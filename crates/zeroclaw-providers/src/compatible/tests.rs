@@ -1390,7 +1390,7 @@ fn relocated_image_marker_identifies_producing_call_with_identical_captions() {
 /// calls use only generated color squares and a synthetic counter. Credentials
 /// are supplied in the child process environment and are never logged here.
 #[tokio::test]
-#[ignore = "requires owner-authorized xAI API usage and explicit environment opt-in"]
+#[ignore = "requires owner-authorized API usage and explicit environment opt-in"]
 async fn live_xai_native_tool_images_preserve_ordinary_and_parallel_results() {
     async fn native_once(
         provider: &OpenAiCompatibleModelProvider,
@@ -1470,7 +1470,7 @@ async fn live_xai_native_tool_images_preserve_ordinary_and_parallel_results() {
                 .choices
                 .into_iter()
                 .next()
-                .ok_or_else(|| anyhow::anyhow!("live native response has no choices"))?
+                .ok_or_else(|| anyhow::Error::msg("live native response has no choices"))?
                 .message;
             Ok::<_, anyhow::Error>(provider.parse_native_response(message))
         })
@@ -1498,15 +1498,33 @@ async fn live_xai_native_tool_images_preserve_ordinary_and_parallel_results() {
     let key = std::env::var("ZEROCLAW_LIVE_TOOL_IMAGES_API_KEY")
         .expect("an explicitly supplied API credential is required");
     assert!(!key.trim().is_empty());
-    let provider = OpenAiCompatibleModelProvider::builder("live-image-acceptance")
-        .display_name("xAI")
-        .base_url("https://api.x.ai/v1")
+    let base_url = std::env::var("ZEROCLAW_LIVE_TOOL_IMAGES_BASE_URL")
+        .unwrap_or_else(|_| "https://api.openai.com/v1".to_string());
+    let display_name = std::env::var("ZEROCLAW_LIVE_TOOL_IMAGES_DISPLAY_NAME")
+        .unwrap_or_else(|_| "OpenAI Compatible".to_string());
+    let model_id = model
+        .rsplit('/')
+        .next()
+        .unwrap_or(&model)
+        .to_ascii_lowercase();
+    let use_max_completion_tokens = base_url.contains("api.openai.com")
+        || model_id.starts_with("gpt-5")
+        || model_id.starts_with("o1")
+        || model_id.starts_with("o3")
+        || model_id.starts_with("o4");
+    let mut builder = OpenAiCompatibleModelProvider::builder("live-image-acceptance")
+        .display_name(&display_name)
+        .base_url(&base_url)
         .credential(Some(&key))
         .auth_style(AuthStyle::Bearer)
         .vision(true)
-        .max_tokens(Some(512))
-        .timeout_secs(90)
-        .build();
+        .timeout_secs(90);
+    if use_max_completion_tokens {
+        builder = builder.extra_body(serde_json::json!({ "max_completion_tokens": 512 }));
+    } else {
+        builder = builder.max_tokens(Some(512));
+    }
+    let provider = builder.build();
     // Redirects and implicit retries cannot consume extra billed requests or
     // move the credential beyond the owner-approved host. Product normalization,
     // constructor, authentication and response mapping remain the exercised path.
