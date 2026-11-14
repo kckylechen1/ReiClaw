@@ -82,6 +82,130 @@ pub struct TrackedPropIdentity {
     pub had_sibling_entry: bool,
 }
 
+/// Thread-safe snapshot of on-disk external secret references (`op://`, `vault:`)
+/// captured before load-time decryption and synchronized whenever a full or
+/// incremental save writes updated references cleanly.
+#[derive(Default)]
+pub struct ExternalRefSnapshots(std::sync::RwLock<HashMap<String, String>>);
+
+impl ExternalRefSnapshots {
+    #[must_use]
+    pub fn new() -> Self {
+        Self(std::sync::RwLock::new(HashMap::new()))
+    }
+
+    #[must_use]
+    pub fn from_map(map: HashMap<String, String>) -> Self {
+        Self(std::sync::RwLock::new(map))
+    }
+
+    #[must_use]
+    pub fn to_map(&self) -> HashMap<String, String> {
+        self.0
+            .read()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .clone()
+    }
+
+    #[must_use]
+    pub fn is_empty(&self) -> bool {
+        self.0
+            .read()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .is_empty()
+    }
+
+    #[must_use]
+    pub fn contains_key(&self, key: &str) -> bool {
+        self.0
+            .read()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .contains_key(key)
+    }
+
+    #[must_use]
+    pub fn get(&self, key: &str) -> Option<String> {
+        self.0
+            .read()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .get(key)
+            .cloned()
+    }
+
+    #[must_use]
+    pub fn iter(&self) -> std::vec::IntoIter<(String, String)> {
+        let entries: Vec<(String, String)> = self
+            .0
+            .read()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .iter()
+            .map(|(k, v)| (k.clone(), v.clone()))
+            .collect();
+        entries.into_iter()
+    }
+
+    pub fn insert(&self, key: String, value: String) -> Option<String> {
+        self.0
+            .write()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .insert(key, value)
+    }
+
+    pub fn remove(&self, key: &str) -> Option<String> {
+        self.0
+            .write()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .remove(key)
+    }
+
+    pub fn retain<F>(&self, f: F)
+    where
+        F: FnMut(&String, &mut String) -> bool,
+    {
+        self.0
+            .write()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .retain(f);
+    }
+
+    pub fn extend<I>(&self, iter: I)
+    where
+        I: IntoIterator<Item = (String, String)>,
+    {
+        self.0
+            .write()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .extend(iter);
+    }
+}
+
+impl Clone for ExternalRefSnapshots {
+    fn clone(&self) -> Self {
+        Self::from_map(self.to_map())
+    }
+}
+
+impl std::fmt::Debug for ExternalRefSnapshots {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        let guard = self
+            .0
+            .read()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
+        std::fmt::Debug::fmt(&*guard, f)
+    }
+}
+
+impl PartialEq for ExternalRefSnapshots {
+    fn eq(&self, other: &Self) -> bool {
+        if std::ptr::eq(self, other) {
+            return true;
+        }
+        self.to_map() == other.to_map()
+    }
+}
+
+impl Eq for ExternalRefSnapshots {}
+
 /// Top-level ZeroClaw configuration, loaded from `config.toml`.
 ///
 /// Resolution order: `ZEROCLAW_CONFIG_DIR` env → `ZEROCLAW_WORKSPACE` env → `~/.zeroclaw/config.toml`.
@@ -116,7 +240,7 @@ pub struct Config {
     /// `decrypt_secrets()` resolves them for runtime use. `save()` restores
     /// these references unless the same path was intentionally edited.
     #[serde(skip)]
-    pub onepassword_reference_snapshots: std::collections::HashMap<String, String>,
+    pub onepassword_reference_snapshots: ExternalRefSnapshots,
     /// Dotted prop-paths mutated since the last persist; drives the
     /// per-path PATCH applied by `save_dirty()`.
     #[serde(skip)]
@@ -11845,7 +11969,7 @@ impl Default for Config {
             tasks: crate::tasks::TasksConfig::default(),
             env_overridden_paths: std::collections::HashSet::new(),
             pre_override_snapshots: std::collections::HashMap::new(),
-            onepassword_reference_snapshots: std::collections::HashMap::new(),
+            onepassword_reference_snapshots: ExternalRefSnapshots::new(),
             dirty_paths: std::collections::HashSet::new(),
             dirty_map_entries: std::collections::HashSet::new(),
             explicit_prop_dirty_paths: std::collections::HashSet::new(),
@@ -13077,7 +13201,7 @@ impl Config {
 
             let store = crate::secrets::SecretStore::new(&zeroclaw_dir, config.secrets.encrypt);
             config.onepassword_reference_snapshots =
-                collect_onepassword_reference_snapshots(&config)?;
+                ExternalRefSnapshots::from_map(collect_onepassword_reference_snapshots(&config)?);
             // Decrypt all #[secret]-annotated fields via Configurable derive
             config = tokio::task::spawn_blocking(move || {
                 config.decrypt_secrets(&store)?;
@@ -15691,6 +15815,14 @@ impl Config {
         };
 
         write_config_atomically(&config_path, &toml_str).await?;
+        if validate_dirty_refs {
+            // Prune snapshots that were cleared or replaced on disk, or whose in-memory
+            // value after env-masking already holds a literal external reference rather
+            // than resolved plaintext. Failed saves return early above without mutating state.
+            self.onepassword_reference_snapshots.retain(|k, old_ref| {
+                structural_refs.get(k) == Some(&*old_ref) && !after_mask_refs.contains_key(k)
+            });
+        }
         // Report the path actually written so `save_dirty`'s create
         // fallback can record provenance without re-resolving (the
         // resolver re-reads the environment for parentless paths).
@@ -15722,15 +15854,19 @@ impl Config {
         let enc_old_bracket = format!("{enc_old}[");
         let moved_refs: Vec<(String, String)> = self
             .onepassword_reference_snapshots
-            .keys()
+            .to_map()
+            .into_keys()
             .filter_map(|k| {
-                if k == &enc_old {
-                    Some((k.clone(), enc_new.clone()))
+                if k == enc_old {
+                    Some((k, enc_new.clone()))
                 } else if let Some(tail) = k.strip_prefix(&enc_old_dot) {
-                    Some((k.clone(), format!("{enc_new}.{tail}")))
+                    let new_k = format!("{enc_new}.{tail}");
+                    Some((k, new_k))
+                } else if let Some(tail) = k.strip_prefix(&enc_old_bracket) {
+                    let new_k = format!("{enc_new}[{tail}");
+                    Some((k, new_k))
                 } else {
-                    k.strip_prefix(&enc_old_bracket)
-                        .map(|tail| (k.clone(), format!("{enc_new}[{tail}")))
+                    None
                 }
             })
             .collect();
@@ -16156,7 +16292,7 @@ impl Config {
         scope_prefixes: &[String],
         full_create_fallback: bool,
     ) -> std::collections::HashMap<String, String> {
-        let mut snaps = self.onepassword_reference_snapshots.clone();
+        let mut snaps = self.onepassword_reference_snapshots.to_map();
         if snaps.is_empty() {
             return snaps;
         }
@@ -16247,8 +16383,9 @@ impl Config {
         refs_to_resolve.sort_by(|a, b| a.0.cmp(&b.0));
 
         let mut candidate = self.clone();
-        candidate.onepassword_reference_snapshots =
-            self.pruned_snapshots_for_restore(&scope_prefixes, full_create_fallback);
+        candidate.onepassword_reference_snapshots = ExternalRefSnapshots::from_map(
+            self.pruned_snapshots_for_restore(&scope_prefixes, full_create_fallback),
+        );
         let dir = config_path
             .parent()
             .context("Config path must have a parent directory")?;
@@ -16931,11 +17068,8 @@ fn reconcile_natural_key_whole_entry(
             ) else {
                 return;
             };
-            entry_table.clear();
             if let toml::Value::Table(t) = value {
-                for (k, v) in t {
-                    entry_table.insert(&k, crate::migration::toml_value_to_edit_item(&v));
-                }
+                crate::migration::sync_table(entry_table, &t);
             }
         }
         None => {

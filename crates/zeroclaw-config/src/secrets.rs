@@ -635,8 +635,7 @@ fn resolve_tachi_vault_lease(name: &str, reference: &str, deadline: Instant) -> 
     let value = output
         .pointer(&env_pointer)
         .and_then(serde_json::Value::as_str)
-        .context("Tachi Vault lease response missing string value")?
-        .trim_end_matches(&['\r', '\n'][..]);
+        .context("Tachi Vault lease response missing string value")?;
     anyhow::ensure!(
         !value.is_empty(),
         "Tachi Vault returned an empty secret value"
@@ -665,8 +664,7 @@ fn resolve_tachi_vault_get_keychain(
     let value = output
         .get("value")
         .and_then(serde_json::Value::as_str)
-        .context("Tachi Vault secret response missing string value")?
-        .trim_end_matches(&['\r', '\n'][..]);
+        .context("Tachi Vault secret response missing string value")?;
     anyhow::ensure!(
         !value.is_empty(),
         "Tachi Vault returned an empty secret value"
@@ -983,7 +981,8 @@ exit 98
         let _calls = EnvValueGuard::set("TACHI_TEST_CALLS", &calls);
         let store = SecretStore::new(tmp.path(), true);
 
-        // 1. Unlocked daemon WITHOUT Keychain resolves api_key via non-interactive `vault lease`.
+        // 1. Unlocked daemon WITHOUT Keychain resolves api_key via non-interactive `vault lease`,
+        // preserving exact bytes (including trailing CR/LF) encoded inside JSON.
         fs::write(&calls, "").unwrap();
         write_fake_tachi(
             tmp.path(),
@@ -996,7 +995,7 @@ exit 98
         let (secret, migrated) = store
             .decrypt_and_migrate("vault:OPENAI_OFFICIAL_API_KEY")
             .unwrap();
-        assert_eq!(secret, "synthetic-leased-secret");
+        assert_eq!(secret, "synthetic-leased-secret\r\n");
         assert!(migrated.is_none());
         assert_eq!(
             fs::read_to_string(&calls).unwrap(),
@@ -1004,6 +1003,7 @@ exit 98
         );
 
         // 2. Unlocked daemon WITH Keychain falls back to `vault get --keychain` for non-api_key entries.
+        // Outer CLI framing newlines after JSON are ignored while inner `\r\n` bytes stay intact.
         fs::write(&calls, "").unwrap();
         write_fake_tachi(
             tmp.path(),
@@ -1013,7 +1013,10 @@ exit 98
             r#"{"name":"BOT_TOKEN","revealed":true,"value":"synthetic-token\r\n"}"#,
             0,
         );
-        assert_eq!(store.decrypt("vault:BOT_TOKEN").unwrap(), "synthetic-token");
+        assert_eq!(
+            store.decrypt("vault:BOT_TOKEN").unwrap(),
+            "synthetic-token\r\n"
+        );
         assert_eq!(
             fs::read_to_string(&calls).unwrap(),
             "vault status\nvault lease BOT_TOKEN --env-name ZEROCLAW_VAULT_SECRET --stdin-password --json\nvault get BOT_TOKEN --reveal --json --keychain\n"
@@ -1031,21 +1034,22 @@ exit 98
         );
         assert_eq!(
             store.decrypt("vault:OPENAI_OFFICIAL_API_KEY").unwrap(),
-            "synthetic-keychain-secret"
+            "synthetic-keychain-secret\r\n"
         );
         assert_eq!(
             fs::read_to_string(&calls).unwrap(),
             "vault status\nvault get OPENAI_OFFICIAL_API_KEY --reveal --json --keychain\n"
         );
 
-        // 4. Offline plain-text status (no daemon running) resolves via `vault get --keychain`.
+        // 4. Offline plain-text status (no daemon running) resolves via `vault get --keychain`,
+        // and outer CLI CR/LF framing does not alter values without embedded newlines.
         fs::write(&calls, "").unwrap();
         write_fake_tachi(
             tmp.path(),
             "Vault status:\n  initialized: true\n  entries: 3",
             "",
             1,
-            r#"{"name":"OPENAI_OFFICIAL_API_KEY","revealed":true,"value":"synthetic-offline-secret"}"#,
+            "{\"name\":\"OPENAI_OFFICIAL_API_KEY\",\"revealed\":true,\"value\":\"synthetic-offline-secret\"}\r",
             0,
         );
         assert_eq!(
@@ -1056,6 +1060,27 @@ exit 98
             fs::read_to_string(&calls).unwrap(),
             "vault status\nvault get OPENAI_OFFICIAL_API_KEY --reveal --json --keychain\n"
         );
+
+        // 5. Truly empty JSON secret values fail closed on both lease and keychain get.
+        write_fake_tachi(
+            tmp.path(),
+            r#"{"initialized":true,"locked":false,"secure_store":{"auto_unlock_available":false}}"#,
+            r#"{"leased":true,"env":{"ZEROCLAW_VAULT_SECRET":""}}"#,
+            0,
+            "",
+            1,
+        );
+        assert!(store.decrypt("vault:OPENAI_OFFICIAL_API_KEY").is_err());
+
+        write_fake_tachi(
+            tmp.path(),
+            r#"{"initialized":true,"locked":true,"secure_store":{"auto_unlock_available":true}}"#,
+            "",
+            1,
+            r#"{"name":"OPENAI_OFFICIAL_API_KEY","revealed":true,"value":""}"#,
+            0,
+        );
+        assert!(store.decrypt("vault:OPENAI_OFFICIAL_API_KEY").is_err());
 
         assert!(!tmp.path().join(".secret_key").exists());
     }

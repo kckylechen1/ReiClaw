@@ -1903,7 +1903,7 @@ async fn config_toml_roundtrip() {
         escalation: EscalationConfig::default(),
         env_overridden_paths: std::collections::HashSet::new(),
         pre_override_snapshots: std::collections::HashMap::new(),
-        onepassword_reference_snapshots: std::collections::HashMap::new(),
+        onepassword_reference_snapshots: ExternalRefSnapshots::new(),
         dirty_paths: std::collections::HashSet::new(),
         dirty_map_entries: std::collections::HashSet::new(),
         explicit_prop_dirty_paths: std::collections::HashSet::new(),
@@ -2730,7 +2730,7 @@ async fn config_save_and_load_tmpdir() {
         escalation: EscalationConfig::default(),
         env_overridden_paths: std::collections::HashSet::new(),
         pre_override_snapshots: std::collections::HashMap::new(),
-        onepassword_reference_snapshots: std::collections::HashMap::new(),
+        onepassword_reference_snapshots: ExternalRefSnapshots::new(),
         dirty_paths: std::collections::HashSet::new(),
         dirty_map_entries: std::collections::HashSet::new(),
         explicit_prop_dirty_paths: std::collections::HashSet::new(),
@@ -8437,10 +8437,7 @@ async fn dirty_edit_to_tachi_vault_reference_persists_ref_and_resolves_in_memory
             Some(plaintext)
         );
         assert_eq!(
-            config
-                .onepassword_reference_snapshots
-                .get(path)
-                .map(String::as_str),
+            config.onepassword_reference_snapshots.get(path).as_deref(),
             Some(reference)
         );
         assert!(config.dirty_paths.is_empty());
@@ -9599,7 +9596,7 @@ async fn tachi_vault_whole_section_and_entry_dirty_expands_refs_and_isolates_env
         missing_cfg
             .onepassword_reference_snapshots
             .get("model_routes.fast.api_key")
-            .map(String::as_str),
+            .as_deref(),
         Some("op://vault/item/field")
     );
     let raw_replaced = std::fs::read_to_string(&config_path).unwrap();
@@ -9849,13 +9846,13 @@ paired_tokens = ["vault:OPENAI_OFFICIAL_API_KEY"]
     assert_eq!(
         cfg.onepassword_reference_snapshots
             .get("gateway.paired_tokens[0]")
-            .map(String::as_str),
+            .as_deref(),
         Some("vault:OPENAI_OFFICIAL_API_KEY")
     );
     assert_eq!(
         cfg.onepassword_reference_snapshots
             .get("gateway.paired_tokens[1]")
-            .map(String::as_str),
+            .as_deref(),
         Some("op://vault/item/field")
     );
     let raw_dirty = std::fs::read_to_string(&config_path).unwrap();
@@ -9878,7 +9875,7 @@ paired_tokens = ["vault:OPENAI_OFFICIAL_API_KEY"]
     assert_eq!(
         cfg.onepassword_reference_snapshots
             .get("gateway.paired_tokens[0]")
-            .map(String::as_str),
+            .as_deref(),
         Some("vault:OPENAI_OFFICIAL_API_KEY")
     );
 
@@ -9971,7 +9968,7 @@ TOKEN = "disk-a-env"
     assert_eq!(
         cfg.onepassword_reference_snapshots
             .get("mcp.servers.a.env.env%2ETOKEN")
-            .map(String::as_str),
+            .as_deref(),
         Some("vault:OPENAI_OFFICIAL_API_KEY")
     );
     assert!(
@@ -10009,7 +10006,7 @@ TOKEN = "disk-a-env"
     assert_eq!(
         cfg.onepassword_reference_snapshots
             .get("mcp.servers.a.env.env%2ETOKEN")
-            .map(String::as_str),
+            .as_deref(),
         Some("op://vault/item/field")
     );
     let parsed_entry_dirty: Config =
@@ -10048,6 +10045,176 @@ TOKEN = "disk-a-env"
     assert!(
         !cfg.onepassword_reference_snapshots
             .contains_key("mcp.servers.a.env.env%2ETOKEN")
+    );
+}
+
+#[cfg(unix)]
+#[test]
+async fn tachi_vault_full_save_prunes_stale_snapshots_and_creates_nested_mcp_subtable() {
+    let _lock = env_override_lock().await;
+    let (dir, _guards) = tachi_vault_fixture("vault:OPENAI_OFFICIAL_API_KEY", false);
+    let config_path = dir.path().join("config.toml");
+
+    // 1. Standalone `save()` after clearing a resolved `paired_tokens` slot must prune the stale
+    // snapshot so a subsequent `mark_dirty("gateway") + save_dirty()` with `new-token` never
+    // resurrects the old `vault:` reference on disk.
+    std::fs::write(
+        &config_path,
+        r#"
+schema_version = 3
+
+[secrets]
+encrypt = false
+
+[gateway]
+paired_tokens = ["vault:OPENAI_OFFICIAL_API_KEY"]
+"#,
+    )
+    .unwrap();
+    let mut cfg = Config::load_or_init().await.unwrap();
+    assert_eq!(cfg.gateway.paired_tokens, vec!["synthetic-vault-secret"]);
+    cfg.gateway.paired_tokens[0].clear();
+    cfg.save().await.unwrap();
+    assert!(
+        !cfg.onepassword_reference_snapshots
+            .contains_key("gateway.paired_tokens[0]")
+    );
+    let raw_after_clear = std::fs::read_to_string(&config_path).unwrap();
+    assert!(
+        !raw_after_clear.contains("vault:OPENAI_OFFICIAL_API_KEY"),
+        "{raw_after_clear}"
+    );
+
+    cfg.gateway.paired_tokens[0] = "new-token".to_string();
+    cfg.mark_dirty("gateway");
+    cfg.save_dirty().await.unwrap();
+    assert_eq!(cfg.gateway.paired_tokens, vec!["new-token"]);
+    let raw_reassigned = std::fs::read_to_string(&config_path).unwrap();
+    assert!(
+        raw_reassigned.contains("new-token")
+            && !raw_reassigned.contains("vault:OPENAI_OFFICIAL_API_KEY"),
+        "{raw_reassigned}"
+    );
+
+    // 2. Standalone `model_routes.clear(); mark_dirty("model_routes"); save(); clear_dirty(); save()`
+    // on a fresh loaded Config (without calling `save_dirty()` first) must prune snapshots on the
+    // first `save()` so the subsequent `save()` does not fail or resurrect references.
+    std::fs::write(
+        &config_path,
+        r#"
+schema_version = 3
+
+[secrets]
+encrypt = false
+
+[[model_routes]]
+hint = "fast"
+provider = "openai.default"
+model = "gpt-5-mini"
+api_key = "vault:OPENAI_OFFICIAL_API_KEY"
+"#,
+    )
+    .unwrap();
+    let mut routes_cfg = Config::load_or_init().await.unwrap();
+    assert!(
+        routes_cfg
+            .onepassword_reference_snapshots
+            .contains_key("model_routes.fast.api_key")
+    );
+    routes_cfg.model_routes.clear();
+    routes_cfg.mark_dirty("model_routes");
+    routes_cfg.save().await.unwrap();
+    assert!(
+        !routes_cfg
+            .onepassword_reference_snapshots
+            .contains_key("model_routes.fast.api_key")
+    );
+    routes_cfg.clear_dirty();
+    routes_cfg.save().await.unwrap();
+    let raw_routes_cleared = std::fs::read_to_string(&config_path).unwrap();
+    assert!(
+        !raw_routes_cleared.contains("model_routes")
+            && !raw_routes_cleared.contains("vault:OPENAI_OFFICIAL_API_KEY"),
+        "{raw_routes_cleared}"
+    );
+
+    // 3. Replacing a provider secret via `set_prop_persistent` + standalone `save()` (plus
+    // `force_save()` coverage) must prune the superseded snapshot and avoid resurrection.
+    std::fs::write(
+        &config_path,
+        r#"
+schema_version = 3
+
+[secrets]
+encrypt = false
+
+[providers.models.openai.default]
+model = "gpt-5.4"
+api_key = "vault:OPENAI_OFFICIAL_API_KEY"
+"#,
+    )
+    .unwrap();
+    let mut prop_cfg = Config::load_or_init().await.unwrap();
+    prop_cfg
+        .set_prop_persistent(
+            "providers.models.openai.default.api_key",
+            "replacement-plain",
+        )
+        .unwrap();
+    prop_cfg.save().await.unwrap();
+    assert!(
+        !prop_cfg
+            .onepassword_reference_snapshots
+            .contains_key("providers.models.openai.default.api_key")
+    );
+    prop_cfg.clear_dirty();
+    prop_cfg.force_save().await.unwrap();
+    let raw_replaced = std::fs::read_to_string(&config_path).unwrap();
+    assert!(
+        raw_replaced.contains("replacement-plain")
+            && !raw_replaced.contains("vault:OPENAI_OFFICIAL_API_KEY"),
+        "{raw_replaced}"
+    );
+
+    // 4. Adding a new `[mcp.servers.env]` subtable to an existing `[[mcp.servers]]` entry that
+    // previously had no `env` table under `mark_dirty("mcp.servers.no_env") + save_dirty()` must
+    // emit valid TOML with `[mcp.servers.env]` positioned under its parent entry.
+    std::fs::write(
+        &config_path,
+        r#"
+schema_version = 3
+
+[secrets]
+encrypt = false
+
+[[mcp.servers]]
+name = "no_env"
+command = "npx"
+"#,
+    )
+    .unwrap();
+    let mut mcp_cfg = Config::load_or_init().await.unwrap();
+    mcp_cfg.mcp.servers[0].env.insert(
+        "API_TOKEN".to_string(),
+        "vault:OPENAI_OFFICIAL_API_KEY".to_string(),
+    );
+    mcp_cfg.mark_dirty("mcp.servers.no_env");
+    mcp_cfg.save_dirty().await.unwrap();
+    assert_eq!(
+        mcp_cfg.mcp.servers[0]
+            .env
+            .get("API_TOKEN")
+            .map(String::as_str),
+        Some("synthetic-vault-secret")
+    );
+    let raw_mcp = std::fs::read_to_string(&config_path).unwrap();
+    let parsed_mcp: Config = toml::from_str(&raw_mcp).expect(&raw_mcp);
+    assert_eq!(
+        parsed_mcp.mcp.servers[0]
+            .env
+            .get("API_TOKEN")
+            .map(String::as_str),
+        Some("vault:OPENAI_OFFICIAL_API_KEY")
     );
 }
 
