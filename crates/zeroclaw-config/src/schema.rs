@@ -82,13 +82,18 @@ pub struct TrackedPropIdentity {
     pub had_sibling_entry: bool,
 }
 
-/// Thread-safe snapshot of on-disk external secret references (`op://`, `vault:`)
-/// captured before load-time decryption and synchronized whenever a full or
-/// incremental save writes updated references cleanly.
+/// Thread-safe map of snapshot metadata captured on load and synchronized whenever
+/// a full or incremental save writes updated values or references cleanly.
 #[derive(Default)]
-pub struct ExternalRefSnapshots(std::sync::RwLock<HashMap<String, String>>);
+pub struct SharedStringMap(std::sync::RwLock<HashMap<String, String>>);
 
-impl ExternalRefSnapshots {
+/// Alias for on-disk external secret reference (`op://`, `vault:`) snapshots.
+pub type ExternalRefSnapshots = SharedStringMap;
+
+/// Alias for pre-override plaintext snapshots captured when `ZEROCLAW_*` env vars apply.
+pub type PreOverrideSnapshots = SharedStringMap;
+
+impl SharedStringMap {
     #[must_use]
     pub fn new() -> Self {
         Self(std::sync::RwLock::new(HashMap::new()))
@@ -130,6 +135,18 @@ impl ExternalRefSnapshots {
             .unwrap_or_else(std::sync::PoisonError::into_inner)
             .get(key)
             .cloned()
+    }
+
+    #[must_use]
+    pub fn keys(&self) -> std::vec::IntoIter<String> {
+        let keys: Vec<String> = self
+            .0
+            .read()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .keys()
+            .cloned()
+            .collect();
+        keys.into_iter()
     }
 
     #[must_use]
@@ -179,13 +196,19 @@ impl ExternalRefSnapshots {
     }
 }
 
-impl Clone for ExternalRefSnapshots {
+impl From<HashMap<String, String>> for SharedStringMap {
+    fn from(map: HashMap<String, String>) -> Self {
+        Self::from_map(map)
+    }
+}
+
+impl Clone for SharedStringMap {
     fn clone(&self) -> Self {
         Self::from_map(self.to_map())
     }
 }
 
-impl std::fmt::Debug for ExternalRefSnapshots {
+impl std::fmt::Debug for SharedStringMap {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         let guard = self
             .0
@@ -195,7 +218,7 @@ impl std::fmt::Debug for ExternalRefSnapshots {
     }
 }
 
-impl PartialEq for ExternalRefSnapshots {
+impl PartialEq for SharedStringMap {
     fn eq(&self, other: &Self) -> bool {
         if std::ptr::eq(self, other) {
             return true;
@@ -204,7 +227,130 @@ impl PartialEq for ExternalRefSnapshots {
     }
 }
 
-impl Eq for ExternalRefSnapshots {}
+impl Eq for SharedStringMap {}
+
+/// Thread-safe set of env-overridden property paths captured on load and
+/// synchronized whenever a full or incremental save persists edits.
+#[derive(Default)]
+pub struct SharedStringSet(std::sync::RwLock<std::collections::HashSet<String>>);
+
+/// Alias for tracked `ZEROCLAW_*` env-overridden property paths.
+pub type EnvOverriddenPaths = SharedStringSet;
+
+impl SharedStringSet {
+    #[must_use]
+    pub fn new() -> Self {
+        Self(std::sync::RwLock::new(std::collections::HashSet::new()))
+    }
+
+    #[must_use]
+    pub fn from_set(set: std::collections::HashSet<String>) -> Self {
+        Self(std::sync::RwLock::new(set))
+    }
+
+    #[must_use]
+    pub fn to_set(&self) -> std::collections::HashSet<String> {
+        self.0
+            .read()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .clone()
+    }
+
+    #[must_use]
+    pub fn is_empty(&self) -> bool {
+        self.0
+            .read()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .is_empty()
+    }
+
+    #[must_use]
+    pub fn contains(&self, value: &str) -> bool {
+        self.0
+            .read()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .contains(value)
+    }
+
+    #[must_use]
+    pub fn iter(&self) -> std::vec::IntoIter<String> {
+        let entries: Vec<String> = self
+            .0
+            .read()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .iter()
+            .cloned()
+            .collect();
+        entries.into_iter()
+    }
+
+    pub fn insert(&self, value: String) -> bool {
+        self.0
+            .write()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .insert(value)
+    }
+
+    pub fn remove(&self, value: &str) -> bool {
+        self.0
+            .write()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .remove(value)
+    }
+
+    pub fn retain<F>(&self, f: F)
+    where
+        F: FnMut(&String) -> bool,
+    {
+        self.0
+            .write()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .retain(f);
+    }
+
+    pub fn extend<I>(&self, iter: I)
+    where
+        I: IntoIterator<Item = String>,
+    {
+        self.0
+            .write()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .extend(iter);
+    }
+}
+
+impl From<std::collections::HashSet<String>> for SharedStringSet {
+    fn from(set: std::collections::HashSet<String>) -> Self {
+        Self::from_set(set)
+    }
+}
+
+impl Clone for SharedStringSet {
+    fn clone(&self) -> Self {
+        Self::from_set(self.to_set())
+    }
+}
+
+impl std::fmt::Debug for SharedStringSet {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        let guard = self
+            .0
+            .read()
+            .unwrap_or_else(std::sync::PoisonError::into_inner);
+        std::fmt::Debug::fmt(&*guard, f)
+    }
+}
+
+impl PartialEq for SharedStringSet {
+    fn eq(&self, other: &Self) -> bool {
+        if std::ptr::eq(self, other) {
+            return true;
+        }
+        self.to_set() == other.to_set()
+    }
+}
+
+impl Eq for SharedStringSet {}
 
 /// Top-level ZeroClaw configuration, loaded from `config.toml`.
 ///
@@ -228,14 +374,14 @@ pub struct Config {
     /// `prop_is_env_overridden` for O(1) display-layer lookup (config list,
     /// dashboard, quickstart).
     #[serde(skip)]
-    pub env_overridden_paths: std::collections::HashSet<String>,
+    pub env_overridden_paths: EnvOverriddenPaths,
     /// Per-path snapshot of pre-override raw values, captured at apply time
     /// from the post-`decrypt_secrets` in-memory state (so secret entries
     /// hold plaintext, not the display mask). `save()` restores from this
     /// map so env-injected values never reach disk and the operator's
     /// original on-disk credentials survive any save cycle.
     #[serde(skip)]
-    pub pre_override_snapshots: std::collections::HashMap<String, String>,
+    pub pre_override_snapshots: PreOverrideSnapshots,
     /// Per-path snapshot of `op://` and `vault:` external secret references captured before
     /// `decrypt_secrets()` resolves them for runtime use. `save()` restores
     /// these references unless the same path was intentionally edited.
@@ -11967,8 +12113,8 @@ impl Default for Config {
             config_path: zeroclaw_dir.join("config.toml"),
             composition: None,
             tasks: crate::tasks::TasksConfig::default(),
-            env_overridden_paths: std::collections::HashSet::new(),
-            pre_override_snapshots: std::collections::HashMap::new(),
+            env_overridden_paths: EnvOverriddenPaths::new(),
+            pre_override_snapshots: PreOverrideSnapshots::new(),
             onepassword_reference_snapshots: ExternalRefSnapshots::new(),
             dirty_paths: std::collections::HashSet::new(),
             dirty_map_entries: std::collections::HashSet::new(),
@@ -13216,8 +13362,8 @@ impl Config {
             // env-injected values back to the original on-disk state.
             let applied = crate::env_overrides::apply_env_overrides(&mut config)?;
             config.clear_dirty();
-            config.env_overridden_paths = applied.paths;
-            config.pre_override_snapshots = applied.snapshots;
+            config.env_overridden_paths = EnvOverriddenPaths::from_set(applied.paths);
+            config.pre_override_snapshots = PreOverrideSnapshots::from_map(applied.snapshots);
             config.bind_env_override_identities();
             config.retired_surface_warnings = retired_section_warnings
                 .into_iter()
@@ -13274,8 +13420,8 @@ impl Config {
 
             let applied = crate::env_overrides::apply_env_overrides(&mut config)?;
             config.clear_dirty();
-            config.env_overridden_paths = applied.paths;
-            config.pre_override_snapshots = applied.snapshots;
+            config.env_overridden_paths = EnvOverriddenPaths::from_set(applied.paths);
+            config.pre_override_snapshots = PreOverrideSnapshots::from_map(applied.snapshots);
             config.bind_env_override_identities();
             config.retired_surface_warnings = applied.tombstone_warnings;
 
@@ -15387,7 +15533,6 @@ impl Config {
             .env_overridden_paths
             .iter()
             .chain(self.pre_override_snapshots.keys())
-            .cloned()
             .collect();
         for path in paths {
             if let Some(enc) = self.encode_prop_snapshot_key(None, &path) {
@@ -15703,6 +15848,7 @@ impl Config {
             .map_err(anyhow::Error::msg)?;
         let scope_prefixes = self.collect_dirty_scope_prefixes(&whole_entries, &dirty_prop_paths);
         let restorable_snapshots = self.pruned_snapshots_for_restore(&scope_prefixes, false);
+        let dirty_enc_keys = self.dirty_encoded_prop_keys(&dirty_prop_paths);
 
         // Restore non-dirty env-overridden paths to their pre-override snapshots
         // before encryption, so values supplied via `ZEROCLAW_*` env vars never
@@ -15711,8 +15857,9 @@ impl Config {
             let non_dirty_snapshots: std::collections::HashMap<String, String> = self
                 .pre_override_snapshots
                 .iter()
-                .filter(|(path, _)| !dirty_prop_paths.contains(*path))
-                .map(|(path, value)| (path.clone(), value.clone()))
+                .filter(|(path, _)| {
+                    !self.is_env_path_dirty(path, &dirty_prop_paths, &dirty_enc_keys)
+                })
                 .collect();
             if !non_dirty_snapshots.is_empty() {
                 crate::env_overrides::mask_env_overrides_for_save(
@@ -15818,15 +15965,56 @@ impl Config {
         if validate_dirty_refs {
             // Prune snapshots that were cleared or replaced on disk, or whose in-memory
             // value after env-masking already holds a literal external reference rather
-            // than resolved plaintext. Failed saves return early above without mutating state.
+            // than resolved plaintext. Synchronize env-override metadata for persisted
+            // dirty properties too so later full saves never mask back stale plaintext.
+            // Failed saves return early above without mutating state.
             self.onepassword_reference_snapshots.retain(|k, old_ref| {
                 structural_refs.get(k) == Some(&*old_ref) && !after_mask_refs.contains_key(k)
             });
+            self.pre_override_snapshots.retain(|path, _| {
+                !self.is_env_path_dirty(path, &dirty_prop_paths, &dirty_enc_keys)
+            });
+            self.env_overridden_paths
+                .retain(|path| !self.is_env_path_dirty(path, &dirty_prop_paths, &dirty_enc_keys));
         }
         // Report the path actually written so `save_dirty`'s create
         // fallback can record provenance without re-resolving (the
         // resolver re-reads the environment for parentless paths).
         Ok((config_path, structural_refs))
+    }
+
+    fn dirty_encoded_prop_keys(
+        &self,
+        dirty_prop_paths: &std::collections::HashSet<String>,
+    ) -> std::collections::HashSet<String> {
+        dirty_prop_paths
+            .iter()
+            .filter_map(|p| {
+                self.tracked_prop_identities
+                    .get(p.as_str())
+                    .map(|id| id.encoded_key.clone())
+                    .or_else(|| self.encode_prop_snapshot_key(None, p))
+            })
+            .collect()
+    }
+
+    fn is_env_path_dirty(
+        &self,
+        path: &str,
+        dirty_prop_paths: &std::collections::HashSet<String>,
+        dirty_enc_keys: &std::collections::HashSet<String>,
+    ) -> bool {
+        if dirty_prop_paths.contains(path) {
+            return true;
+        }
+        if dirty_enc_keys.is_empty() {
+            return false;
+        }
+        self.tracked_prop_identities
+            .get(path)
+            .map(|id| id.encoded_key.clone())
+            .or_else(|| self.encode_prop_snapshot_key(None, path))
+            .is_some_and(|enc| dirty_enc_keys.contains(&enc))
     }
 
     /// Rewrite secret reference and env-override snapshot keys when an entry in
@@ -15958,12 +16146,18 @@ impl Config {
         let moved_pre_snaps: Vec<(String, String)> = self
             .pre_override_snapshots
             .keys()
-            .filter_map(|k| rewrite_leaf_prop_key(k).map(|nk| (k.clone(), nk)))
+            .filter_map(|k| {
+                let nk = rewrite_leaf_prop_key(&k)?;
+                Some((k, nk))
+            })
             .collect();
         let moved_env_paths: Vec<(String, String)> = self
             .env_overridden_paths
             .iter()
-            .filter_map(|k| rewrite_leaf_prop_key(k).map(|nk| (k.clone(), nk)))
+            .filter_map(|k| {
+                let nk = rewrite_leaf_prop_key(&k)?;
+                Some((k, nk))
+            })
             .collect();
         let was_explicit_prop: std::collections::HashSet<String> = self
             .explicit_prop_dirty_paths
@@ -16330,12 +16524,14 @@ impl Config {
         full_create_fallback: bool,
     ) -> Result<(Self, std::collections::HashSet<String>, Vec<String>)> {
         let mut masked_self = self.clone();
+        let dirty_enc_keys = self.dirty_encoded_prop_keys(dirty_prop_paths);
         if !self.pre_override_snapshots.is_empty() {
             let non_dirty_snapshots: std::collections::HashMap<String, String> = self
                 .pre_override_snapshots
                 .iter()
-                .filter(|(path, _)| !dirty_prop_paths.contains(*path))
-                .map(|(path, value)| (path.clone(), value.clone()))
+                .filter(|(path, _)| {
+                    !self.is_env_path_dirty(path, dirty_prop_paths, &dirty_enc_keys)
+                })
                 .collect();
             if !non_dirty_snapshots.is_empty() {
                 crate::env_overrides::mask_env_overrides_for_save(
@@ -16359,12 +16555,12 @@ impl Config {
             .pre_override_snapshots
             .keys()
             .chain(self.env_overridden_paths.iter())
-            .filter(|path| !dirty_prop_paths.contains(*path))
+            .filter(|path| !self.is_env_path_dirty(path, dirty_prop_paths, &dirty_enc_keys))
             .filter_map(|path| {
                 self.tracked_prop_identities
                     .get(path.as_str())
                     .map(|id| id.encoded_key.clone())
-                    .or_else(|| self.encode_prop_snapshot_key(None, path))
+                    .or_else(|| self.encode_prop_snapshot_key(None, &path))
             })
             .collect();
 
@@ -16450,10 +16646,13 @@ impl Config {
                         .retain(|k, _| structural_refs.contains_key(k));
                     // This value just created the file; `written` is the
                     // path the full save actually wrote.
-                    for path in &dirty_prop_paths {
-                        candidate.pre_override_snapshots.remove(path);
-                        candidate.env_overridden_paths.remove(path);
-                    }
+                    let dirty_enc_keys = self.dirty_encoded_prop_keys(&dirty_prop_paths);
+                    candidate.pre_override_snapshots.retain(|path, _| {
+                        !self.is_env_path_dirty(path, &dirty_prop_paths, &dirty_enc_keys)
+                    });
+                    candidate.env_overridden_paths.retain(|path| {
+                        !self.is_env_path_dirty(path, &dirty_prop_paths, &dirty_enc_keys)
+                    });
                     candidate.loaded_from = Some(written);
                     candidate.clear_dirty();
                     *self = candidate;
@@ -16487,13 +16686,15 @@ impl Config {
             .parent()
             .context("Config path must have a parent directory")?;
         let store = crate::secrets::SecretStore::new(zeroclaw_dir, self.secrets.encrypt);
+        let dirty_enc_keys = self.dirty_encoded_prop_keys(&dirty_prop_paths);
 
         if !self.pre_override_snapshots.is_empty() {
             let non_dirty_snapshots: std::collections::HashMap<String, String> = self
                 .pre_override_snapshots
                 .iter()
-                .filter(|(path, _)| !dirty_prop_paths.contains(*path))
-                .map(|(path, value)| (path.clone(), value.clone()))
+                .filter(|(path, _)| {
+                    !self.is_env_path_dirty(path, &dirty_prop_paths, &dirty_enc_keys)
+                })
                 .collect();
             if !non_dirty_snapshots.is_empty() {
                 crate::env_overrides::mask_env_overrides_for_save(
@@ -16563,10 +16764,12 @@ impl Config {
                         || structural_refs.contains_key(k)
                 });
         }
-        for path in &dirty_prop_paths {
-            live_candidate.pre_override_snapshots.remove(path);
-            live_candidate.env_overridden_paths.remove(path);
-        }
+        live_candidate
+            .pre_override_snapshots
+            .retain(|path, _| !self.is_env_path_dirty(path, &dirty_prop_paths, &dirty_enc_keys));
+        live_candidate
+            .env_overridden_paths
+            .retain(|path| !self.is_env_path_dirty(path, &dirty_prop_paths, &dirty_enc_keys));
         live_candidate.clear_dirty();
         *self = live_candidate;
         Ok(())

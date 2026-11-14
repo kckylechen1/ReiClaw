@@ -1901,8 +1901,8 @@ async fn config_toml_roundtrip() {
         sop: SopConfig::default(),
         shell_tool: ShellToolConfig::default(),
         escalation: EscalationConfig::default(),
-        env_overridden_paths: std::collections::HashSet::new(),
-        pre_override_snapshots: std::collections::HashMap::new(),
+        env_overridden_paths: EnvOverriddenPaths::new(),
+        pre_override_snapshots: PreOverrideSnapshots::new(),
         onepassword_reference_snapshots: ExternalRefSnapshots::new(),
         dirty_paths: std::collections::HashSet::new(),
         dirty_map_entries: std::collections::HashSet::new(),
@@ -2728,8 +2728,8 @@ async fn config_save_and_load_tmpdir() {
         sop: SopConfig::default(),
         shell_tool: ShellToolConfig::default(),
         escalation: EscalationConfig::default(),
-        env_overridden_paths: std::collections::HashSet::new(),
-        pre_override_snapshots: std::collections::HashMap::new(),
+        env_overridden_paths: EnvOverriddenPaths::new(),
+        pre_override_snapshots: PreOverrideSnapshots::new(),
         onepassword_reference_snapshots: ExternalRefSnapshots::new(),
         dirty_paths: std::collections::HashSet::new(),
         dirty_map_entries: std::collections::HashSet::new(),
@@ -8047,10 +8047,10 @@ async fn prop_is_env_overridden_reflects_env_overridden_paths() {
 
     // Populate the field directly (the same set that
     // `apply_env_overrides` returns from `load_or_init`).
-    cfg.env_overridden_paths = std::collections::HashSet::from([
+    cfg.env_overridden_paths = EnvOverriddenPaths::from_set(std::collections::HashSet::from([
         "channels.telegram.api_base_url".to_string(),
         "gateway.request_timeout_secs".to_string(),
-    ]);
+    ]));
 
     // True for paths in the list, false for anything else.
     assert!(cfg.prop_is_env_overridden("channels.telegram.api_base_url"));
@@ -8254,9 +8254,11 @@ async fn env_override_save_cycle_preserves_on_disk_secret() {
     // `ZEROCLAW_providers__models__anthropic__default__api_key=...`
     // set in the environment.
     let env_value = "sk-ant-from-env-DIFFERENT";
-    reloaded.env_overridden_paths = std::collections::HashSet::from([api_key_path.to_string()]);
-    reloaded.pre_override_snapshots =
-        std::collections::HashMap::from([(api_key_path.to_string(), original_secret.to_string())]);
+    reloaded.env_overridden_paths =
+        EnvOverriddenPaths::from_set(std::collections::HashSet::from([api_key_path.to_string()]));
+    reloaded.pre_override_snapshots = PreOverrideSnapshots::from_map(
+        std::collections::HashMap::from([(api_key_path.to_string(), original_secret.to_string())]),
+    );
     reloaded.set_prop(api_key_path, env_value).unwrap();
 
     // Save again. With the pre-fix code path, this is the moment the
@@ -9307,14 +9309,14 @@ token = "vault:OPENAI_OFFICIAL_API_KEY"
         chained_cfg
             .pre_override_snapshots
             .get("mcp.servers.a.env.env.token")
-            .map(String::as_str),
+            .as_deref(),
         Some("disk-a-1")
     );
     assert_eq!(
         chained_cfg
             .pre_override_snapshots
             .get("mcp.servers.a.env.env.env.token")
-            .map(String::as_str),
+            .as_deref(),
         Some("disk-a-2")
     );
     assert!(
@@ -10216,6 +10218,67 @@ command = "npx"
             .map(String::as_str),
         Some("vault:OPENAI_OFFICIAL_API_KEY")
     );
+
+    // 5. Env-overridden Vault field explicitly replaced via `set_prop_persistent` and persisted
+    // with standalone `save()` (before `clear_dirty()` + `force_save()` + `save()`) must sync
+    // `pre_override_snapshots` and `env_overridden_paths` alongside `onepassword_reference_snapshots`
+    // so subsequent full saves never mask stale plaintext back onto disk (both encrypt=false/true).
+    for encrypt in [false, true] {
+        std::fs::write(
+            &config_path,
+            format!(
+                r#"
+schema_version = 3
+
+[secrets]
+encrypt = {encrypt}
+
+[providers.models.openai.default]
+model = "gpt-5.4"
+api_key = "vault:OPENAI_OFFICIAL_API_KEY"
+"#
+            ),
+        )
+        .unwrap();
+        let _env_guard = EnvValueGuard::set(
+            "ZEROCLAW_providers__models__openai__default__api_key",
+            "synthetic-env-override",
+        );
+        let path = "providers.models.openai.default.api_key";
+        let mut env_cfg = Config::load_or_init().await.unwrap();
+        assert!(env_cfg.prop_is_env_overridden(path));
+        assert!(env_cfg.pre_override_snapshots.contains_key(path));
+        assert!(env_cfg.onepassword_reference_snapshots.contains_key(path));
+
+        env_cfg
+            .set_prop_persistent(path, "replacement-plain")
+            .unwrap();
+        env_cfg.save().await.unwrap();
+        assert!(!env_cfg.onepassword_reference_snapshots.contains_key(path));
+        assert!(!env_cfg.pre_override_snapshots.contains_key(path));
+        assert!(!env_cfg.env_overridden_paths.contains(path));
+        assert!(!env_cfg.prop_is_env_overridden(path));
+
+        env_cfg.clear_dirty();
+        env_cfg.force_save().await.unwrap();
+        env_cfg.save().await.unwrap();
+
+        let raw_after = std::fs::read_to_string(&config_path).unwrap();
+        assert!(
+            !raw_after.contains("synthetic-vault-secret")
+                && !raw_after.contains("synthetic-env-override")
+                && !raw_after.contains("vault:OPENAI_OFFICIAL_API_KEY"),
+            "encrypt={encrypt}: {raw_after}"
+        );
+        let mut parsed_after: Config = toml::from_str(&raw_after).unwrap();
+        parsed_after
+            .decrypt_secrets(&crate::secrets::SecretStore::new(dir.path(), encrypt))
+            .unwrap();
+        assert_eq!(
+            crate::env_overrides::raw_value_for_path(&parsed_after, path).as_deref(),
+            Some("replacement-plain")
+        );
+    }
 }
 
 #[cfg(unix)]

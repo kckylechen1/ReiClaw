@@ -1041,7 +1041,18 @@ exit 98
             "vault status\nvault get OPENAI_OFFICIAL_API_KEY --reveal --json --keychain\n"
         );
 
-        // 4. Offline plain-text status (no daemon running) resolves via `vault get --keychain`,
+        // 4. Secrets consisting solely of CR/LF bytes are preserved verbatim rather than treated as empty.
+        write_fake_tachi(
+            tmp.path(),
+            r#"{"initialized":true,"locked":true,"secure_store":{"auto_unlock_available":true}}"#,
+            "",
+            1,
+            r#"{"name":"CRLF_ONLY","revealed":true,"value":"\r\n"}"#,
+            0,
+        );
+        assert_eq!(store.decrypt("vault:CRLF_ONLY").unwrap(), "\r\n");
+
+        // 5. Offline plain-text status (no daemon running) resolves via `vault get --keychain`,
         // and outer CLI CR/LF framing does not alter values without embedded newlines.
         fs::write(&calls, "").unwrap();
         write_fake_tachi(
@@ -1223,11 +1234,21 @@ exit 98
                 locked_keychain,
                 "",
                 1,
-                r#"{"revealed":true,"value":"\r\n"}"#,
+                r#"{"revealed":true,"value":""}"#,
                 0,
                 "empty secret",
                 false,
                 true,
+            ),
+            (
+                unlocked_no_keychain,
+                r#"{"leased":true,"env":{"ZEROCLAW_VAULT_SECRET":""}}"#,
+                0,
+                "",
+                1,
+                "empty secret",
+                true,
+                false,
             ),
             (
                 locked_keychain,
