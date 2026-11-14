@@ -15577,15 +15577,8 @@ impl Config {
         let dirty_prop_paths = self.collect_dirty_prop_paths(&whole_entries);
         self.verify_tracked_prop_identities(Some(&dirty_prop_paths))
             .map_err(anyhow::Error::msg)?;
-        let self_table = toml::Value::try_from(self)
-            .ok()
-            .and_then(|v| toml::Table::try_from(v).ok());
-        let (_secret_edits, effective_skip_restore_paths, _scope_prefixes) = self
-            .collect_effective_dirty_secret_edits(
-                &whole_entries,
-                &dirty_prop_paths,
-                self_table.as_ref(),
-            );
+        let scope_prefixes = self.collect_dirty_scope_prefixes(&whole_entries, &dirty_prop_paths);
+        let restorable_snapshots = self.pruned_snapshots_for_restore(&scope_prefixes, false);
 
         // Restore non-dirty env-overridden paths to their pre-override snapshots
         // before encryption, so values supplied via `ZEROCLAW_*` env vars never
@@ -15605,23 +15598,20 @@ impl Config {
             }
         }
         let mut after_mask_refs = std::collections::HashMap::new();
-        let mut extra_skip_encoded = std::collections::HashSet::new();
-        if validate_dirty_refs {
-            config_to_save.collect_external_secret_refs(None, &mut after_mask_refs)?;
-            for (enc_k, ref_val) in &after_mask_refs {
-                if self.onepassword_reference_snapshots.get(enc_k) != Some(ref_val) {
-                    extra_skip_encoded.insert(enc_k.clone());
-                    if let Some(base) = strip_snapshot_array_index(enc_k) {
-                        extra_skip_encoded.insert(base.to_string());
-                    }
-                }
+        config_to_save.collect_external_secret_refs(None, &mut after_mask_refs)?;
+        let mut skip_encoded_dirty: std::collections::HashSet<String> = dirty_prop_paths
+            .iter()
+            .filter_map(|raw| config_to_save.encode_prop_snapshot_key(None, raw))
+            .collect();
+        for (enc_k, ref_val) in &after_mask_refs {
+            if restorable_snapshots.get(enc_k) != Some(ref_val) {
+                skip_encoded_dirty.insert(enc_k.clone());
             }
         }
         restore_onepassword_references_for_save(
             &mut config_to_save,
-            &self.onepassword_reference_snapshots,
-            &effective_skip_restore_paths,
-            &extra_skip_encoded,
+            &restorable_snapshots,
+            &skip_encoded_dirty,
         )?;
 
         let mut structural_refs = std::collections::HashMap::new();
@@ -15633,11 +15623,11 @@ impl Config {
             // before touching disk without mutating `self`; live runtime edits
             // publish through `save_dirty(&mut self)`.
             let _validated = self
-                .prepare_dirty_secret_edits(&config_path, &whole_entries, &dirty_prop_paths)
+                .prepare_dirty_secret_edits(&config_path, &whole_entries, &dirty_prop_paths, false)
                 .await?;
             let mut seen_unvalidated = std::collections::BTreeMap::new();
             for (enc_k, ref_val) in after_mask_refs.iter().chain(structural_refs.iter()) {
-                if self.onepassword_reference_snapshots.get(enc_k) != Some(ref_val) {
+                if restorable_snapshots.get(enc_k) != Some(ref_val) {
                     seen_unvalidated
                         .entry(enc_k.clone())
                         .or_insert_with(|| ref_val.clone());
@@ -16157,169 +16147,140 @@ impl Config {
         prefixes
     }
 
-    /// Expand dirty sections and whole-entry writes into any newly introduced or
-    /// cleared secret leaves beneath them while keeping env-only overrides isolated
-    /// and untouched resolved plaintext fields backed by their external ref snapshots.
-    #[allow(clippy::type_complexity)]
-    fn collect_effective_dirty_secret_edits(
+    /// Prune active external-reference snapshots under natural-key `List`
+    /// sections that are explicitly in scope for this save and now empty
+    /// (`keys.is_empty()`), while leaving non-empty sections intact so
+    /// unregistered natural-key mutations still fail closed.
+    fn pruned_snapshots_for_restore(
         &self,
-        whole_entries: &[(String, String)],
-        dirty_prop_paths: &std::collections::HashSet<String>,
-        self_table: Option<&toml::Table>,
-    ) -> (
-        Vec<(String, Option<toml::Value>)>,
-        std::collections::HashSet<String>,
-        Vec<String>,
-    ) {
-        let mut effective_skip_restore_paths = dirty_prop_paths.clone();
-        let mut edits: Vec<(String, Option<toml::Value>)> = dirty_prop_paths
-            .iter()
-            .filter(|path| Self::prop_is_secret(path))
-            .map(|path| {
-                let raw_val = self_table
-                    .and_then(|t| lookup_prop_value_in_table(t, path))
-                    .cloned();
-                (path.clone(), raw_val)
-            })
-            .collect();
-
-        let scope_prefixes = self.collect_dirty_scope_prefixes(whole_entries, dirty_prop_paths);
-        if !scope_prefixes.is_empty() {
-            let env_encoded_keys: std::collections::HashSet<String> = self
-                .pre_override_snapshots
-                .keys()
-                .chain(self.env_overridden_paths.iter())
-                .filter_map(|p| self.encode_prop_snapshot_key(None, p))
-                .collect();
-            for field in self.prop_fields() {
-                if !field.is_secret || dirty_prop_paths.contains(&field.name) {
-                    continue;
-                }
-                if self.pre_override_snapshots.contains_key(&field.name)
-                    || self.env_overridden_paths.contains(&field.name)
-                {
-                    continue;
-                }
-                let Some(enc_leaf) = self.encode_prop_snapshot_key(None, &field.name) else {
-                    continue;
-                };
-                if env_encoded_keys.contains(&enc_leaf)
-                    || !snapshot_key_covered_by_prefixes(&enc_leaf, &scope_prefixes)
-                {
-                    continue;
-                }
-                let raw_val = self_table
-                    .and_then(|t| lookup_prop_value_in_table(t, &field.name))
-                    .cloned();
-                if value_has_external_secret_ref(raw_val.as_ref())
-                    || value_is_unset_or_empty_secret(raw_val.as_ref())
-                {
-                    effective_skip_restore_paths.insert(field.name.clone());
-                    edits.push((field.name, raw_val));
-                }
+        scope_prefixes: &[String],
+        full_create_fallback: bool,
+    ) -> std::collections::HashMap<String, String> {
+        let mut snaps = self.onepassword_reference_snapshots.clone();
+        if snaps.is_empty() {
+            return snaps;
+        }
+        for section in Self::map_key_sections() {
+            if section.kind != crate::traits::MapKeyKind::List || section.natural_key.is_none() {
+                continue;
+            }
+            if !(full_create_fallback
+                || snapshot_key_covered_by_prefixes(section.path, scope_prefixes))
+            {
+                continue;
+            }
+            if self
+                .get_map_keys(section.path)
+                .is_some_and(|keys| keys.is_empty())
+            {
+                let sec_dot = format!("{}.", section.path);
+                let sec_bracket = format!("{}[", section.path);
+                snaps.retain(|k, _| {
+                    k != section.path && !k.starts_with(&sec_dot) && !k.starts_with(&sec_bracket)
+                });
             }
         }
-
-        (edits, effective_skip_restore_paths, scope_prefixes)
+        snaps
     }
 
     /// Prepare live secret edits without mutating the running config. Resolve all
-    /// references before any write; publish this candidate only after success.
+    /// references structurally in %-encoded snapshot-key space before any write;
+    /// publish this candidate only after success.
     async fn prepare_dirty_secret_edits(
         &self,
         config_path: &Path,
         whole_entries: &[(String, String)],
         dirty_prop_paths: &std::collections::HashSet<String>,
+        full_create_fallback: bool,
     ) -> Result<(Self, std::collections::HashSet<String>, Vec<String>)> {
-        let mut structural_refs = std::collections::HashMap::new();
-        self.collect_external_secret_refs(None, &mut structural_refs)?;
+        let mut masked_self = self.clone();
+        if !self.pre_override_snapshots.is_empty() {
+            let non_dirty_snapshots: std::collections::HashMap<String, String> = self
+                .pre_override_snapshots
+                .iter()
+                .filter(|(path, _)| !dirty_prop_paths.contains(*path))
+                .map(|(path, value)| (path.clone(), value.clone()))
+                .collect();
+            if !non_dirty_snapshots.is_empty() {
+                crate::env_overrides::mask_env_overrides_for_save(
+                    &mut masked_self,
+                    &non_dirty_snapshots,
+                )?;
+            }
+        }
+
+        let mut live_refs = std::collections::HashMap::new();
+        masked_self.collect_external_secret_refs(None, &mut live_refs)?;
+
+        let scope_prefixes = self.collect_dirty_scope_prefixes(whole_entries, dirty_prop_paths);
+        let explicit_dirty_enc_leaves: std::collections::HashSet<String> = dirty_prop_paths
+            .iter()
+            .filter(|path| Self::prop_is_secret(path))
+            .filter_map(|path| self.encode_prop_snapshot_key(None, path))
+            .collect();
+
+        let env_isolated_enc_prefixes: Vec<String> = self
+            .pre_override_snapshots
+            .keys()
+            .chain(self.env_overridden_paths.iter())
+            .filter(|path| !dirty_prop_paths.contains(*path))
+            .filter_map(|path| {
+                self.tracked_prop_identities
+                    .get(path.as_str())
+                    .map(|id| id.encoded_key.clone())
+                    .or_else(|| self.encode_prop_snapshot_key(None, path))
+            })
+            .collect();
+
+        let mut refs_to_resolve: Vec<(String, String)> = live_refs
+            .into_iter()
+            .filter(|(enc_k, _)| {
+                !snapshot_key_covered_by_prefixes(enc_k, &env_isolated_enc_prefixes)
+                    && (full_create_fallback
+                        || explicit_dirty_enc_leaves.contains(enc_k)
+                        || explicit_dirty_enc_leaves
+                            .iter()
+                            .any(|arr| is_indexed_key_for_array_path(enc_k, arr))
+                        || snapshot_key_covered_by_prefixes(enc_k, &scope_prefixes))
+            })
+            .collect();
+        refs_to_resolve.sort_by(|a, b| a.0.cmp(&b.0));
+
         let mut candidate = self.clone();
+        candidate.onepassword_reference_snapshots =
+            self.pruned_snapshots_for_restore(&scope_prefixes, full_create_fallback);
         let dir = config_path
             .parent()
             .context("Config path must have a parent directory")?;
         let store = crate::secrets::SecretStore::new(dir, self.secrets.encrypt);
-        let self_table = toml::Value::try_from(self)
-            .ok()
-            .and_then(|v| toml::Table::try_from(v).ok());
-        let (edits, effective_skip_restore_paths, scope_prefixes) = self
-            .collect_effective_dirty_secret_edits(
-                whole_entries,
-                dirty_prop_paths,
-                self_table.as_ref(),
-            );
+
         tokio::task::spawn_blocking(move || {
-            for (path, raw_val) in edits {
-                let maybe_enc_path = candidate.encode_prop_snapshot_key(None, &path);
-                let is_string_array = matches!(&raw_val, Some(toml::Value::Array(_)))
-                    || candidate
-                        .prop_fields()
-                        .iter()
-                        .any(|f| f.name == path && f.kind == crate::traits::PropKind::StringArray);
-                if let Some(ref enc_path) = maybe_enc_path {
-                    if is_string_array {
-                        candidate.onepassword_reference_snapshots.retain(|k, _| {
-                            k != enc_path && !is_indexed_key_for_array_path(k, enc_path)
-                        });
-                    } else {
-                        candidate.onepassword_reference_snapshots.remove(enc_path);
-                    }
-                }
-                match raw_val {
-                    Some(toml::Value::String(reference))
-                        if crate::secrets::SecretStore::is_external_secret_ref(&reference) =>
-                    {
-                        let enc_path = maybe_enc_path.ok_or_else(|| {
-                            anyhow::Error::msg(format!(
-                                "Dirty external secret reference at `{path}` could not be bound \
-                                 to an unambiguous config entry"
-                            ))
-                        })?;
-                        let plaintext = store.decrypt(&reference).with_context(|| {
-                            format!("Failed to resolve external secret at {path}")
-                        })?;
-                        candidate.set_prop(&path, &plaintext)?;
-                        candidate
-                            .onepassword_reference_snapshots
-                            .insert(enc_path, reference);
-                    }
-                    Some(toml::Value::Array(items)) => {
-                        let mut resolved = Vec::with_capacity(items.len());
-                        let mut external_slots: Vec<(usize, String)> = Vec::new();
-                        for (idx, item) in items.into_iter().enumerate() {
-                            let Some(elem) = item.as_str() else {
-                                continue;
-                            };
-                            if crate::secrets::SecretStore::is_external_secret_ref(elem) {
-                                let plaintext = store.decrypt(elem).with_context(|| {
-                                    format!("Failed to resolve external secret at {path}[{idx}]")
-                                })?;
-                                external_slots.push((idx, elem.to_string()));
-                                resolved.push(plaintext);
-                            } else {
-                                resolved.push(elem.to_string());
-                            }
-                        }
-                        if !external_slots.is_empty() {
-                            let enc_path = maybe_enc_path.ok_or_else(|| {
-                                anyhow::Error::msg(format!(
-                                    "Dirty external secret reference at `{path}` could not be \
-                                     bound to an unambiguous config entry"
-                                ))
-                            })?;
-                            for (idx, elem) in external_slots {
-                                candidate
-                                    .onepassword_reference_snapshots
-                                    .insert(format!("{enc_path}[{idx}]"), elem);
-                            }
-                            let encoded = serde_json::to_string(&resolved)
-                                .context("Failed to serialize resolved secret array")?;
-                            candidate.set_prop(&path, &encoded)?;
-                        }
-                    }
-                    _ => {}
-                }
+            let mut resolved_plaintexts = std::collections::HashMap::new();
+            let mut resolved_refs = std::collections::HashMap::new();
+            for (enc_k, reference) in refs_to_resolve {
+                let plaintext = store
+                    .decrypt(&reference)
+                    .with_context(|| format!("Failed to resolve external secret at {enc_k}"))?;
+                resolved_plaintexts.insert(enc_k.clone(), plaintext);
+                resolved_refs.insert(enc_k, reference);
             }
-            Ok((candidate, effective_skip_restore_paths, scope_prefixes))
+            if !resolved_plaintexts.is_empty() {
+                let empty_skip = std::collections::HashSet::new();
+                candidate.restore_external_secret_refs(None, &resolved_plaintexts, &empty_skip)?;
+            }
+            for enc_leaf in &explicit_dirty_enc_leaves {
+                candidate
+                    .onepassword_reference_snapshots
+                    .retain(|k, _| k != enc_leaf && !is_indexed_key_for_array_path(k, enc_leaf));
+            }
+            let mut skip_restore_enc_keys = explicit_dirty_enc_leaves;
+            for (enc_k, reference) in resolved_refs {
+                candidate
+                    .onepassword_reference_snapshots
+                    .insert(enc_k.clone(), reference);
+                skip_restore_enc_keys.insert(enc_k);
+            }
+            Ok((candidate, skip_restore_enc_keys, scope_prefixes))
         })
         .await
         .context("Config secret edit resolution task failed")?
@@ -16342,17 +16303,14 @@ impl Config {
             let dirty_prop_paths = self.collect_dirty_prop_paths(&whole_entries);
             self.verify_tracked_prop_identities(Some(&dirty_prop_paths))
                 .map_err(anyhow::Error::msg)?;
-            let (mut candidate, _skip_paths, scope_prefixes) = self
-                .prepare_dirty_secret_edits(&config_path, &whole_entries, &dirty_prop_paths)
+            let (mut candidate, _skip_enc_keys, _scope_prefixes) = self
+                .prepare_dirty_secret_edits(&config_path, &whole_entries, &dirty_prop_paths, true)
                 .await?;
             return match self.save_impl(false, false).await {
                 Ok((written, structural_refs)) => {
-                    if !scope_prefixes.is_empty() {
-                        candidate.onepassword_reference_snapshots.retain(|k, _| {
-                            !snapshot_key_covered_by_prefixes(k, &scope_prefixes)
-                                || structural_refs.contains_key(k)
-                        });
-                    }
+                    candidate
+                        .onepassword_reference_snapshots
+                        .retain(|k, _| structural_refs.contains_key(k));
                     // This value just created the file; `written` is the
                     // path the full save actually wrote.
                     for path in &dirty_prop_paths {
@@ -16383,9 +16341,10 @@ impl Config {
         self.verify_tracked_prop_identities(Some(&dirty_prop_paths))
             .map_err(anyhow::Error::msg)?;
 
-        let (mut live_candidate, effective_skip_restore_paths, scope_prefixes) = self
-            .prepare_dirty_secret_edits(&config_path, &whole_entries, &dirty_prop_paths)
+        let (mut live_candidate, skip_restore_enc_keys, scope_prefixes) = self
+            .prepare_dirty_secret_edits(&config_path, &whole_entries, &dirty_prop_paths, false)
             .await?;
+        let restorable_snapshots = self.pruned_snapshots_for_restore(&scope_prefixes, false);
         let mut config_to_save = self.clone();
         let zeroclaw_dir = config_path
             .parent()
@@ -16406,12 +16365,10 @@ impl Config {
                 )?;
             }
         }
-        let empty_extra_skips = std::collections::HashSet::new();
         restore_onepassword_references_for_save(
             &mut config_to_save,
-            &self.onepassword_reference_snapshots,
-            &effective_skip_restore_paths,
-            &empty_extra_skips,
+            &restorable_snapshots,
+            &skip_restore_enc_keys,
         )?;
         let mut structural_refs = std::collections::HashMap::new();
         config_to_save.collect_external_secret_refs(None, &mut structural_refs)?;
@@ -16589,26 +16546,6 @@ fn collect_onepassword_reference_snapshots(
     Ok(snapshots)
 }
 
-fn value_has_external_secret_ref(val: Option<&toml::Value>) -> bool {
-    match val {
-        Some(toml::Value::String(s)) => crate::secrets::SecretStore::is_external_secret_ref(s),
-        Some(toml::Value::Array(items)) => items
-            .iter()
-            .filter_map(toml::Value::as_str)
-            .any(crate::secrets::SecretStore::is_external_secret_ref),
-        _ => false,
-    }
-}
-
-fn value_is_unset_or_empty_secret(val: Option<&toml::Value>) -> bool {
-    match val {
-        None => true,
-        Some(toml::Value::String(s)) => s.is_empty(),
-        Some(toml::Value::Array(items)) => items.is_empty(),
-        _ => false,
-    }
-}
-
 fn snapshot_key_covered_by_prefixes(key: &str, prefixes: &[String]) -> bool {
     prefixes.iter().any(|pfx| {
         key == pfx
@@ -16618,26 +16555,15 @@ fn snapshot_key_covered_by_prefixes(key: &str, prefixes: &[String]) -> bool {
     })
 }
 
-fn strip_snapshot_array_index(key: &str) -> Option<&str> {
-    let (base, idx) = key.strip_suffix(']')?.rsplit_once('[')?;
-    idx.parse::<usize>().ok().map(|_| base)
-}
-
 fn restore_onepassword_references_for_save(
     config_to_save: &mut Config,
     snapshots: &std::collections::HashMap<String, String>,
-    dirty_paths: &std::collections::HashSet<String>,
-    extra_skip_encoded: &std::collections::HashSet<String>,
+    skip_encoded_dirty: &std::collections::HashSet<String>,
 ) -> Result<()> {
     if snapshots.is_empty() {
         return Ok(());
     }
-    let mut skip_encoded_dirty: std::collections::HashSet<String> = dirty_paths
-        .iter()
-        .filter_map(|raw| config_to_save.encode_prop_snapshot_key(None, raw))
-        .collect();
-    skip_encoded_dirty.extend(extra_skip_encoded.iter().cloned());
-    config_to_save.restore_external_secret_refs(None, snapshots, &skip_encoded_dirty)
+    config_to_save.restore_external_secret_refs(None, snapshots, skip_encoded_dirty)
 }
 
 /// Atomic write shared by `save()` and `save_dirty()`.

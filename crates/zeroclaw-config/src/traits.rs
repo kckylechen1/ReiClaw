@@ -439,6 +439,7 @@ impl SecretField for String {
         skip_encoded_dirty: &std::collections::HashSet<String>,
     ) {
         if !skip_encoded_dirty.contains(enc_path)
+            && !self.is_empty()
             && let Some(reference) = snapshots.get(enc_path)
         {
             self.clone_from(reference);
@@ -568,6 +569,7 @@ impl SecretField for std::path::PathBuf {
         skip_encoded_dirty: &std::collections::HashSet<String>,
     ) {
         if !skip_encoded_dirty.contains(enc_path)
+            && !self.as_os_str().is_empty()
             && let Some(reference) = snapshots.get(enc_path)
         {
             *self = std::path::PathBuf::from(reference);
@@ -695,7 +697,11 @@ impl SecretField for Vec<String> {
             return;
         }
         for (idx, element) in self.iter_mut().enumerate() {
-            if let Some(reference) = snapshots.get(&format!("{enc_path}[{idx}]")) {
+            let slot_key = format!("{enc_path}[{idx}]");
+            if !skip_encoded_dirty.contains(&slot_key)
+                && !element.is_empty()
+                && let Some(reference) = snapshots.get(&slot_key)
+            {
                 element.clone_from(reference);
             }
         }

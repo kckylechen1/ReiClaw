@@ -9655,8 +9655,8 @@ async fn tachi_vault_whole_section_and_entry_dirty_expands_refs_and_isolates_env
         "{raw_provider}"
     );
 
-    // 5. Deleting an entry under section dirty `mark_dirty("model_routes")` prunes its
-    // stale external reference snapshot cleanly.
+    // 5. Deleting all entries under section dirty `mark_dirty("model_routes")` succeeds on both
+    // `save_dirty()` and `save()` and prunes stale external reference snapshots cleanly.
     missing_cfg.model_routes.clear();
     missing_cfg.mark_dirty("model_routes");
     missing_cfg.save_dirty().await.unwrap();
@@ -9665,6 +9665,8 @@ async fn tachi_vault_whole_section_and_entry_dirty_expands_refs_and_isolates_env
             .onepassword_reference_snapshots
             .contains_key("model_routes.fast.api_key")
     );
+    missing_cfg.mark_dirty("model_routes");
+    missing_cfg.save().await.unwrap();
 
     // 6. Env-override isolation under `mark_dirty("model_routes")`: an env-overridden
     // sibling route must keep its pre-override disk value and must NEVER leak or get
@@ -9755,6 +9757,297 @@ api_key = "vault:OPENAI_OFFICIAL_API_KEY"
     assert_eq!(
         std::fs::read_to_string(dir.path().join("config.toml")).unwrap(),
         before_disk
+    );
+}
+
+#[cfg(unix)]
+#[test]
+async fn tachi_vault_paired_tokens_per_slot_append_and_empty_clear_no_leak() {
+    let _lock = env_override_lock().await;
+    let (dir, _guards) = tachi_vault_fixture("vault:OPENAI_OFFICIAL_API_KEY", false);
+    let config_path = dir.path().join("config.toml");
+    std::fs::write(
+        &config_path,
+        r#"
+schema_version = 3
+
+[secrets]
+encrypt = false
+
+[gateway]
+paired_tokens = ["vault:OPENAI_OFFICIAL_API_KEY"]
+"#,
+    )
+    .unwrap();
+
+    let mut cfg = Config::load_or_init().await.unwrap();
+    assert_eq!(cfg.gateway.paired_tokens, vec!["synthetic-vault-secret"]);
+
+    // 1. Unmarked append + save(): slot [1] failing invalid ref fails closed without touching disk.
+    let mut bad_unmarked = cfg.clone();
+    bad_unmarked
+        .gateway
+        .paired_tokens
+        .push("vault:-invalid".to_string());
+    assert!(bad_unmarked.save().await.is_err());
+    let disk_after_bad = std::fs::read_to_string(&config_path).unwrap();
+    assert!(!disk_after_bad.contains("vault:-invalid"));
+    assert!(!disk_after_bad.contains("synthetic-vault-secret"));
+
+    // 2. Unmarked append + save(): slot [0] must keep its vault: snapshot on disk (never leak
+    // plaintext), while new slot [1] persists its op:// reference.
+    let mut good_unmarked = cfg.clone();
+    good_unmarked
+        .gateway
+        .paired_tokens
+        .push("op://vault/item/field".to_string());
+    good_unmarked.save().await.unwrap();
+    let raw_unmarked = std::fs::read_to_string(&config_path).unwrap();
+    assert!(
+        raw_unmarked.contains("vault:OPENAI_OFFICIAL_API_KEY")
+            && raw_unmarked.contains("op://vault/item/field")
+            && !raw_unmarked.contains("synthetic-vault-secret")
+            && !raw_unmarked.contains("synthetic-op-secret"),
+        "{raw_unmarked}"
+    );
+
+    // Reload clean [vault:OPENAI_OFFICIAL_API_KEY] fixture to test section-dirty save_dirty().
+    std::fs::write(
+        &config_path,
+        r#"
+schema_version = 3
+
+[secrets]
+encrypt = false
+
+[gateway]
+paired_tokens = ["vault:OPENAI_OFFICIAL_API_KEY"]
+"#,
+    )
+    .unwrap();
+    cfg = Config::load_or_init().await.unwrap();
+
+    // 3. Section-dirty invalid append fails closed without partial write or memory mutation.
+    cfg.gateway.paired_tokens.push("vault:-invalid".to_string());
+    cfg.mark_dirty("gateway");
+    assert!(cfg.save_dirty().await.is_err());
+    let disk_before_good_dirty = std::fs::read_to_string(&config_path).unwrap();
+    assert!(!disk_before_good_dirty.contains("vault:-invalid"));
+    assert!(!disk_before_good_dirty.contains("synthetic-vault-secret"));
+
+    // 4. Section-dirty valid append resolves [1] live and preserves [0]'s vault: snapshot on disk.
+    cfg.gateway.paired_tokens[1] = "op://vault/item/field".to_string();
+    cfg.mark_dirty("gateway");
+    cfg.save_dirty().await.unwrap();
+    assert_eq!(
+        cfg.gateway.paired_tokens,
+        vec![
+            "synthetic-vault-secret".to_string(),
+            "synthetic-op-secret".to_string()
+        ]
+    );
+    assert_eq!(
+        cfg.onepassword_reference_snapshots
+            .get("gateway.paired_tokens[0]")
+            .map(String::as_str),
+        Some("vault:OPENAI_OFFICIAL_API_KEY")
+    );
+    assert_eq!(
+        cfg.onepassword_reference_snapshots
+            .get("gateway.paired_tokens[1]")
+            .map(String::as_str),
+        Some("op://vault/item/field")
+    );
+    let raw_dirty = std::fs::read_to_string(&config_path).unwrap();
+    assert!(
+        raw_dirty.contains("vault:OPENAI_OFFICIAL_API_KEY")
+            && raw_dirty.contains("op://vault/item/field")
+            && !raw_dirty.contains("synthetic-vault-secret")
+            && !raw_dirty.contains("synthetic-op-secret"),
+        "{raw_dirty}"
+    );
+
+    // 5. Popping slot [1] under `mark_dirty("gateway")` prunes snapshot [1] while keeping [0].
+    cfg.gateway.paired_tokens.pop();
+    cfg.mark_dirty("gateway");
+    cfg.save_dirty().await.unwrap();
+    assert!(
+        !cfg.onepassword_reference_snapshots
+            .contains_key("gateway.paired_tokens[1]")
+    );
+    assert_eq!(
+        cfg.onepassword_reference_snapshots
+            .get("gateway.paired_tokens[0]")
+            .map(String::as_str),
+        Some("vault:OPENAI_OFFICIAL_API_KEY")
+    );
+
+    // 6. Clearing slot [0] to empty string under `mark_dirty("gateway")` does not resurrect
+    // the old `vault:` snapshot on disk.
+    cfg.gateway.paired_tokens[0].clear();
+    cfg.mark_dirty("gateway");
+    cfg.save_dirty().await.unwrap();
+    let raw_cleared_slot = std::fs::read_to_string(&config_path).unwrap();
+    assert!(
+        !raw_cleared_slot.contains("vault:OPENAI_OFFICIAL_API_KEY"),
+        "{raw_cleared_slot}"
+    );
+    assert!(
+        !cfg.onepassword_reference_snapshots
+            .contains_key("gateway.paired_tokens[0]")
+    );
+}
+
+#[cfg(unix)]
+#[test]
+async fn tachi_vault_dotted_mcp_sibling_collision_fails_closed_and_resolves_structurally() {
+    let _lock = env_override_lock().await;
+    let (dir, _guards) = tachi_vault_fixture("vault:OPENAI_OFFICIAL_API_KEY", false);
+    let config_path = dir.path().join("config.toml");
+    std::fs::write(
+        &config_path,
+        r#"
+schema_version = 3
+
+[secrets]
+encrypt = false
+
+[[mcp.servers]]
+name = "a"
+command = "npx"
+
+[mcp.servers.env]
+"env.TOKEN" = "disk-a"
+
+[[mcp.servers]]
+name = "a.env"
+command = "uvx"
+
+[mcp.servers.env]
+TOKEN = "disk-a-env"
+"#,
+    )
+    .unwrap();
+
+    let mut cfg = Config::load_or_init().await.unwrap();
+
+    // 1. Mutating server "a"'s env["env.TOKEN"] to `vault:-invalid` must fail closed under
+    // `mark_dirty("mcp.servers")`, `mark_dirty("mcp.servers.a")`, and `save()`, never letting
+    // dotted prop_fields collisions with sibling server "a.env"'s `env["TOKEN"]` bypass checks.
+    for dirty_target in [Some("mcp.servers"), Some("mcp.servers.a"), None] {
+        let mut attempt = cfg.clone();
+        attempt.mcp.servers[0]
+            .env
+            .insert("env.TOKEN".to_string(), "vault:-invalid".to_string());
+        if let Some(path) = dirty_target {
+            attempt.mark_dirty(path);
+            assert!(
+                attempt.save_dirty().await.is_err(),
+                "dirty_target={path} should fail closed on vault:-invalid"
+            );
+        } else {
+            assert!(attempt.save().await.is_err());
+        }
+        let disk = std::fs::read_to_string(&config_path).unwrap();
+        assert!(!disk.contains("vault:-invalid"), "{disk}");
+    }
+
+    // 2. Setting valid `vault:OPENAI_OFFICIAL_API_KEY` on server "a"'s env["env.TOKEN"] under
+    // `mark_dirty("mcp.servers")` must resolve onto server "a" without touching sibling "a.env".
+    cfg.mcp.servers[0].env.insert(
+        "env.TOKEN".to_string(),
+        "vault:OPENAI_OFFICIAL_API_KEY".to_string(),
+    );
+    cfg.mark_dirty("mcp.servers");
+    cfg.save_dirty().await.unwrap();
+    assert_eq!(
+        cfg.mcp.servers[0].env.get("env.TOKEN").map(String::as_str),
+        Some("synthetic-vault-secret")
+    );
+    assert_eq!(
+        cfg.mcp.servers[1].env.get("TOKEN").map(String::as_str),
+        Some("disk-a-env")
+    );
+    assert_eq!(
+        cfg.onepassword_reference_snapshots
+            .get("mcp.servers.a.env.env%2ETOKEN")
+            .map(String::as_str),
+        Some("vault:OPENAI_OFFICIAL_API_KEY")
+    );
+    assert!(
+        !cfg.onepassword_reference_snapshots
+            .contains_key("mcp.servers.a%2Eenv.env.TOKEN")
+    );
+    let parsed_after: Config =
+        toml::from_str(&std::fs::read_to_string(&config_path).unwrap()).unwrap();
+    assert_eq!(
+        parsed_after.mcp.servers[0]
+            .env
+            .get("env.TOKEN")
+            .map(String::as_str),
+        Some("vault:OPENAI_OFFICIAL_API_KEY")
+    );
+    assert_eq!(
+        parsed_after.mcp.servers[1]
+            .env
+            .get("TOKEN")
+            .map(String::as_str),
+        Some("disk-a-env")
+    );
+
+    // 2b. Replacing server "a"'s env["env.TOKEN"] under whole-entry dirty
+    // `mark_dirty("mcp.servers.a")` updates server "a" and keeps sibling "a.env" untouched.
+    cfg.mcp.servers[0]
+        .env
+        .insert("env.TOKEN".to_string(), "op://vault/item/field".to_string());
+    cfg.mark_dirty("mcp.servers.a");
+    cfg.save_dirty().await.unwrap();
+    assert_eq!(
+        cfg.mcp.servers[0].env.get("env.TOKEN").map(String::as_str),
+        Some("synthetic-op-secret")
+    );
+    assert_eq!(
+        cfg.onepassword_reference_snapshots
+            .get("mcp.servers.a.env.env%2ETOKEN")
+            .map(String::as_str),
+        Some("op://vault/item/field")
+    );
+    let parsed_entry_dirty: Config =
+        toml::from_str(&std::fs::read_to_string(&config_path).unwrap()).unwrap();
+    assert_eq!(
+        parsed_entry_dirty.mcp.servers[0]
+            .env
+            .get("env.TOKEN")
+            .map(String::as_str),
+        Some("op://vault/item/field")
+    );
+    assert_eq!(
+        parsed_entry_dirty.mcp.servers[1]
+            .env
+            .get("TOKEN")
+            .map(String::as_str),
+        Some("disk-a-env")
+    );
+
+    // 3. Clearing server "a"'s env["env.TOKEN"] to "" under `mark_dirty("mcp.servers")` does not
+    // resurrect the old `vault:` reference on disk or keep a stale snapshot.
+    cfg.mcp.servers[0]
+        .env
+        .insert("env.TOKEN".to_string(), String::new());
+    cfg.mark_dirty("mcp.servers");
+    cfg.save_dirty().await.unwrap();
+    let parsed_cleared: Config =
+        toml::from_str(&std::fs::read_to_string(&config_path).unwrap()).unwrap();
+    assert_ne!(
+        parsed_cleared.mcp.servers[0]
+            .env
+            .get("env.TOKEN")
+            .map(String::as_str),
+        Some("vault:OPENAI_OFFICIAL_API_KEY")
+    );
+    assert!(
+        !cfg.onepassword_reference_snapshots
+            .contains_key("mcp.servers.a.env.env%2ETOKEN")
     );
 }
 
