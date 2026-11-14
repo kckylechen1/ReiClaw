@@ -9547,6 +9547,219 @@ model = "gpt-5"
 
 #[cfg(unix)]
 #[test]
+async fn tachi_vault_whole_section_and_entry_dirty_expands_refs_and_isolates_env() {
+    let _lock = env_override_lock().await;
+    let (dir, _guards) = tachi_vault_fixture("vault:OPENAI_OFFICIAL_API_KEY", false);
+    let config_path = dir.path().join("config.toml");
+    std::fs::remove_file(&config_path).unwrap();
+
+    // 1. Missing-file create fallback with section dirty `model_routes` carrying an
+    // invalid `vault:-invalid` reference must fail closed without creating disk state.
+    let mut missing_cfg = Config {
+        config_path: config_path.clone(),
+        data_dir: dir.path().join("workspace"),
+        ..Config::default()
+    };
+    missing_cfg.secrets.encrypt = false;
+    missing_cfg.model_routes.push(ModelRouteConfig {
+        hint: "fast".to_string(),
+        model_provider: "openai.default".to_string(),
+        model: "gpt-5-mini".to_string(),
+        api_key: Some("vault:-invalid".to_string()),
+    });
+    missing_cfg.mark_dirty("model_routes");
+    assert!(missing_cfg.save_dirty().await.is_err());
+    assert!(!config_path.exists());
+
+    // 2. Valid `vault:OPENAI_OFFICIAL_API_KEY` under `mark_dirty("model_routes")` creates
+    // disk with the external reference and resolves plaintext in live memory.
+    missing_cfg.model_routes[0].api_key = Some("vault:OPENAI_OFFICIAL_API_KEY".to_string());
+    missing_cfg.save_dirty().await.unwrap();
+    assert_eq!(
+        missing_cfg.model_routes[0].api_key.as_deref(),
+        Some("synthetic-vault-secret")
+    );
+    let raw_created = std::fs::read_to_string(&config_path).unwrap();
+    assert!(
+        raw_created.contains("vault:OPENAI_OFFICIAL_API_KEY")
+            && !raw_created.contains("synthetic-vault-secret"),
+        "{raw_created}"
+    );
+
+    // 3. Replacing that route's external ref under section dirty `mark_dirty("model_routes")`
+    // persists the new reference on disk, updates the snapshot, and resolves plaintext live.
+    missing_cfg.model_routes[0].api_key = Some("op://vault/item/field".to_string());
+    missing_cfg.mark_dirty("model_routes");
+    missing_cfg.save_dirty().await.unwrap();
+    assert_eq!(
+        missing_cfg.model_routes[0].api_key.as_deref(),
+        Some("synthetic-op-secret")
+    );
+    assert_eq!(
+        missing_cfg
+            .onepassword_reference_snapshots
+            .get("model_routes.fast.api_key")
+            .map(String::as_str),
+        Some("op://vault/item/field")
+    );
+    let raw_replaced = std::fs::read_to_string(&config_path).unwrap();
+    assert!(
+        raw_replaced.contains("op://vault/item/field")
+            && !raw_replaced.contains("synthetic-op-secret")
+            && !raw_replaced.contains("vault:OPENAI_OFFICIAL_API_KEY"),
+        "{raw_replaced}"
+    );
+
+    // 4. Whole-entry dirty (`mark_dirty("providers.models.openai.default")`) fails closed
+    // on `vault:-bad` and persists/resolves valid `vault:OPENAI_OFFICIAL_API_KEY`.
+    missing_cfg.providers.models.openai.insert(
+        "default".to_string(),
+        OpenAIModelProviderConfig {
+            base: ModelProviderConfig {
+                model: Some("gpt-5.4".to_string()),
+                api_key: Some("vault:-bad".to_string()),
+                ..Default::default()
+            },
+        },
+    );
+    missing_cfg.mark_dirty("providers.models.openai.default");
+    let pre_provider_disk = std::fs::read_to_string(&config_path).unwrap();
+    assert!(missing_cfg.save_dirty().await.is_err());
+    assert_eq!(
+        std::fs::read_to_string(&config_path).unwrap(),
+        pre_provider_disk
+    );
+
+    missing_cfg
+        .providers
+        .models
+        .openai
+        .get_mut("default")
+        .unwrap()
+        .base
+        .api_key = Some("vault:OPENAI_OFFICIAL_API_KEY".to_string());
+    missing_cfg.save_dirty().await.unwrap();
+    assert_eq!(
+        missing_cfg
+            .providers
+            .models
+            .openai
+            .get("default")
+            .and_then(|p| p.base.api_key.as_deref()),
+        Some("synthetic-vault-secret")
+    );
+    let raw_provider = std::fs::read_to_string(&config_path).unwrap();
+    assert!(
+        raw_provider.contains("vault:OPENAI_OFFICIAL_API_KEY")
+            && !raw_provider.contains("synthetic-vault-secret"),
+        "{raw_provider}"
+    );
+
+    // 5. Deleting an entry under section dirty `mark_dirty("model_routes")` prunes its
+    // stale external reference snapshot cleanly.
+    missing_cfg.model_routes.clear();
+    missing_cfg.mark_dirty("model_routes");
+    missing_cfg.save_dirty().await.unwrap();
+    assert!(
+        !missing_cfg
+            .onepassword_reference_snapshots
+            .contains_key("model_routes.fast.api_key")
+    );
+
+    // 6. Env-override isolation under `mark_dirty("model_routes")`: an env-overridden
+    // sibling route must keep its pre-override disk value and must NEVER leak or get
+    // absorbed into `onepassword_reference_snapshots` when editing another route.
+    std::fs::write(
+        &config_path,
+        r#"
+schema_version = 3
+
+[secrets]
+encrypt = false
+
+[[model_routes]]
+hint = "env_only"
+provider = "openai.default"
+model = "gpt-5-nano"
+api_key = "disk-inline"
+
+[[model_routes]]
+hint = "editable"
+provider = "openai.default"
+model = "gpt-5-mini"
+"#,
+    )
+    .unwrap();
+    let _env_guard = EnvValueGuard::set(
+        "ZEROCLAW_model_routes__env_only__api_key",
+        "vault:OPENAI_OFFICIAL_API_KEY",
+    );
+    let mut env_cfg = Config::load_or_init().await.unwrap();
+    assert_eq!(
+        env_cfg.model_routes[0].api_key.as_deref(),
+        Some("vault:OPENAI_OFFICIAL_API_KEY")
+    );
+    assert!(
+        !env_cfg
+            .onepassword_reference_snapshots
+            .contains_key("model_routes.env_only.api_key")
+    );
+    env_cfg.model_routes[1].api_key = Some("op://vault/item/field".to_string());
+    env_cfg.mark_dirty("model_routes");
+    env_cfg.save_dirty().await.unwrap();
+    assert!(
+        !env_cfg
+            .onepassword_reference_snapshots
+            .contains_key("model_routes.env_only.api_key")
+    );
+    assert_eq!(
+        env_cfg.model_routes[1].api_key.as_deref(),
+        Some("synthetic-op-secret")
+    );
+    let raw_env = std::fs::read_to_string(&config_path).unwrap();
+    assert!(
+        raw_env.contains("disk-inline")
+            && !raw_env.contains("vault:OPENAI_OFFICIAL_API_KEY")
+            && raw_env.contains("op://vault/item/field")
+            && !raw_env.contains("synthetic-op-secret"),
+        "{raw_env}"
+    );
+}
+
+#[cfg(unix)]
+#[test]
+async fn tachi_vault_direct_save_fails_closed_on_unmarked_invalid_ref() {
+    let _lock = env_override_lock().await;
+    let (dir, _guards) = tachi_vault_fixture("vault:OPENAI_OFFICIAL_API_KEY", false);
+    std::fs::write(
+        dir.path().join("config.toml"),
+        r#"
+schema_version = 3
+
+[secrets]
+encrypt = false
+
+[[model_routes]]
+hint = "fast"
+provider = "openai.default"
+model = "gpt-5-mini"
+api_key = "vault:OPENAI_OFFICIAL_API_KEY"
+"#,
+    )
+    .unwrap();
+
+    let mut cfg = Config::load_or_init().await.unwrap();
+    let before_disk = std::fs::read_to_string(dir.path().join("config.toml")).unwrap();
+    cfg.model_routes[0].api_key = Some("vault:-invalid".to_string());
+    assert!(cfg.save().await.is_err());
+    assert_eq!(
+        std::fs::read_to_string(dir.path().join("config.toml")).unwrap(),
+        before_disk
+    );
+}
+
+#[cfg(unix)]
+#[test]
 async fn onepassword_reference_survives_load_save_cycle() {
     let _env_guard = env_override_lock().await;
     let dir = TempDir::new().unwrap();
