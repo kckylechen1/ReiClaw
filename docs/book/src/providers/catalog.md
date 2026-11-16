@@ -148,7 +148,7 @@ The remaining Chinese-region slots (`yi`, `hunyuan`, `qianfan`, `baichuan`) appe
 
 ## Routing layers
 
-OpenRouter is treated as a single first-class provider, not a meta-router. The runtime sees one endpoint; OpenRouter handles vendor fan-out behind that endpoint.
+OpenRouter is reached through a `custom` (OpenAI-compatible) slot pointed at `https://openrouter.ai/api/v1`, not a dedicated family. The runtime still sees one endpoint; OpenRouter handles vendor fan-out behind that endpoint.
 
 For per-task routing, run multiple agents and let channels pick which agent handles which traffic, see [Routing](./routing.md). For a narrower in-config hint mechanism, use `[[model_routes]]`.
 

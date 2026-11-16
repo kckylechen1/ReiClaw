@@ -4358,16 +4358,16 @@ mod tests {
     #[test]
     fn json_pointer_to_dotted_handles_pointer_form() {
         assert_eq!(
-            json_pointer_to_dotted("/providers/models/openrouter/api-key"),
-            "providers.models.openrouter.api-key"
+            json_pointer_to_dotted("/providers/models/anthropic/api-key"),
+            "providers.models.anthropic.api-key"
         );
     }
 
     #[test]
     fn json_pointer_to_dotted_passes_dotted_through() {
         assert_eq!(
-            json_pointer_to_dotted("providers.models.openrouter.api-key"),
-            "providers.models.openrouter.api-key"
+            json_pointer_to_dotted("providers.models.anthropic.api-key"),
+            "providers.models.anthropic.api-key"
         );
         assert_eq!(
             json_pointer_to_dotted("scheduler.max_concurrent"),

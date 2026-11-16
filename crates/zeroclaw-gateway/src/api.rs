@@ -1974,9 +1974,9 @@ pub(crate) mod tests {
     fn with_test_agent(
         mut config: zeroclaw_config::schema::Config,
     ) -> zeroclaw_config::schema::Config {
-        config.providers.models.openrouter.insert(
+        config.providers.models.openai.insert(
             "default".to_string(),
-            zeroclaw_config::schema::OpenRouterModelProviderConfig::default(),
+            zeroclaw_config::schema::OpenAIModelProviderConfig::default(),
         );
         config.risk_profiles.insert(
             "test-profile".to_string(),
@@ -1985,7 +1985,7 @@ pub(crate) mod tests {
         config.agents.insert(
             "test-agent".to_string(),
             zeroclaw_config::schema::AliasedAgentConfig {
-                model_provider: "openrouter.default".into(),
+                model_provider: "openai.default".into(),
                 risk_profile: "test-profile".into(),
                 ..Default::default()
             },

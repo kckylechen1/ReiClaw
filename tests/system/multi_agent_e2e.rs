@@ -106,15 +106,15 @@ async fn two_agents_on_one_install_have_isolated_memory() {
     std::fs::create_dir_all(&cfg.data_dir).unwrap();
     cfg.risk_profiles
         .insert("default".into(), RiskProfileConfig::default());
-    cfg.providers.models.openrouter.insert(
+    cfg.providers.models.openai.insert(
         "default".to_string(),
-        zeroclaw_config::schema::OpenRouterModelProviderConfig::default(),
+        zeroclaw_config::schema::OpenAIModelProviderConfig::default(),
     );
     for alias in ["alpha", "beta"] {
         cfg.agents.insert(
             alias.to_string(),
             AliasedAgentConfig {
-                model_provider: "openrouter.default".into(),
+                model_provider: "openai.default".into(),
                 risk_profile: "default".into(),
                 ..AliasedAgentConfig::default()
             },

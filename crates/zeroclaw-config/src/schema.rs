@@ -1081,35 +1081,6 @@ impl FamilyEndpoint for QwenModelProviderConfig {
     }
 }
 
-// ── OpenRouter ──
-
-#[derive(
-    Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default, zeroclaw_macros::ConfigEnum,
-)]
-#[cfg_attr(feature = "schema-export", derive(schemars::JsonSchema))]
-#[serde(rename_all = "snake_case")]
-pub enum OpenRouterEndpoint {
-    #[default]
-    Default,
-}
-
-impl ModelEndpoint for OpenRouterEndpoint {
-    fn uri(&self) -> &'static str {
-        match self {
-            Self::Default => "https://openrouter.ai/api/v1",
-        }
-    }
-}
-
-#[derive(Debug, Clone, Default, Serialize, Deserialize, Configurable)]
-#[cfg_attr(feature = "schema-export", derive(schemars::JsonSchema))]
-#[prefix = "providers.models.openrouter"]
-pub struct OpenRouterModelProviderConfig {
-    #[nested]
-    #[serde(flatten)]
-    pub base: ModelProviderConfig,
-}
-
 // ── Ollama (local-default endpoint) ──
 
 #[derive(
@@ -2925,7 +2896,6 @@ impl_default_family_endpoint! {
     OpenAIModelProviderConfig,
     AnthropicModelProviderConfig,
     AtomicChatModelProviderConfig,
-    OpenRouterModelProviderConfig,
     OllamaModelProviderConfig,
     TogetherModelProviderConfig,
     FireworksModelProviderConfig,
@@ -9204,8 +9174,8 @@ impl Default for SchedulerConfig {
 /// ```toml
 /// [[model_routes]]
 /// hint = "reasoning"
-/// model_provider = "openrouter.default"
-/// model = "anthropic/claude-opus-4-20250514"
+/// model_provider = "openai.default"
+/// model = "gpt-5.2"
 ///
 /// [[model_routes]]
 /// hint = "fast"

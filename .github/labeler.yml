@@ -369,12 +369,6 @@
           - "crates/zeroclaw-providers/src/openai.rs"
           - "crates/zeroclaw-providers/src/openai_codex.rs"
 
-"provider:openrouter":
-  - changed-files:
-      - any-glob-to-any-file:
-          - "src/providers/openrouter.rs"
-          - "crates/zeroclaw-providers/src/openrouter.rs"
-
 "provider:reliable":
   - changed-files:
       - any-glob-to-any-file:

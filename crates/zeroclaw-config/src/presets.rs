@@ -12,7 +12,7 @@ pub use crate::multi_agent::MemoryBackendKind as MemoryChoice;
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 #[cfg_attr(feature = "schema-export", derive(schemars::JsonSchema))]
 pub struct ModelProviderChoice {
-    /// Provider type identifier (`anthropic`, `openai`, `openrouter`,
+    /// Provider type identifier (`anthropic`, `openai`,
     /// `ollama`, etc.). Used as the type segment in the TOML path.
     pub provider_type: String,
     /// User-named alias. Defaults to `"default"` in the UI; users

@@ -259,9 +259,9 @@ mod tests {
 
     #[test]
     fn secret_test_forbidden_carries_path() {
-        let err = ConfigApiError::secret_test_forbidden("providers.models.openrouter.api-key");
+        let err = ConfigApiError::secret_test_forbidden("providers.models.anthropic.api-key");
         assert_eq!(err.code, ConfigApiCode::SecretTestForbidden);
-        assert!(err.message.contains("providers.models.openrouter.api-key"));
+        assert!(err.message.contains("providers.models.anthropic.api-key"));
     }
 
     #[test]

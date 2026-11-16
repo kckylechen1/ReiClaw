@@ -10,7 +10,7 @@ skipped.
 
 | Step | Required | What it sets |
 |---|---|---|
-| **Model provider** | yes | Provider family (Anthropic, OpenAI, Ollama, OpenRouter, …), its API key or endpoint, and the model. |
+| **Model provider** | yes | Provider family (Anthropic, OpenAI, Ollama, …), its API key or endpoint, and the model. |
 | **Risk profile** | yes | Autonomy and sandbox posture. Pick a preset or reuse an existing `[risk_profiles.<alias>]`. |
 | **Memory** | yes | Memory backend (`tachi`, `markdown`, or `none`). |
 | **Channels** | optional | Live surfaces (Telegram bridge, webhook ingress, Email/Discord tools). The built-in `cli` channel always works; add others here or later. |

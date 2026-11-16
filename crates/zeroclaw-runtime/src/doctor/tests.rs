@@ -52,7 +52,7 @@ fn model_in_catalog_requires_exact_id_match() {
 #[test]
 fn provider_validation_checks_custom_url_shape() {
     let config = Config::default();
-    assert!(provider_validation_error(&config, "openrouter").is_none());
+    assert!(provider_validation_error(&config, "openai").is_none());
     assert!(provider_validation_error(&config, "custom:https://example.com").is_none());
     assert!(provider_validation_error(&config, "anthropic-custom:https://example.com").is_none());
 
@@ -108,7 +108,7 @@ fn config_validation_catches_bad_temperature() {
     config
         .providers
         .models
-        .ensure("openrouter", "default")
+        .ensure("openai", "default")
         .expect("known model_provider type")
         .temperature = Some(5.0);
     let mut items = Vec::new();
@@ -124,7 +124,7 @@ fn config_validation_accepts_valid_temperature() {
     config
         .providers
         .models
-        .ensure("openrouter", "default")
+        .ensure("openai", "default")
         .expect("known model_provider type")
         .temperature = Some(0.7);
     let mut items = Vec::new();

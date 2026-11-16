@@ -23,9 +23,9 @@ Each `[agents.<alias>]` entry points at exactly one `[providers.models.<type>.<a
 
 To run multiple models, run multiple agents, each binding to one model provider. Each channel binds to one agent at a time. To move a channel to a different agent, edit the `channels` list on the agent that should pick it up; `Config::validate()` makes sure references resolve at startup.
 
-## Cross-vendor reliability: use OpenRouter
+## Cross-vendor reliability: use an aggregator
 
-OpenRouter is treated as a single first-class provider. It handles vendor fan-out and uptime behind one endpoint. If your goal is "one provider goes down, automatically use another", that's OpenRouter's job, not ZeroClaw's. The runtime sees one provider; OpenRouter does the cross-vendor work upstream.
+OpenRouter is reached through a `custom` (OpenAI-compatible) slot pointed at `https://openrouter.ai/api/v1`. It handles vendor fan-out and uptime behind one endpoint. If your goal is "one provider goes down, automatically use another", that's the aggregator's job, not ZeroClaw's. The runtime sees one provider; the aggregator does the cross-vendor work upstream.
 
 ## Same-vendor retry
 
@@ -109,7 +109,7 @@ Retries are NOT triggered by:
 2. **Permanent auth failure**: invalid API key format
 3. **Model output errors**: the model responded but returned an error payload
 
-When all retries are exhausted on a single provider, the failure surfaces to the calling channel. There is no automatic cross-provider retry, that's the point of using OpenRouter or splitting traffic across multiple agents.
+When all retries are exhausted on a single provider, the failure surfaces to the calling channel. There is no automatic cross-provider retry, that's the point of using an aggregator or splitting traffic across multiple agents.
 
 ## Debugging
 
@@ -130,7 +130,7 @@ zeroclaw doctor traces --contains "model_provider"
 ## Best practices
 
 1. **One agent per routing intent.** If two channels need different model behavior, name two agents.
-2. **Use OpenRouter for cross-vendor reliability.** Cross-vendor "if Claude fails, try OpenAI" is OpenRouter's job; configure it as one provider and let its endpoint handle the fan-out.
+2. **Use an aggregator for cross-vendor reliability.** Cross-vendor "if Claude fails, try OpenAI" is the aggregator's job; configure OpenRouter as one `custom` slot and let its endpoint handle the fan-out.
 3. **Keep API key rotation pools homogeneous.** All keys in `[reliability] api_keys` should be from the same provider account, this is rate-limit smoothing, not multi-tenancy.
 4. **Smoke-test each agent in isolation.** `zeroclaw agent -a <alias> -m "hello"` runs one turn locally, without the gateway or channel plumbing in the way.
 5. **Document agent intent.** Add `# comment` lines explaining which channels each agent serves and why.

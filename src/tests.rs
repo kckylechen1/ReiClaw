@@ -300,7 +300,7 @@ fn onboard_cli_accepts_model_provider_and_api_key_in_quick_mode() {
         "zeroclaw",
         "onboard",
         "--model-provider",
-        "openrouter",
+        "anthropic",
         "--model",
         "custom-model-946",
         "--api-key",
@@ -319,7 +319,7 @@ fn onboard_cli_accepts_model_provider_and_api_key_in_quick_mode() {
         } => {
             assert!(!force);
             assert!(!channels_only);
-            assert_eq!(model_provider.as_deref(), Some("openrouter"));
+            assert_eq!(model_provider.as_deref(), Some("anthropic"));
             assert_eq!(model.as_deref(), Some("custom-model-946"));
             assert_eq!(api_key.as_deref(), Some("sk-issue946"));
         }

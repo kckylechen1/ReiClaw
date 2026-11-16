@@ -248,7 +248,7 @@ sections! {
         key:   "providers.models",
         shape: TypedFamilyMap,
         group: Foundation,
-        help:  "Pick a model provider to configure (Anthropic, OpenAI, OpenRouter, \
+        help:  "Pick a model provider to configure (Anthropic, OpenAI, \
                 Ollama, custom OpenAI-compatible gateways, etc.). Multiple aliases per \
                 provider are supported — e.g. anthropic.production and anthropic.dev \
                 can coexist.",

@@ -5,7 +5,7 @@ Routing happens at the **agent layer**. Each agent points at exactly one provide
 Two layers of decisions:
 
 1. **Per-call backend selection**: "use the cheap model unless this prompt looks like reasoning." Each routing target is its own `[agents.<alias>]` entry with its own `model_provider`. Channels are routed to whichever agent should handle their traffic.
-2. **Provider reliability**: vendor-redundancy lives behind a single first-class provider. Configure OpenRouter (or an equivalent) as one provider and let it handle vendor fan-out at its endpoint.
+2. **Provider reliability**: vendor-redundancy lives behind a single OpenAI-compatible aggregator. Configure an aggregator such as OpenRouter as one `custom` slot and let it handle vendor fan-out at its endpoint.
 
 ## Per-agent dispatch
 

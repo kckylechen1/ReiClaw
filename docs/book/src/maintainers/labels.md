@@ -244,7 +244,6 @@ to one provider.
 | `provider:compatible` | `compatible.rs` |
 | `provider:gemini` | `gemini.rs` |
 | `provider:openai` | `openai.rs`, `openai_codex.rs` |
-| `provider:openrouter` | `openrouter.rs` |
 | `provider:reliable` | `reliable.rs` |
 | `provider:router` | `router.rs` |
 

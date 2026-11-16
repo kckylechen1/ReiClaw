@@ -2148,14 +2148,14 @@ mod tests {
             "test-profile".to_string(),
             zeroclaw_config::schema::RiskProfileConfig::default(),
         );
-        config.providers.models.openrouter.insert(
+        config.providers.models.openai.insert(
             "default".to_string(),
-            zeroclaw_config::schema::OpenRouterModelProviderConfig::default(),
+            zeroclaw_config::schema::OpenAIModelProviderConfig::default(),
         );
         config.agents.insert(
             "test-agent".to_string(),
             zeroclaw_config::schema::AliasedAgentConfig {
-                model_provider: "openrouter.default".into(),
+                model_provider: "openai.default".into(),
                 risk_profile: "test-profile".into(),
                 ..Default::default()
             },

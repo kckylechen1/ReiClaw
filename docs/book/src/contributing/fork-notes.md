@@ -86,6 +86,7 @@ See [runtime internals](../agents/internals.md#repeated-tool-failure-recovery).
 | Builtin `calculator` / `weather` tools (`crates/zeroclaw-tools/src/{calculator,weather_tool}.rs`) | present | retired; implementations deleted, names reserved in `RETIRED_OPERATOR_TOOL_NAMES`. Weather, if ever needed again, is an HTTP skill / MCP wrapper, not a builtin |
 | `knowledge` graph tool + `knowledge.db` + `[knowledge]` / `[knowledge_bundles]` config | present | retired; relationship memory belongs to the Tachi memory kernel (`memory-tachi`), not a second local graph. Leftover sections warn via `RETIRED_CONFIG_SURFACES` tombstones |
 | GitHub Copilot provider family (`copilot.rs`, `CopilotModelProviderConfig`) | present | retired (#673 pattern); `copilot` / `github-copilot` sit in `RETIRED_MODEL_PROVIDER_NAMES`, so old configs fail closed with an explicit migration error instead of silently dropping the OAuth token |
+| OpenRouter chat provider family (`openrouter.rs`, `OpenRouterModelProviderConfig`) | present | retired; reached via a `custom` (OpenAI-compatible) slot at `https://openrouter.ai/api/v1` instead. `openrouter` is in `RETIRED_MODEL_PROVIDER_NAMES` (fail-closed). **Retained on purpose**: `openrouter_catalog.rs` + `openrouter_vendor_prefix` (public-catalog model discovery & pricing for compatible families), the `[memory]` embedder `"openrouter"` arm (embeddings axis), and OpenRouter-as-compatible-gateway prose. Stock V1/V2 configs with no provider default now migrate to `openai` instead of `openrouter` |
 
 ### Known gaps
 
