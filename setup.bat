@@ -199,7 +199,7 @@ set "BUILD_DESC=default (default feature set)"
 goto :do_build
 
 :build_all
-set "FEATURES=--no-default-features --features agent-runtime,channel-acp-server,channel-discord,channel-email,channel-notion,channel-telegram,channel-webhook,gateway,memory-tachi,nodes,observability-prometheus,provider-gitea,provider-github,sandbox-bubblewrap,sandbox-landlock,schema-export"
+set "FEATURES=--no-default-features --features agent-runtime,channel-acp-server,channel-discord,channel-email,channel-telegram,channel-webhook,gateway,memory-tachi,nodes,observability-prometheus,sandbox-bubblewrap,sandbox-landlock,schema-export"
 set "BUILD_DESC=all (every optional feature (kitchen sink))"
 goto :do_build
 :: >>> end generated:presets <<<
