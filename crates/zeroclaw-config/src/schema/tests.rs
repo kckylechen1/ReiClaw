@@ -235,15 +235,20 @@ async fn retired_sop_run_config_keys_fail_parse_loudly() {
 /// The retired run-side config keys must FAIL config parse
 /// with an actionable message, never silently no-op.
 use super::*;
+use crate::load::{
+    ConfigResolutionSource, ExtraNestedModelProviderTable, config_dir_creation_error,
+    expand_tilde_path, resolve_runtime_config_dirs, try_resolve_macos_homebrew_config_dir,
+};
 use std::ffi::OsString;
 #[cfg(unix)]
 use std::os::unix::fs::PermissionsExt;
-#[cfg(unix)]
 use std::path::Path;
 use std::path::PathBuf;
 use tempfile::TempDir;
+use tokio::fs;
 use tokio::sync::MutexGuard;
 use tokio::test;
+use zeroclaw_api::runtime_status::RuntimeConfigKind;
 
 struct EnvValueGuard {
     key: &'static str,
@@ -14685,11 +14690,12 @@ fn config_with_dispatchable_agent(agent: AliasedAgentConfig) -> Config {
 /// `Config::agent_is_dispatchable`, which routes through
 /// `resolved_risk_profile_alias`).
 ///
-/// This scans the schema and extracted behavior production sources
-/// (everything before each `mod tests`, so test comments cannot trip
-/// the guard) and fails if a `.risk_profile` dot-access (the
-/// singular field, not the `.risk_profiles` map) appears inside any
-/// function other than the allowlisted ones below. Reverting
+/// This scans `schema.rs` and every extracted production module:
+/// `state.rs`, `validate.rs`, `save.rs`, and `load.rs`. Everything before
+/// each `mod tests` is checked, so test comments cannot trip the guard.
+/// A `.risk_profile` dot-access (the singular field, not the `.risk_profiles`
+/// map) is rejected inside any function other than the allowlisted ones below.
+/// Reverting
 /// `reachable_delegate_target_configs` back to `caller.risk_profile.trim()`
 /// / `agent.risk_profile.trim()` turns this red; so does adding a new
 /// raw read anywhere else in those modules' production code.
@@ -14714,6 +14720,14 @@ async fn no_new_raw_risk_profile_reads_outside_the_resolver_and_validation() {
         (
             "save.rs",
             include_str!(concat!(env!("CARGO_MANIFEST_DIR"), "/src/save.rs")),
+        ),
+        (
+            "load.rs",
+            include_str!(concat!(env!("CARGO_MANIFEST_DIR"), "/src/load.rs")),
+        ),
+        (
+            "state.rs",
+            include_str!(concat!(env!("CARGO_MANIFEST_DIR"), "/src/state.rs")),
         ),
     ];
 

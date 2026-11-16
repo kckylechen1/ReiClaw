@@ -3,10 +3,8 @@
 //! The schema owns declarations. This module retains the existing save ordering:
 //! prepare a separate candidate, validate and write, then publish saved state.
 
-use crate::schema::{
-    Config, ExternalRefSnapshots, TrackedPropIdentity, default_config_and_data_dirs,
-    resolve_runtime_config_dirs,
-};
+use crate::load::{default_config_and_data_dirs, resolve_runtime_config_dirs};
+use crate::schema::{Config, ExternalRefSnapshots, TrackedPropIdentity};
 use anyhow::{Context, Result};
 use std::path::{Path, PathBuf};
 #[cfg(unix)]
