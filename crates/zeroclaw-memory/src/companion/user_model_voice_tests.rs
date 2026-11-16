@@ -35,7 +35,7 @@ fn consent_binds_revision_provider_and_cas_and_survives_restart() {
         store
             .voice_export_heads(&context(), "moss-live", 2)
             .unwrap(),
-        [first.clone()]
+        std::slice::from_ref(&first)
     );
     assert!(
         store
@@ -53,7 +53,7 @@ fn consent_binds_revision_provider_and_cas_and_survives_restart() {
         store
             .voice_export_heads(&context(), "moss-live", 2)
             .unwrap(),
-        [first.clone()]
+        std::slice::from_ref(&first)
     );
     store
         .set_voice_consent(&first.id, "moss-live", VoiceConsentAction::Revoke, 1, 3)
@@ -211,7 +211,10 @@ fn additive_migration_preserves_legacy_heads_without_granting_consent() {
         .unwrap();
     drop(store);
     let store = UserModelStore::open(dir.path()).unwrap();
-    assert_eq!(store.active_heads(Some(2)).unwrap(), [head.clone()]);
+    assert_eq!(
+        store.active_heads(Some(2)).unwrap(),
+        std::slice::from_ref(&head)
+    );
     assert!(
         store
             .voice_export_heads(&context(), "moss-live", 2)

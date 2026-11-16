@@ -2,6 +2,26 @@ use super::*;
 use zeroclaw_memory::companion::*;
 use zeroclaw_runtime::agent::persona_projection::*;
 
+// Inspect actual text bytes, not parsed-and-reserialized JSON.
+async fn raw_text(socket: &mut DeviceWire) -> String {
+    tokio::time::timeout(LIMIT, async {
+        assert_eq!(socket.0.read_u8().await.unwrap(), 0x81);
+        let second = socket.0.read_u8().await.unwrap();
+        assert_eq!(second & 0x80, 0);
+        let len = match second {
+            126 => usize::from(socket.0.read_u16().await.unwrap()),
+            127 => usize::try_from(socket.0.read_u64().await.unwrap()).unwrap(),
+            len => usize::from(len),
+        };
+        assert!(len < 4096);
+        let mut bytes = vec![0; len];
+        socket.0.read_exact(&mut bytes).await.unwrap();
+        String::from_utf8(bytes).unwrap()
+    })
+    .await
+    .unwrap()
+}
+
 fn owner_soul(fixture: &DeviceFixture) -> Arc<SoulProfileStore> {
     let dir = fixture.state.config.read().data_dir.clone();
     let soul = SoulProfileStore::shared(&dir).unwrap();
@@ -195,8 +215,11 @@ async fn voice_projection_real_handshake_equals_persona_bytes_and_excludes_priva
     );
     assert_eq!(
         projection["owner_facts"],
-        project_active_heads(&[allowed.clone()], USER_MODEL_PROJECTION_DEFAULT_MAX_CHARS)
-            .prompt_section
+        project_active_heads(
+            std::slice::from_ref(&allowed),
+            USER_MODEL_PROJECTION_DEFAULT_MAX_CHARS
+        )
+        .prompt_section
     );
     assert!(!projection.to_string().contains("PRIVATE_"));
     socket
@@ -339,9 +362,9 @@ async fn voice_projection_requires_provider_alias_and_query_surface_without_chan
         )
         .await;
         assert_eq!(status, 101);
-        let start = socket.next().await.unwrap();
+        let start = raw_text(&mut socket).await;
         assert_eq!(
-            start.to_string(),
+            start,
             json!({"type":"session_start", "session_id":SESSION, "resumed":false,
             "message_count":0, "surface_version":1, "surface":surface})
             .to_string()
@@ -350,7 +373,7 @@ async fn voice_projection_requires_provider_alias_and_query_surface_without_chan
             .send(json!({"type":"connect", "surface":surface}))
             .await;
         assert_eq!(
-            socket.next().await.unwrap().to_string(),
+            raw_text(&mut socket).await,
             json!({"type":"connected",
             "owner_bridge_cancel":false, "owner_bridge_approval_once":false,
             "message":"Connection established", "surface_version":1, "surface":surface})
@@ -365,7 +388,7 @@ async fn voice_projection_requires_provider_alias_and_query_surface_without_chan
     .await;
     assert_eq!(status, 101);
     assert_eq!(
-        late.next().await.unwrap().to_string(),
+        raw_text(&mut late).await,
         json!({"type":"session_start", "session_id":SESSION,
         "resumed":false, "message_count":0, "surface_version":1, "surface":null})
         .to_string()
@@ -374,4 +397,149 @@ async fn voice_projection_requires_provider_alias_and_query_surface_without_chan
         .await;
     assert_eq!(late.next().await.unwrap()["code"], "VOICE_QUERY_REQUIRED");
     assert!(fixture.seen.lock().is_empty());
+}
+
+struct PausedMetadata {
+    inner: Arc<dyn zeroclaw_infra::session_backend::SessionBackend>,
+    entered: tokio::sync::Notify,
+    release: std::sync::Mutex<std::sync::mpsc::Receiver<()>>,
+}
+
+impl zeroclaw_infra::session_backend::SessionBackend for PausedMetadata {
+    fn load(&self, key: &str) -> Vec<zeroclaw_providers::ChatMessage> {
+        self.inner.load(key)
+    }
+    fn append(&self, key: &str, message: &zeroclaw_providers::ChatMessage) -> std::io::Result<()> {
+        self.inner.append(key, message)
+    }
+    fn remove_last(&self, key: &str) -> std::io::Result<bool> {
+        self.inner.remove_last(key)
+    }
+    fn list_sessions(&self) -> Vec<String> {
+        self.inner.list_sessions()
+    }
+    fn get_session_agent_alias(&self, key: &str) -> std::io::Result<Option<String>> {
+        self.inner.get_session_agent_alias(key)
+    }
+    fn get_session_metadata(
+        &self,
+        key: &str,
+    ) -> Option<zeroclaw_infra::session_backend::SessionMetadata> {
+        self.entered.notify_one();
+        self.release.lock().unwrap().recv_timeout(LIMIT).unwrap();
+        self.inner.get_session_metadata(key)
+    }
+}
+
+#[tokio::test]
+async fn voice_projection_rechecks_live_admission_after_metadata_wait() {
+    for reduction in ["bridge", "chat", "alias", "paired", "anonymous-mode"] {
+        let mut fixture =
+            DeviceFixture::with_pairing(&["chat"], reduction != "anonymous-mode").await;
+        owner_soul(&fixture);
+        let config = fixture.state.config.read().clone();
+        let facts = UserModelStore::shared(&config.data_dir).unwrap();
+        let head = facts
+            .record_owner_statement(
+                UserModelKind::Preference,
+                "PRIVATE_CONSENTED_FACT",
+                "style",
+                "global",
+                1,
+            )
+            .unwrap();
+        facts
+            .set_voice_consent(&head.id, "moss-live", VoiceConsentAction::Grant, 0, 2)
+            .unwrap();
+        let initial_bridge = config.gateway.bridges["device"].clone();
+        if reduction == "anonymous-mode" {
+            fixture.state.config.write().gateway.bridges.clear();
+        }
+        let (release_tx, release_rx) = std::sync::mpsc::channel();
+        let backend = Arc::new(PausedMetadata {
+            inner: fixture.state.session_backend.as_ref().unwrap().clone(),
+            entered: tokio::sync::Notify::new(),
+            release: std::sync::Mutex::new(release_rx),
+        });
+        let mut state = fixture.state.clone();
+        state.session_backend = Some(backend.clone());
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let address = listener.local_addr().unwrap();
+        let app = axum::Router::new()
+            .route("/ws/chat", axum::routing::get(handle_ws_chat))
+            .with_state(state);
+        fixture.tasks.push(zeroclaw_spawn::spawn!(async move {
+            axum::serve(listener, app).await.unwrap();
+        }));
+        let token = match reduction {
+            "paired" => OWNER_TOKEN,
+            "anonymous-mode" => "",
+            _ => DEVICE_TOKEN,
+        };
+        let (status, mut socket) = DeviceWire::upgrade(
+            address,
+            &format!(
+                "agent=device-agent&session_id={SESSION}&surface=voice&voice_provider=moss-live"
+            ),
+            token,
+        )
+        .await;
+        assert_eq!(status, 101);
+        // This signal is after the first binding check, not a scheduling delay.
+        tokio::time::timeout(LIMIT, backend.entered.notified())
+            .await
+            .unwrap();
+        match reduction {
+            "bridge" => {
+                fixture.state.config.write().gateway.bridges.clear();
+            }
+            "chat" => fixture
+                .state
+                .config
+                .write()
+                .gateway
+                .bridges
+                .get_mut("device")
+                .unwrap()
+                .device
+                .as_mut()
+                .unwrap()
+                .operations
+                .clear(),
+            "alias" => {
+                fixture
+                    .state
+                    .config
+                    .write()
+                    .agents
+                    .get_mut("device-agent")
+                    .unwrap()
+                    .enabled = false
+            }
+            "paired" => {
+                fixture.state.pairing.revoke_token(OWNER_TOKEN);
+            }
+            "anonymous-mode" => {
+                fixture
+                    .state
+                    .config
+                    .write()
+                    .gateway
+                    .bridges
+                    .insert("device".into(), initial_bridge);
+            }
+            _ => unreachable!(),
+        }
+        release_tx.send(()).unwrap();
+        let first = socket.next().await.unwrap();
+        assert_eq!(first["type"], "error", "{reduction}: {first}");
+        assert_eq!(
+            first["code"], "VOICE_AUTHORIZATION_CHANGED",
+            "{reduction}: {first}"
+        );
+        assert!(first.get("voice_projection").is_none());
+        assert!(!first.to_string().contains("PRIVATE_CONSENTED_FACT"));
+        assert!(socket.next().await.is_none());
+        assert!(fixture.seen.lock().is_empty());
+    }
 }

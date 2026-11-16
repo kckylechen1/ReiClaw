@@ -137,6 +137,8 @@ The boundary is enforced by the carrier's instructions and by measurement (§7),
 
 Missing/invalid provider and unknown alias refuse the HTTP upgrade with a typed error (`VOICE_PROVIDER_REQUIRED`, `VOICE_PROVIDER_INVALID`, `VOICE_UNKNOWN_ALIAS`). Store/Identity failures send a WebSocket `error` and close before `session_start`, with code `VOICE_SOUL_UNAVAILABLE`, `VOICE_OWNER_IDENTITY_REQUIRED`, `VOICE_USER_MODEL_UNAVAILABLE`, or `VOICE_PROJECTION_UNAVAILABLE`. A late switch to voice returns `VOICE_QUERY_REQUIRED`. These errors carry no projection. Non-voice acknowledgement frames are unchanged, and ignore `voice_provider`.
 
+Immediately before sending the projection, the gateway rechecks the original admission against live bridge operations, paired credential membership, alias enablement and authentication mode. A reduction during the asynchronous handshake returns `VOICE_AUTHORIZATION_CHANGED` and closes without a projection.
+
 ### 4. Delegation goes through the voice surface
 
 When the carrier delegates:

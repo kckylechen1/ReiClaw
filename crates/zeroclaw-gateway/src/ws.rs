@@ -498,6 +498,35 @@ async fn handle_socket(
     }
     #[cfg(feature = "voice-surface")]
     if let Some(projection) = voice_projection {
+        // Metadata and projection work both yield. Recheck the original
+        // admission against live policy before releasing any private bytes.
+        let still_admitted = {
+            let config = state.config.read();
+            device::authenticated_mode(&state, &config)
+                && config
+                    .agent(&agent_alias)
+                    .is_some_and(|agent| agent.enabled)
+                && bridge_scope.as_ref().map_or_else(
+                    || {
+                        auth_subject
+                            .as_ref()
+                            .map_or(!state.pairing.require_pairing(), |subject| {
+                                state.pairing.tokens().contains(subject)
+                            })
+                    },
+                    |binding| binding.allows(&config, &agent_alias, &session_id, "chat"),
+                )
+        };
+        if !still_admitted {
+            let _ = sender
+                .send(Message::Text(
+                    device::refusal("VOICE_AUTHORIZATION_CHANGED")
+                        .to_string()
+                        .into(),
+                ))
+                .await;
+            return;
+        }
         session_start["voice_projection"] = serde_json::json!(projection);
     }
     let _ = sender
