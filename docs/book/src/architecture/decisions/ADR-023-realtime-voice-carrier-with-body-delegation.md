@@ -56,12 +56,7 @@ All other ADR-021 decisions stay in force, including §2 (device and adapter spl
 - OpenAI Realtime can disable automatic responses (`create_response: false`). That would allow the strict cascaded mode of ADR-021 §1.
 - The owner rejected the strict mode for the robot. Making every greeting or weather question wait for a full body turn is the wrong experience. Small, public, non-personal requests should be handled by the voice service directly, including with its own search. Everything else should be delegated, and the robot should say so ("好的，我去查查") instead of falling silent.
 - The owner also requires that the body stay the single source of identity and memory, and that the robot know the owner: the Soul and owner-approved parts of the User Model.
-- While preparing this record, the owner's operator session inspected the deployment on 2026-11-16, reading configuration section and key names only. It found three facts:
-  1. The Robotic voice adapter connects to `/ws/chat` without `surface=voice` (`Zeroclaw-Robotic/crates/yonbo-voice/src/gateway.rs`).
-  2. It authenticates with a paired token. `[gateway]` holds only `paired_tokens` and there is no `[gateway.bridges]` entry.
-  3. No `gateway.operator.token_hashes` are configured. Paired tokens therefore keep legacy operator authority (`crates/zeroclaw-gateway/src/operator_auth.rs`, which logs a WARN for this case).
-
-  Together, these mean the adapter's text may be recorded as operator input with owner ingress (`crates/zeroclaw-gateway/src/ws.rs`, owner-ingress handling), and the voice credential can call management APIs.
+- The voice adapter as first written connects to `/ws/chat` without `surface=voice` and authenticates with a paired token (`Zeroclaw-Robotic/crates/yonbo-voice/src/gateway.rs`). On any gateway without `gateway.operator.token_hashes`, paired tokens keep legacy operator authority (`crates/zeroclaw-gateway/src/operator_auth.rs`, which logs a WARN for this case). In that configuration the adapter's text can be recorded as operator input with owner ingress (`crates/zeroclaw-gateway/src/ws.rs`, owner-ingress handling), and the voice credential can call management APIs. Slice 1 removes that combination.
 - The adapter currently writes its own identity into the carrier instructions (`Zeroclaw-Robotic/crates/yonbo-voice/src/moss.rs`, the default instructions naming the robot and the owner).
 
 ## Decision
