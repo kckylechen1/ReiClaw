@@ -34,9 +34,6 @@ async fn surfaces_share_identity_soul_tone_and_history_without_pinning_the_first
     chat.owner_config = Some(Arc::new(zeroclaw_config::schema::Config { data_dir, ..Default::default() }));
     {
         let mut config = chat.state.config.write();
-        config.risk_profiles.insert("public".into(), zeroclaw_config::schema::RiskProfileConfig {
-            allowed_tools: Some(vec![]), auto_approve: vec![], always_ask: vec![], ..Default::default()
-        });
         config.agents.insert("web".into(), zeroclaw_config::schema::AliasedAgentConfig { enabled: true, ..Default::default() });
         config.providers.models.openai.insert("default".into(), zeroclaw_config::schema::OpenAIModelProviderConfig { base: zeroclaw_config::schema::ModelProviderConfig { model: Some("test-model".into()), ..Default::default() } });
     }
@@ -141,6 +138,9 @@ async fn three_surfaces_render_same_turn_without_changing_soul_or_shared_history
     {
         let mut config = chat.state.config.write();
         config.data_dir = data_dir;
+        config.risk_profiles.insert("public".into(), zeroclaw_config::schema::RiskProfileConfig {
+            allowed_tools: Some(vec![]), auto_approve: vec![], always_ask: vec![], ..Default::default()
+        });
         config.gateway.bridges.insert("voice-device".into(), zeroclaw_config::schema::GatewayBridgeConfig {
             token_hash: zeroclaw_config::tokens::hash_token("synthetic-surface-device"),
             sessions: vec!["shared".into()], session_prefix: None, owner: None,
