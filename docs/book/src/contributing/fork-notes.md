@@ -4,12 +4,33 @@ This page keeps the fork-specific facts that used to live in `AGENTS.md`. The sh
 
 ## Where new types go
 
-`crates/zeroclaw-config/src/schema.rs` is about 22.5k production lines of config structs on `agent-runtime`'s mandatory path, so every consumer pays for every subsystem's config at build time. The release binary is unaffected because LTO discards what is never instantiated; the cost is build time and disk.
+`zeroclaw-config` is on `agent-runtime`'s mandatory dependency path. Moving
+code between files in this crate does not remove downstream dependencies or
+macro expansion. The extraction tracked in [#689](https://github.com/kckylechen1/zeroclaw/issues/689)
+starts from `schema.rs` at 18,210 lines on `d95302025684`; its goals are explicit
+ownership and smaller review/conflict surfaces, not an unmeasured build speedup.
 
 1. **Shared wire and domain types go in `zeroclaw-api`.** A type two crates both name belongs there.
 2. **Logic stays where it runs.** `zeroclaw-api` holds the shape; the owning crate holds the behavior. A consumer that only reads a result must not link the runtime that produces it.
 3. **New config sections get their own module** under `zeroclaw-config/src/` (see `persona.rs`), not another block in `schema.rs`.
-4. **Do not restructure `schema.rs` to fix this.** Shrink it by deleting sections whose readers are gone (#382 S7). Schema unit tests live in `zeroclaw-config/src/schema/tests.rs`.
+4. **Delete retired consumers first; extract retained behavior in bounded slices.**
+   Keep declarations, serialization attributes and defaults together. State,
+   validation, saving, loading and permission policy need named behavior owners;
+   new behavior must name its module and existing state owner in the issue/PR
+   before implementation. Do not add another behavior block to `schema.rs` by
+   default or split declarations merely to claim compilation savings.
+5. **Preserve contracts during mechanical extraction.** Keep existing public
+   schema paths, deep-copy snapshot semantics, explicit log components and
+   serialization/default behavior. Schema unit tests stay in
+   `zeroclaw-config/src/schema/tests.rs`; only necessary imports and source-scan
+   inputs change, without weakening assertions or coverage. Use one dependent PR
+   per slice and retain the parent boundary for restacking.
+6. **Separate extraction from declaration splitting.** The approved sequence is
+   state, validation, saving, then loading. Inventory any remaining configuration
+   resolution and permission-policy methods instead of calling them declarations.
+   Split declarations by domain only after the affected config surface and its
+   overlapping changes are stable. Preserve the frozen `schema::v1` and
+   `schema::v2` migration lenses. This is not a project-wide upstream freeze.
 
 ## Upstream relationship
 

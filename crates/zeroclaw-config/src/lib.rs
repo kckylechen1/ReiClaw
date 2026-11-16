@@ -36,6 +36,7 @@ pub mod schema;
 pub mod secrets;
 pub mod sections;
 pub mod skill_bundles;
+mod state;
 pub mod tachi;
 pub mod tasks;
 pub mod tokens;
