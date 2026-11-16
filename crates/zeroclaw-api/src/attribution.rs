@@ -179,7 +179,6 @@ pub enum ModelProviderKind {
     Mistral,
     Groq,
     OpenRouter,
-    Copilot,
     Glm,
     Kilo,
     Router,

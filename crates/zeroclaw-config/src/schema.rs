@@ -2092,33 +2092,6 @@ pub struct OvhModelProviderConfig {
     pub base: ModelProviderConfig,
 }
 
-// ── GitHub Copilot ──
-
-#[derive(
-    Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default, zeroclaw_macros::ConfigEnum,
-)]
-#[cfg_attr(feature = "schema-export", derive(schemars::JsonSchema))]
-#[serde(rename_all = "snake_case")]
-pub enum CopilotEndpoint {
-    #[default]
-    Default,
-}
-impl ModelEndpoint for CopilotEndpoint {
-    fn uri(&self) -> &'static str {
-        match self {
-            Self::Default => "https://api.githubcopilot.com",
-        }
-    }
-}
-#[derive(Debug, Clone, Default, Serialize, Deserialize, Configurable)]
-#[cfg_attr(feature = "schema-export", derive(schemars::JsonSchema))]
-#[prefix = "providers.models.copilot"]
-pub struct CopilotModelProviderConfig {
-    #[nested]
-    #[serde(flatten)]
-    pub base: ModelProviderConfig,
-}
-
 // ── GLM (multi-region) ──
 
 #[derive(
@@ -2983,7 +2956,6 @@ impl_default_family_endpoint! {
     VercelModelProviderConfig,
     CloudflareModelProviderConfig,
     OvhModelProviderConfig,
-    CopilotModelProviderConfig,
     DoubaoModelProviderConfig,
     YiModelProviderConfig,
     HunyuanModelProviderConfig,

@@ -26,10 +26,6 @@ OpenAI Codex subscription auth lives on the `openai` slot. Set `wire_api = "resp
 
 Google's Gemini API. Supports vision and pre-executed grounded search (see [Streaming](./streaming.md) for `PreExecutedToolCall` events).
 
-### Copilot: slot `copilot`
-
-Uses a GitHub Copilot subscription for agent inference. Authentication uses a Copilot OAuth token obtained from GitHub.
-
 ### Kilo AI Gateway: slot `kilo`
 
 ```toml
