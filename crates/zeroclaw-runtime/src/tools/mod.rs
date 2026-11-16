@@ -33,8 +33,6 @@ pub mod todo_write;
 pub use zeroclaw_tools::ask_user::AskUserTool;
 pub use zeroclaw_tools::ask_user::ChannelMapHandle;
 pub use zeroclaw_tools::backup_tool::BackupTool;
-pub use zeroclaw_tools::browser::{BrowserTool, ComputerUseConfig};
-pub use zeroclaw_tools::browser_open::BrowserOpenTool;
 pub use zeroclaw_tools::content_search::ContentSearchTool;
 pub use zeroclaw_tools::data_management::DataManagementTool;
 pub use zeroclaw_tools::discord_search::DiscordSearchTool;
@@ -74,7 +72,6 @@ pub use zeroclaw_tools::screenshot::ScreenshotTool;
 pub use zeroclaw_tools::sessions::{
     SessionsCurrentTool, SessionsHistoryTool, SessionsListTool, SessionsSendTool,
 };
-pub use zeroclaw_tools::text_browser::TextBrowserTool;
 pub use zeroclaw_tools::tool_search::ToolSearchTool;
 pub use zeroclaw_tools::web_fetch::WebFetchTool;
 pub use zeroclaw_tools::web_search_tool::WebSearchTool;
@@ -483,6 +480,12 @@ pub(crate) const RETIRED_OPERATOR_TOOL_NAMES: &[&str] = &[
     "gemini_cli",
     "opencode_cli",
     "browser_delegate",
+    // Browser tools retired (fork decision 2026-11-16): implementations
+    // deleted; web interaction stays on web_fetch/web_search/http_request,
+    // heavy automation goes to external harnesses via Tachi.
+    "browser",
+    "browser_open",
+    "text_browser",
 ];
 
 /// Bundled return values from tool registry construction.
@@ -511,7 +514,6 @@ pub fn all_tools(
     risk_profile: &zeroclaw_config::schema::RiskProfileConfig,
     agent_alias: &str,
     memory: Arc<dyn Memory>,
-    browser_config: &zeroclaw_config::schema::BrowserConfig,
     http_config: &zeroclaw_config::schema::HttpRequestConfig,
     web_fetch_config: &zeroclaw_config::schema::WebFetchConfig,
     workspace_dir: &std::path::Path,
@@ -531,7 +533,6 @@ pub fn all_tools(
         agent_alias,
         Arc::new(NativeRuntime::new()),
         memory,
-        browser_config,
         http_config,
         web_fetch_config,
         workspace_dir,
@@ -560,7 +561,6 @@ pub fn all_tools_with_runtime(
     agent_alias: &str,
     runtime: Arc<dyn RuntimeAdapter>,
     memory: Arc<dyn Memory>,
-    browser_config: &zeroclaw_config::schema::BrowserConfig,
     http_config: &zeroclaw_config::schema::HttpRequestConfig,
     web_fetch_config: &zeroclaw_config::schema::WebFetchConfig,
     workspace_dir: &std::path::Path,
@@ -877,58 +877,10 @@ pub fn all_tools_with_runtime(
         )));
     }
 
-    if browser_config.enabled {
-        // Add legacy browser_open tool for simple URL opening
-        match BrowserOpenTool::new_with_private_hosts(
-            security.clone(),
-            browser_config.allowed_domains.clone(),
-            browser_config.allowed_private_hosts.clone(),
-        ) {
-            Ok(tool) => {
-                tool_arcs.push(Arc::new(tool));
-            }
-            Err(e) => {
-                ::zeroclaw_log::record!(
-                    WARN,
-                    ::zeroclaw_log::Event::new(module_path!(), ::zeroclaw_log::Action::Note)
-                        .with_outcome(::zeroclaw_log::EventOutcome::Unknown)
-                        .with_attrs(::serde_json::json!({"error": format!("{}", e)})),
-                    "browser_open: failed to construct tool, skipping registration"
-                );
-            }
-        }
-        // Add full browser automation tool (pluggable backend)
-        match BrowserTool::new_with_backend(
-            security.clone(),
-            browser_config.allowed_domains.clone(),
-            browser_config.session_name.clone(),
-            browser_config.backend.clone(),
-            browser_config.headed,
-            ComputerUseConfig {
-                endpoint: browser_config.computer_use.endpoint.clone(),
-                api_key: browser_config.computer_use.api_key.clone(),
-                timeout_ms: browser_config.computer_use.timeout_ms,
-                allow_remote_endpoint: browser_config.computer_use.allow_remote_endpoint,
-                window_allowlist: browser_config.computer_use.window_allowlist.clone(),
-                max_coordinate_x: browser_config.computer_use.max_coordinate_x,
-                max_coordinate_y: browser_config.computer_use.max_coordinate_y,
-            },
-            browser_config.allowed_private_hosts.clone(),
-        ) {
-            Ok(tool) => {
-                tool_arcs.push(Arc::new(RateLimitedTool::new(tool, security.clone())));
-            }
-            Err(e) => {
-                ::zeroclaw_log::record!(
-                    WARN,
-                    ::zeroclaw_log::Event::new(module_path!(), ::zeroclaw_log::Action::Note)
-                        .with_outcome(::zeroclaw_log::EventOutcome::Unknown)
-                        .with_attrs(::serde_json::json!({"error": format!("{}", e)})),
-                    "browser: failed to construct tool, skipping registration"
-                );
-            }
-        }
-    }
+    // `browser` / `browser_open` are retired: implementations deleted; names
+    // reserved in RETIRED_OPERATOR_TOOL_NAMES. A leftover `[browser]` config
+    // section warns via the retired-surface tombstone instead of reaching
+    // this assembly.
 
     // Browser delegation tool (conditionally registered; requires shell access)
     if http_config.enabled {
@@ -983,27 +935,9 @@ pub fn all_tools_with_runtime(
     }
 
     // Text browser tool (headless text-based browser rendering)
-    if root_config.text_browser.enabled {
-        match TextBrowserTool::new_with_private_hosts(
-            security.clone(),
-            root_config.text_browser.preferred_browser.clone(),
-            root_config.text_browser.timeout_secs,
-            root_config.text_browser.allowed_private_hosts.clone(),
-        ) {
-            Ok(tool) => {
-                tool_arcs.push(Arc::new(tool));
-            }
-            Err(e) => {
-                ::zeroclaw_log::record!(
-                    ERROR,
-                    ::zeroclaw_log::Event::new(module_path!(), ::zeroclaw_log::Action::Note)
-                        .with_outcome(::zeroclaw_log::EventOutcome::Failure)
-                        .with_attrs(::serde_json::json!({"error": format!("{}", e)})),
-                    "text_browser: failed to construct tool, skipping registration"
-                );
-            }
-        }
-    }
+    // `text_browser` is retired: implementation deleted; name reserved in
+    // RETIRED_OPERATOR_TOOL_NAMES. A leftover `[text_browser]` section warns
+    // via the retired-surface tombstone.
 
     // Web search tool (enabled by default for GLM and other models)
     if root_config.web_search.enabled {

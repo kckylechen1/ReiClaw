@@ -1,8 +1,8 @@
 //! Configurable-generated paths and legacy imports share the API contract.
 
 use zeroclaw_api::config_metadata::{
-    ChannelConfig, ChannelInfo, ConfigTab, CredentialSurfaceClass, IntegrationDescriptor,
-    NestedOptionEntry, PropKind, SecretFieldInfo,
+    ChannelConfig, ChannelInfo, ConfigTab, CredentialSurfaceClass, NestedOptionEntry, PropKind,
+    SecretFieldInfo,
 };
 use zeroclaw_config::schema::{Config, TelegramConfig};
 
@@ -68,15 +68,6 @@ fn channel_and_integration_metadata_remain_derived_from_config() {
             .unwrap()
             .configured
     );
-
-    config.browser.enabled = false;
-    let before: IntegrationDescriptor = config.browser.integration_descriptor();
-    config.browser.enabled = true;
-    let after: zeroclaw_config::config::IntegrationDescriptor =
-        config.browser.integration_descriptor();
-    assert!(!before.active);
-    assert!(after.active);
-    assert_eq!(before.display_name, after.display_name);
 }
 
 #[test]

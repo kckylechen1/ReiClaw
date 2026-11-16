@@ -261,27 +261,6 @@ mod tests {
     }
 
     #[test]
-    fn browser_active_in_default_config() {
-        // BrowserConfig::default() has enabled=true, so the toggle
-        // should be Active in the unconfigured registry.
-        let config = Config::default();
-        assert!(matches!(
-            toggle_status(&config, |n| n == "Browser"),
-            IntegrationStatus::Active
-        ));
-    }
-
-    #[test]
-    fn browser_available_when_disabled() {
-        let mut config = Config::default();
-        config.browser.enabled = false;
-        assert!(matches!(
-            toggle_status(&config, |n| n == "Browser"),
-            IntegrationStatus::Available
-        ));
-    }
-
-    #[test]
     fn cron_available_when_no_jobs_configured() {
         let config = Config::default();
         assert!(matches!(

@@ -7,8 +7,6 @@ pub mod util_helpers;
 
 pub mod ask_user;
 pub mod backup_tool;
-pub mod browser;
-pub mod browser_open;
 pub mod content_search;
 pub mod data_management;
 pub mod discord_search;
@@ -57,7 +55,6 @@ pub mod sessions;
 pub mod tachi_admission;
 pub mod tachi_delegation;
 pub mod tachi_staff;
-pub mod text_browser;
 pub mod tool_search;
 pub mod web_fetch;
 pub mod web_search_provider_routing;

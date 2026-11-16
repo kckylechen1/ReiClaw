@@ -99,7 +99,6 @@
     - [Filesystem](./channels/filesystem.md)
 - [Tools & Extensibility](./tools/overview.md)
   - [MCP (Model Context Protocol)](./tools/mcp.md)
-  - [Browser automation](./tools/browser.md)
   - [Skills](./tools/skills.md)
   - [Python skills](./tools/python-skills.md)
 - [Security & Autonomy](./security/overview.md)

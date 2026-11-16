@@ -42,7 +42,7 @@ By default, sandboxed tools have full network egress but no inbound listening. P
 - Bubblewrap and Firejail can block network when configured.
 - Docker container network mode follows `[runtime.docker].network` when `[runtime].kind = "docker"`.
 
-Tool-specific network gates (browser, HTTP, web_fetch) live on those tools' own config blocks (`[browser].allowed_domains`, `[http_request].allowed_domains`, `[web_fetch].allowed_domains`).
+Tool-specific network gates (HTTP, web_fetch) live on those tools' own config blocks (`[http_request].allowed_domains`, `[web_fetch].allowed_domains`). The retired `[browser]` gates went with the tools.
 
 For `http_request`, private/local targets remain blocked by default. Use `[http_request].allowed_private_hosts` to allow only named private/local hosts such as `localhost` or `10.0.0.1` while keeping `[http_request].allowed_domains` non-empty; `allowed_domains = []` still disables requests. The existing `[http_request].allow_private_hosts = true` setting remains a broader compatibility opt-in.
 

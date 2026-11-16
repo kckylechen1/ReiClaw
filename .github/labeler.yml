@@ -400,15 +400,7 @@
 "tool:browser":
   - changed-files:
       - any-glob-to-any-file:
-          - "src/tools/browser.rs"
-          - "src/tools/browser_delegate.rs"
-          - "src/tools/browser_open.rs"
-          - "src/tools/text_browser.rs"
           - "src/tools/screenshot.rs"
-          - "crates/zeroclaw-tools/src/browser.rs"
-          - "crates/zeroclaw-tools/src/browser_delegate.rs"
-          - "crates/zeroclaw-tools/src/browser_open.rs"
-          - "crates/zeroclaw-tools/src/text_browser.rs"
           - "crates/zeroclaw-tools/src/screenshot.rs"
 
 "tool:composio":

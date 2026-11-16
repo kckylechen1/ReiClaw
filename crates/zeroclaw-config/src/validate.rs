@@ -26,7 +26,6 @@ pub(crate) const SUPPORTED_PROXY_SERVICE_KEYS: &[&str] = &[
     "channel.qq",
     "channel.telegram",
     "channel.wechat",
-    "tool.browser",
     "tool.http_request",
     "tool.web_search",
     "memory.embeddings",
