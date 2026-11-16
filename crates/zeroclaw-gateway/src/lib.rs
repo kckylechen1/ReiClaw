@@ -1640,6 +1640,8 @@ pub async fn run_gateway(
         // ── WebSocket agent chat ──
         .route("/ws/chat", get(ws::handle_ws_chat))
         .route("/ws/bridge", get(ws_bridge::handle_ws_bridge));
+    #[cfg(feature = "voice-surface")]
+    let inner = inner.merge(api_user_model::voice::routes());
     // ── WebSocket node discovery (nodes feature) ──
     #[cfg(feature = "nodes")]
     let inner = inner
