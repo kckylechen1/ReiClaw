@@ -13,10 +13,10 @@ const LIMIT: Duration = Duration::from_secs(15);
 
 /// Real transport client for adversarial frames that the typed client cannot express.
 /// All I/O is bounded; credentials are synthetic and endpoints are loopback-only.
-struct DeviceWire(tokio::net::TcpStream);
+pub(super) struct DeviceWire(tokio::net::TcpStream);
 
 impl DeviceWire {
-    async fn upgrade(address: std::net::SocketAddr, query: &str, token: &str) -> (u16, Self) {
+    pub(super) async fn upgrade(address: std::net::SocketAddr, query: &str, token: &str) -> (u16, Self) {
         Self::upgrade_path(address, &format!("/ws/chat?{query}"), token).await
     }
 
@@ -56,7 +56,7 @@ impl DeviceWire {
         (status, Self(stream))
     }
 
-    async fn send_opcode(&mut self, opcode: u8, payload: &[u8]) {
+    pub(super) async fn send_opcode(&mut self, opcode: u8, payload: &[u8]) {
         assert!(payload.len() < 65_536);
         let mut frame = vec![0x80 | opcode];
         if payload.len() < 126 {
@@ -80,11 +80,11 @@ impl DeviceWire {
             .unwrap();
     }
 
-    async fn send(&mut self, value: Value) {
+    pub(super) async fn send(&mut self, value: Value) {
         self.send_opcode(1, value.to_string().as_bytes()).await;
     }
 
-    async fn next(&mut self) -> Option<Value> {
+    pub(super) async fn next(&mut self) -> Option<Value> {
         self.next_with_limit(65_536).await
     }
 
@@ -120,7 +120,7 @@ impl DeviceWire {
         .expect("bounded WebSocket response")
     }
 
-    async fn until(&mut self, kind: &str) -> Value {
+    pub(super) async fn until(&mut self, kind: &str) -> Value {
         for _ in 0..64 {
             let frame = self
                 .next()
@@ -146,6 +146,11 @@ impl DeviceWire {
             assert_eq!(frame["code"], "BRIDGE_OPERATION_DENIED", "{frame}");
         }
     }
+}
+
+#[cfg(feature = "voice-surface")]
+mod voice_projection_tests {
+    include!("voice_projection_tests.rs");
 }
 
 /// A deterministic local OpenAI-compatible provider. The gateway still resolves
