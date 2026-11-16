@@ -42,6 +42,7 @@ pub mod tasks;
 pub mod tokens;
 pub mod traits;
 pub mod typed_value;
+mod validate;
 pub mod validation_warnings;
 
 /// Shim module so `Configurable` derive macro's generated `crate::config::*` paths resolve.
