@@ -169,7 +169,21 @@ async fn device_provider(
         message["role"] == "user" && message["content"].to_string().contains("approval-probe")
     });
     let mut message = json!({"role":"assistant", "content":"device response"});
-    let finish = if tool_needed {
+    let confinement_probe = messages.last().is_some_and(|m| m["role"] == "user" && m["content"].to_string().contains("device-tool-probe"));
+    let cap_probe = messages.iter().any(|m| m["role"] == "user" && m["content"].to_string().contains("device-cap-probe"));
+    let finish = if cap_probe {
+        message["content"] = Value::Null;
+        message["tool_calls"] = json!([{"index":0,"id":format!("cap-{}", messages.len()),"type":"function",
+            "function":{"name":format!("absent_{}", messages.len()),"arguments":"{}"}}]);
+        "tool_calls"
+    } else if confinement_probe {
+        message["content"] = Value::Null;
+        message["tool_calls"] = json!(["shell", "file_write", "notify", "memory_store", "sessions_send", "cron_add", "public__probe"].iter().enumerate().map(|(i, name)| json!({
+            "index":i, "id":format!("device-probe-{i}"), "type":"function",
+            "function":{"name":name,"arguments":json!({"path":"forbidden.txt","content":"forbidden","command":"touch forbidden.txt"}).to_string()}
+        })).collect::<Vec<_>>());
+        "tool_calls"
+    } else if tool_needed {
         message["content"] = Value::Null;
         message["tool_calls"] = json!([{
             "index":0,"id":"approval-file-call","type":"function",
@@ -236,6 +250,7 @@ impl DeviceFixture {
             require_pairing,
             &[OWNER_TOKEN.into(), DEVICE_TOKEN.into()],
         ));
+        state.auto_save = true;
         state.session_backend = Some(Arc::new(
             zeroclaw_infra::session_sqlite::SqliteSessionBackend::new(tmp.path()).unwrap(),
         ));
@@ -265,6 +280,12 @@ impl DeviceFixture {
                     ..Default::default()
                 },
             );
+            config.risk_profiles.insert("public-device".into(), RiskProfileConfig {
+                level: zeroclaw_config::autonomy::AutonomyLevel::Supervised,
+                allowed_tools: Some(vec![]), auto_approve: vec![], always_ask: vec![],
+                mcp_discovered_tool_policy: zeroclaw_config::autonomy::McpDiscoveredToolPolicy::ExplicitOnly,
+                ..Default::default()
+            });
             config.runtime_profiles.insert(
                 "test".into(),
                 RuntimeProfileConfig {
@@ -292,11 +313,14 @@ impl DeviceFixture {
                     session_prefix: None,
                     owner: None,
                     device: Some(GatewayDeviceBridgeConfig {
+                        risk_profile: Some("public-device".into()),
                         agent: "device-agent".into(),
                         operations: operations.iter().map(|op| (*op).into()).collect(),
                     }),
                 },
             );
+            config.gateway.bridges["device"].device.as_ref().unwrap()
+                .validated_profile(&config).expect("valid public-tier device fixture");
         }
         let app = axum::Router::new()
             .route("/ws/chat", axum::routing::get(handle_ws_chat))
@@ -326,14 +350,18 @@ impl DeviceFixture {
     }
 
     async fn socket(&self, token: &str) -> DeviceWire {
+        let owner_namespace = token == OWNER_TOKEN && self.state.config.read().gateway.bridges.values().any(|b| b.device.is_some());
+        let session = if owner_namespace { "owner-session" } else { SESSION };
         let (status, mut client) = DeviceWire::upgrade(
             self.address,
-            &format!("agent=device-agent&session_id={SESSION}"),
+            &format!("agent=device-agent&session_id={session}"),
             token,
         )
         .await;
         assert_eq!(status, 101);
-        client.connected(json!({"type":"connect"})).await;
+        assert_eq!(client.until("session_start").await["session_id"], session);
+        client.send(json!({"type":"connect"})).await;
+        client.until("connected").await;
         client
     }
 
@@ -412,12 +440,10 @@ async fn device_wire_cannot_consume_owner_approval_but_owner_can_approve() {
     let fixture = DeviceFixture::new(&["chat", "answer", "cancel"]).await;
     let mut device = fixture.socket(DEVICE_TOKEN).await;
     let mut owner = fixture.socket(OWNER_TOKEN).await;
-    device
+    owner
         .send(json!({"type":"message", "id":"needs-approval", "content":"approval-probe"}))
         .await;
-    let approval = device.until("approval_request").await;
-    let owner_approval = owner.until("approval_request").await;
-    assert_eq!(approval["request_id"], owner_approval["request_id"]);
+    let approval = owner.until("approval_request").await;
     assert_eq!(approval["tool"], "file_write");
     for decision in ["approve", "always", "deny"] {
         device.send(json!({"type":"approval_response", "request_id":approval["request_id"], "decision":decision})).await;
@@ -565,7 +591,8 @@ async fn device_wire_input_never_becomes_operator_even_with_paired_token_collisi
         device_rows[0].ingress.is_none(),
         "device text is not Operator learning evidence"
     );
-    let owner_rows: Vec<_> = rows
+    let owner_history = fixture.state.session_backend.as_ref().unwrap().load_with_timestamps("gw_owner-session");
+    let owner_rows: Vec<_> = owner_history
         .iter()
         .filter(|row| {
             row.ingress
@@ -943,6 +970,7 @@ async fn owner_bridge_handshake_reports_cancel_only_when_granted() {
 #[tokio::test]
 async fn paired_session_cwd_rejects_outside_workspace() {
     let fixture = DeviceFixture::new(&["chat"]).await;
+    fixture.state.config.write().gateway.bridges.clear();
     let (status, mut client) = DeviceWire::upgrade(
         fixture.address,
         "agent=device-agent&session_id=device-session&cwd=%2F",
@@ -960,6 +988,7 @@ async fn paired_session_cwd_rejects_outside_workspace() {
 #[tokio::test]
 async fn paired_session_cwd_accepts_workspace_descendant() {
     let fixture = DeviceFixture::new(&["chat"]).await;
+    fixture.state.config.write().gateway.bridges.clear();
     let workspace = fixture.state.config.read().agent_workspace_dir("device-agent");
     let child = workspace.join("project");
     std::fs::create_dir(&child).unwrap();
@@ -975,6 +1004,7 @@ async fn paired_session_cwd_accepts_workspace_descendant() {
 async fn btw_wire_revoked_owner_is_refused_before_provider_or_slot_use() {
     for negotiated in [false, true] {
         let fixture = DeviceFixture::new(&["chat"]).await;
+    fixture.state.config.write().gateway.bridges.clear();
         let mut client = fixture.socket(OWNER_TOKEN).await;
         if negotiated {
             client
@@ -1093,5 +1123,177 @@ async fn btw_wire_anonymous_legacy_chat_retains_pairing_off_policy() {
         client.until("btw_response").await["content"],
         "device response"
     );
+    assert_eq!(fixture.seen.lock().len(), 1);
+}
+
+#[tokio::test]
+async fn device_full_agent_is_confined_on_every_non_voice_surface() {
+    for surface in ["", "&surface=web", "&surface=telegram", "&surface=cli"] {
+        let fixture = DeviceFixture::new(&["chat"]).await;
+        {
+            let mut config = fixture.state.config.write();
+            config.risk_profiles.get_mut("test").unwrap().level = zeroclaw_config::autonomy::AutonomyLevel::Full;
+            config.risk_profiles.get_mut("test").unwrap().allowed_tools = None;
+            let public = config.risk_profiles.get_mut("public-device").unwrap();
+            // Keep one real public tool registered so the provider's adversarial
+            // native calls reach dispatch; the skill-shaped name must stay absent.
+            public.allowed_tools = Some(vec!["web_search_tool".into(), "public__probe".into()]);
+            public.auto_approve = vec!["web_search_tool".into(), "public__probe".into()];
+            config.web_search.enabled = true;
+            config.memory.auto_save = true;
+            config.agents.get_mut("device-agent").unwrap().memory.backend = zeroclaw_config::multi_agent::MemoryBackendKind::Markdown;
+        }
+        let skill_dir = fixture.workspace.join("skills/public");
+        std::fs::create_dir_all(&skill_dir).unwrap();
+        std::fs::write(skill_dir.join("SKILL.toml"), r#"
+[skill]
+name = "public"
+description = "PRIVATE_SKILL_SENTINEL"
+version = "0.1.0"
+[[tools]]
+name = "probe"
+description = "Synthetic private HTTP action"
+kind = "http"
+command = "http://127.0.0.1:1/private"
+"#).unwrap();
+        let config = fixture.state.config.read().clone();
+        let ordinary = zeroclaw_runtime::agent::Agent::from_config_with_session_cwd_and_mcp(
+            &config, "device-agent", Some(&fixture.workspace), false).await.unwrap();
+        assert!(ordinary.tool_names().contains(&"public__probe"), "ordinary skills remain registered");
+        let memory = resolve_ws_memory_handle(&config, "device-agent").await.unwrap().unwrap();
+        memory.store("owner-private", "PRIVATE_RECALL_SENTINEL device-tool-probe",
+            zeroclaw_memory::MemoryCategory::Core, None).await.unwrap();
+        let memory_before = memory.count().await.unwrap();
+        // Actual HTTP provider sees the constructed agent; no injected registry.
+        let (status, mut client) = DeviceWire::upgrade(fixture.address,
+            &format!("agent=device-agent&session_id={SESSION}{surface}"), DEVICE_TOKEN).await;
+        assert_eq!(status, 101);
+        client.connected(json!({"type":"connect"})).await;
+        fixture.send_turn(&mut client, "confinement", "device-tool-probe").await;
+        assert_eq!(memory.count().await.unwrap(), memory_before, "device turns must not write memory");
+        let seen = fixture.seen.lock();
+        assert_eq!(seen.len(), 2, "one tool round and final answer, no consolidation");
+        assert!(!seen[0]["messages"].to_string().contains("PRIVATE_RECALL_SENTINEL"));
+        assert!(!seen[0]["messages"].to_string().contains("PRIVATE_SKILL_SENTINEL"));
+        for name in ["shell", "file_write", "notify", "memory_store", "sessions_send", "cron_add", "public__probe"] {
+            assert!(!seen[0]["tools"].to_string().contains(name));
+            assert!(seen[1]["messages"].to_string().contains(&format!("Unknown tool: {name}")));
+        }
+        assert!(!fixture.workspace.join("forbidden.txt").exists());
+        assert!(fixture.state.session_backend.as_ref().unwrap().load(&format!("gw_{SESSION}")).iter().any(|m| m.role == "user"));
+    }
+}
+
+#[tokio::test]
+async fn device_namespace_refuses_owner_legacy_bridge_and_connect_override() {
+    let fixture = DeviceFixture::new(&["chat"]).await;
+    for session in [SESSION, "outside-device"] {
+        let token = if session == SESSION { OWNER_TOKEN } else { DEVICE_TOKEN };
+        let (status, _) = DeviceWire::upgrade(fixture.address,
+            &format!("agent=device-agent&session_id={session}"), token).await;
+        assert_eq!(status, 403);
+    }
+    fixture.state.config.write().gateway.bridges.insert("legacy".into(), GatewayBridgeConfig {
+        token_hash: zeroclaw_config::tokens::hash_token("synthetic-legacy-token"),
+        sessions: vec![SESSION.into()], ..Default::default()
+    });
+    let (status, _) = DeviceWire::upgrade(fixture.address,
+        &format!("agent=device-agent&session_id={SESSION}"), "synthetic-legacy-token").await;
+    assert_eq!(status, 403);
+    let (status, mut owner) = DeviceWire::upgrade(fixture.address,
+        "agent=device-agent&session_id=owner-session", OWNER_TOKEN).await;
+    assert_eq!(status, 101);
+    owner.until("session_start").await;
+    owner.send(json!({"type":"connect", "session_id":SESSION})).await;
+    assert_eq!(owner.until("error").await["code"], "BRIDGE_BINDING_REJECTED");
+    assert!(fixture.seen.lock().is_empty());
+}
+
+#[tokio::test]
+async fn device_turn_prompt_excludes_private_context_but_owner_keeps_it() {
+    use zeroclaw_memory::companion::*;
+    let fixture = DeviceFixture::new(&["chat"]).await;
+    let config = fixture.state.config.read().clone();
+    let soul = SoulProfileStore::shared(&config.data_dir).unwrap();
+    soul.set_identity("device-agent", SoulIdentity {
+        name: "Same Identity".into(), self_description: None, primary_language: None, pronouns: None,
+    }, 0, 1).unwrap();
+    soul.set_story("device-agent", SoulStory { entries: vec![StoryEntry { kind: StoryKind::Bond, text: "PRIVATE_STORY_SENTINEL".into() }] }, 0, 2).unwrap();
+    soul.set_tone_exemplars("device-agent", SoulToneExemplars { exemplars: vec![ToneExemplar {
+        situation: "Private situation".into(), owner_line: "Private line".into(), agent_line: "PRIVATE_EXEMPLAR_SENTINEL".into(),
+    }] }, 0, 2).unwrap();
+    UserModelStore::shared(&config.data_dir).unwrap().record_owner_statement(
+        UserModelKind::Preference, "PRIVATE_USER_MODEL_SENTINEL", "style", "global", 1).unwrap();
+    std::fs::write(fixture.workspace.join("USER.md"), "PRIVATE_USER_FILE_SENTINEL").unwrap();
+    std::fs::write(fixture.workspace.join("MEMORY.md"), "PRIVATE_MEMORY_FILE_SENTINEL").unwrap();
+    let mut device = fixture.socket(DEVICE_TOKEN).await;
+    fixture.send_turn(&mut device, "first", "public question").await;
+    fixture.send_turn(&mut device, "second", "another public question").await;
+    {
+        let seen = fixture.seen.lock();
+        for request in seen.iter() {
+            let prompt = request["messages"][0]["content"].as_str().unwrap();
+            assert!(prompt.contains("Same Identity"));
+            assert!(prompt.contains("## Principles"));
+            assert!(prompt.contains("## Tone"));
+            for marker in ["PRIVATE_STORY_SENTINEL", "PRIVATE_EXEMPLAR_SENTINEL", "PRIVATE_USER_MODEL_SENTINEL", "PRIVATE_USER_FILE_SENTINEL", "PRIVATE_MEMORY_FILE_SENTINEL"] {
+                assert!(!prompt.contains(marker), "leaked {marker}");
+            }
+        }
+    }
+    let mut owner = fixture.socket(OWNER_TOKEN).await;
+    fixture.send_turn(&mut owner, "owner", "owner question").await;
+    let seen = fixture.seen.lock();
+    let owner_prompt = seen.last().unwrap()["messages"][0]["content"].as_str().unwrap();
+    for marker in ["Same Identity", "PRIVATE_STORY_SENTINEL", "PRIVATE_EXEMPLAR_SENTINEL", "PRIVATE_USER_MODEL_SENTINEL"] {
+        assert!(owner_prompt.contains(marker), "owner regression: {marker}");
+    }
+}
+
+#[tokio::test]
+async fn device_tool_rounds_stop_at_three_or_the_agents_lower_limit() {
+    for limit in [2, 7] {
+        let fixture = DeviceFixture::new(&["chat"]).await;
+        {
+            let mut config = fixture.state.config.write();
+            config.runtime_profiles.get_mut("test").unwrap().max_tool_iterations = limit;
+            let public = config.risk_profiles.get_mut("public-device").unwrap();
+            public.allowed_tools = Some(vec!["web_search_tool".into()]);
+            public.auto_approve = vec!["web_search_tool".into()];
+            config.web_search.enabled = true;
+        }
+        let mut client = fixture.socket(DEVICE_TOKEN).await;
+        client.send(json!({"type":"message", "id":"cap", "content":"device-cap-probe"})).await;
+        let error = client.until("error").await;
+        assert_eq!(error["code"], "AGENT_ERROR");
+        assert!(error["message"].as_str().unwrap().contains("maximum tool iterations"));
+        let seen = fixture.seen.lock();
+        // Amendment 1 caps tool rounds. The streaming path then makes exactly
+        // one tools-free summary request; it cannot execute another tool round.
+        let (summary, rounds) = seen.split_last().unwrap();
+        assert_eq!(rounds.len(), limit.min(3));
+        for round in rounds {
+            assert_eq!(round["tools"].as_array().unwrap().len(), 1);
+            assert_eq!(round["tools"][0]["function"]["name"], "web_search_tool");
+        }
+        assert!(summary["tools"].is_null());
+        assert!(summary["messages"].as_array().unwrap().last().unwrap()["content"]
+            .as_str().unwrap().contains("maximum number of tool iterations"));
+    }
+}
+
+#[tokio::test]
+async fn device_profile_reload_revokes_the_old_agent_snapshot() {
+    let fixture = DeviceFixture::new(&["chat"]).await;
+    let mut client = fixture.socket(DEVICE_TOKEN).await;
+    fixture.send_turn(&mut client, "before", "before reload").await;
+    {
+        let mut config = fixture.state.config.write();
+        let profile = config.risk_profiles.get_mut("public-device").unwrap();
+        profile.allowed_tools = Some(vec!["web_search_tool".into()]);
+        profile.auto_approve = vec!["web_search_tool".into()];
+    }
+    client.send(json!({"type":"message", "id":"after", "content":"must not use old policy"})).await;
+    client.denied().await;
     assert_eq!(fixture.seen.lock().len(), 1);
 }

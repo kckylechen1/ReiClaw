@@ -113,6 +113,18 @@ impl SystemPromptBuilder {
         }
     }
 
+    /// Public device prompts never load workspace notes, legacy identity files,
+    /// or private installed skill instructions. Persona refresh only replaces Tone.
+    pub fn with_device_persona(
+        persona: crate::agent::persona_projection::PersonaProjection,
+    ) -> Self {
+        let mut builder = Self::with_persona(persona);
+        builder
+            .sections
+            .retain(|section| !matches!(section.name(), "identity" | "notes" | "skills"));
+        builder
+    }
+
     /// Swap in a new Soul projection, keeping every other section and the
     /// section order. Used when the Soul revision moves mid-session.
     pub fn set_persona(&mut self, persona: crate::agent::persona_projection::PersonaProjection) {

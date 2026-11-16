@@ -62,7 +62,9 @@ pub(crate) async fn gate_tool_approval(
         // Non-interactive (channels): try the channel's inline
         // approval (e.g. Telegram inline keyboard) before falling
         // back to auto-deny.
-        let (decision, decided_by, unanswerable) = if mgr.is_non_interactive() {
+        let (decision, decided_by, unanswerable) = if mgr.denies_prompts() {
+            (ApprovalResponse::No, None, true)
+        } else if mgr.is_non_interactive() {
             let attributed = if let Some(ch) = ctx.channel {
                 let ch_request = zeroclaw_api::channel::ChannelApprovalRequest {
                     tool_name: request.tool_name.clone(),
