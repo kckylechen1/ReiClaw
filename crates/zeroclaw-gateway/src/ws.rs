@@ -776,7 +776,11 @@ async fn handle_socket(
     let conversation_key = if credential_key.is_empty() {
         format!("{session_key}\u{1f}{agent_alias}")
     } else {
-        format!("{session_key}\u{1f}{agent_alias}\u{1f}{credential_key}")
+        crate::ws_conversation::device_conversation_key(
+            &session_key,
+            &agent_alias,
+            &credential_key,
+        )
     };
     let attached = state
         .ws_conversations

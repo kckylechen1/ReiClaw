@@ -606,8 +606,9 @@ Every allowed tool must appear in `auto_approve`; `always_ask` must be empty
 and `approval_route` absent. Any unexpected approval prompt is immediately
 denied without routing or waiting.
 
-`risk_profile` may be omitted on delegation-only device bridges, but those
-credentials cannot enter `/ws/chat`. With `surface=voice`, missing or invalid
+Config validation rejects any device bridge that grants `chat` without a valid
+`risk_profile`. The field may be omitted on delegation-only device bridges, but
+those credentials cannot enter `/ws/chat`. With `surface=voice`, missing or invalid
 profiles return HTTP 403 with `VOICE_DEVICE_PROFILE_INVALID` at upgrade.
 The confinement itself also applies in builds without `voice-surface`.
 

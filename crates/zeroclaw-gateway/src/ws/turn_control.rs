@@ -109,8 +109,7 @@ fn log_refusal(scope: &WsTurnScope, alias: &str, request: &str, code: &str, atta
 /// `done` succeeds; `aborted`/`error` fail (matching the legacy cancel
 /// logging); anything else is unknown — never a silent success.
 fn log_terminal(conversation: &str, request: Option<&str>, turn: &str, outcome: &str) {
-    let (session_key, agent) = conversation
-        .rsplit_once('\u{1f}')
+    let (session_key, agent) = crate::ws_conversation::conversation_identity(conversation)
         .unwrap_or((conversation, ""));
     let session_id = session_key
         .strip_prefix(super::GW_SESSION_PREFIX)
@@ -763,9 +762,7 @@ impl Store {
     pub(crate) fn redact_session(&self, session_key: &str) {
         let mut entries = self.entries.lock();
         for entry in entries.values_mut().filter(|entry| {
-            entry
-                .conversation
-                .rsplit_once('\u{1f}')
+            crate::ws_conversation::conversation_identity(&entry.conversation)
                 .is_some_and(|(key, _)| key == session_key)
         }) {
             *entry = Entry {

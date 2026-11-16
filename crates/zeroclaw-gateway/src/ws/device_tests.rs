@@ -281,7 +281,9 @@ impl DeviceFixture {
                 },
             );
             config.risk_profiles.insert("public-device".into(), RiskProfileConfig {
+                level: zeroclaw_config::autonomy::AutonomyLevel::Supervised,
                 allowed_tools: Some(vec![]), auto_approve: vec![], always_ask: vec![],
+                mcp_discovered_tool_policy: zeroclaw_config::autonomy::McpDiscoveredToolPolicy::ExplicitOnly,
                 ..Default::default()
             });
             config.runtime_profiles.insert(
@@ -317,6 +319,8 @@ impl DeviceFixture {
                     }),
                 },
             );
+            config.gateway.bridges["device"].device.as_ref().unwrap()
+                .validated_profile(&config).expect("valid public-tier device fixture");
         }
         let app = axum::Router::new()
             .route("/ws/chat", axum::routing::get(handle_ws_chat))

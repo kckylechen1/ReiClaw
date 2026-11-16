@@ -157,7 +157,7 @@ async fn three_surfaces_render_same_turn_without_changing_soul_or_shared_history
         let binding = device::Binding::new("voice-device".into(), config.gateway.bridges["voice-device"].clone(), &config);
         zeroclaw_config::tokens::hash_token(&format!("{}:{:?}", binding.initial.token_hash, binding.profile))
     };
-    let retained = chat.attach_key(&format!("gw_shared\u{1f}web\u{1f}{credential_key}")).await;
+    let retained = chat.attach_key(&crate::ws_conversation::device_conversation_key("gw_shared", "web", &credential_key)).await;
     chat.gate.add_permits(3);
     let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
     let address = listener.local_addr().unwrap();
