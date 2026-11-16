@@ -195,7 +195,7 @@ The following are measured on a fixed test set before carrier mode is enabled fo
 
 Positive:
 
-- Small talk and public lookups feel immediate. Personal questions and actions still go through the body.
+- Small talk and public lookups feel immediate. Personal questions and actions still go through the body; under Amendment 1 v1, the body declines them on voice until the owner tier exists.
 - The robot knows the owner through a reviewed projection, without raw Soul or unconsented User Model access.
 - Carriers can be swapped between providers without a body change.
 - The voice-credential and owner-ingress defects found in Context are corrected as part of adopting the voice surface.
@@ -239,34 +239,46 @@ Accepted by the owner on 2026-11-16.
 ### A1. Why
 
 - `ChatSurface` is a presentation register requested by the client, "never an authority grant" (`crates/zeroclaw-api/src/chat_surface.rs`). The runtime, memory and tool crates do not read it.
-- A device-bridge connection builds the bound alias with that agent's own risk profile and tools (`build_ws_session` in `crates/zeroclaw-gateway/src/ws.rs`). The voice surface removes owner ingress and approval by voice; it does not narrow tools. At `AutonomyLevel::Full` no approval prompt is raised (`crates/zeroclaw-runtime/src/approval/mod.rs`). With the main agent bound (§3), unverified speech delegated by the carrier would therefore reach the main agent's full tool set.
-- Lowering a voice turn to a supervised autonomy level does not fix this. The device credential cannot answer approvals (`bridge_access.rs`), so prompts would only time out, while auto-approved and low-risk tools would still run.
-- Turn consolidation into long-term memory does not depend on the surface (`consolidate_turn`), so household speech, television and false wakes would enter the owner's memory.
-- Read-only is not the same as safe. Answers are spoken aloud to a room, and private facts in the body's prompt can also leave through tool arguments such as a search query, whether the trigger is a bystander's request or an injected search result.
+- A device-bridge connection builds the bound alias with that agent's own risk profile and tools (`build_ws_session` in `crates/zeroclaw-gateway/src/ws.rs`). The voice surface removes owner ingress and approval by voice; it does not narrow tools. For an agent bound at `full`, only tools in `always_ask` prompt (`crates/zeroclaw-runtime/src/approval/mod.rs`), so unverified speech delegated by the carrier would reach that agent's tool set.
+- Lowering a voice turn to `supervised` does not fix this. The device credential cannot answer approvals (`crates/zeroclaw-config/src/bridge_access.rs`), so prompts either wait until timeout or, with an `approval_route`, reach an owner channel and bypass A4. Auto-approved tools would still run.
+- Memory writes do not depend on the surface. The gateway consolidates each turn (`consolidate_turn`, called from `ws.rs`), and the agent stores user messages when `auto_save` is on (`crates/zeroclaw-runtime/src/agent/agent.rs`). Household speech, television and false wakes would therefore enter the owner's memory.
+- Read-only is not the same as safe. Answers are spoken aloud to a room, and private text in the body's prompt can also leave through tool arguments such as a search query, whether the trigger is a bystander's request or an injected search result.
 
 ### A2. Decision: a delegated turn is confined by its credential
 
 Permissions for device-bridge turns bind to the bridge credential, independent of `surface`.
 
-- `[gateway.bridges.<name>.device]` names a `risk_profile`. Config validation requires that the profile exists, that its level is not `full`, and that `allowed_tools` is an explicit list. MCP tools are named individually; none are admitted by prefix.
-- Voice admission refuses a device bridge without such a profile, with a typed error.
-- A device-bound session builds the same alias, with the same Soul, using the bridge's profile instead of the agent's own.
-- Sessions under a device bridge's session namespace are reserved for that bridge. A non-device connection cannot create or attach to them, and a device connection cannot attach to other sessions.
-- Device-bound turns do not run memory consolidation and do not write owner memory.
+**Profile and validation.** `[gateway.bridges.<name>.device]` names a `risk_profile`. Config validation requires all of the following:
+
+- the profile exists and its level is not `full`;
+- `allowed_tools` is `Some` and contains none of the fixed device deny set: shell and process tools, file tools, messaging and channel tools, memory tools, session tools, cron and schedule tools, and `tool_search`;
+- MCP tools are listed by their full `<server>__<tool>` name, and `mcp_discovered_tool_policy` is `explicit_only`;
+- every allowed tool is in `auto_approve`, `always_ask` is empty, and `approval_route` is unset.
+
+Voice admission refuses a device bridge without a valid profile, with a typed error. In addition, any approval prompt raised on a device-bound turn is denied immediately; it is never routed and never waits.
+
+**Session construction.** A device-bound session builds the same alias, with the same Identity, using the bridge's profile instead of the agent's own, and with the existing `exclude_memory` seam. That seam replaces the memory backend with `NoneMemory`, strips memory tools and forces `auto_save` off, so the turn has no memory recall, no auto-context and no agent-side memory writes.
+
+- The gateway's `consolidate_turn` does not run for device-bound turns.
+- The User Model section is not injected.
+- Of the Soul, the prompt receives exactly the layers in the voice projection (§3): Identity, Principles and the Tone levels. Story entries and Tone exemplars are excluded.
+- Session transcript rows for the delegated turn are still written, as today.
+
+**Session namespace.** A device bridge's `sessions` and `session_prefix` must not overlap with any other bridge's. On `/ws/chat`, a non-device connection cannot create or attach to sessions in that namespace, and a device connection cannot attach to sessions outside it.
 
 **Public tier (v1, the only tier at first).**
 
-- Public read-only tools only: web search (including an allow-listed search MCP), time, and calculation.
-- No memory tools, no User Model section in the prompt, and no memory or auto-context recall.
+- Allowed tools: `web_search_tool` and allow-listed search MCP tools named individually. Time and simple arithmetic come from the prompt and the model; no tool is needed.
 - The only owner facts available to voice are the consented `owner_facts` in the projection (§3).
-- Requests with side effects are declined in speech, and the robot points the owner to another surface.
-- Cost is bounded per bridge: a rate limit, a daily budget, and a lower tool-iteration cap. Whether device-bound turns use a lighter, faster model is an owner decision recorded with that slice.
+- Personal questions and requests with side effects are declined in speech, and the robot points the owner to another surface.
+
+**Cost.** Slice 1 includes a lower tool-iteration cap for device-bound turns. A per-bridge rate limit and a daily budget follow in their own slice, before resident wake (A5). Whether device-bound turns use a lighter, faster model is an owner decision recorded with that slice.
 
 ### A3. Owner tier through speaker verification (later slice)
 
-- Speaker verification runs in the adapter on the owner's host, which already carries the window's audio. It uses the speaker-embedding API of the pinned sherpa-onnx release that the device keyword spotter already uses.
+- Speaker verification runs in the adapter on the owner's host, which already carries the window's audio. It uses the speaker-embedding API of sherpa-onnx v1.12.14, the release pinned by the Robotic keyword-spotting adapter (`Zeroclaw-Robotic/crates/yonbo-audio/src/kws.rs`).
 - The owner's enrollment template is stored owner-private on that host. It never enters a repository and is never sent to a carrier or any cloud service.
-- Every user speech segment is verified, not only the wake word. A delegation is owner-tier only when every user segment since the previous delegation in that window verified as the owner. Otherwise the delegation uses the public tier. Mixed-speaker windows therefore fall back to public.
+- Every user speech segment is verified, not only the wake word. A delegation is owner-tier only when every user segment since the previous delegation in that window verified as the owner. Otherwise it uses the public tier. Mixed-speaker windows therefore fall back to public.
 - The adapter holds two device-bridge credentials, public and owner, and selects one per delegated turn. The gateway trusts credentials only, never a client-declared identity.
 - The owner tier may add owner-private reads, such as memory recall and the User Model. The owner chooses to hear these answers aloud by asking.
 - Voice verification never unlocks side effects, because recordings can be replayed and voices cloned. The one exception: the owner may enable an owner-curated allowlist of low-risk, reversible actions, such as reminders and notes, for the owner tier.
@@ -274,7 +286,7 @@ Permissions for device-bridge turns bind to the bridge credential, independent o
 
 ### A4. Side effects through approval (deferred)
 
-Voice-originated proposals that need approval wait for two things: durable turns (ADR-020) and an owner approval surface, such as an owner bridge with `approval_response` on the owner's phone. When built:
+Voice-originated proposals that need approval wait for two things: durable turns (ADR-020) and an owner approval client. The owner bridge with `approval_response` already exists in configuration; only the client is missing. When built:
 
 - approval cards show the real tool arguments and "source: voice, unverified";
 - approval requests from voice are rate-limited;
@@ -282,20 +294,24 @@ Voice-originated proposals that need approval wait for two things: durable turns
 
 ### A5. Slice order
 
-1. Bridge risk profile and device-bound confinement (A2), in one gateway PR.
+This replaces the order of the original slices 4–6.
+
+1. Bridge risk profile, validation, device-bound session construction, session namespace and tool-iteration cap (A2), in one gateway PR.
 2. An allow-listed search MCP for the public tier.
-3. Slice 4, adapter delegation and persona.
+3. Original slice 4: adapter delegation and persona.
 4. Per-bridge rate limit and daily budget.
-5. Resident wake on the robot.
-6. Speaker verification and the owner tier (A3).
-7. The approval flow (A4).
+5. Original slice 5: presentation-event intake.
+6. Original slice 6: measurement (§7).
+7. Resident wake on the robot.
+8. Speaker verification and the owner tier (A3).
+9. The approval flow (A4).
 
 ### A6. Acceptance additions
 
-1. An agent at `full`, reached through a device bridge, cannot call shell, file-write, messaging or memory tools. Non-device paths are unchanged.
-2. Device-bound turns write no memory and receive no User Model section.
-3. A device bridge without a valid profile is refused for voice.
-4. Device session namespaces cannot be shared with non-device connections.
+1. An agent at `full`, reached through a device bridge, cannot call shell, file, messaging, memory or session tools. Non-device paths are unchanged.
+2. Device-bound turns write no memory, run no consolidation, and receive no User Model, Story or exemplar text.
+3. A device bridge whose profile fails A2 validation is refused for voice. An approval prompt on a device-bound turn is denied without waiting.
+4. On `/ws/chat`, device session namespaces cannot be shared with non-device connections.
 5. When it is built, the owner tier is reachable only with the owner credential, and mixed-speaker windows use the public tier.
 
 ## Open questions
