@@ -171,6 +171,14 @@ pub async fn handle_ws_chat(
         .gateway
         .bridge_for_token(presented)
         .map(|(name, bridge)| (name.to_string(), bridge.clone()));
+    #[cfg(feature = "voice-surface")]
+    if params.surface.as_deref() == Some("voice")
+        && !bridge_scope
+            .as_ref()
+            .is_some_and(|(_, bridge)| bridge.device.is_some())
+    {
+        return voice_projection::Error::DeviceCredentialRequired.response();
+    }
     let auth_subject = if let Some((bridge, scope)) = &bridge_scope {
         let allowed = params
             .session_id
@@ -234,11 +242,13 @@ pub async fn handle_ws_chat(
     };
     {
         let cfg = state.config.read();
+        #[cfg(feature = "voice-surface")]
+        if params.surface.as_deref() == Some("voice")
+            && let Err(error) = voice_projection::validate_alias(&cfg, &agent_alias)
+        {
+            return error.response();
+        }
         if cfg.agent(&agent_alias).is_none() {
-            #[cfg(feature = "voice-surface")]
-            if params.surface.as_deref() == Some("voice") {
-                return voice_projection::Error::UnknownAlias.response();
-            }
             return (
                 axum::http::StatusCode::BAD_REQUEST,
                 format!(
@@ -506,16 +516,10 @@ async fn handle_socket(
                 && config
                     .agent(&agent_alias)
                     .is_some_and(|agent| agent.enabled)
-                && bridge_scope.as_ref().map_or_else(
-                    || {
-                        auth_subject
-                            .as_ref()
-                            .map_or(!state.pairing.require_pairing(), |subject| {
-                                state.pairing.tokens().contains(subject)
-                            })
-                    },
-                    |binding| binding.allows(&config, &agent_alias, &session_id, "chat"),
-                )
+                && bridge_scope.as_ref().is_some_and(|binding| {
+                    binding.initial.device.is_some()
+                        && binding.allows(&config, &agent_alias, &session_id, "chat")
+                })
         };
         if !still_admitted {
             let _ = sender

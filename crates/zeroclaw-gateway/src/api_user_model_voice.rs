@@ -28,6 +28,43 @@ fn refusal(status: StatusCode, code: &str) -> Response {
     (status, axum::Json(serde_json::json!({"code": code}))).into_response()
 }
 
+fn operator_configuration_required() -> Response {
+    (
+        StatusCode::FORBIDDEN,
+        axum::Json(serde_json::json!({
+            "code": "VOICE_CONSENT_OPERATOR_CONFIG_REQUIRED",
+            "message": zeroclaw_runtime::i18n::get_required_cli_string("gateway-voice-consent-operator-config-required"),
+        })),
+    )
+        .into_response()
+}
+
+fn gate_voice_operator(
+    state: &AppState,
+    peer: SocketAddr,
+    headers: &HeaderMap,
+) -> Option<Response> {
+    if !state.config.read().gateway.operator.is_configured() {
+        return Some(operator_configuration_required());
+    }
+    if let Some(error) = crate::operator_auth::gate_operator_identity(state, peer, headers) {
+        return Some(error);
+    }
+    // A reload must not turn the shared gate's legacy fallback into voice consent.
+    let config = state.config.read();
+    if !config.gateway.operator.is_configured() {
+        return Some(operator_configuration_required());
+    }
+    let token = crate::operator_auth::extract_bearer(headers).unwrap_or("");
+    if !config.gateway.operator.authenticates(token) {
+        return Some(refusal(
+            StatusCode::FORBIDDEN,
+            "VOICE_CONSENT_OPERATOR_REQUIRED",
+        ));
+    }
+    None
+}
+
 async fn get(
     State(state): State<AppState>,
     ConnectInfo(peer): ConnectInfo<SocketAddr>,
@@ -35,7 +72,7 @@ async fn get(
     Path(head): Path<String>,
     uri: Uri,
 ) -> Response {
-    if let Some(err) = crate::operator_auth::gate_operator_identity(&state, peer, &headers) {
+    if let Some(err) = gate_voice_operator(&state, peer, &headers) {
         return err;
     }
     let Ok(query) = axum::extract::Query::<ProviderQuery>::try_from_uri(&uri) else {
@@ -64,7 +101,7 @@ async fn put(
     Path(head): Path<String>,
     body: Bytes,
 ) -> Response {
-    if let Some(err) = crate::operator_auth::gate_operator_identity(&state, peer, &headers) {
+    if let Some(err) = gate_voice_operator(&state, peer, &headers) {
         return err;
     }
     let Ok(body) = serde_json::from_slice::<ConsentBody>(&body) else {

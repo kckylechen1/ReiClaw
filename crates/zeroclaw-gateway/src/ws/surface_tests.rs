@@ -132,9 +132,19 @@ async fn three_surfaces_render_same_turn_without_changing_soul_or_shared_history
     }, 1, 2).unwrap();
     let before = serde_json::to_value(soul.profile("web").unwrap()).unwrap();
     chat.owner_config = Some(Arc::new(zeroclaw_config::schema::Config { data_dir: data_dir.clone(), ..Default::default() }));
+    chat.state.pairing = Arc::new(zeroclaw_runtime::security::pairing::PairingGuard::new(
+        true, &["synthetic-surface-owner".into()],
+    ));
     {
         let mut config = chat.state.config.write();
         config.data_dir = data_dir;
+        config.gateway.bridges.insert("voice-device".into(), zeroclaw_config::schema::GatewayBridgeConfig {
+            token_hash: zeroclaw_config::tokens::hash_token("synthetic-surface-device"),
+            sessions: vec!["shared".into()], session_prefix: None, owner: None,
+            device: Some(zeroclaw_config::schema::GatewayDeviceBridgeConfig {
+                agent: "web".into(), operations: vec!["chat".into()],
+            }),
+        });
         config.agents.insert("web".into(), zeroclaw_config::schema::AliasedAgentConfig { enabled: true, ..Default::default() });
         config.providers.models.openai.insert("default".into(), zeroclaw_config::schema::OpenAIModelProviderConfig { base: zeroclaw_config::schema::ModelProviderConfig { model: Some("test-model".into()), ..Default::default() } });
     }
@@ -142,14 +152,14 @@ async fn three_surfaces_render_same_turn_without_changing_soul_or_shared_history
     chat.gate.add_permits(3);
     let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
     let address = listener.local_addr().unwrap();
-    let options = ConnectOptions { gateway: format!("ws://{}", listener.local_addr().unwrap()), agent: "web".into(), session_id: Some("shared".into()), token: None };
+    let options = ConnectOptions { gateway: format!("ws://{}", listener.local_addr().unwrap()), agent: "web".into(), session_id: Some("shared".into()), token: Some("synthetic-surface-owner".into()) };
     let app = axum::Router::new().route("/ws/chat", axum::routing::get(handle_ws_chat)).with_state(chat.state.clone());
     let exchange = async {
         let mut web = Client::connect_with_surface(&options, "web").await.unwrap();
         let mut cli = Client::connect_with_surface(&options, "cli").await.unwrap();
         // Carrier projection is admitted in the query, before session_start.
         let (status, mut voice) = super::device_tests::DeviceWire::upgrade(address,
-            "agent=web&session_id=shared&surface=voice&voice_provider=moss-live", "").await;
+            "agent=web&session_id=shared&surface=voice&voice_provider=moss-live", "synthetic-surface-device").await;
         assert_eq!(status, 101);
         assert_eq!(voice.until("session_start").await["voice_projection"]["version"], 1);
         voice.send(json!({"type":"connect", "surface":"voice"})).await;

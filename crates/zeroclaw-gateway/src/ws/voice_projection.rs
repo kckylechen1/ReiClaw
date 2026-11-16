@@ -26,6 +26,8 @@ pub(super) enum Error {
     MissingProvider,
     InvalidProvider,
     UnknownAlias,
+    DisabledAlias,
+    DeviceCredentialRequired,
     SoulUnavailable,
     OwnerIdentityRequired,
     UserModelUnavailable,
@@ -38,6 +40,8 @@ impl Error {
             Self::MissingProvider => "VOICE_PROVIDER_REQUIRED",
             Self::InvalidProvider => "VOICE_PROVIDER_INVALID",
             Self::UnknownAlias => "VOICE_UNKNOWN_ALIAS",
+            Self::DisabledAlias => "VOICE_ALIAS_DISABLED",
+            Self::DeviceCredentialRequired => "VOICE_DEVICE_CREDENTIAL_REQUIRED",
             Self::SoulUnavailable => "VOICE_SOUL_UNAVAILABLE",
             Self::OwnerIdentityRequired => "VOICE_OWNER_IDENTITY_REQUIRED",
             Self::UserModelUnavailable => "VOICE_USER_MODEL_UNAVAILABLE",
@@ -51,7 +55,19 @@ impl Error {
     }
 
     pub(super) fn response(self) -> Response {
-        (StatusCode::BAD_REQUEST, axum::Json(self.frame())).into_response()
+        let status = match self {
+            Self::DisabledAlias | Self::DeviceCredentialRequired => StatusCode::FORBIDDEN,
+            _ => StatusCode::BAD_REQUEST,
+        };
+        (status, axum::Json(self.frame())).into_response()
+    }
+}
+
+pub(super) fn validate_alias(config: &Config, alias: &str) -> Result<(), Error> {
+    match config.agent(alias) {
+        None => Err(Error::UnknownAlias),
+        Some(agent) if !agent.enabled => Err(Error::DisabledAlias),
+        Some(_) => Ok(()),
     }
 }
 
@@ -70,9 +86,7 @@ pub(super) fn build(
     carrier: Option<&str>,
 ) -> Result<VoiceProjection, Error> {
     let provider = provider(carrier)?;
-    if config.agent(alias).is_none() {
-        return Err(Error::UnknownAlias);
-    }
+    validate_alias(config, alias)?;
     if !config
         .data_dir
         .join(SOUL_PROFILE_DB_FILE)
@@ -111,9 +125,9 @@ pub(super) fn build(
     Ok(VoiceProjection {
         version: 1,
         provider: provider.into(),
-        identity,
-        tone,
-        principles,
+        identity: identity.trim_end().to_owned(),
+        tone: tone.trim_end().to_owned(),
+        principles: principles.trim_end().to_owned(),
         owner_facts: project_active_heads(&heads, USER_MODEL_PROJECTION_DEFAULT_MAX_CHARS)
             .prompt_section,
     })

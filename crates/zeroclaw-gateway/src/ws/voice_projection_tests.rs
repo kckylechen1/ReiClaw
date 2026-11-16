@@ -76,6 +76,103 @@ async fn http_error(socket: &mut DeviceWire) -> Value {
 }
 
 #[tokio::test]
+async fn voice_projection_refuses_non_device_credentials_before_upgrade() {
+    for scenario in [
+        "paired",
+        "anonymous",
+        "legacy-bridge",
+        "owner-bridge",
+        "wrong-agent",
+        "no-chat",
+    ] {
+        let fixture = DeviceFixture::with_pairing(&["chat"], scenario != "anonymous").await;
+        owner_soul(&fixture);
+        let config = fixture.state.config.read().clone();
+        let store = UserModelStore::shared(&config.data_dir).unwrap();
+        let head = store
+            .record_owner_statement(
+                UserModelKind::Preference,
+                "PRIVATE_CONSENTED_FACT",
+                "style",
+                "global",
+                1,
+            )
+            .unwrap();
+        store
+            .set_voice_consent(&head.id, "moss-live", VoiceConsentAction::Grant, 0, 2)
+            .unwrap();
+        let token = match scenario {
+            "paired" => OWNER_TOKEN,
+            "anonymous" => {
+                fixture.state.config.write().gateway.bridges.clear();
+                ""
+            }
+            _ => {
+                let mut config = fixture.state.config.write();
+                let bridge = config.gateway.bridges.get_mut("device").unwrap();
+                match scenario {
+                    "legacy-bridge" => bridge.device = None,
+                    "owner-bridge" => {
+                        bridge.device = None;
+                        bridge.owner = Some(zeroclaw_config::schema::GatewayOwnerBridgeConfig {
+                            agent: "device-agent".into(),
+                            operations: vec!["chat".into()],
+                        });
+                    }
+                    "wrong-agent" => bridge.device.as_mut().unwrap().agent = "other-agent".into(),
+                    "no-chat" => bridge.device.as_mut().unwrap().operations = vec!["cancel".into()],
+                    _ => unreachable!(),
+                }
+                DEVICE_TOKEN
+            }
+        };
+        let (status, mut socket) = DeviceWire::upgrade(
+            fixture.address,
+            &format!(
+                "agent=device-agent&session_id={SESSION}&surface=voice&voice_provider=moss-live"
+            ),
+            token,
+        )
+        .await;
+        assert_eq!(status, 403, "{scenario}");
+        let response = http_error(&mut socket).await;
+        let expected = if matches!(scenario, "wrong-agent" | "no-chat") {
+            "BRIDGE_BINDING_REJECTED"
+        } else {
+            "VOICE_DEVICE_CREDENTIAL_REQUIRED"
+        };
+        assert_eq!(response["code"], expected, "{scenario}: {response}");
+        assert!(response.get("voice_projection").is_none());
+        assert!(!response.to_string().contains("PRIVATE_CONSENTED_FACT"));
+        assert!(fixture.seen.lock().is_empty());
+    }
+}
+
+#[tokio::test]
+async fn voice_projection_disabled_alias_is_refused_before_build() {
+    let fixture = DeviceFixture::new(&["chat"]).await;
+    let config = {
+        let mut config = fixture.state.config.write();
+        config.agents.get_mut("device-agent").unwrap().enabled = false;
+        config.clone()
+    };
+    // An unreadable store would fail if projection construction were attempted.
+    std::fs::create_dir(config.data_dir.join(SOUL_PROFILE_DB_FILE)).unwrap();
+    let (status, mut socket) = DeviceWire::upgrade(
+        fixture.address,
+        &format!("agent=device-agent&session_id={SESSION}&surface=voice&voice_provider=moss-live"),
+        DEVICE_TOKEN,
+    )
+    .await;
+    assert_eq!(status, 403);
+    let response = http_error(&mut socket).await;
+    assert_eq!(response["code"], "VOICE_ALIAS_DISABLED");
+    assert!(response.get("voice_projection").is_none());
+    assert!(!config.data_dir.join("user_model.db").exists());
+    assert!(fixture.seen.lock().is_empty());
+}
+
+#[tokio::test]
 async fn voice_projection_real_handshake_equals_persona_bytes_and_excludes_private_layers() {
     let fixture = DeviceFixture::new(&["chat", "cancel"]).await;
     let soul = owner_soul(&fixture);
@@ -179,8 +276,6 @@ async fn voice_projection_real_handshake_equals_persona_bytes_and_excludes_priva
     );
     assert_eq!(projection["version"], 1);
     assert_eq!(projection["provider"], "moss-live");
-    let profile = soul.profile("device-agent").unwrap();
-    assert_eq!(projection["identity"], render_identity(&profile).unwrap());
     assert!(
         projection["identity"]
             .as_str()
@@ -193,20 +288,21 @@ async fn voice_projection_real_handshake_equals_persona_bytes_and_excludes_priva
             .unwrap()
             .contains(IDENTITY_HONESTY_LINE)
     );
-    assert_eq!(
-        projection["principles"],
-        render_principles(&profile).unwrap()
-    );
-    assert_eq!(
-        projection["tone"],
-        resolve_effective_tone(&config, "device-agent", Some(&profile))
-            .0
-            .to_prompt_section()
-            .unwrap()
-    );
     let ordinary = persona_projection(&config, "device-agent").section.unwrap();
-    for field in ["identity", "principles", "tone"] {
-        assert!(ordinary.contains(projection[field].as_str().unwrap()));
+    // Split the assembled persona, preserving its exact section bytes. Renderer
+    // output alone misses persona_projection's trim_end/join boundary.
+    for (field, heading, next) in [
+        ("identity", "## Identity", "## Principles"),
+        ("principles", "## Principles", "## Tone"),
+        ("tone", "## Tone", TONE_EXEMPLARS_FRAMING_LINE),
+    ] {
+        let section = &ordinary[ordinary.find(heading).unwrap()..];
+        let expected = section.split_once(&format!("\n\n{next}")).unwrap().0;
+        assert_eq!(
+            projection[field].as_str().unwrap().as_bytes(),
+            expected.as_bytes(),
+            "{field}"
+        );
     }
     assert!(
         ordinary.contains("PRIVATE_SELF_STORY")
@@ -433,9 +529,15 @@ impl zeroclaw_infra::session_backend::SessionBackend for PausedMetadata {
 
 #[tokio::test]
 async fn voice_projection_rechecks_live_admission_after_metadata_wait() {
-    for reduction in ["bridge", "chat", "alias", "paired", "anonymous-mode"] {
-        let mut fixture =
-            DeviceFixture::with_pairing(&["chat"], reduction != "anonymous-mode").await;
+    for reduction in [
+        "bridge",
+        "chat",
+        "alias",
+        "credential",
+        "device-scope",
+        "device-agent",
+    ] {
+        let mut fixture = DeviceFixture::new(&["chat"]).await;
         owner_soul(&fixture);
         let config = fixture.state.config.read().clone();
         let facts = UserModelStore::shared(&config.data_dir).unwrap();
@@ -451,10 +553,6 @@ async fn voice_projection_rechecks_live_admission_after_metadata_wait() {
         facts
             .set_voice_consent(&head.id, "moss-live", VoiceConsentAction::Grant, 0, 2)
             .unwrap();
-        let initial_bridge = config.gateway.bridges["device"].clone();
-        if reduction == "anonymous-mode" {
-            fixture.state.config.write().gateway.bridges.clear();
-        }
         let (release_tx, release_rx) = std::sync::mpsc::channel();
         let backend = Arc::new(PausedMetadata {
             inner: fixture.state.session_backend.as_ref().unwrap().clone(),
@@ -471,17 +569,12 @@ async fn voice_projection_rechecks_live_admission_after_metadata_wait() {
         fixture.tasks.push(zeroclaw_spawn::spawn!(async move {
             axum::serve(listener, app).await.unwrap();
         }));
-        let token = match reduction {
-            "paired" => OWNER_TOKEN,
-            "anonymous-mode" => "",
-            _ => DEVICE_TOKEN,
-        };
         let (status, mut socket) = DeviceWire::upgrade(
             address,
             &format!(
                 "agent=device-agent&session_id={SESSION}&surface=voice&voice_provider=moss-live"
             ),
-            token,
+            DEVICE_TOKEN,
         )
         .await;
         assert_eq!(status, 101);
@@ -516,17 +609,41 @@ async fn voice_projection_rechecks_live_admission_after_metadata_wait() {
                     .unwrap()
                     .enabled = false
             }
-            "paired" => {
-                fixture.state.pairing.revoke_token(OWNER_TOKEN);
-            }
-            "anonymous-mode" => {
+            "credential" => {
                 fixture
                     .state
                     .config
                     .write()
                     .gateway
                     .bridges
-                    .insert("device".into(), initial_bridge);
+                    .get_mut("device")
+                    .unwrap()
+                    .token_hash = zeroclaw_config::tokens::hash_token("rotated-device-token");
+            }
+            "device-scope" => {
+                fixture
+                    .state
+                    .config
+                    .write()
+                    .gateway
+                    .bridges
+                    .get_mut("device")
+                    .unwrap()
+                    .device = None;
+            }
+            "device-agent" => {
+                fixture
+                    .state
+                    .config
+                    .write()
+                    .gateway
+                    .bridges
+                    .get_mut("device")
+                    .unwrap()
+                    .device
+                    .as_mut()
+                    .unwrap()
+                    .agent = "other-agent".into();
             }
             _ => unreachable!(),
         }
@@ -534,7 +651,12 @@ async fn voice_projection_rechecks_live_admission_after_metadata_wait() {
         let first = socket.next().await.unwrap();
         assert_eq!(first["type"], "error", "{reduction}: {first}");
         assert_eq!(
-            first["code"], "VOICE_AUTHORIZATION_CHANGED",
+            first["code"],
+            if reduction == "alias" {
+                "VOICE_ALIAS_DISABLED"
+            } else {
+                "VOICE_AUTHORIZATION_CHANGED"
+            },
             "{reduction}: {first}"
         );
         assert!(first.get("voice_projection").is_none());

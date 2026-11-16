@@ -28,6 +28,55 @@ async fn consent_http(
 }
 
 #[tokio::test]
+async fn voice_consent_legacy_paired_token_cannot_read_grant_or_revoke() {
+    let (dir, state) = state_with_tempdir();
+    assert!(!state.config.read().gateway.operator.is_configured());
+    let store = UserModelStore::open(dir.path()).unwrap();
+    let head = store
+        .record_owner_statement(
+            UserModelKind::Preference,
+            "Synthetic private fact.",
+            "style",
+            "global",
+            1,
+        )
+        .unwrap();
+    // Exercise grant with no receipt and revoke with a real grant to preserve.
+    for (action, revision) in [("grant", 0), ("revoke", 1)] {
+        let before = store.voice_consent(&head.id, "moss-live").unwrap();
+        let payload = serde_json::json!({"provider":"moss-live", "action":action, "expected_consent_revision":revision}).to_string();
+        for token in [Some("op-token"), None] {
+            for method in ["GET", "PUT"] {
+                let (status, response) =
+                    consent_http(&state, &head.id, method, token, &payload).await;
+                assert_eq!(status, StatusCode::FORBIDDEN);
+                assert_eq!(response["code"], "VOICE_CONSENT_OPERATOR_CONFIG_REQUIRED");
+                assert!(
+                    response["message"]
+                        .as_str()
+                        .unwrap()
+                        .contains("gateway.operator.token_hashes")
+                );
+                assert!(response.get("receipt").is_none());
+                assert_eq!(store.voice_consent(&head.id, "moss-live").unwrap(), before);
+            }
+        }
+        if revision == 0 {
+            store
+                .set_voice_consent(
+                    &head.id,
+                    "moss-live",
+                    zeroclaw_memory::companion::VoiceConsentAction::Grant,
+                    0,
+                    2,
+                )
+                .unwrap();
+        }
+    }
+    assert_eq!(store.active_heads(None).unwrap(), [head]);
+}
+
+#[tokio::test]
 async fn voice_consent_routes_gate_before_parsing_and_persist_exact_decisions() {
     let (dir, state) = state_with_tempdir();
     state.config.write().gateway.operator.token_hashes =
