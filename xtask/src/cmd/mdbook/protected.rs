@@ -625,7 +625,7 @@ mod tests {
 
     #[test]
     fn extracts_registry_provider_terms() {
-        assert!(texts("Configure OpenRouter or Anthropic.").contains(&"OpenRouter".to_string()));
+        assert!(texts("Configure Anthropic or OpenAI.").contains(&"Anthropic".to_string()));
     }
 
     #[test]

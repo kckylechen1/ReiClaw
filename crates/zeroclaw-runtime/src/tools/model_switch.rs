@@ -377,12 +377,6 @@ fn hardcoded_models_for(provider_family: &str) -> Vec<String> {
             "claude-3-opus",
             "claude-3-haiku",
         ],
-        "openrouter" => vec![
-            "anthropic/claude-sonnet-4-6",
-            "openai/gpt-4o",
-            "google/gemini-pro",
-            "meta-llama/llama-3-70b-instruct",
-        ],
         "groq" => vec![
             "llama-3.3-70b-versatile",
             "mixtral-8x7b-32768",
@@ -599,11 +593,10 @@ mod tests {
 
     #[test]
     fn hardcoded_fallback_covers_known_families() {
-        // The nine families that have hardcoded fallback arms.
+        // The eight families that have hardcoded fallback arms.
         for family in [
             "openai",
             "anthropic",
-            "openrouter",
             "groq",
             "ollama",
             "deepseek",
