@@ -252,10 +252,6 @@ hermes = "planned"
 openclaw = "none"
 hermes = "none"
 
-[providers.copilot]
-openclaw = "supported"
-hermes = "supported"
-
 [providers.lmstudio]
 openclaw = "supported"
 hermes = "supported"

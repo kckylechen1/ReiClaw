@@ -17,7 +17,6 @@ use anyhow::{Context, Result};
 pub(crate) const SUPPORTED_PROXY_SERVICE_KEYS: &[&str] = &[
     "model_provider.anthropic",
     "model_provider.compatible",
-    "model_provider.copilot",
     "model_provider.gemini",
     "model_provider.glm",
     "model_provider.ollama",

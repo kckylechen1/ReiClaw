@@ -20,7 +20,6 @@ pub fn catalog_source_for(family: &str) -> Option<(Option<&'static str>, Option<
         "anthropic" => (Some("anthropic"), Some("anthropic")),
         "gemini" => (Some("google"), Some("google")),
         "openrouter" => (Some("openrouter"), Some("openrouter")),
-        "copilot" => (Some("github-copilot"), None),
         "minimax" => (Some("minimax"), Some("minimax")),
         "lmstudio" => (Some("lmstudio"), None),
         "kilo" => (Some("kilo"), None),
@@ -339,8 +338,8 @@ mod tests {
 
     #[test]
     fn bespoke_family_with_only_models_dev() {
-        let (md, or) = catalog_source_for("copilot").expect("copilot is canonical");
-        assert_eq!(md, Some("github-copilot"));
+        let (md, or) = catalog_source_for("lmstudio").expect("lmstudio is canonical");
+        assert_eq!(md, Some("lmstudio"));
         assert_eq!(or, None);
     }
 

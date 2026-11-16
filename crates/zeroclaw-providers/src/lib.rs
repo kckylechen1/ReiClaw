@@ -5,7 +5,6 @@ pub mod anthropic;
 pub mod auth;
 pub mod catalog;
 pub mod compatible;
-pub mod copilot;
 pub mod dispatch;
 pub mod factory;
 pub mod gemini;
@@ -1058,7 +1057,6 @@ pub fn canonicalize_v2_model_provider_name(name: &str) -> &str {
         "01ai" | "lingyiwanwu" => "yi",
         "tencent" => "hunyuan",
         "baidu" => "qianfan",
-        "github-copilot" => "copilot",
         "ovhcloud" => "ovh",
         "opencode-zen" => "opencode",
         "llama.cpp" => "llamacpp",
@@ -1937,7 +1935,6 @@ pub fn list_model_providers() -> Vec<ModelProviderInfo> {
             ("novita", "Novita AI", false),
             ("perplexity", "Perplexity", false),
             ("cohere", "Cohere", false),
-            ("copilot", "GitHub Copilot", false),
             ("kilo", "Kilo", false),
             ("lmstudio", "LM Studio", true),
             ("llamacpp", "llama.cpp server", true),

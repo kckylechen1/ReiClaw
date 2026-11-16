@@ -242,7 +242,6 @@ to one provider.
 |---|---|
 | `provider:anthropic` | `anthropic.rs` |
 | `provider:compatible` | `compatible.rs` |
-| `provider:copilot` | `copilot.rs` |
 | `provider:gemini` | `gemini.rs` |
 | `provider:openai` | `openai.rs`, `openai_codex.rs` |
 | `provider:openrouter` | `openrouter.rs` |
