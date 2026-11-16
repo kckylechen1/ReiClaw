@@ -553,7 +553,9 @@ async fn ingress_capacity_and_deadline_bound_admission_without_claiming_a_stop()
         selected_data_dir: fixture.state.config.read().data_dir.clone(),
         tracker: PerSenderTracker::new(),
         slots: Arc::new(tokio::sync::Semaphore::new(1)),
-        timeout: Duration::from_millis(300),
+        // The deadline must cover the synthetic MCP handshake before the held
+        // start; 300ms raced it under a loaded full-suite run.
+        timeout: Duration::from_millis(2000),
     });
     let app = router(fixture.state.clone(), context);
     let caller_app = app.clone();
