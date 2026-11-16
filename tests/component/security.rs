@@ -21,7 +21,7 @@ use zeroclaw::config::Config;
 #[test]
 fn security_config_secret_property_readback_masks_api_key() {
     let mut config = Config::default();
-    let path = "providers.models.openrouter.default.api_key";
+    let path = "providers.models.anthropic.default.api_key";
     let secret = "sk-1234567890abcdef";
 
     assert!(
@@ -31,7 +31,7 @@ fn security_config_secret_property_readback_masks_api_key() {
     config
         .providers
         .models
-        .ensure("openrouter", "default")
+        .ensure("anthropic", "default")
         .expect("openrouter provider entry should be creatable");
     config
         .set_prop(path, secret)

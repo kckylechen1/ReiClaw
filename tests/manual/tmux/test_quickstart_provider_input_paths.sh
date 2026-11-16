@@ -19,4 +19,4 @@ run_case() {
 }
 
 run_case ollama-local --model-provider ollama --model qwen2.5:7b --agent ollama
-run_case openrouter-hosted --model-provider openrouter --model openrouter/auto --api-key dummy-key --agent or
+run_case openai-hosted --model-provider openai --model gpt-test --api-key dummy-key --agent or

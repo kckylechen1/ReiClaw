@@ -16,7 +16,7 @@ fn frame(value: serde_json::Value) -> Vec<u8> {
 async fn events(chunks: Vec<Vec<u8>>) -> Vec<StreamResult<StreamEvent>> {
     tokio::time::timeout(
         Duration::from_secs(2),
-        sse_bytes_to_events(response(chunks), false).collect(),
+        sse_bytes_to_events_for_contract(response(chunks), false, false).collect(),
     )
     .await
     .expect("parser must finish instead of retaining an invalid prefix")
@@ -157,7 +157,7 @@ async fn invalid_utf8_fails_even_when_the_server_keeps_the_body_open() {
         } else {
             tokio::time::timeout(
                 Duration::from_secs(2),
-                sse_bytes_to_events(response, false).next(),
+                sse_bytes_to_events_for_contract(response, false, false).next(),
             )
             .await
             .expect("invalid UTF-8 must fail without waiting for EOF")
