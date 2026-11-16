@@ -634,3 +634,27 @@ async fn voice_projection_rechecks_live_admission_after_metadata() {
         assert!(fixture.seen.lock().is_empty());
     }
 }
+
+#[tokio::test]
+async fn voice_refuses_missing_and_invalid_device_profiles_at_upgrade() {
+    for invalid in ["missing", "unknown", "full", "unbounded", "prompt", "mcp"] {
+        let fixture = DeviceFixture::new(&["chat"]).await;
+        {
+            let mut config = fixture.state.config.write();
+            match invalid {
+                "missing" => config.gateway.bridges.get_mut("device").unwrap().device.as_mut().unwrap().risk_profile = None,
+                "unknown" => config.gateway.bridges.get_mut("device").unwrap().device.as_mut().unwrap().risk_profile = Some("absent".into()),
+                "full" => config.risk_profiles.get_mut("public-device").unwrap().level = zeroclaw_config::autonomy::AutonomyLevel::Full,
+                "unbounded" => config.risk_profiles.get_mut("public-device").unwrap().allowed_tools = None,
+                "prompt" => config.risk_profiles.get_mut("public-device").unwrap().always_ask.push("*".into()),
+                "mcp" => config.risk_profiles.get_mut("public-device").unwrap().mcp_discovered_tool_policy = zeroclaw_config::autonomy::McpDiscoveredToolPolicy::AutoAdmit,
+                _ => unreachable!(),
+            }
+        }
+        let (status, mut socket) = DeviceWire::upgrade(fixture.address,
+            &format!("agent=device-agent&session_id={SESSION}&surface=voice&voice_provider=test"), DEVICE_TOKEN).await;
+        assert_eq!(status, 403, "{invalid}");
+        assert_eq!(http_error(&mut socket).await["code"], "VOICE_DEVICE_PROFILE_INVALID");
+        assert!(fixture.seen.lock().is_empty());
+    }
+}

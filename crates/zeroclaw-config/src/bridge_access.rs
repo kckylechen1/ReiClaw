@@ -8,10 +8,131 @@ use zeroclaw_macros::Configurable;
 #[serde(default, deny_unknown_fields)]
 pub struct GatewayDeviceBridgeConfig {
     pub agent: String,
+    /// Public-tier chat policy. Required for chat, optional for delegation-only bridges.
+    pub risk_profile: Option<String>,
     pub operations: Vec<String>,
 }
 
+/// ADR-023 A2 fixed deny set, derived from the tools/runtime registries.
+/// Keep this independent of optional tool features and of client-selected surfaces.
+pub const DEVICE_DENIED_TOOLS: &[&str] = &[
+    "shell",
+    "process",
+    "file_read",
+    "file_write",
+    "file_edit",
+    "file_download",
+    "file_upload",
+    "file_upload_bundle",
+    "glob_search",
+    "content_search",
+    "git_operations",
+    "backup",
+    "data_management",
+    "notify",
+    "send_message_to_peer",
+    "ask_user",
+    "escalate_to_human",
+    "reaction",
+    "poll",
+    "channel_room",
+    "email_read",
+    "email_search",
+    "discord_search",
+    "memory_store",
+    "memory_recall",
+    "memory_forget",
+    "memory_export",
+    "memory_purge",
+    "note_owner_correction",
+    "sessions_list",
+    "sessions_history",
+    "sessions_send",
+    "sessions_current",
+    "cron_add",
+    "cron_list",
+    "cron_remove",
+    "cron_update",
+    "cron_run",
+    "cron_runs",
+    "schedule",
+    "tool_search",
+];
+
+/// Shared by configuration validation and credential admission, including reloads.
+pub fn validate_device_profile(
+    profile: &crate::schema::RiskProfileConfig,
+) -> Result<(), &'static str> {
+    use crate::autonomy::{AutonomyLevel, McpDiscoveredToolPolicy};
+    if profile.level == AutonomyLevel::Full {
+        return Err("device risk profile must not use full autonomy");
+    }
+    let allowed = profile
+        .allowed_tools
+        .as_ref()
+        .ok_or("device risk profile requires allowed_tools")?;
+    if profile.mcp_discovered_tool_policy != McpDiscoveredToolPolicy::ExplicitOnly {
+        return Err("device MCP policy must be explicit_only");
+    }
+    if !profile.always_ask.is_empty() || profile.approval_route.is_some() {
+        return Err("device risk profile must not prompt or route approvals");
+    }
+    for tool in allowed {
+        if DEVICE_DENIED_TOOLS.contains(&tool.as_str()) {
+            return Err("device risk profile contains a denied tool");
+        }
+        let full_mcp_name = tool.split_once("__").is_some_and(|(server, name)| {
+            !server.is_empty()
+                && !name.is_empty()
+                && tool
+                    .bytes()
+                    .all(|c| c.is_ascii_alphanumeric() || matches!(c, b'_' | b'-' | b'.'))
+        });
+        if tool != "web_search_tool" && !full_mcp_name {
+            return Err("public device tools must be web_search_tool or full server__tool names");
+        }
+        if !profile.auto_approve.contains(tool) {
+            return Err("every device allowed tool must be explicitly auto_approved");
+        }
+    }
+    Ok(())
+}
+
+/// Whether two bridge namespaces share any exact session or prefix.
+pub fn namespaces_overlap(
+    a: &crate::schema::GatewayBridgeConfig,
+    b: &crate::schema::GatewayBridgeConfig,
+) -> bool {
+    a.sessions.iter().any(|s| b.allows_session(s))
+        || b.sessions.iter().any(|s| a.allows_session(s))
+        || a.session_prefix
+            .as_deref()
+            .filter(|p| !p.is_empty())
+            .is_some_and(|a| {
+                b.session_prefix
+                    .as_deref()
+                    .filter(|p| !p.is_empty())
+                    .is_some_and(|b| a.starts_with(b) || b.starts_with(a))
+            })
+}
+
 impl GatewayDeviceBridgeConfig {
+    pub fn validated_profile<'a>(
+        &self,
+        config: &'a crate::schema::Config,
+    ) -> Result<&'a crate::schema::RiskProfileConfig, &'static str> {
+        let name = self
+            .risk_profile
+            .as_deref()
+            .ok_or("device chat requires risk_profile")?;
+        let profile = config
+            .risk_profiles
+            .get(name)
+            .ok_or("device risk profile does not exist")?;
+        validate_device_profile(profile)?;
+        Ok(profile)
+    }
+
     pub fn valid_operation(operation: &str) -> bool {
         matches!(
             operation,
@@ -62,6 +183,7 @@ mod tests {
     fn delegation_grants_are_explicit_and_do_not_add_chat_cancel_or_owner_authority() {
         let mut access = GatewayDeviceBridgeConfig {
             agent: "edge".into(),
+            risk_profile: None,
             operations: vec!["chat".into(), "cancel".into()],
         };
         for op in [
@@ -134,8 +256,65 @@ mod owner_tests {
         assert!(!owner.allows("owner", "chat"));
         let device = GatewayDeviceBridgeConfig {
             agent: "owner".into(),
+            risk_profile: None,
             operations: vec!["chat".into(), "approval_response".into()],
         };
         assert!(!device.allows("owner", "approval_response"));
+    }
+}
+
+#[cfg(test)]
+mod confinement_tests {
+    use super::*;
+    use crate::schema::{Config, GatewayBridgeConfig, RiskProfileConfig};
+
+    fn public_profile() -> RiskProfileConfig {
+        RiskProfileConfig {
+            allowed_tools: Some(vec!["web_search_tool".into(), "search__lookup".into()]),
+            auto_approve: vec!["web_search_tool".into(), "search__lookup".into()],
+            always_ask: vec![], ..Default::default()
+        }
+    }
+
+    #[test]
+    fn device_profile_rejects_each_authority_escape() {
+        assert!(validate_device_profile(&public_profile()).is_ok());
+        for tool in DEVICE_DENIED_TOOLS.iter().copied().chain(["*", "lookup", "search__*", "__lookup", "search__", "pipeline"]) {
+            let mut profile = public_profile();
+            profile.allowed_tools = Some(vec![tool.into()]);
+            profile.auto_approve = vec![tool.into()];
+            assert!(validate_device_profile(&profile).is_err(), "{tool}");
+        }
+        for mutation in 0..6 {
+            let mut profile = public_profile();
+            match mutation {
+                0 => profile.level = crate::autonomy::AutonomyLevel::Full,
+                1 => profile.allowed_tools = None,
+                2 => profile.auto_approve.clear(),
+                3 => profile.always_ask.push("web_search_tool".into()),
+                4 => profile.mcp_discovered_tool_policy = crate::autonomy::McpDiscoveredToolPolicy::AutoAdmit,
+                5 => profile.approval_route = Some(toml::from_str("approver_channel = 'owner'").unwrap()),
+                _ => unreachable!(),
+            }
+            assert!(validate_device_profile(&profile).is_err(), "mutation {mutation}");
+        }
+        let mut config = Config::default();
+        let device = GatewayDeviceBridgeConfig { risk_profile: Some("public".into()), ..Default::default() };
+        assert!(device.validated_profile(&config).is_err());
+        config.risk_profiles.insert("public".into(), public_profile());
+        assert!(device.validated_profile(&config).is_ok());
+    }
+
+    #[test]
+    fn device_namespaces_reject_exact_prefix_and_nested_prefix_collisions() {
+        let device = GatewayBridgeConfig { sessions: vec!["device-one".into()], session_prefix: Some("edge-".into()), ..Default::default() };
+        for other in [
+            GatewayBridgeConfig { sessions: vec!["device-one".into()], ..Default::default() },
+            GatewayBridgeConfig { sessions: vec!["edge-two".into()], ..Default::default() },
+            GatewayBridgeConfig { session_prefix: Some("device-".into()), ..Default::default() },
+            GatewayBridgeConfig { session_prefix: Some("edge-sub-".into()), ..Default::default() },
+            GatewayBridgeConfig { session_prefix: Some("edge".into()), ..Default::default() },
+        ] { assert!(namespaces_overlap(&device, &other)); }
+        assert!(!namespaces_overlap(&device, &GatewayBridgeConfig { sessions: vec!["owner".into()], session_prefix: Some("other-".into()), ..Default::default() }));
     }
 }

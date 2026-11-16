@@ -42,6 +42,7 @@ impl Agent {
             None,
             None,
             None,
+            false,
         )
         .await
     }
@@ -63,6 +64,7 @@ impl Agent {
             None,
             None,
             None,
+            false,
         )
         .await
     }
@@ -96,6 +98,48 @@ impl Agent {
             None,
             Some(live_config),
             Some(task_identity),
+            false,
+        )
+        .await
+    }
+
+    /// ADR-023 public device session. The alias and persona stay the same;
+    /// its executable policy is a private snapshot of the credential's profile.
+    pub async fn from_device_bridge_config(
+        config: &Config,
+        agent_alias: &str,
+        session_cwd: &Path,
+        device: &zeroclaw_config::bridge_access::GatewayDeviceBridgeConfig,
+    ) -> Result<Self> {
+        device
+            .validated_profile(config)
+            .map_err(anyhow::Error::msg)?;
+        anyhow::ensure!(device.agent == agent_alias, "device agent mismatch");
+        let mut confined = config.clone();
+        let mut alias = config
+            .resolved_agent_config(agent_alias)
+            .context("missing device agent")?;
+        // Resolve a card before replacing its policy, retaining persona/MCP reach.
+        if let Some(card) = config.card_for_agent(agent_alias) {
+            alias.persona = card.persona.clone();
+        }
+        alias.card.clear();
+        alias.risk_profile = device
+            .risk_profile
+            .clone()
+            .context("missing device profile")?;
+        confined.agents.insert(agent_alias.to_owned(), alias);
+        Self::from_config_with_session_cwd_and_mcp_approval_mode(
+            &confined,
+            agent_alias,
+            Some(session_cwd),
+            true,
+            false,
+            true,
+            None,
+            None,
+            None,
+            true,
         )
         .await
     }
@@ -122,6 +166,7 @@ impl Agent {
             tui_env,
             None,
             None,
+            false,
         )
         .await
     }
@@ -137,6 +182,7 @@ impl Agent {
         tui_env: Option<std::collections::HashMap<String, String>>,
         live_config: Option<Arc<parking_lot::RwLock<Config>>>,
         task_identity: Option<crate::tools::task_context::TaskIdentity>,
+        device_bound: bool,
     ) -> Result<Self> {
         let agent_cfg = config
             .agent(agent_alias)
@@ -212,12 +258,16 @@ impl Agent {
                     );
                 }
             };
-        let memory: Arc<dyn Memory> = zeroclaw_memory::create_memory_for_agent(
-            config,
-            agent_alias,
-            agent_model_provider.and_then(|e| e.api_key.as_deref()),
-        )
-        .await?;
+        let memory: Arc<dyn Memory> = if exclude_memory {
+            Arc::new(zeroclaw_memory::NoneMemory::new("none"))
+        } else {
+            zeroclaw_memory::create_memory_for_agent(
+                config,
+                agent_alias,
+                agent_model_provider.and_then(|e| e.api_key.as_deref()),
+            )
+            .await?
+        };
 
         let all_tools_result = tools::all_tools_with_runtime(
             Arc::new(config.clone()),
@@ -326,7 +376,7 @@ impl Agent {
             .collect();
         let available_hints: Vec<String> = route_model_by_hint.keys().cloned().collect();
 
-        let response_cache = if config.memory.response_cache_enabled {
+        let response_cache = if !device_bound && config.memory.response_cache_enabled {
             zeroclaw_memory::response_cache::ResponseCache::with_hot_cache(
                 &config.data_dir,
                 config.memory.response_cache_ttl_minutes,
@@ -344,6 +394,7 @@ impl Agent {
         } else {
             ApprovalManager::for_non_interactive(risk_profile)
         }
+        .with_prompt_denial(device_bound)
         .with_store_at(&config.data_dir);
 
         let live_pacing_config = live_config.clone();
@@ -363,7 +414,11 @@ impl Agent {
         // Read before projecting, so a Soul change that lands in between is
         // picked up on the first turn instead of being missed.
         let soul_stamp = crate::agent::turn_context::soul_revision_stamp(config, agent_alias);
-        let persona = crate::agent::persona_projection::persona_projection(config, agent_alias);
+        let persona = if device_bound {
+            crate::agent::persona_projection::device_persona_projection(config, agent_alias)
+        } else {
+            crate::agent::persona_projection::persona_projection(config, agent_alias)
+        };
 
         let mut agent = Agent::builder()
             .model_provider(model_provider)
@@ -425,6 +480,12 @@ impl Agent {
             })
             .build()?;
 
+        agent.device_bound = device_bound;
+        if device_bound {
+            // Three tool rounds, or the alias's lower configured bound.
+            agent.config.resolved.max_tool_iterations =
+                agent.config.resolved.max_tool_iterations.min(3);
+        }
         agent.live_pacing_config = live_pacing_config;
         agent.sync_side_query_snapshot(None);
 

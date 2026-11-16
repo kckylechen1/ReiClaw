@@ -28,6 +28,7 @@ pub(super) enum Error {
     UnknownAlias,
     DisabledAlias,
     DeviceCredentialRequired,
+    InvalidDeviceProfile,
     SoulUnavailable,
     OwnerIdentityRequired,
     UserModelUnavailable,
@@ -42,6 +43,7 @@ impl Error {
             Self::UnknownAlias => "VOICE_UNKNOWN_ALIAS",
             Self::DisabledAlias => "VOICE_ALIAS_DISABLED",
             Self::DeviceCredentialRequired => "VOICE_DEVICE_CREDENTIAL_REQUIRED",
+            Self::InvalidDeviceProfile => "VOICE_DEVICE_PROFILE_INVALID",
             Self::SoulUnavailable => "VOICE_SOUL_UNAVAILABLE",
             Self::OwnerIdentityRequired => "VOICE_OWNER_IDENTITY_REQUIRED",
             Self::UserModelUnavailable => "VOICE_USER_MODEL_UNAVAILABLE",
@@ -56,7 +58,9 @@ impl Error {
 
     pub(super) fn response(self) -> Response {
         let status = match self {
-            Self::DisabledAlias | Self::DeviceCredentialRequired => StatusCode::FORBIDDEN,
+            Self::DisabledAlias | Self::DeviceCredentialRequired | Self::InvalidDeviceProfile => {
+                StatusCode::FORBIDDEN
+            }
             _ => StatusCode::BAD_REQUEST,
         };
         (status, axum::Json(self.frame())).into_response()

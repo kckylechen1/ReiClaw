@@ -184,6 +184,7 @@ impl Fixture {
                 token_hash: zeroclaw_config::tokens::hash_token(TOKEN),
                 sessions: vec!["voice".into(), "voice-next".into()],
                 device: Some(GatewayDeviceBridgeConfig {
+                    risk_profile: None,
                     agent: AGENT.into(),
                     operations: vec![
                         "tachi_start".into(),

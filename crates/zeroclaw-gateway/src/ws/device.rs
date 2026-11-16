@@ -7,9 +7,27 @@ use zeroclaw_config::schema::{Config, GatewayBridgeConfig};
 pub(super) struct Binding {
     pub name: String,
     pub initial: GatewayBridgeConfig,
+    pub profile: Option<serde_json::Value>,
 }
 
 impl Binding {
+    pub fn new(name: String, initial: GatewayBridgeConfig, config: &Config) -> Self {
+        let profile = initial
+            .device
+            .as_ref()
+            .and_then(|device| device.validated_profile(config).ok())
+            .and_then(|profile| serde_json::to_value(profile).ok());
+        Self {
+            name,
+            initial,
+            profile,
+        }
+    }
+
+    pub fn device_bound(&self) -> bool {
+        self.initial.device.is_some()
+    }
+
     pub fn restricted(&self) -> bool {
         self.initial.scoped()
     }
@@ -18,6 +36,23 @@ impl Binding {
         let Some(current) = config.gateway.bridges.get(&self.name) else {
             return false;
         };
+        if !namespace_allowed(config, Some(self), session) {
+            return false;
+        }
+        if self.device_bound() {
+            let current_profile = current
+                .device
+                .as_ref()
+                .and_then(|device| device.validated_profile(config).ok())
+                .and_then(|profile| serde_json::to_value(profile).ok());
+            if self.profile.is_none()
+                || self.profile != current_profile
+                || self.initial.device.as_ref().map(|d| &d.risk_profile)
+                    != current.device.as_ref().map(|d| &d.risk_profile)
+            {
+                return false;
+            }
+        }
         let hash = self.initial.token_hash.to_ascii_lowercase();
         if !zeroclaw_config::tokens::constant_time_eq(
             &hash,
@@ -63,6 +98,28 @@ impl Binding {
     }
 }
 
+/// Check both raw and persisted memory identities. No credential may cross a
+/// device namespace, including paired tokens and legacy/owner bridges.
+pub(super) fn namespace_allowed(config: &Config, binding: Option<&Binding>, session: &str) -> bool {
+    let sanitized = zeroclaw_api::session_keys::sanitize_session_key(session);
+    let device = binding.filter(|b| b.device_bound());
+    if let Some(binding) = device
+        && (!binding.initial.allows_session(session)
+            || !config
+                .gateway
+                .bridges
+                .get(&binding.name)
+                .is_some_and(|b| b.allows_session(session)))
+    {
+        return false;
+    }
+    config.gateway.bridges.iter().all(|(name, bridge)| {
+        bridge.device.is_none()
+            || (!bridge.allows_session(session) && !bridge.allows_session(&sanitized))
+            || device.is_some_and(|binding| binding.name == *name)
+    })
+}
+
 pub(super) fn permitted(
     state: &AppState,
     scope: &WsTurnScope,
@@ -71,6 +128,7 @@ pub(super) fn permitted(
 ) -> bool {
     let config = state.config.read();
     authenticated_mode(state, &config)
+        && namespace_allowed(&config, scope.bridge.as_ref(), &scope.session_id)
         && scope
             .bridge
             .as_ref()

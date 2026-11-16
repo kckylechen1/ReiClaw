@@ -29,6 +29,7 @@ token_hash = "<SHA-256 of a separately minted bridge token>"
 session_prefix = "yonbo-task-"
 
 [gateway.bridges.robot_tasks.device]
+# risk_profile may be omitted for delegation-only bridges; chat requires a valid public-tier profile.
 agent = "task_agent"
 operations = ["tachi_start", "tachi_status", "tachi_result", "tachi_cancel"]
 ```

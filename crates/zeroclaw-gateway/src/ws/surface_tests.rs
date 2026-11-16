@@ -142,6 +142,7 @@ async fn three_surfaces_render_same_turn_without_changing_soul_or_shared_history
             token_hash: zeroclaw_config::tokens::hash_token("synthetic-surface-device"),
             sessions: vec!["shared".into()], session_prefix: None, owner: None,
             device: Some(zeroclaw_config::schema::GatewayDeviceBridgeConfig {
+                        risk_profile: None,
                 agent: "web".into(), operations: vec!["chat".into()],
             }),
         });

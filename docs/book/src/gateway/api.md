@@ -552,7 +552,15 @@ sessions = ["device-session"]
 
 [gateway.bridges.device_chat.device]
 agent = "device-agent" # must name a configured, enabled agent
+risk_profile = "device_public"
 operations = ["chat"] # optionally also "answer" and "cancel"
+
+[risk_profiles.device_public]
+level = "supervised"
+allowed_tools = ["web_search_tool"]
+auto_approve = ["web_search_tool"]
+always_ask = []
+mcp_discovered_tool_policy = "explicit_only"
 ```
 
 The existing bridge configuration owns the credential and session scope. The
@@ -588,21 +596,40 @@ client-provided names or presentation surfaces do not confer authority.
 | Source intake/recovery, attachments, voice and unknown frames | Always refused |
 | `/ws/bridge` proactive outbox and HTTP attachment access | Refused |
 
-Owner approval remains on a separately authenticated owner connection. Chat
-access may observe the authorized session's output and approval requests; it
-cannot consume or decide those approvals. Device input is persisted as chat
-history without Operator learning provenance, even if a misconfigured token is
-also present in the paired-token set. Other owner-authenticated entrypoints are
-not a sandbox for such reused tokens, so dedicated credentials are mandatory.
-The agent's existing risk profile and tool approval policy still govern tools;
-this policy does not make all chat-triggered tools read-only.
+Every device-bound chat turn uses the bridge's `risk_profile`, regardless of
+`surface` or the agent's own autonomy level. The profile must exist, must not
+use `full`, and must explicitly list allowed tools. Public-tier tools are
+`web_search_tool` and individually named `<server>__<tool>` search MCP tools;
+MCP discovery must use `explicit_only`. Shell/process, file, messaging/channel,
+memory, session, cron/schedule tools and `tool_search` are always denied.
+Every allowed tool must appear in `auto_approve`; `always_ask` must be empty
+and `approval_route` absent. Any unexpected approval prompt is immediately
+denied without routing or waiting.
+
+`risk_profile` may be omitted on delegation-only device bridges, but those
+credentials cannot enter `/ws/chat`. With `surface=voice`, missing or invalid
+profiles return HTTP 403 with `VOICE_DEVICE_PROFILE_INVALID` at upgrade.
+The confinement itself also applies in builds without `voice-surface`.
+
+Device namespaces (`sessions` and `session_prefix`) must not overlap any other
+bridge. Paired, owner and legacy connections cannot create or attach to a
+device namespace, including via a `connect` session override. Device connections
+cannot leave their namespace. Owner approvals continue in separate owner sessions.
+
+The same agent alias keeps its Identity, Principles and Tone levels. Device
+turns omit Story, Tone exemplars, User Model and legacy persona/user files;
+`exclude_memory` disables recall, automatic context and agent memory writes.
+The gateway skips consolidation, while session transcript rows are still
+persisted without Operator learning provenance. Tool iterations are capped at
+**3**, or the agent's lower configured limit. Non-device chat policy is unchanged.
 
 Each socket retains its initial bridge identity and permission ceiling. Every
 new operation, queued turn admission and subsequent output checks the live
 configuration too. Removing/rotating the bridge credential or reducing its
 permissions therefore rejects new work on an open socket after the configuration
 change has been applied. Removing the `device` restriction cannot upgrade that
-socket to owner authority. Widened permissions need a new attachment. Revocation
+socket to owner authority. Profile changes invalidate existing device attachments;
+widened permissions need a new attachment. Revocation
 does not undo an already admitted effect or promise cancellation of a dispatched
 turn. Configuration reload timing is separate from operation authorization.
 

@@ -245,6 +245,52 @@ pub fn persona_projection(config: &Config, agent_alias: &str) -> PersonaProjecti
     }
 }
 
+/// Public device context: only governed Identity, Principles and Tone levels.
+/// Never reads the User Model or falls back to private workspace persona files.
+pub fn device_persona_projection(config: &Config, agent_alias: &str) -> PersonaProjection {
+    let profile = config
+        .data_dir
+        .is_dir()
+        .then(|| {
+            SoulProfileStore::shared(&config.data_dir).and_then(|store| {
+                store.ensure_seeded(
+                    agent_alias,
+                    zeroclaw_memory::companion::seed_name_for_agent(agent_alias),
+                    now_unix(),
+                )
+            })
+        })
+        .and_then(Result::ok);
+    let Some(profile) = profile else {
+        return degraded_projection(
+            config
+                .persona_for_agent(agent_alias)
+                .copied()
+                .unwrap_or_default(),
+            true,
+        );
+    };
+    let mut parts = Vec::new();
+    parts.extend(render_identity(&profile));
+    parts.extend(render_principles(&profile));
+    parts.extend(
+        zeroclaw_memory::companion::resolve_effective_tone(config, agent_alias, Some(&profile))
+            .0
+            .to_prompt_section(),
+    );
+    PersonaProjection {
+        section: Some(
+            parts
+                .iter()
+                .map(|s| s.trim_end())
+                .collect::<Vec<_>>()
+                .join("\n\n")
+                + "\n",
+        ),
+        legacy_files: LegacyPersonaFiles::SuppressAll,
+    }
+}
+
 /// The projection used when an initialized Soul store cannot be read: a
 /// fixed identity notice, the honesty floor, and the configured Tone.
 fn degraded_projection(
