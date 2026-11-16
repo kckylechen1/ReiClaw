@@ -57,6 +57,8 @@ pub use user_model::{
     UserModelStore, is_candidate_already_reviewed, is_user_model_head_conflict,
     project_active_heads, project_applicable_heads,
 };
+#[cfg(feature = "voice-surface")]
+pub use user_model::{VoiceConsentAction, VoiceConsentReceipt, validate_voice_provider};
 pub use user_model_scope::{ApplicabilityContext, Scope};
 
 /// Construct the companion store from config.

@@ -378,35 +378,67 @@ fn config_with_mcp_bundles(bundles: Vec<(&str, McpBundleConfig)>) -> Config {
     config
 }
 
-#[test]
-async fn sop_untrusted_payload_defaults_are_back_compat() {
-    let config: SopConfig = toml::from_str("").expect("empty SOP config should deserialize");
-
-    assert_eq!(config.untrusted_payload_max_bytes, 8192);
-    assert_eq!(config.untrusted_input_guard, "warn");
-    assert_eq!(config.untrusted_guard_sensitivity, 0.7);
-    assert!(config.untrusted_frame_warning);
-    assert!(config.untrusted_outbound_redact);
+#[::core::prelude::v1::test]
+fn retired_sop_config_rejects_direct_deserialization() {
+    for raw in [
+        "[sop]\n",
+        "[sop]\napproval_mode = \"out_of_band_required\"\nstep_scope_enforce = true\n",
+        "[sop.approval.groups.private_group]\nmembers = [\"private-member\"]\n",
+        "sop = false\n",
+        "sop = []\n",
+        "sop = \"zeroclaw-private-fixture\"\n",
+    ] {
+        let error = toml::from_str::<Config>(raw).unwrap_err();
+        // The parser's Display may add source context; the rejection itself
+        // must remain fixed and never interpolate submitted values.
+        assert_eq!(
+            error.message(),
+            crate::migration::RETIRED_SOP_CONFIG_MESSAGE
+        );
+    }
+    for value in [
+        serde_json::json!({}),
+        serde_json::json!({"approval": {"groups": {"private_group": {"members": ["private-member"]}}}}),
+        serde_json::json!(false),
+        serde_json::json!([]),
+        serde_json::Value::Null,
+    ] {
+        let error = serde_json::from_value::<Config>(serde_json::json!({"sop": value}))
+            .unwrap_err()
+            .to_string();
+        assert_eq!(error, crate::migration::RETIRED_SOP_CONFIG_MESSAGE);
+    }
+    assert!(toml::from_str::<Config>("").unwrap().sop.is_empty());
+    assert!(serde_json::from_str::<Config>("{}").unwrap().sop.is_empty());
 }
 
-#[test]
-async fn sop_untrusted_payload_config_overrides_deserialize() {
-    let config: SopConfig = toml::from_str(
-        r#"
-untrusted_payload_max_bytes = 4096
-untrusted_input_guard = "block"
-untrusted_guard_sensitivity = 0.9
-untrusted_frame_warning = false
-untrusted_outbound_redact = false
-"#,
-    )
-    .expect("SOP untrusted payload overrides should deserialize");
-
-    assert_eq!(config.untrusted_payload_max_bytes, 4096);
-    assert_eq!(config.untrusted_input_guard, "block");
-    assert_eq!(config.untrusted_guard_sensitivity, 0.9);
-    assert!(!config.untrusted_frame_warning);
-    assert!(!config.untrusted_outbound_redact);
+#[::core::prelude::v1::test]
+fn retired_sop_is_absent_from_serialization_and_editable_metadata() {
+    let config = Config::default();
+    assert!(serde_json::to_value(&config).unwrap().get("sop").is_none());
+    assert!(toml::Value::try_from(&config).unwrap().get("sop").is_none());
+    assert!(
+        config
+            .prop_fields()
+            .iter()
+            .all(|field| { field.name != "sop" && !field.name.starts_with("sop.") })
+    );
+    assert!(config.get_prop("sop.approval_mode").is_err());
+    assert_eq!(
+        crate::sections::section_group_for_key("sop"),
+        crate::sections::SectionGroup::Other
+    );
+    #[cfg(feature = "schema-export")]
+    {
+        let schema = serde_json::to_value(schemars::schema_for!(Config)).unwrap();
+        assert!(
+            schema["properties"]
+                .as_object()
+                .unwrap()
+                .get("sop")
+                .is_none()
+        );
+    }
 }
 
 #[test]
@@ -1901,7 +1933,7 @@ async fn config_toml_roundtrip() {
         file_download: FileDownloadConfig::default(),
         locale: None,
         verifiable_intent: VerifiableIntentConfig::default(),
-        sop: SopConfig::default(),
+        sop: HashMap::new(),
         shell_tool: ShellToolConfig::default(),
         escalation: EscalationConfig::default(),
         env_overridden_paths: EnvOverriddenPaths::new(),
@@ -2655,7 +2687,7 @@ async fn config_save_and_load_tmpdir() {
         file_download: FileDownloadConfig::default(),
         locale: None,
         verifiable_intent: VerifiableIntentConfig::default(),
-        sop: SopConfig::default(),
+        sop: HashMap::new(),
         shell_tool: ShellToolConfig::default(),
         escalation: EscalationConfig::default(),
         env_overridden_paths: EnvOverriddenPaths::new(),
@@ -14918,5 +14950,168 @@ async fn load_or_init_rejects_retired_model_provider_without_rewriting_file() {
         assert!(!error.contains("private-test-key"));
         assert!(!error.contains("private_alias"));
         assert_eq!(fs::read_to_string(&config_path).await.unwrap(), raw);
+    }
+}
+
+#[test]
+#[allow(clippy::large_futures)]
+async fn load_or_init_rejects_retired_sop_without_rewriting_file() {
+    let _env_guard = env_override_lock().await;
+    let home = TempDir::new().unwrap();
+    let config_dir = home.path().join("profile");
+    fs::create_dir_all(&config_dir).await.unwrap();
+    let config_path = config_dir.join("config.toml");
+    let _home = EnvValueGuard::set("HOME", home.path());
+    let _config_dir = EnvValueGuard::set("ZEROCLAW_CONFIG_DIR", &config_dir);
+    let _workspace = EnvValueGuard::remove("ZEROCLAW_WORKSPACE");
+    for version in 1..=crate::migration::CURRENT_SCHEMA_VERSION {
+        let raw = format!(
+            "schema_version = {version}\n[sop.approval.policies.private_policy]\n\
+             required_group = \"private-group\"\nrequest_route = \"channel:private-route\"\n"
+        );
+        fs::write(&config_path, &raw).await.unwrap();
+        let error = Box::pin(Config::load_or_init())
+            .await
+            .unwrap_err()
+            .to_string();
+        assert_eq!(error, crate::migration::RETIRED_SOP_CONFIG_MESSAGE);
+        assert_eq!(fs::read_to_string(&config_path).await.unwrap(), raw);
+        assert!(!config_path.with_extension("toml.backup").exists());
+        assert!(!config_dir.join(".secret_key").exists());
+    }
+}
+
+#[test]
+#[allow(clippy::large_futures)]
+async fn saves_reject_sop_added_after_load_without_mutating_disk_or_tracking() {
+    let _env_guard = env_override_lock().await;
+    let home = TempDir::new().unwrap();
+    let config_dir = home.path().join("profile");
+    fs::create_dir_all(&config_dir).await.unwrap();
+    let config_path = config_dir.join("config.toml");
+    let _home = EnvValueGuard::set("HOME", home.path());
+    let _config_dir = EnvValueGuard::set("ZEROCLAW_CONFIG_DIR", &config_dir);
+    let _workspace = EnvValueGuard::remove("ZEROCLAW_WORKSPACE");
+    let clean = "schema_version = 3\n[secrets]\nencrypt = true\n";
+    fs::write(&config_path, clean).await.unwrap();
+    let mut config = Box::pin(Config::load_or_init()).await.unwrap();
+    assert_eq!(config.loaded_from.as_ref(), Some(&config_path));
+
+    let secret_path = "http_request.secrets.api_token";
+    config
+        .set_prop_persistent(secret_path, "private-new-token")
+        .unwrap();
+    config.env_overridden_paths.insert(secret_path.into());
+    config
+        .pre_override_snapshots
+        .insert(secret_path.into(), "private-old-token".into());
+    config.onepassword_reference_snapshots.insert(
+        config.encode_prop_snapshot_key(None, secret_path).unwrap(),
+        "vault:private-reference".into(),
+    );
+    let before = config.clone();
+    let raw =
+        format!("{clean}\n[sop]\nstep_scope_enforce = true\nuntrusted_input_guard = \"block\"\n");
+    fs::write(&config_path, &raw).await.unwrap();
+    assert!(!config_dir.join(".secret_key").exists());
+    let entries_before: std::collections::BTreeSet<_> = std::fs::read_dir(&config_dir)
+        .unwrap()
+        .map(|entry| entry.unwrap().file_name())
+        .collect();
+
+    for mode in ["save", "force_save", "save_dirty"] {
+        let result = match mode {
+            "save" => Box::pin(config.save()).await,
+            "force_save" => Box::pin(config.force_save()).await,
+            "save_dirty" => Box::pin(config.save_dirty()).await,
+            _ => unreachable!(),
+        };
+        let error = result.expect_err("retired SOP must stop every write");
+        assert!(
+            error.is::<crate::migration::RetiredSopConfigError>(),
+            "{mode}: {error}"
+        );
+        assert_eq!(
+            error.to_string(),
+            crate::migration::RETIRED_SOP_CONFIG_MESSAGE,
+            "{mode}"
+        );
+        assert_eq!(
+            fs::read_to_string(&config_path).await.unwrap(),
+            raw,
+            "{mode}"
+        );
+        assert_eq!(config.dirty_paths, before.dirty_paths, "{mode}");
+        assert_eq!(config.dirty_map_entries, before.dirty_map_entries, "{mode}");
+        assert_eq!(
+            config.explicit_prop_dirty_paths, before.explicit_prop_dirty_paths,
+            "{mode}"
+        );
+        assert_eq!(
+            config.tracked_prop_identities, before.tracked_prop_identities,
+            "{mode}"
+        );
+        assert_eq!(
+            config.pre_override_snapshots, before.pre_override_snapshots,
+            "{mode}"
+        );
+        assert_eq!(
+            config.onepassword_reference_snapshots, before.onepassword_reference_snapshots,
+            "{mode}"
+        );
+        assert_eq!(
+            config.env_overridden_paths, before.env_overridden_paths,
+            "{mode}"
+        );
+        assert_eq!(
+            config.http_request.secrets, before.http_request.secrets,
+            "{mode}"
+        );
+        assert_eq!(config.loaded_from, before.loaded_from, "{mode}");
+        let entries_after: std::collections::BTreeSet<_> = std::fs::read_dir(&config_dir)
+            .unwrap()
+            .map(|entry| entry.unwrap().file_name())
+            .collect();
+        assert_eq!(
+            entries_after, entries_before,
+            "{mode} created a key, backup or temporary file"
+        );
+    }
+}
+
+#[test]
+#[allow(clippy::large_futures)]
+async fn full_saves_fail_closed_when_existing_config_cannot_be_read() {
+    let dir = TempDir::new().unwrap();
+    let config_path = dir.path().join("config.toml");
+    // A directory deterministically fails read_to_string, including in root-run
+    // tests where chmod-based unreadability would not exercise the boundary.
+    fs::create_dir(&config_path).await.unwrap();
+    let mut config = Config {
+        config_path: config_path.clone(),
+        loaded_from: Some(config_path.clone()),
+        secrets: SecretsConfig { encrypt: true },
+        ..Config::default()
+    };
+    config
+        .set_prop_persistent("http_request.secrets.api_token", "private-token")
+        .unwrap();
+    for mode in ["save", "force_save"] {
+        let result = if mode == "save" {
+            Box::pin(config.save()).await
+        } else {
+            Box::pin(config.force_save()).await
+        };
+        let error = result.expect_err("an unreadable existing target must stop save");
+        assert!(
+            error
+                .to_string()
+                .contains("Failed to read existing config before save"),
+            "{mode}: {error}"
+        );
+        assert!(config_path.is_dir());
+        assert!(!dir.path().join(".secret_key").exists());
+        assert!(!dir.path().join("config.toml.bak").exists());
+        assert_eq!(std::fs::read_dir(dir.path()).unwrap().count(), 1);
     }
 }

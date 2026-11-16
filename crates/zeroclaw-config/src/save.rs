@@ -545,15 +545,23 @@ impl Config {
         let zeroclaw_dir = config_path
             .parent()
             .context("Config path must have a parent directory")?;
-        let store = crate::secrets::SecretStore::new(zeroclaw_dir, self.secrets.encrypt);
         let existing_raw = if target_exists {
-            fs::read_to_string(&config_path).await.ok()
+            Some(fs::read_to_string(&config_path).await.with_context(|| {
+                format!(
+                    "Failed to read existing config before save: {}; refusing to overwrite unchecked configuration",
+                    config_path.display()
+                )
+            })?)
         } else {
             None
         };
         let on_disk_table: Option<toml::Table> = existing_raw
             .as_deref()
             .and_then(|s| toml::from_str::<toml::Table>(s).ok());
+        if let Some(table) = on_disk_table.as_ref() {
+            crate::migration::reject_retired_sop_config(table)?;
+        }
+        let store = crate::secrets::SecretStore::new(zeroclaw_dir, self.secrets.encrypt);
         let whole_entries = self.effective_whole_entry_dirty_entries(on_disk_table.as_ref());
         let dirty_prop_paths = self.collect_dirty_prop_paths(&whole_entries);
         self.verify_tracked_prop_identities(Some(&dirty_prop_paths))
@@ -1384,6 +1392,9 @@ impl Config {
             .parse()
             .context("Failed to parse existing config for incremental save")?;
         let on_disk_table: Option<toml::Table> = toml::from_str::<toml::Table>(&existing).ok();
+        if let Some(table) = on_disk_table.as_ref() {
+            crate::migration::reject_retired_sop_config(table)?;
+        }
         let whole_entries = self.effective_whole_entry_dirty_entries(on_disk_table.as_ref());
         let dirty_prop_paths = self.collect_dirty_prop_paths(&whole_entries);
         self.verify_tracked_prop_identities(Some(&dirty_prop_paths))

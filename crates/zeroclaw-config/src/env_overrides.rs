@@ -127,6 +127,9 @@ pub fn apply_env_overrides(config: &mut Config) -> Result<AppliedOverrides> {
         // Err — deprecation visibility should not depend on the rest of
         // the environment being clean.
         let tail_segments: Vec<&str> = tail.split(SEP).collect();
+        if tail_segments.first() == Some(&"sop") {
+            return Err(crate::migration::RetiredSopConfigError.into());
+        }
         if tail_segments.starts_with(&["providers", "models"])
             && let Some(family) = tail_segments.get(2)
         {
@@ -360,6 +363,59 @@ mod tests {
             // SAFETY: tests serialize on `env_test_lock()`.
             unsafe { std::env::remove_var(self.0) };
         }
+    }
+
+    #[tokio::test]
+    async fn walker_rejects_retired_sop_config_without_applying_it() {
+        let _guard = super::env_test_lock().await;
+        for name in [
+            "ZEROCLAW_sop",
+            "ZEROCLAW_sop__approval__groups__private_group__members",
+            "ZEROCLAW_sop__untrusted_input_guard",
+        ] {
+            let _value = EnvVarGuard::set(name, "private-test-value");
+            let mut config = Config::default();
+            let error = apply_env_overrides(&mut config).unwrap_err().to_string();
+            assert_eq!(error, crate::migration::RETIRED_SOP_CONFIG_MESSAGE);
+            assert!(config.sop.is_empty());
+            assert!(config.dirty_paths.is_empty());
+            assert!(config.pre_override_snapshots.is_empty());
+        }
+    }
+
+    #[tokio::test]
+    async fn walker_preserves_sop_path_and_case_boundaries() {
+        let _guard = super::env_test_lock().await;
+        // Uppercase tails remain outside the existing lowercase override grammar.
+        let _uppercase = EnvVarGuard::set("ZEROCLAW_SOP__approval_mode", "ignored-uppercase");
+        let _alias = EnvVarGuard::set(
+            "ZEROCLAW_providers__models__openai__sop__api_key",
+            "retained-alias-token",
+        );
+        let mut config = Config::default();
+        let applied = apply_env_overrides(&mut config).unwrap();
+        assert_eq!(
+            config.providers.models.openai["sop"]
+                .base
+                .api_key
+                .as_deref(),
+            Some("retained-alias-token")
+        );
+        assert!(
+            !applied
+                .paths
+                .iter()
+                .any(|path| path == "sop" || path.starts_with("sop."))
+        );
+        assert!(applied.tombstone_warnings.is_empty());
+
+        let _adjacent = EnvVarGuard::set("ZEROCLAW_sop_extra__enabled", "true");
+        let error = apply_env_overrides(&mut config).unwrap_err().to_string();
+        assert!(
+            error.contains("did not resolve to a schema path"),
+            "{error}"
+        );
+        assert!(!error.contains(crate::migration::RETIRED_SOP_CONFIG_MESSAGE));
     }
 
     #[tokio::test]

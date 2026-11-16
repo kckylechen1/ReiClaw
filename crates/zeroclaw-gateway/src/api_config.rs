@@ -465,18 +465,26 @@ async fn persist_and_swap(
     // Snapshot pre-write disk state (used for revert on save failure). When
     // the file doesn't exist yet, snapshot is None — we'll remove the file
     // again on rollback so a failed first-write doesn't leak partial state.
-    let snapshot = if config_path.exists() {
-        // best-effort; if we can't read, we can't revert
-        tokio::fs::read(&config_path).await.ok()
-    } else {
-        None
+    let snapshot = match tokio::fs::read(&config_path).await {
+        Ok(bytes) => Some(bytes),
+        Err(error) if error.kind() == std::io::ErrorKind::NotFound => None,
+        Err(error) => {
+            return Err(error_response(ConfigApiError::new(
+                ConfigApiCode::ReloadFailed,
+                format!("failed to snapshot config before save: {error}"),
+            )));
+        }
     };
 
     if let Err(e) = new_config.save_dirty().await {
-        if let Some(prev) = snapshot {
-            let _ = tokio::fs::write(&config_path, prev).await;
-        } else if config_path.exists() {
-            let _ = tokio::fs::remove_file(&config_path).await;
+        // SOP refusal happens before any write. Restoring an older snapshot
+        // could overwrite the external edit that caused that refusal.
+        if !e.is::<zeroclaw_config::migration::RetiredSopConfigError>() {
+            if let Some(prev) = snapshot {
+                let _ = tokio::fs::write(&config_path, prev).await;
+            } else if config_path.exists() {
+                let _ = tokio::fs::remove_file(&config_path).await;
+            }
         }
         return Err(error_response(ConfigApiError::new(
             ConfigApiCode::ReloadFailed,
@@ -3232,6 +3240,104 @@ mod tests {
     // tests below fall through into real persistence (`persist_and_swap` ->
     // `save_dirty`), and a bare `Config::default()` would write the developer's
     // live `~/.zeroclaw/config.toml`.
+
+    #[tokio::test]
+    async fn prop_put_preserves_retired_sop_file_without_rollback() {
+        let tmp = tempfile::tempdir().unwrap();
+        let mut config = temp_config(&tmp);
+        config.gateway.port = 42617;
+        config.save().await.unwrap();
+        let config_path = config.config_path.clone();
+        let persisted = std::fs::read_to_string(&config_path).unwrap();
+        let external = format!("{persisted}\n[sop.approval]\nroute = \"private-legacy-route\"\n");
+        std::fs::write(&config_path, &external).unwrap();
+        // Writing the same snapshot would preserve bytes but change mtime.
+        // A fixed old timestamp detects that write without sleeping or hooks.
+        let old_modified = std::time::UNIX_EPOCH + Duration::from_secs(946_684_800);
+        std::fs::File::options()
+            .write(true)
+            .open(&config_path)
+            .unwrap()
+            .set_times(std::fs::FileTimes::new().set_modified(old_modified))
+            .unwrap();
+        let modified_before = std::fs::metadata(&config_path).unwrap().modified().unwrap();
+        assert_eq!(modified_before, old_modified);
+        let state = test_state(config);
+
+        let (status, json) = response_json(
+            handle_prop_put(
+                ConnectInfo("127.0.0.1:12345".parse().unwrap()),
+                State(state.clone()),
+                HeaderMap::new(),
+                axum::Json(PropPutBody {
+                    path: "gateway.port".into(),
+                    value: serde_json::json!(42618),
+                    comment: None,
+                }),
+            )
+            .await,
+        )
+        .await;
+
+        assert_eq!(status, StatusCode::INTERNAL_SERVER_ERROR);
+        assert_eq!(json["code"], "reload_failed");
+        let message = json["message"].as_str().unwrap();
+        assert!(message.contains("[sop] is retired"));
+        assert!(!message.contains("private-legacy-route"));
+        assert_eq!(std::fs::read(&config_path).unwrap(), external.as_bytes());
+        assert_eq!(
+            std::fs::metadata(&config_path).unwrap().modified().unwrap(),
+            modified_before,
+            "a pre-write refusal must not rewrite the rollback snapshot"
+        );
+        assert_eq!(state.config.read().gateway.port, 42617);
+        assert!(state.config.read().dirty_paths.is_empty());
+        assert!(
+            !state
+                .pending_reload
+                .load(std::sync::atomic::Ordering::Relaxed)
+        );
+    }
+
+    #[tokio::test]
+    async fn persist_and_swap_rejects_unreadable_snapshot_before_noop_save() {
+        let tmp = tempfile::tempdir().unwrap();
+        let config = temp_config(&tmp);
+        let config_path = config.config_path.clone();
+        // A directory gives a real read failure even when tests run as root.
+        std::fs::create_dir(&config_path).unwrap();
+        let marker = config_path.join("preserve");
+        std::fs::write(&marker, "existing target").unwrap();
+        let state = test_state(config);
+        let working = state.config.read().clone();
+        // save_dirty would otherwise succeed without touching the file. The
+        // failed snapshot must reject before that no-op can reach the swap.
+        assert!(working.dirty_paths.is_empty());
+        let guard = Arc::clone(&state.config_write_lock).lock_owned().await;
+
+        let response = persist_and_swap(&state, working, &guard, None)
+            .await
+            .unwrap_err();
+        let (status, json) = response_json(response).await;
+
+        assert_eq!(status, StatusCode::INTERNAL_SERVER_ERROR);
+        assert_eq!(json["code"], "reload_failed");
+        assert!(
+            json["message"]
+                .as_str()
+                .unwrap()
+                .contains("failed to snapshot config before save")
+        );
+        assert!(config_path.is_dir());
+        assert_eq!(std::fs::read(&marker).unwrap(), b"existing target");
+        assert_eq!(state.config.read().config_path, config_path);
+        assert!(state.config.read().dirty_paths.is_empty());
+        assert!(
+            !state
+                .pending_reload
+                .load(std::sync::atomic::Ordering::Relaxed)
+        );
+    }
 
     #[tokio::test]
     async fn prop_put_does_not_materialize_resource_keyed_rate_alias() {

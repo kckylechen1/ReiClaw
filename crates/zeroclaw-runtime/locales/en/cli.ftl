@@ -995,6 +995,8 @@ gateway-cwd-workspace-unavailable = Agent workspace is not a usable directory
 gateway-cwd-not-directory = cwd is not a usable directory
 gateway-cwd-outside-workspace = cwd must be within the configured agent workspace
 gateway-invalid-surface = Invalid chat surface. Use web, telegram or cli; query and connect values must agree.
+gateway-voice-projection-unavailable = Voice could not start. Check the carrier provider and the owner's governed identity, then reconnect.
+gateway-voice-consent-operator-config-required = Configure gateway.operator.token_hashes with an independent operator token before reading or changing voice export consent.
 
 # Generic review notice. Never interpolate Soul or owner evidence content.
 soul-weekly-review-notice = Weekly reflection created { $soul_count } Soul proposals and { $user_count } User Model candidates. Review: { $review_path }

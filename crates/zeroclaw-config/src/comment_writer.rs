@@ -17,6 +17,12 @@ pub async fn apply_comments(
         Ok(d) => d,
         Err(_) => return Ok(()), // unparseable; bail without touching file
     };
+    let table: toml::Table = match raw.parse() {
+        Ok(table) => table,
+        Err(_) => return Ok(()),
+    };
+    crate::migration::reject_retired_sop_config(&table)
+        .map_err(|error| std::io::Error::new(std::io::ErrorKind::InvalidData, error))?;
     for (path, comment) in annotations {
         decorate_key(doc.as_table_mut(), path, comment);
     }
@@ -77,6 +83,56 @@ pub fn build_comment_prefix(existing: Option<&toml_edit::RawString>, comment: &s
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[tokio::test]
+    async fn apply_comments_rejects_retired_sop_without_changing_bytes() {
+        let tmp = tempfile::tempdir().unwrap();
+        let path = tmp.path().join("config.toml");
+        let annotations = [("default_temperature".to_string(), "new comment".to_string())];
+        for raw in [
+            "default_temperature = 0.7\n[sop.approval]\nroute = \"private-legacy-route\"\n",
+            "sop = \"private-legacy-value\"\ndefault_temperature = 0.7\n",
+            "default_temperature = 0.7\n[sop]\n",
+        ] {
+            tokio::fs::write(&path, raw).await.unwrap();
+
+            let error = apply_comments(&path, &annotations).await.unwrap_err();
+
+            assert_eq!(error.kind(), std::io::ErrorKind::InvalidData);
+            assert_eq!(
+                error.to_string(),
+                crate::migration::RETIRED_SOP_CONFIG_MESSAGE
+            );
+            assert_eq!(tokio::fs::read(&path).await.unwrap(), raw.as_bytes());
+        }
+    }
+
+    #[tokio::test]
+    async fn apply_comments_with_no_annotations_does_not_read_or_reject() {
+        let tmp = tempfile::tempdir().unwrap();
+        let path = tmp.path().join("config.toml");
+        apply_comments(&path, &[]).await.unwrap();
+        assert!(!path.exists());
+
+        let raw = "[sop]\n";
+        tokio::fs::write(&path, raw).await.unwrap();
+        apply_comments(&path, &[]).await.unwrap();
+        assert_eq!(tokio::fs::read(&path).await.unwrap(), raw.as_bytes());
+    }
+
+    #[tokio::test]
+    async fn apply_comments_leaves_unparseable_files_untouched() {
+        let tmp = tempfile::tempdir().unwrap();
+        let path = tmp.path().join("config.toml");
+        let raw = "sop = [\n";
+        tokio::fs::write(&path, raw).await.unwrap();
+
+        apply_comments(&path, &[("sop".to_string(), "new comment".to_string())])
+            .await
+            .unwrap();
+
+        assert_eq!(tokio::fs::read(&path).await.unwrap(), raw.as_bytes());
+    }
 
     #[test]
     fn build_comment_prefix_appends_to_blank() {

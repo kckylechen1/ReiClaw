@@ -2450,9 +2450,10 @@ async fn async_main(command: clap::Command) -> Result<()> {
             // a real install may still carry `<data_dir>/sop/runs.db` (runs,
             // events, claims, proposals) from before the run-side demolition.
             // The file is left exactly in place - nothing reads, migrates, or
-            // deletes it - and this once-per-boot WARN names the migration path
-            // so the disposition is never silent. Run truth lives Tachi-side as
-            // ProcedureRuns through the procedure_v1 seam.
+            // deletes it - and this once-per-boot WARN makes the retained data
+            // visible. The SOP engine, definition
+            // loader and procedure_v1 seam are retired; no automatic migration
+            // to a retained execution or permission surface is available.
             let legacy_sop_run_store = config.data_dir.join("sop").join("runs.db");
             if legacy_sop_run_store.exists() {
                 ::zeroclaw_log::record!(
@@ -2462,7 +2463,7 @@ async fn async_main(command: clap::Command) -> Result<()> {
                         .with_attrs(::serde_json::json!({
                             "path": legacy_sop_run_store.display().to_string()
                         })),
-                    "Legacy SOP run store found and left in place (never read, migrated, or deleted); SOP runs are Tachi-side ProcedureRuns via the procedure_v1 seam - archive or remove the file manually if it is no longer needed"
+                    "Legacy SOP run store found and left in place (never read, migrated, or deleted); the SOP engine and procedure_v1 path are retired - review and archive or remove the file manually if it is no longer needed"
                 );
             }
 
