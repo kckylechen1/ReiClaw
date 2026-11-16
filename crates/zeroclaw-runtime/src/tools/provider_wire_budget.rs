@@ -299,7 +299,6 @@ async fn assemble_turn(req: TurnRequest<'_>) -> (ScopedAssembled, WireBudget) {
         req.agent_alias,
         Arc::clone(&runtime),
         mem,
-        &req.config.browser,
         &req.config.http_request,
         &req.config.web_fetch,
         workspace,
@@ -874,7 +873,6 @@ async fn minimal_composition_no_bypass_subsystem_flags() {
     // Explicitly configure and enable non-minimal subsystems with valid credentials
     config.pipeline.enabled = true;
     config.pipeline.allowed_tools = vec!["shell".to_string(), "file_read".to_string()];
-    config.browser.enabled = true;
     config.http_request.enabled = true;
     config.web_search.enabled = true;
 
@@ -892,16 +890,6 @@ async fn minimal_composition_no_bypass_subsystem_flags() {
     assert!(
         full_budget.names.contains(&"execute_pipeline".to_string()),
         "execute_pipeline must be registered under full composition: {:?}",
-        full_budget.names
-    );
-    assert!(
-        full_budget.names.contains(&"browser".to_string()),
-        "browser must be registered under full composition: {:?}",
-        full_budget.names
-    );
-    assert!(
-        full_budget.names.contains(&"browser_open".to_string()),
-        "browser_open must be registered under full composition: {:?}",
         full_budget.names
     );
     assert!(

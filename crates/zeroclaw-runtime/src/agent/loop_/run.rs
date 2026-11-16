@@ -195,7 +195,6 @@ pub async fn run(
             agent_alias,
             runtime.clone(),
             mem.clone(),
-            &config.browser,
             &config.http_request,
             &config.web_fetch,
             &config.data_dir,
@@ -401,12 +400,6 @@ pub async fn run(
         "image_info",
         "Read image file metadata (format, dimensions, size) and optionally base64-encode it. Use when: inspecting images, preparing visual data for analysis.",
     ));
-        if config.browser.enabled {
-            tool_descs.push((
-                "browser_open",
-                "Open approved HTTPS URLs in system browser (allowlist-only, no scraping)",
-            ));
-        }
         tool_descs.push((
         "schedule",
         "Manage scheduled tasks (create/list/get/cancel/pause/resume). Supports recurring cron and one-shot delays.",

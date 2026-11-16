@@ -163,7 +163,7 @@ pub struct NestedOptionEntry {
 
 /// One row emitted by the `Configurable` derive's `integration_descriptor()`
 /// method on structs annotated with `#[integration(...)]`. Used for nested
-/// toggleable configs (e.g. `BrowserConfig`, `CronConfig`) where the
+/// toggleable configs where the
 /// integration is "active" iff a named bool field on the struct is `true`.
 #[derive(Debug, Clone, Copy)]
 pub struct IntegrationDescriptor {

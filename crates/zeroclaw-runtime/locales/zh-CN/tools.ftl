@@ -1,5 +1,3 @@
-tool-browser = 使用可插拔后端（agent-browser、rust-native、computer_use）进行网页/浏览器自动化。支持 DOM 操作以及通过 computer-use 边车进行的可选系统级操作（mouse_move、mouse_click、mouse_drag、key_type、key_press、screen_capture）。使用 'snapshot' 将交互元素映射到引用（@e1、@e2）。对 open 操作强制执行 browser.allowed_domains。
-tool-browser-open = 在系统浏览器中打开经批准的 HTTPS URL。安全约束：仅限允许列表中的域名，不允许本地/私有主机，不允许抓取。
 tool-content-search = 在工作区内按正则表达式模式搜索文件内容。支持 ripgrep (rg)，并以 grep 或内部搜索作为后备。输出模式：'content'（带上下文的匹配行）、'files_with_matches'（仅文件路径）、'count'（每个文件的匹配数量）。示例：pattern='fn main'，include='*.rs'，output_mode='content'。
 tool-cron-add = 创建一个定时 cron 任务（shell 或 agent），支持 cron/at/every 调度。使用 job_type='agent' 并提供提示词以按计划运行 AI agent。要将输出投递到频道（Telegram 或已配置的网关 bridge），请设置 delivery={"{"}"mode":"announce","channel":"discord","to":"<channel_id_or_chat_id>"{"}"}。这是通过可用通道面向用户发送定时/延迟消息的首选工具。
 tool-cron-list = 列出所有定时 cron 任务
@@ -49,21 +47,6 @@ tool-tool-search = 获取延迟加载的 MCP 工具的完整 schema 定义，以
 tool-web-fetch = 获取网页并将其内容以干净的纯文本形式返回。HTML 页面会自动转换为可读文本。JSON 和纯文本响应按原样返回。仅支持 GET 请求；会跟随重定向。安全性：仅限白名单域名，不允许本地/私有主机。
 tool-web-search-tool = 在网络上搜索信息。返回包含标题、URL 和描述的相关搜索结果。使用此工具查找最新信息、新闻或研究主题。
 tool-workspace = 管理多客户端工作区。子命令：list、switch、create、info、export。每个工作区提供隔离的内存、审计、密钥和工具限制。
-
-tool-browser-screenshot-error-args-not-object = 截图参数必须是 JSON 对象
-tool-browser-screenshot-error-computeruse-non-string-path = 截图的 'path' 参数必须是字符串，实际为 { $path }
-tool-browser-screenshot-error-missing-filename = 截图路径 '{ $path }' 缺少文件名部分
-tool-browser-screenshot-error-non-string-path = 截图的 'path' 必须是字符串或省略
-tool-browser-screenshot-error-parent-not-exist = 截图路径 '{ $path }' 的父目录 '{ $parent }' 不存在
-tool-browser-screenshot-error-path-not-allowed = 截图路径 '{ $path }' 不在工作区允许列表中
-tool-browser-screenshot-error-path-not-utf8 = 截图路径 '{ $path }' 解析为非 UTF-8 路径；拒绝通过有损转换写入
-tool-browser-screenshot-error-path-outside-workspace = 截图路径 '{ $path }' 解析为 '{ $canonical }'，位于工作区之外
-tool-browser-screenshot-error-runtime-config-target = 无法将截图写入运行时配置路径 '{ $target }'
-tool-browser-screenshot-error-sidecar-empty-png = computer-use 边车返回了空的截图载荷
-tool-browser-screenshot-error-sidecar-no-png-data = computer-use 边车未返回 PNG 数据
-tool-browser-screenshot-error-sidecar-non-json-success = 对于带路径的截图，computer-use 边车返回了非 JSON 的成功响应；请求的文件未被写入
-tool-browser-screenshot-error-sidecar-not-png = computer-use 边车返回了非 PNG 的截图载荷
-tool-browser-screenshot-error-symlink-target = 无法将截图写入符号链接目标 '{ $target }'
 
 # MCP 延迟发现与不回显输入值的参数恢复。
 tool-mcp-deferred-instructions = 以下工具可用，但完整 schema 尚未加载。需要 schema 时，用 tool_search 的 "select:name1,name2" 或关键词查询。已知参数时也可直接调用列表中的精确名称；运行时在常规 hooks 和审批通过后激活工具。发现工具不会授予未列出或被拒绝工具的权限。

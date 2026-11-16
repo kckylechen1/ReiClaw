@@ -1,7 +1,7 @@
 #[cfg(test)]
 pub(crate) use super::*;
 use tempfile::TempDir;
-use zeroclaw_config::schema::{BrowserConfig, Config, MemoryConfig};
+use zeroclaw_config::schema::{Config, MemoryConfig};
 
 #[tokio::test]
 async fn mcp_capability_tools_respect_policy() {
@@ -71,7 +71,6 @@ fn email_factory_respects_compile_feature_and_channel_activation() {
             &risk_profile,
             "test-agent",
             mem,
-            &BrowserConfig::default(),
             &zeroclaw_config::schema::HttpRequestConfig::default(),
             &zeroclaw_config::schema::WebFetchConfig::default(),
             tmp.path(),
@@ -111,12 +110,6 @@ fn sop_run_tools_stay_retired_from_the_registry() {
     let mem: Arc<dyn Memory> =
         Arc::from(zeroclaw_memory::create_memory(&mem_cfg, tmp.path(), None).unwrap());
 
-    let browser = BrowserConfig {
-        enabled: false,
-        allowed_domains: vec![],
-        session_name: None,
-        ..BrowserConfig::default()
-    };
     let http = zeroclaw_config::schema::HttpRequestConfig::default();
     let cfg = test_config(&tmp);
 
@@ -126,7 +119,6 @@ fn sop_run_tools_stay_retired_from_the_registry() {
         &zeroclaw_config::schema::RiskProfileConfig::default(),
         "test-agent",
         mem,
-        &browser,
         &http,
         &zeroclaw_config::schema::WebFetchConfig::default(),
         tmp.path(),
@@ -172,10 +164,6 @@ async fn retired_tools_stay_absent_without_removing_human_channel_tools() {
     };
     let mem: Arc<dyn Memory> =
         Arc::from(zeroclaw_memory::create_memory(&mem_cfg, tmp.path(), None).unwrap());
-    let browser = BrowserConfig {
-        enabled: false,
-        ..BrowserConfig::default()
-    };
     let mut cfg = test_config(&tmp);
     cfg.composition = Some(zeroclaw_config::composition::Composition::Full);
     let risk = zeroclaw_config::schema::RiskProfileConfig {
@@ -191,7 +179,6 @@ async fn retired_tools_stay_absent_without_removing_human_channel_tools() {
         "test-agent",
         Arc::new(zeroclaw_platform::NativeRuntime::new()),
         mem,
-        &browser,
         &zeroclaw_config::schema::HttpRequestConfig::default(),
         &zeroclaw_config::schema::WebFetchConfig::default(),
         tmp.path(),
@@ -251,7 +238,6 @@ fn shared_store_tools_open_data_dir_not_per_agent_workspace() {
     };
     let mem: Arc<dyn Memory> =
         Arc::from(zeroclaw_memory::create_memory(&mem_cfg, tmp.path(), None).unwrap());
-    let browser = BrowserConfig::default();
     let http = zeroclaw_config::schema::HttpRequestConfig::default();
     let web = zeroclaw_config::schema::WebFetchConfig::default();
     let risk = zeroclaw_config::schema::RiskProfileConfig::default();
@@ -282,7 +268,6 @@ fn shared_store_tools_open_data_dir_not_per_agent_workspace() {
         "test-agent",
         Arc::new(NativeRuntime::new()),
         mem,
-        &browser,
         &http,
         &web,
         workspace_dir.as_path(), // DIFFERENT from data_dir
@@ -420,50 +405,6 @@ async fn registered_tools_warn_or_block_on_ephemeral_runtime() {
 }
 
 #[test]
-fn all_tools_excludes_browser_when_disabled() {
-    let tmp = TempDir::new().unwrap();
-    let security = Arc::new(SecurityPolicy::default());
-    let mem_cfg = MemoryConfig {
-        backend: "markdown".into(),
-        ..MemoryConfig::default()
-    };
-    let mem: Arc<dyn Memory> =
-        Arc::from(zeroclaw_memory::create_memory(&mem_cfg, tmp.path(), None).unwrap());
-
-    let browser = BrowserConfig {
-        enabled: false,
-        allowed_domains: vec!["example.com".into()],
-        session_name: None,
-        ..BrowserConfig::default()
-    };
-    let http = zeroclaw_config::schema::HttpRequestConfig::default();
-    let cfg = test_config(&tmp);
-
-    let tools = all_tools(
-        Arc::new(Config::default()),
-        &security,
-        &zeroclaw_config::schema::RiskProfileConfig::default(),
-        "test-agent",
-        mem,
-        &browser,
-        &http,
-        &zeroclaw_config::schema::WebFetchConfig::default(),
-        tmp.path(),
-        &HashMap::new(),
-        None,
-        &cfg,
-        None,
-    )
-    .tools;
-    let names: Vec<&str> = tools.iter().map(|t| t.name()).collect();
-    assert!(!names.contains(&"browser_open"));
-    assert!(names.contains(&"schedule"));
-    // Operator/admin tools are never part of the model surface.
-    assert!(!names.contains(&"model_routing_config"));
-    assert!(!names.contains(&"proxy_config"));
-}
-
-#[test]
 fn minimal_composition_cuts_registry_to_membership() {
     let tmp = TempDir::new().unwrap();
     let security = Arc::new(SecurityPolicy::default());
@@ -474,17 +415,9 @@ fn minimal_composition_cuts_registry_to_membership() {
     let mem: Arc<dyn Memory> =
         Arc::from(zeroclaw_memory::create_memory(&mem_cfg, tmp.path(), None).unwrap());
 
-    let browser = BrowserConfig {
-        enabled: false,
-        allowed_domains: vec!["example.com".into()],
-        session_name: None,
-        ..BrowserConfig::default()
-    };
     let http = zeroclaw_config::schema::HttpRequestConfig::default();
     let mut cfg = test_config(&tmp);
     cfg.composition = Some(zeroclaw_config::composition::Composition::Minimal);
-    // Explicitly enabled non-members must not widen the minimal profile.
-    cfg.browser.enabled = true;
 
     let tools = all_tools(
         Arc::new(Config::default()),
@@ -492,7 +425,6 @@ fn minimal_composition_cuts_registry_to_membership() {
         &zeroclaw_config::schema::RiskProfileConfig::default(),
         "test-agent",
         mem,
-        &browser,
         &http,
         &zeroclaw_config::schema::WebFetchConfig::default(),
         tmp.path(),
@@ -553,12 +485,6 @@ fn absent_composition_keeps_full_assembly() {
     let mem: Arc<dyn Memory> =
         Arc::from(zeroclaw_memory::create_memory(&mem_cfg, tmp.path(), None).unwrap());
 
-    let browser = BrowserConfig {
-        enabled: false,
-        allowed_domains: vec!["example.com".into()],
-        session_name: None,
-        ..BrowserConfig::default()
-    };
     let http = zeroclaw_config::schema::HttpRequestConfig::default();
     let cfg = test_config(&tmp);
     assert!(
@@ -572,7 +498,6 @@ fn absent_composition_keeps_full_assembly() {
         &zeroclaw_config::schema::RiskProfileConfig::default(),
         "test-agent",
         mem,
-        &browser,
         &http,
         &zeroclaw_config::schema::WebFetchConfig::default(),
         tmp.path(),
@@ -598,50 +523,6 @@ fn absent_composition_keeps_full_assembly() {
         names.contains(&"reasoning_subagent"),
         "full composition must carry the V1 reasoning_subagent; got: {names:?}"
     );
-}
-
-#[test]
-fn all_tools_includes_browser_when_enabled() {
-    let tmp = TempDir::new().unwrap();
-    let security = Arc::new(SecurityPolicy::default());
-    let mem_cfg = MemoryConfig {
-        backend: "markdown".into(),
-        ..MemoryConfig::default()
-    };
-    let mem: Arc<dyn Memory> =
-        Arc::from(zeroclaw_memory::create_memory(&mem_cfg, tmp.path(), None).unwrap());
-
-    let browser = BrowserConfig {
-        enabled: true,
-        allowed_domains: vec!["example.com".into()],
-        session_name: None,
-        ..BrowserConfig::default()
-    };
-    let http = zeroclaw_config::schema::HttpRequestConfig::default();
-    let cfg = test_config(&tmp);
-
-    let tools = all_tools(
-        Arc::new(Config::default()),
-        &security,
-        &zeroclaw_config::schema::RiskProfileConfig::default(),
-        "test-agent",
-        mem,
-        &browser,
-        &http,
-        &zeroclaw_config::schema::WebFetchConfig::default(),
-        tmp.path(),
-        &HashMap::new(),
-        None,
-        &cfg,
-        None,
-    )
-    .tools;
-    let names: Vec<&str> = tools.iter().map(|t| t.name()).collect();
-    assert!(names.contains(&"browser_open"));
-    assert!(names.contains(&"content_search"));
-    // Operator/admin tools are never part of the model surface.
-    assert!(!names.contains(&"model_routing_config"));
-    assert!(!names.contains(&"proxy_config"));
 }
 
 #[test]
@@ -762,7 +643,6 @@ fn delegate_stays_absent_from_every_registry() {
     let mem: Arc<dyn Memory> =
         Arc::from(zeroclaw_memory::create_memory(&mem_cfg, tmp.path(), None).unwrap());
 
-    let browser = BrowserConfig::default();
     let http = zeroclaw_config::schema::HttpRequestConfig::default();
     let cfg = test_config(&tmp);
 
@@ -785,7 +665,6 @@ fn delegate_stays_absent_from_every_registry() {
             &zeroclaw_config::schema::RiskProfileConfig::default(),
             "test-agent",
             mem.clone(),
-            &browser,
             &http,
             &zeroclaw_config::schema::WebFetchConfig::default(),
             tmp.path(),
@@ -910,7 +789,6 @@ fn registry_keeps_root_advisor_and_bridge_snapshot_separate_from_runtime_config(
             &risk,
             "test-agent",
             memory,
-            &BrowserConfig::default(),
             &zeroclaw_config::schema::HttpRequestConfig::default(),
             &zeroclaw_config::schema::WebFetchConfig::default(),
             tmp.path(),
@@ -999,7 +877,6 @@ async fn registry_rebuild_carries_spawn_lineage_and_cannot_reset_depth() {
         "parent-agent",
         Arc::new(NativeRuntime::new()),
         mem,
-        &BrowserConfig::default(),
         &zeroclaw_config::schema::HttpRequestConfig::default(),
         &zeroclaw_config::schema::WebFetchConfig::default(),
         tmp.path(),
@@ -1075,7 +952,6 @@ fn all_tools_includes_read_skill_in_compact_mode() {
     let mem: Arc<dyn Memory> =
         Arc::from(zeroclaw_memory::create_memory(&mem_cfg, tmp.path(), None).unwrap());
 
-    let browser = BrowserConfig::default();
     let http = zeroclaw_config::schema::HttpRequestConfig::default();
     let mut cfg = test_config(&tmp);
     cfg.skills.prompt_injection_mode = zeroclaw_config::schema::SkillsPromptInjectionMode::Compact;
@@ -1086,7 +962,6 @@ fn all_tools_includes_read_skill_in_compact_mode() {
         &zeroclaw_config::schema::RiskProfileConfig::default(),
         "test-agent",
         mem,
-        &browser,
         &http,
         &zeroclaw_config::schema::WebFetchConfig::default(),
         tmp.path(),
@@ -1111,7 +986,6 @@ fn all_tools_excludes_read_skill_in_full_mode() {
     let mem: Arc<dyn Memory> =
         Arc::from(zeroclaw_memory::create_memory(&mem_cfg, tmp.path(), None).unwrap());
 
-    let browser = BrowserConfig::default();
     let http = zeroclaw_config::schema::HttpRequestConfig::default();
     let mut cfg = test_config(&tmp);
     cfg.skills.prompt_injection_mode = zeroclaw_config::schema::SkillsPromptInjectionMode::Full;
@@ -1122,7 +996,6 @@ fn all_tools_excludes_read_skill_in_full_mode() {
         &zeroclaw_config::schema::RiskProfileConfig::default(),
         "test-agent",
         mem,
-        &browser,
         &http,
         &zeroclaw_config::schema::WebFetchConfig::default(),
         tmp.path(),
@@ -1176,7 +1049,6 @@ fn retired_operator_tools_absent_from_every_assembly_path() {
             &zeroclaw_config::schema::RiskProfileConfig::default(),
             "test-agent",
             mem,
-            &BrowserConfig::default(),
             &zeroclaw_config::schema::HttpRequestConfig::default(),
             &zeroclaw_config::schema::WebFetchConfig::default(),
             tmp.path(),
@@ -1230,7 +1102,6 @@ fn all_tools_registers_read_skill_for_compact_agent_override_over_global_full() 
     let mem: Arc<dyn Memory> =
         Arc::from(zeroclaw_memory::create_memory(&mem_cfg, tmp.path(), None).unwrap());
 
-    let browser = BrowserConfig::default();
     let http = zeroclaw_config::schema::HttpRequestConfig::default();
     let mut cfg = test_config(&tmp);
     // Global stays Full; a runtime profile flips this agent to Compact and
@@ -1259,7 +1130,6 @@ fn all_tools_registers_read_skill_for_compact_agent_override_over_global_full() 
         &zeroclaw_config::schema::RiskProfileConfig::default(),
         "test-agent",
         mem,
-        &browser,
         &http,
         &zeroclaw_config::schema::WebFetchConfig::default(),
         tmp.path(),
@@ -1287,7 +1157,6 @@ fn all_tools_omits_read_skill_for_full_agent_override_over_global_compact() {
     let mem: Arc<dyn Memory> =
         Arc::from(zeroclaw_memory::create_memory(&mem_cfg, tmp.path(), None).unwrap());
 
-    let browser = BrowserConfig::default();
     let http = zeroclaw_config::schema::HttpRequestConfig::default();
     let mut cfg = test_config(&tmp);
     // Global is Compact; a runtime profile pins this agent to Full and the
@@ -1314,7 +1183,6 @@ fn all_tools_omits_read_skill_for_full_agent_override_over_global_compact() {
         &zeroclaw_config::schema::RiskProfileConfig::default(),
         "test-agent",
         mem,
-        &browser,
         &http,
         &zeroclaw_config::schema::WebFetchConfig::default(),
         tmp.path(),
@@ -1355,7 +1223,6 @@ fn vi_verify_is_not_registered_even_when_verifiable_intent_is_enabled() {
         &zeroclaw_config::schema::RiskProfileConfig::default(),
         "test-agent",
         mem,
-        &BrowserConfig::default(),
         &zeroclaw_config::schema::HttpRequestConfig::default(),
         &zeroclaw_config::schema::WebFetchConfig::default(),
         tmp.path(),
@@ -1514,7 +1381,6 @@ async fn tone_proposals_resolve_defaults_in_fixed_and_live_registries() {
             "parent-agent",
             Arc::new(NativeRuntime::new()),
             mem,
-            &BrowserConfig::default(),
             &Default::default(),
             &Default::default(),
             tmp.path(),

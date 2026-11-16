@@ -100,11 +100,6 @@ pub fn show_integration_info(config: &Config, name: &str) -> Result<()> {
             println!("    2. Pull a model: ollama pull llama3");
             println!("    3. Set model_provider to 'ollama' in config.toml");
         }
-        "Browser" => {
-            println!("  Built-in:");
-            println!("    ZeroClaw can control Chrome/Chromium for web tasks.");
-            println!("    Uses headless browser automation.");
-        }
         "Cron" => {
             println!("  Built-in:");
             println!("    Schedule tasks in ~/.zeroclaw/workspace/cron/");

@@ -15,22 +15,21 @@ pub mod schema;
 pub mod traits;
 
 pub use schema::{
-    AliasedAgentConfig, AssemblyAiSttConfig, AuditConfig, BackupConfig, BrowserComputerUseConfig,
-    BrowserConfig, BuiltinHooksConfig, ChannelsConfig, ClassificationRule, Config, CostConfig,
-    CronJobDecl, CronScheduleDecl, DataRetentionConfig, DeepgramSttConfig, DiscordConfig,
-    DockerRuntimeConfig, EmbeddingRouteConfig, EstopConfig, GatewayConfig, GoogleSttConfig,
-    HeartbeatConfig, HooksConfig, HttpRequestConfig, IdentityConfig, ImageGenConfig,
-    LinkEnricherConfig, LocalWhisperConfig, McpConfig, McpServerConfig, McpTransport,
-    MediaPipelineConfig, MemoryConfig, MemoryPolicyConfig, ModelRouteConfig, MultimodalConfig,
-    NodeTransportConfig, NodesConfig, ObservabilityConfig, OpenAiSttConfig, OpenVpnTunnelConfig,
-    OtpConfig, OtpMethod, PacingConfig, PipelineConfig, ProxyConfig, ProxyScope,
-    QueryClassificationConfig, ReliabilityConfig, RiskProfileConfig, RuntimeConfig, SandboxBackend,
-    SandboxConfig, SchedulerConfig, SearchMode, SecretsConfig, SecurityConfig, SecurityOpsConfig,
-    ShellToolConfig, SkillCreationConfig, SkillImprovementConfig, SkillsConfig,
-    SkillsPromptInjectionMode, StorageConfig, StreamMode, TelegramConfig, TextBrowserConfig,
-    ToolFilterGroup, ToolFilterGroupMode, TranscriptionConfig, TtsConfig, TtsProviderConfig,
-    TunnelConfig, VerifiableIntentConfig, WebFetchConfig, WebSearchConfig, WebhookConfig,
-    read_persisted_proxy_for_boot,
+    AliasedAgentConfig, AssemblyAiSttConfig, AuditConfig, BackupConfig, BuiltinHooksConfig,
+    ChannelsConfig, ClassificationRule, Config, CostConfig, CronJobDecl, CronScheduleDecl,
+    DataRetentionConfig, DeepgramSttConfig, DiscordConfig, DockerRuntimeConfig,
+    EmbeddingRouteConfig, EstopConfig, GatewayConfig, GoogleSttConfig, HeartbeatConfig,
+    HooksConfig, HttpRequestConfig, IdentityConfig, ImageGenConfig, LinkEnricherConfig,
+    LocalWhisperConfig, McpConfig, McpServerConfig, McpTransport, MediaPipelineConfig,
+    MemoryConfig, MemoryPolicyConfig, ModelRouteConfig, MultimodalConfig, NodeTransportConfig,
+    NodesConfig, ObservabilityConfig, OpenAiSttConfig, OpenVpnTunnelConfig, OtpConfig, OtpMethod,
+    PacingConfig, PipelineConfig, ProxyConfig, ProxyScope, QueryClassificationConfig,
+    ReliabilityConfig, RiskProfileConfig, RuntimeConfig, SandboxBackend, SandboxConfig,
+    SchedulerConfig, SearchMode, SecretsConfig, SecurityConfig, SecurityOpsConfig, ShellToolConfig,
+    SkillCreationConfig, SkillImprovementConfig, SkillsConfig, SkillsPromptInjectionMode,
+    StorageConfig, StreamMode, TelegramConfig, ToolFilterGroup, ToolFilterGroupMode,
+    TranscriptionConfig, TtsConfig, TtsProviderConfig, TunnelConfig, VerifiableIntentConfig,
+    WebFetchConfig, WebSearchConfig, WebhookConfig, read_persisted_proxy_for_boot,
 };
 
 pub use schema::ModelProviderConfig;

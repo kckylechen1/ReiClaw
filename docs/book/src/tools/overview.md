@@ -28,7 +28,6 @@ A minimal build ships with:
 | `http_request` | HTTP GET/POST/PUT/DELETE/PATCH/HEAD/OPTIONS to allowlisted domains |
 | `web_search_tool` | Web search. Provider is configurable: DuckDuckGo (default, no key), Brave, Tavily, SearXNG, Jina, or Bocha |
 | `web_fetch` | Fetch a page and return clean plain text |
-| `browser` | Headless-browser automation. See [Browser automation](./browser.md) |
 | `memory_recall` | Search long-term memory for relevant facts, preferences, or context |
 | `memory_store` | Store a fact, preference, or note in long-term memory |
 | `ask_user` | Send a question to the active channel and wait for a reply. Supports optional `choices` for structured responses (inline keyboard on Telegram, numbered list on CLI). On ACP, `choices` are required: free-form ask awaits the ACP elicitation RFD. Parameters: `question` (required), `choices` (optional list), `timeout_secs` (default 600). |
@@ -122,7 +121,6 @@ See [Autonomy levels](../security/autonomy.md) for the full set of per-profile f
 - [MCP](./mcp.md)
 - [Tool execution lifecycle](../architecture/tool-execution-lifecycle.md)
 - [ACP](../channels/acp.md)
-- [Browser automation](./browser.md)
 - [Security → Overview](../security/overview.md)
 
 ## Named HTTP authorization secrets

@@ -141,7 +141,6 @@ pub async fn process_message_with_task_identity(
             agent_alias,
             runtime.clone(),
             mem.clone(),
-            &config.browser,
             &config.http_request,
             &config.web_fetch,
             &config.data_dir,
@@ -249,9 +248,6 @@ pub async fn process_message_with_task_identity(
                 "read_skill",
                 "Load the full source for an available skill by name.",
             ));
-        }
-        if config.browser.enabled {
-            tool_descs.push(("browser_open", "Open approved URLs in browser."));
         }
 
         let mut excluded_tools = compute_excluded_mcp_tools(

@@ -8,8 +8,6 @@ use zeroclaw_api::tool_attribution;
 
 use crate::ask_user::AskUserTool;
 use crate::backup_tool::BackupTool;
-use crate::browser::BrowserTool;
-use crate::browser_open::BrowserOpenTool;
 use crate::content_search::ContentSearchTool;
 use crate::data_management::DataManagementTool;
 use crate::discord_search::DiscordSearchTool;
@@ -37,15 +35,12 @@ use crate::screenshot::ScreenshotTool;
 use crate::sessions::{
     SessionsCurrentTool, SessionsHistoryTool, SessionsListTool, SessionsSendTool,
 };
-use crate::text_browser::TextBrowserTool;
 use crate::tool_search::ToolSearchTool;
 use crate::web_fetch::WebFetchTool;
 use crate::web_search_tool::WebSearchTool;
 
 tool_attribution!(AskUserTool, ToolKind::Wait);
 tool_attribution!(BackupTool, ToolKind::Plugin);
-tool_attribution!(BrowserTool, ToolKind::Plugin);
-tool_attribution!(BrowserOpenTool, ToolKind::Plugin);
 tool_attribution!(ContentSearchTool, ToolKind::Search);
 tool_attribution!(DataManagementTool, ToolKind::Plugin);
 tool_attribution!(DiscordSearchTool, ToolKind::Search);
@@ -78,7 +73,6 @@ tool_attribution!(SessionsCurrentTool, ToolKind::Plugin);
 tool_attribution!(SessionsHistoryTool, ToolKind::Plugin);
 tool_attribution!(SessionsListTool, ToolKind::Plugin);
 tool_attribution!(SessionsSendTool, ToolKind::Plugin);
-tool_attribution!(TextBrowserTool, ToolKind::Plugin);
 tool_attribution!(ToolSearchTool, ToolKind::Search);
 tool_attribution!(WebFetchTool, ToolKind::FetchUrl);
 tool_attribution!(WebSearchTool, ToolKind::Search);

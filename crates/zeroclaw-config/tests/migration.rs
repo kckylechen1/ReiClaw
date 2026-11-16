@@ -1823,6 +1823,7 @@ native_chrome_path = "/usr/bin/chromium"
     assert_eq!(
         hits,
         vec![
+            ("browser", "browser_tools_removed"),
             ("browser.backend", "browser_native_backend_removed"),
             (
                 "browser.native_chrome_path",

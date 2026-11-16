@@ -1,7 +1,7 @@
 import type { LucideIcon } from 'lucide-react';
 import {
   Terminal, FileText, FilePlus, FileEdit, Search, FolderSearch,
-  Globe, ExternalLink, Download, Wifi, Database, GitBranch,
+  Download, Wifi, Database, GitBranch,
   Image, Camera, Wrench, CheckCircle2, Loader2,
 } from 'lucide-react';
 import { Card, Badge } from '@/components/ui';
@@ -25,9 +25,6 @@ const TOOL_ICON_MAP: Record<string, LucideIcon> = {
   file_edit: FileEdit,
   content_search: Search,
   glob_search: FolderSearch,
-  browser: Globe,
-  browser_open: ExternalLink,
-  text_browser: Globe,
   web_search_tool: Search,
   web_fetch: Download,
   http_request: Wifi,

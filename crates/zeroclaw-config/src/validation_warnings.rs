@@ -117,6 +117,14 @@ use serde::{Deserialize, Serialize};
 ///   an `agents.<alias>.knowledge_bundles` list is still present. The bundles
 ///   only fed the retired knowledge-graph tool, so both surfaces are ignored
 ///   (see `RETIRED_CONFIG_SURFACES` and `RETIRED_CONFIG_FIELDS`).
+/// - `browser_tools_removed`: a `[browser]` section (incl.
+///   `[browser.computer_use]`) is still present. The browser automation
+///   tools were retired — web interaction stays on `web_fetch` /
+///   `web_search_tool` / `http_request` — so the section is ignored
+///   (see `RETIRED_CONFIG_SURFACES`).
+/// - `text_browser_tool_removed`: a `[text_browser]` section is still
+///   present. The text-browser tool was retired with the browser family,
+///   so the section is ignored (see `RETIRED_CONFIG_SURFACES`).
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 #[cfg_attr(feature = "schema-export", derive(schemars::JsonSchema))]
 pub struct ValidationWarning {
@@ -163,6 +171,8 @@ pub const RETIRED_CONFIG_SURFACES: &[(&str, &str)] = &[
     ),
     ("knowledge", "knowledge_graph_removed"),
     ("knowledge_bundles", "knowledge_bundles_removed"),
+    ("browser", "browser_tools_removed"),
+    ("text_browser", "text_browser_tool_removed"),
     ("delegate", "delegate_config_removed"),
     ("claude_code", "raw_launcher_config_removed"),
     ("claude_code_runner", "raw_launcher_config_removed"),

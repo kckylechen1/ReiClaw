@@ -1325,7 +1325,6 @@ fn v1_child_capability_set_is_disjoint_from_a_real_parent_registry() {
         "parent-agent",
         Arc::new(crate::platform::NativeRuntime::new()),
         mem,
-        &zeroclaw_config::schema::BrowserConfig::default(),
         &zeroclaw_config::schema::HttpRequestConfig::default(),
         &zeroclaw_config::schema::WebFetchConfig::default(),
         tmp.path(),

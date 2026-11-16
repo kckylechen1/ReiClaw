@@ -1900,13 +1900,11 @@ async fn config_toml_roundtrip() {
         tunnel: TunnelConfig::default(),
         gateway: GatewayConfig::default(),
         secrets: SecretsConfig::default(),
-        browser: BrowserConfig::default(),
         http_request: HttpRequestConfig::default(),
         multimodal: MultimodalConfig::default(),
         media_pipeline: MediaPipelineConfig::default(),
         web_fetch: WebFetchConfig::default(),
         link_enricher: LinkEnricherConfig::default(),
-        text_browser: TextBrowserConfig::default(),
         web_search: WebSearchConfig::default(),
         proxy: ProxyConfig::default(),
         pacing: PacingConfig::default(),
@@ -2653,13 +2651,11 @@ async fn config_save_and_load_tmpdir() {
         tunnel: TunnelConfig::default(),
         gateway: GatewayConfig::default(),
         secrets: SecretsConfig::default(),
-        browser: BrowserConfig::default(),
         http_request: HttpRequestConfig::default(),
         multimodal: MultimodalConfig::default(),
         media_pipeline: MediaPipelineConfig::default(),
         web_fetch: WebFetchConfig::default(),
         link_enricher: LinkEnricherConfig::default(),
-        text_browser: TextBrowserConfig::default(),
         web_search: WebSearchConfig::default(),
         proxy: ProxyConfig::default(),
         pacing: PacingConfig::default(),
@@ -2756,7 +2752,7 @@ async fn config_save_encrypts_nested_credentials() {
         },
     );
     // ModelProvider fields are now resolved directly — no cache needed.
-    config.browser.computer_use.api_key = Some("browser-credential".into());
+    config.link_enricher.enabled = true;
     config.web_search.brave_api_key = Some("brave-credential".into());
     config.web_search.tavily_api_key = Some("tavily-credential".into());
     config.reliability.api_keys = vec![
@@ -2836,7 +2832,6 @@ async fn config_save_encrypts_nested_credentials() {
     for plaintext in [
         "root-credential",
         "Bearer provider-header-credential",
-        "browser-credential",
         "brave-credential",
         "tavily-credential",
         "rotation-credential-a",
@@ -2876,13 +2871,6 @@ async fn config_save_encrypts_nested_credentials() {
     assert_eq!(
         store.decrypt(provider_header).unwrap(),
         "Bearer provider-header-credential"
-    );
-
-    let browser_encrypted = stored.browser.computer_use.api_key.as_deref().unwrap();
-    assert!(crate::secrets::SecretStore::is_encrypted(browser_encrypted));
-    assert_eq!(
-        store.decrypt(browser_encrypted).unwrap(),
-        "browser-credential"
     );
 
     let web_search_encrypted = stored.web_search.brave_api_key.as_deref().unwrap();
@@ -3440,47 +3428,6 @@ default_temperature = 0.7
         parsed.secrets.encrypt,
         "Missing [secrets] must default to encrypt=true"
     );
-}
-
-#[test]
-async fn browser_config_default_enabled() {
-    let b = BrowserConfig::default();
-    assert!(b.enabled);
-    assert_eq!(b.allowed_domains, vec!["*".to_string()]);
-    assert_eq!(b.backend, "agent_browser");
-    assert_eq!(b.headed, None);
-    assert_eq!(b.computer_use.endpoint, "http://127.0.0.1:8787/v1/actions");
-    assert_eq!(b.computer_use.timeout_ms, 15_000);
-    assert!(!b.computer_use.allow_remote_endpoint);
-    assert!(b.computer_use.window_allowlist.is_empty());
-    assert!(b.computer_use.max_coordinate_x.is_none());
-    assert!(b.computer_use.max_coordinate_y.is_none());
-}
-
-#[test]
-async fn browser_config_parses_headed_true() {
-    let parsed: BrowserConfig = toml::from_str(
-        r#"
-backend = "agent_browser"
-headed = true
-"#,
-    )
-    .unwrap();
-
-    assert_eq!(parsed.backend, "agent_browser");
-    assert_eq!(parsed.headed, Some(true));
-}
-
-#[test]
-async fn browser_config_backward_compat_missing_section() {
-    let minimal = r#"
-workspace_dir = "/tmp/ws"
-config_path = "/tmp/config.toml"
-default_temperature = 0.7
-"#;
-    let parsed = parse_test_config(minimal);
-    assert!(parsed.browser.enabled);
-    assert_eq!(parsed.browser.allowed_domains, vec!["*".to_string()]);
 }
 
 async fn env_override_lock() -> MutexGuard<'static, ()> {
@@ -6524,7 +6471,7 @@ enabled = true
 method = "totp"
 token_ttl_secs = 30
 cache_valid_secs = 120
-gated_actions = ["shell", "browser_open"]
+gated_actions = ["shell", "file_edit"]
 gated_domains = ["*.chase.com", "accounts.google.com"]
 gated_domain_categories = ["banking"]
 
