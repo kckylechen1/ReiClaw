@@ -495,13 +495,13 @@ async fn voice_projection_requires_provider_alias_and_query_surface_without_chan
     assert!(fixture.seen.lock().is_empty());
 }
 
-struct PausedMetadata {
+struct ReducingMetadata {
     inner: Arc<dyn zeroclaw_infra::session_backend::SessionBackend>,
-    entered: tokio::sync::Notify,
-    release: std::sync::Mutex<std::sync::mpsc::Receiver<()>>,
+    reduce: Box<dyn Fn() + Send + Sync>,
+    calls: std::sync::atomic::AtomicUsize,
 }
 
-impl zeroclaw_infra::session_backend::SessionBackend for PausedMetadata {
+impl zeroclaw_infra::session_backend::SessionBackend for ReducingMetadata {
     fn load(&self, key: &str) -> Vec<zeroclaw_providers::ChatMessage> {
         self.inner.load(key)
     }
@@ -521,14 +521,17 @@ impl zeroclaw_infra::session_backend::SessionBackend for PausedMetadata {
         &self,
         key: &str,
     ) -> Option<zeroclaw_infra::session_backend::SessionMetadata> {
-        self.entered.notify_one();
-        self.release.lock().unwrap().recv_timeout(LIMIT).unwrap();
-        self.inner.get_session_metadata(key)
+        let metadata = self.inner.get_session_metadata(key);
+        // Mutate only this fixture, at the actual metadata boundary after the
+        // initial binding check. No worker needs to wait for the test driver.
+        assert_eq!(self.calls.fetch_add(1, std::sync::atomic::Ordering::SeqCst), 0);
+        (self.reduce)();
+        metadata
     }
 }
 
 #[tokio::test]
-async fn voice_projection_rechecks_live_admission_after_metadata_wait() {
+async fn voice_projection_rechecks_live_admission_after_metadata() {
     for reduction in [
         "bridge",
         "chat",
@@ -553,11 +556,46 @@ async fn voice_projection_rechecks_live_admission_after_metadata_wait() {
         facts
             .set_voice_consent(&head.id, "moss-live", VoiceConsentAction::Grant, 0, 2)
             .unwrap();
-        let (release_tx, release_rx) = std::sync::mpsc::channel();
-        let backend = Arc::new(PausedMetadata {
+        let live_config = fixture.state.config.clone();
+        let backend = Arc::new(ReducingMetadata {
             inner: fixture.state.session_backend.as_ref().unwrap().clone(),
-            entered: tokio::sync::Notify::new(),
-            release: std::sync::Mutex::new(release_rx),
+            reduce: Box::new(move || {
+                let mut config = live_config.write();
+                match reduction {
+                    "bridge" => config.gateway.bridges.clear(),
+                    "chat" => config
+                        .gateway
+                        .bridges
+                        .get_mut("device")
+                        .unwrap()
+                        .device
+                        .as_mut()
+                        .unwrap()
+                        .operations
+                        .clear(),
+                    "alias" => config.agents.get_mut("device-agent").unwrap().enabled = false,
+                    "credential" => {
+                        config.gateway.bridges.get_mut("device").unwrap().token_hash =
+                            zeroclaw_config::tokens::hash_token("rotated-device-token");
+                    }
+                    "device-scope" => {
+                        config.gateway.bridges.get_mut("device").unwrap().device = None;
+                    }
+                    "device-agent" => {
+                        config
+                            .gateway
+                            .bridges
+                            .get_mut("device")
+                            .unwrap()
+                            .device
+                            .as_mut()
+                            .unwrap()
+                            .agent = "other-agent".into();
+                    }
+                    _ => unreachable!(),
+                }
+            }),
+            calls: std::sync::atomic::AtomicUsize::new(0),
         });
         let mut state = fixture.state.clone();
         state.session_backend = Some(backend.clone());
@@ -578,77 +616,8 @@ async fn voice_projection_rechecks_live_admission_after_metadata_wait() {
         )
         .await;
         assert_eq!(status, 101);
-        // This signal is after the first binding check, not a scheduling delay.
-        tokio::time::timeout(LIMIT, backend.entered.notified())
-            .await
-            .unwrap();
-        match reduction {
-            "bridge" => {
-                fixture.state.config.write().gateway.bridges.clear();
-            }
-            "chat" => fixture
-                .state
-                .config
-                .write()
-                .gateway
-                .bridges
-                .get_mut("device")
-                .unwrap()
-                .device
-                .as_mut()
-                .unwrap()
-                .operations
-                .clear(),
-            "alias" => {
-                fixture
-                    .state
-                    .config
-                    .write()
-                    .agents
-                    .get_mut("device-agent")
-                    .unwrap()
-                    .enabled = false
-            }
-            "credential" => {
-                fixture
-                    .state
-                    .config
-                    .write()
-                    .gateway
-                    .bridges
-                    .get_mut("device")
-                    .unwrap()
-                    .token_hash = zeroclaw_config::tokens::hash_token("rotated-device-token");
-            }
-            "device-scope" => {
-                fixture
-                    .state
-                    .config
-                    .write()
-                    .gateway
-                    .bridges
-                    .get_mut("device")
-                    .unwrap()
-                    .device = None;
-            }
-            "device-agent" => {
-                fixture
-                    .state
-                    .config
-                    .write()
-                    .gateway
-                    .bridges
-                    .get_mut("device")
-                    .unwrap()
-                    .device
-                    .as_mut()
-                    .unwrap()
-                    .agent = "other-agent".into();
-            }
-            _ => unreachable!(),
-        }
-        release_tx.send(()).unwrap();
         let first = socket.next().await.unwrap();
+        assert_eq!(backend.calls.load(std::sync::atomic::Ordering::SeqCst), 1);
         assert_eq!(first["type"], "error", "{reduction}: {first}");
         assert_eq!(
             first["code"],

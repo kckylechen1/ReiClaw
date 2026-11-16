@@ -173,9 +173,9 @@ pub async fn handle_ws_chat(
         .map(|(name, bridge)| (name.to_string(), bridge.clone()));
     #[cfg(feature = "voice-surface")]
     if params.surface.as_deref() == Some("voice")
-        && !bridge_scope
+        && bridge_scope
             .as_ref()
-            .is_some_and(|(_, bridge)| bridge.device.is_some())
+            .is_none_or(|(_, bridge)| bridge.device.is_none())
     {
         return voice_projection::Error::DeviceCredentialRequired.response();
     }
