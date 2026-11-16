@@ -205,10 +205,8 @@ default-channels = [
     "channel-email", "channel-telegram", "channel-discord",
 ]
 
-# Historical broad channel bundle. Preserves the older default channel surface.
-channels-full = [
-    "default-channels", "channel-notion",
-]
+# Compatibility alias for the retained default channel surface.
+channels-full = ["default-channels"]
 
 # Major subsystems — each forwards to exactly ONE crate
 gateway = [
@@ -221,9 +219,6 @@ schema-export = ["dep:zeroclaw-schema-markdown", "zeroclaw-config/schema-export"
 channel-email = ["zeroclaw-runtime?/email-tools"]
 channel-telegram = []
 channel-discord = []
-provider-github = []
-provider-gitea = []
-channel-notion = []
 channel-webhook = []
 channel-acp-server = []
 

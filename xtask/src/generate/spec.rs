@@ -802,7 +802,14 @@ mod tests {
             .cloned()
             .collect();
         ts::require_non_empty("channels-full rows", Cause::Protected, full_rows.len());
-        ts::require_non_empty("broad-only rows", Cause::Retired, broad_only.len());
+        // An empty broad-only set is the supported channels-full alias case.
+        // Assert equivalence explicitly instead of proving an empty walk.
+        if broad_only.is_empty() {
+            assert_eq!(
+                broad, dist,
+                "dist-broad must match dist when channels-full has no broad-only channels"
+            );
+        }
         for feature in &full_rows {
             assert!(
                 broad.contains(feature),
