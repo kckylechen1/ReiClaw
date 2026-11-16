@@ -123,12 +123,18 @@ impl Agent {
         if let Some(card) = config.card_for_agent(agent_alias) {
             alias.persona = card.persona.clone();
         }
-        alias.card.clear();
+        alias.card = Default::default();
         alias.risk_profile = device
             .risk_profile
             .clone()
-            .context("missing device profile")?;
+            .context("missing device profile")?
+            .into();
         confined.agents.insert(agent_alias.to_owned(), alias);
+        confined.mcp.deferred_loading = false;
+        // Resource pins are private auto-context, not an explicitly invoked search tool.
+        for server in &mut confined.mcp.servers {
+            server.pinned_resources.clear();
+        }
         Self::from_config_with_session_cwd_and_mcp_approval_mode(
             &confined,
             agent_alias,
@@ -293,7 +299,11 @@ impl Agent {
         // Skills are loaded here and handed to `assemble`, which owns skill
         // registration and resolves builtin/MCP elevation against the pre-filter
         // arcs internally. Bundle-aware via `[agents.<alias>].skill_bundles`.
-        let skills = crate::skills::load_skills_for_agent_from_config(config, agent_alias);
+        let skills = if device_bound {
+            Vec::new()
+        } else {
+            crate::skills::load_skills_for_agent_from_config(config, agent_alias)
+        };
         let assembled = crate::tools::scoped::ScopedToolRegistry::assemble(
             crate::tools::scoped::ScopedAssembly {
                 config,
@@ -333,7 +343,14 @@ impl Agent {
             // already-consumed sibling fields via `..`.
             ..
         } = assembled;
-        let tools = registry.into_inner();
+        let mut tools = registry.into_inner();
+        if device_bound {
+            // Last admission boundary, after optional tools and helpers register.
+            // Skills were never loaded, so a server__tool-shaped skill cannot
+            // impersonate an explicitly allowed MCP tool.
+            let allowed = risk_profile.allowed_tools.as_deref().unwrap_or_default();
+            tools.retain(|tool| allowed.iter().any(|name| name == tool.name()));
+        }
 
         let model_name = match agent_model_provider
             .and_then(|e| e.model.as_deref())
@@ -420,6 +437,11 @@ impl Agent {
             crate::agent::persona_projection::persona_projection(config, agent_alias)
         };
 
+        let prompt_builder = if device_bound {
+            SystemPromptBuilder::with_device_persona(persona)
+        } else {
+            SystemPromptBuilder::with_persona(persona)
+        };
         let mut agent = Agent::builder()
             .model_provider(model_provider)
             .tools(tools)
@@ -438,7 +460,7 @@ impl Agent {
             // Tone from the configured persona dials (ADR-015). The body
             // re-projects it at the start of any turn whose Soul revision
             // moved, and adds the User Model owner profile per turn.
-            .prompt_builder(SystemPromptBuilder::with_persona(persona))
+            .prompt_builder(prompt_builder)
             .governed_turn_context(soul_stamp)
             .config(
                 config

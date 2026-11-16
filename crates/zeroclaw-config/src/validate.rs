@@ -1394,10 +1394,14 @@ impl Config {
                 );
             }
             if let Some(device) = &bridge.device {
-                if device.risk_profile.is_some() {
-                    device.validated_profile(self).map_err(|reason| {
-                        anyhow::anyhow!("gateway.bridges.{name}.device.risk_profile: {reason}")
-                    })?;
+                if device.risk_profile.is_some()
+                    && let Err(reason) = device.validated_profile(self)
+                {
+                    validation_bail!(
+                        InvalidFormat,
+                        format!("gateway.bridges.{name}.device.risk_profile"),
+                        "gateway.bridges.{name}.device.risk_profile: {reason}"
+                    );
                 }
                 for (other_name, other) in &self.gateway.bridges {
                     if other_name != name && crate::bridge_access::namespaces_overlap(bridge, other)

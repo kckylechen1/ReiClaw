@@ -335,18 +335,41 @@ async fn device_prompt_denial_never_calls_or_waits_for_an_approver() {
     let observer = RecordingObserver::default();
     let channel = DenyingChannel::default();
     let approval = ApprovalManager::for_non_interactive_backchannel(&RiskProfileConfig {
-        auto_approve: vec![], always_ask: vec!["probe".into()], ..Default::default()
-    }).with_prompt_denial(true);
+        auto_approve: vec![],
+        always_ask: vec!["probe".into()],
+        ..Default::default()
+    })
+    .with_prompt_denial(true);
     let pacing = PacingConfig::default();
     let ctx = TurnCtx {
-        observer: &observer, provider_name: "fixture", model: "fixture", temperature: None,
-        approval: Some(&approval), channel_name: "fixture", channel_reply_target: None,
-        cancellation_token: None, on_delta: None, event_tx: None, hooks: None,
-        dedup_exempt_tools: &[], pacing: &pacing, strict_tool_parsing: false,
-        channel: Some(&channel), turn_id: "device-denial", agent_alias: None, parent_agent_alias: None,
+        observer: &observer,
+        provider_name: "fixture",
+        model: "fixture",
+        temperature: None,
+        approval: Some(&approval),
+        channel_name: "fixture",
+        channel_reply_target: None,
+        cancellation_token: None,
+        on_delta: None,
+        event_tx: None,
+        hooks: None,
+        dedup_exempt_tools: &[],
+        pacing: &pacing,
+        strict_tool_parsing: false,
+        channel: Some(&channel),
+        turn_id: "device-denial",
+        agent_alias: None,
+        parent_agent_alias: None,
     };
-    let outcome = tokio::time::timeout(std::time::Duration::from_millis(100),
-        super::approval_gate::gate_tool_approval(&ctx, "probe", &json!({}), 0)).await.unwrap();
-    assert!(matches!(outcome, super::approval_gate::ApprovalGateOutcome::Deny(_)));
+    let outcome = tokio::time::timeout(
+        std::time::Duration::from_millis(100),
+        crate::agent::turn::approval_gate::gate_tool_approval(&ctx, "probe", &json!({}), 0),
+    )
+    .await
+    .unwrap();
+    assert!(matches!(
+        outcome,
+        crate::agent::turn::approval_gate::ApprovalGateOutcome::Deny(_)
+    ));
     assert_eq!(channel.0.load(Ordering::SeqCst), 0);
 }

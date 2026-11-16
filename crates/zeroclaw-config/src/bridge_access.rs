@@ -272,14 +272,22 @@ mod confinement_tests {
         RiskProfileConfig {
             allowed_tools: Some(vec!["web_search_tool".into(), "search__lookup".into()]),
             auto_approve: vec!["web_search_tool".into(), "search__lookup".into()],
-            always_ask: vec![], ..Default::default()
+            always_ask: vec![],
+            ..Default::default()
         }
     }
 
     #[test]
     fn device_profile_rejects_each_authority_escape() {
         assert!(validate_device_profile(&public_profile()).is_ok());
-        for tool in DEVICE_DENIED_TOOLS.iter().copied().chain(["*", "lookup", "search__*", "__lookup", "search__", "pipeline"]) {
+        for tool in DEVICE_DENIED_TOOLS.iter().copied().chain([
+            "*",
+            "lookup",
+            "search__*",
+            "__lookup",
+            "search__",
+            "pipeline",
+        ]) {
             let mut profile = public_profile();
             profile.allowed_tools = Some(vec![tool.into()]);
             profile.auto_approve = vec![tool.into()];
@@ -292,29 +300,71 @@ mod confinement_tests {
                 1 => profile.allowed_tools = None,
                 2 => profile.auto_approve.clear(),
                 3 => profile.always_ask.push("web_search_tool".into()),
-                4 => profile.mcp_discovered_tool_policy = crate::autonomy::McpDiscoveredToolPolicy::AutoAdmit,
-                5 => profile.approval_route = Some(toml::from_str("approver_channel = 'owner'").unwrap()),
+                4 => {
+                    profile.mcp_discovered_tool_policy =
+                        crate::autonomy::McpDiscoveredToolPolicy::AutoAdmit
+                }
+                5 => {
+                    profile.approval_route =
+                        Some(toml::from_str("approver_channel = 'owner'").unwrap())
+                }
                 _ => unreachable!(),
             }
-            assert!(validate_device_profile(&profile).is_err(), "mutation {mutation}");
+            assert!(
+                validate_device_profile(&profile).is_err(),
+                "mutation {mutation}"
+            );
         }
         let mut config = Config::default();
-        let device = GatewayDeviceBridgeConfig { risk_profile: Some("public".into()), ..Default::default() };
+        let device = GatewayDeviceBridgeConfig {
+            risk_profile: Some("public".into()),
+            ..Default::default()
+        };
         assert!(device.validated_profile(&config).is_err());
-        config.risk_profiles.insert("public".into(), public_profile());
+        config
+            .risk_profiles
+            .insert("public".into(), public_profile());
         assert!(device.validated_profile(&config).is_ok());
     }
 
     #[test]
     fn device_namespaces_reject_exact_prefix_and_nested_prefix_collisions() {
-        let device = GatewayBridgeConfig { sessions: vec!["device-one".into()], session_prefix: Some("edge-".into()), ..Default::default() };
+        let device = GatewayBridgeConfig {
+            sessions: vec!["device-one".into()],
+            session_prefix: Some("edge-".into()),
+            ..Default::default()
+        };
         for other in [
-            GatewayBridgeConfig { sessions: vec!["device-one".into()], ..Default::default() },
-            GatewayBridgeConfig { sessions: vec!["edge-two".into()], ..Default::default() },
-            GatewayBridgeConfig { session_prefix: Some("device-".into()), ..Default::default() },
-            GatewayBridgeConfig { session_prefix: Some("edge-sub-".into()), ..Default::default() },
-            GatewayBridgeConfig { session_prefix: Some("edge".into()), ..Default::default() },
-        ] { assert!(namespaces_overlap(&device, &other)); }
-        assert!(!namespaces_overlap(&device, &GatewayBridgeConfig { sessions: vec!["owner".into()], session_prefix: Some("other-".into()), ..Default::default() }));
+            GatewayBridgeConfig {
+                sessions: vec!["device-one".into()],
+                ..Default::default()
+            },
+            GatewayBridgeConfig {
+                sessions: vec!["edge-two".into()],
+                ..Default::default()
+            },
+            GatewayBridgeConfig {
+                session_prefix: Some("device-".into()),
+                ..Default::default()
+            },
+            GatewayBridgeConfig {
+                session_prefix: Some("edge-sub-".into()),
+                ..Default::default()
+            },
+            GatewayBridgeConfig {
+                session_prefix: Some("edge".into()),
+                ..Default::default()
+            },
+        ] {
+            assert!(namespaces_overlap(&device, &other));
+        }
+        assert!(!namespaces_overlap(
+            &device,
+            &GatewayBridgeConfig {
+                sessions: vec!["owner".into()],
+                session_prefix: Some("other-".into()),
+                ..Default::default()
+            }
+        ));
     }
 }

@@ -170,9 +170,15 @@ async fn device_provider(
     });
     let mut message = json!({"role":"assistant", "content":"device response"});
     let confinement_probe = messages.last().is_some_and(|m| m["role"] == "user" && m["content"].to_string().contains("device-tool-probe"));
-    let finish = if confinement_probe {
+    let cap_probe = messages.iter().any(|m| m["role"] == "user" && m["content"].to_string().contains("device-cap-probe"));
+    let finish = if cap_probe {
         message["content"] = Value::Null;
-        message["tool_calls"] = json!(["shell", "file_write", "notify", "memory_store", "sessions_send", "cron_add"].iter().enumerate().map(|(i, name)| json!({
+        message["tool_calls"] = json!([{"index":0,"id":format!("cap-{}", messages.len()),"type":"function",
+            "function":{"name":format!("absent_{}", messages.len()),"arguments":"{}"}}]);
+        "tool_calls"
+    } else if confinement_probe {
+        message["content"] = Value::Null;
+        message["tool_calls"] = json!(["shell", "file_write", "notify", "memory_store", "sessions_send", "cron_add", "public__probe"].iter().enumerate().map(|(i, name)| json!({
             "index":i, "id":format!("device-probe-{i}"), "type":"function",
             "function":{"name":name,"arguments":json!({"path":"forbidden.txt","content":"forbidden","command":"touch forbidden.txt"}).to_string()}
         })).collect::<Vec<_>>());
@@ -960,6 +966,7 @@ async fn owner_bridge_handshake_reports_cancel_only_when_granted() {
 #[tokio::test]
 async fn paired_session_cwd_rejects_outside_workspace() {
     let fixture = DeviceFixture::new(&["chat"]).await;
+    fixture.state.config.write().gateway.bridges.clear();
     let (status, mut client) = DeviceWire::upgrade(
         fixture.address,
         "agent=device-agent&session_id=device-session&cwd=%2F",
@@ -977,6 +984,7 @@ async fn paired_session_cwd_rejects_outside_workspace() {
 #[tokio::test]
 async fn paired_session_cwd_accepts_workspace_descendant() {
     let fixture = DeviceFixture::new(&["chat"]).await;
+    fixture.state.config.write().gateway.bridges.clear();
     let workspace = fixture.state.config.read().agent_workspace_dir("device-agent");
     let child = workspace.join("project");
     std::fs::create_dir(&child).unwrap();
@@ -992,6 +1000,7 @@ async fn paired_session_cwd_accepts_workspace_descendant() {
 async fn btw_wire_revoked_owner_is_refused_before_provider_or_slot_use() {
     for negotiated in [false, true] {
         let fixture = DeviceFixture::new(&["chat"]).await;
+    fixture.state.config.write().gateway.bridges.clear();
         let mut client = fixture.socket(OWNER_TOKEN).await;
         if negotiated {
             client
@@ -1121,18 +1130,45 @@ async fn device_full_agent_is_confined_on_every_non_voice_surface() {
             let mut config = fixture.state.config.write();
             config.risk_profiles.get_mut("test").unwrap().level = zeroclaw_config::autonomy::AutonomyLevel::Full;
             config.risk_profiles.get_mut("test").unwrap().allowed_tools = None;
+            let public = config.risk_profiles.get_mut("public-device").unwrap();
+            public.allowed_tools = Some(vec!["public__probe".into()]);
+            public.auto_approve = vec!["public__probe".into()];
             config.memory.auto_save = true;
             config.agents.get_mut("device-agent").unwrap().memory.backend = zeroclaw_config::multi_agent::MemoryBackendKind::Markdown;
         }
+        let skill_dir = fixture.workspace.join("skills/public");
+        std::fs::create_dir_all(&skill_dir).unwrap();
+        std::fs::write(skill_dir.join("SKILL.toml"), r#"
+[skill]
+name = "public"
+description = "PRIVATE_SKILL_SENTINEL"
+version = "0.1.0"
+[[tools]]
+name = "probe"
+description = "Synthetic private HTTP action"
+kind = "http"
+command = "http://127.0.0.1:1/private"
+"#).unwrap();
+        let config = fixture.state.config.read().clone();
+        let ordinary = zeroclaw_runtime::agent::Agent::from_config_with_session_cwd_and_mcp(
+            &config, "device-agent", Some(&fixture.workspace), false).await.unwrap();
+        assert!(ordinary.tool_names().contains(&"public__probe"), "ordinary skills remain registered");
+        let memory = resolve_ws_memory_handle(&config, "device-agent").await.unwrap().unwrap();
+        memory.store("owner-private", "PRIVATE_RECALL_SENTINEL device-tool-probe",
+            zeroclaw_memory::MemoryCategory::Core, None).await.unwrap();
+        let memory_before = memory.count().await.unwrap();
         // Actual HTTP provider sees the constructed agent; no injected registry.
         let (status, mut client) = DeviceWire::upgrade(fixture.address,
             &format!("agent=device-agent&session_id={SESSION}{surface}"), DEVICE_TOKEN).await;
         assert_eq!(status, 101);
         client.connected(json!({"type":"connect"})).await;
         fixture.send_turn(&mut client, "confinement", "device-tool-probe").await;
+        assert_eq!(memory.count().await.unwrap(), memory_before, "device turns must not write memory");
         let seen = fixture.seen.lock();
         assert_eq!(seen.len(), 2, "one tool round and final answer, no consolidation");
-        for name in ["shell", "file_write", "notify", "memory_store", "sessions_send", "cron_add"] {
+        assert!(!seen[0]["messages"].to_string().contains("PRIVATE_RECALL_SENTINEL"));
+        assert!(!seen[0]["messages"].to_string().contains("PRIVATE_SKILL_SENTINEL"));
+        for name in ["shell", "file_write", "notify", "memory_store", "sessions_send", "cron_add", "public__probe"] {
             assert!(!seen[0]["tools"].to_string().contains(name));
             assert!(seen[1]["messages"].to_string().contains(&format!("Unknown tool: {name}")));
         }
@@ -1150,6 +1186,13 @@ async fn device_namespace_refuses_owner_legacy_bridge_and_connect_override() {
             &format!("agent=device-agent&session_id={session}"), token).await;
         assert_eq!(status, 403);
     }
+    fixture.state.config.write().gateway.bridges.insert("legacy".into(), GatewayBridgeConfig {
+        token_hash: zeroclaw_config::tokens::hash_token("synthetic-legacy-token"),
+        sessions: vec![SESSION.into()], ..Default::default()
+    });
+    let (status, _) = DeviceWire::upgrade(fixture.address,
+        &format!("agent=device-agent&session_id={SESSION}"), "synthetic-legacy-token").await;
+    assert_eq!(status, 403);
     let (status, mut owner) = DeviceWire::upgrade(fixture.address,
         "agent=device-agent&session_id=owner-session", OWNER_TOKEN).await;
     assert_eq!(status, 101);
@@ -1175,6 +1218,7 @@ async fn device_turn_prompt_excludes_private_context_but_owner_keeps_it() {
     UserModelStore::shared(&config.data_dir).unwrap().record_owner_statement(
         UserModelKind::Preference, "PRIVATE_USER_MODEL_SENTINEL", "style", "global", 1).unwrap();
     std::fs::write(fixture.workspace.join("USER.md"), "PRIVATE_USER_FILE_SENTINEL").unwrap();
+    std::fs::write(fixture.workspace.join("MEMORY.md"), "PRIVATE_MEMORY_FILE_SENTINEL").unwrap();
     let mut device = fixture.socket(DEVICE_TOKEN).await;
     fixture.send_turn(&mut device, "first", "public question").await;
     fixture.send_turn(&mut device, "second", "another public question").await;
@@ -1185,7 +1229,7 @@ async fn device_turn_prompt_excludes_private_context_but_owner_keeps_it() {
             assert!(prompt.contains("Same Identity"));
             assert!(prompt.contains("## Principles"));
             assert!(prompt.contains("## Tone"));
-            for marker in ["PRIVATE_STORY_SENTINEL", "PRIVATE_EXEMPLAR_SENTINEL", "PRIVATE_USER_MODEL_SENTINEL", "PRIVATE_USER_FILE_SENTINEL"] {
+            for marker in ["PRIVATE_STORY_SENTINEL", "PRIVATE_EXEMPLAR_SENTINEL", "PRIVATE_USER_MODEL_SENTINEL", "PRIVATE_USER_FILE_SENTINEL", "PRIVATE_MEMORY_FILE_SENTINEL"] {
                 assert!(!prompt.contains(marker), "leaked {marker}");
             }
         }
@@ -1197,4 +1241,34 @@ async fn device_turn_prompt_excludes_private_context_but_owner_keeps_it() {
     for marker in ["Same Identity", "PRIVATE_STORY_SENTINEL", "PRIVATE_EXEMPLAR_SENTINEL", "PRIVATE_USER_MODEL_SENTINEL"] {
         assert!(owner_prompt.contains(marker), "owner regression: {marker}");
     }
+}
+
+#[tokio::test]
+async fn device_tool_rounds_stop_at_three_or_the_agents_lower_limit() {
+    for limit in [2, 7] {
+        let fixture = DeviceFixture::new(&["chat"]).await;
+        fixture.state.config.write().runtime_profiles.get_mut("test").unwrap().max_tool_iterations = limit;
+        let mut client = fixture.socket(DEVICE_TOKEN).await;
+        client.send(json!({"type":"message", "id":"cap", "content":"device-cap-probe"})).await;
+        let error = client.until("error").await;
+        assert_eq!(error["code"], "AGENT_ERROR");
+        assert!(error["message"].as_str().unwrap().contains("maximum tool iterations"));
+        assert_eq!(fixture.seen.lock().len(), limit.min(3));
+    }
+}
+
+#[tokio::test]
+async fn device_profile_reload_revokes_the_old_agent_snapshot() {
+    let fixture = DeviceFixture::new(&["chat"]).await;
+    let mut client = fixture.socket(DEVICE_TOKEN).await;
+    fixture.send_turn(&mut client, "before", "before reload").await;
+    {
+        let mut config = fixture.state.config.write();
+        let profile = config.risk_profiles.get_mut("public-device").unwrap();
+        profile.allowed_tools = Some(vec!["web_search_tool".into()]);
+        profile.auto_approve = vec!["web_search_tool".into()];
+    }
+    client.send(json!({"type":"message", "id":"after", "content":"must not use old policy"})).await;
+    client.denied().await;
+    assert_eq!(fixture.seen.lock().len(), 1);
 }

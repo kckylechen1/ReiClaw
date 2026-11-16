@@ -618,7 +618,10 @@ cannot leave their namespace. Owner approvals continue in separate owner session
 
 The same agent alias keeps its Identity, Principles and Tone levels. Device
 turns omit Story, Tone exemplars, User Model and legacy persona/user files;
-`exclude_memory` disables recall, automatic context and agent memory writes.
+Private workspace notes, skill instructions/tools and MCP resource pins are also
+omitted. Device MCP tools load eagerly, so deferred discovery never adds
+`tool_search`. `exclude_memory` disables recall, automatic context and agent
+memory writes.
 The gateway skips consolidation, while session transcript rows are still
 persisted without Operator learning provenance. Tool iterations are capped at
 **3**, or the agent's lower configured limit. Non-device chat policy is unchanged.
