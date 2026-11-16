@@ -167,7 +167,7 @@ consumer census; a module's size alone is not permission to remove it.
 | Quickstart preset selection | Risk/runtime catalogues, factories and provider recommendations moved to the existing Quickstart runtime owner. Config keeps submission DTOs and canonical profile types/defaults. |
 | Shared config metadata | Moved to `zeroclaw-api::config_metadata`; config keeps derive generation and compatibility re-exports. Config-specific traits, coercion, validation and writes remain config-owned. |
 | `sections`, `comment_writer`, `card`, `typed_value` and onboarding DTOs | Config editing, onboarding and persistence still consume these surfaces. #379 owns editor retirement; keep canonical types and write paths until their retained callers have replacements. |
-| Legacy delegation/SOP configuration | #381 owns duplicate execution retirement after replacement proof. Keep L1 reasoning, the Tachi bridge and their shared types. |
+| Legacy SOP configuration | #697 removes the unused declarations after the engine, definition/authoring surface and `procedure_v1` retired. Explicit `sop` input rejects at parse, load, migration and save boundaries; former approval/guard values never become current authority. Keep L1 reasoning and the Tachi bridge. |
 
 ## Env overrides are not saved
 

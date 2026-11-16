@@ -1,4 +1,5 @@
 use anyhow::{Context, Result};
+use serde::Deserialize;
 use std::path::Path;
 
 use crate::schema::Config;
@@ -7,6 +8,43 @@ use crate::schema::v2::V2Config;
 
 /// The schema version this binary writes and expects on disk.
 pub const CURRENT_SCHEMA_VERSION: u32 = 3;
+
+pub(crate) const RETIRED_SOP_CONFIG_MESSAGE: &str = "[sop] is retired: the SOP engine, definition loader, authoring surface and \
+     procedure_v1 path were removed. Review and remove [sop] and ZEROCLAW_sop__* \
+     overrides explicitly; legacy approval and guard settings are not migrated \
+     to current policy or Tachi permissions.";
+
+/// A pre-write refusal to discard retired SOP approval or guard settings.
+#[derive(Debug)]
+pub struct RetiredSopConfigError;
+
+impl std::fmt::Display for RetiredSopConfigError {
+    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        formatter.write_str(RETIRED_SOP_CONFIG_MESSAGE)
+    }
+}
+
+impl std::error::Error for RetiredSopConfigError {}
+
+/// Preserve a rejecting parse boundary without retaining editable SOP settings.
+pub(crate) fn deserialize_retired_sop_config<'de, D>(
+    deserializer: D,
+) -> Result<std::collections::HashMap<String, ()>, D::Error>
+where
+    D: serde::Deserializer<'de>,
+{
+    let _ = serde::de::IgnoredAny::deserialize(deserializer)?;
+    Err(serde::de::Error::custom(RetiredSopConfigError))
+}
+
+/// Reject the old root before migration or salvage can discard its authority.
+/// Inspect only key presence, never the submitted values or member identities.
+pub(crate) fn reject_retired_sop_config(table: &toml::Table) -> Result<()> {
+    if table.contains_key("sop") {
+        return Err(RetiredSopConfigError.into());
+    }
+    Ok(())
+}
 
 pub(crate) struct ConfigLoadAttribution;
 
@@ -61,6 +99,9 @@ pub fn detect_version(value: &toml::Value) -> Result<u32> {
 
 pub fn migrate_file(input: &str) -> Result<Option<String>> {
     let value: toml::Value = toml::from_str(input).context("failed to parse config TOML")?;
+    if let Some(table) = value.as_table() {
+        reject_retired_sop_config(table)?;
+    }
     crate::providers::reject_retired_model_provider_config(&value)?;
     let from = detect_version(&value)?;
     if from == CURRENT_SCHEMA_VERSION {
@@ -139,6 +180,12 @@ pub fn generate(target_version: u32, opts: &GenerateOptions<'_>) -> Result<Strin
     };
 
     let mut value = value;
+    // This is the embedded historical seed, never a user's input. New configs
+    // must omit SOP, while real inputs retain a hard rejection boundary rather
+    // than the ordinary warn-and-ignore retirement policy below.
+    if let Some(root) = value.as_table_mut() {
+        root.remove("sop");
+    }
     // The generator must never emit a retired config surface: the seed
     // fixture predates retirements and the migration lenses pass unknown
     // nested tables through, so without this filter a freshly generated
@@ -290,9 +337,18 @@ pub fn migrate_to_current(input: &str) -> Result<Config> {
 }
 
 /// Daemon load path: versioned TOML → usable `Config`, never failing.
-/// Thin wrapper over [`migrate_to_current_salvaged`] that drops the report.
+/// Thin wrapper over [`migrate_to_current_salvaged`] that retains its degradation
+/// report on `Config`, so a caller cannot mistake fallback defaults for a clean
+/// security posture.
 pub fn migrate_to_current_resilient(input: &str) -> Config {
-    migrate_to_current_salvaged(input).config
+    let ResilientLoad {
+        mut config,
+        dropped,
+        dropped_security,
+    } = migrate_to_current_salvaged(input);
+    config.degraded_security = dropped_security;
+    config.degraded_sections = dropped;
+    config
 }
 
 /// Top-level keys whose silent loss could *weaken* security posture: dropping
@@ -344,6 +400,9 @@ pub fn migrate_to_current_salvaged(input: &str) -> ResilientLoad {
 /// the final typed deserialize. Shared by the strict and resilient entries.
 fn migrate_value(input: &str) -> Result<toml::Value> {
     let value: toml::Value = toml::from_str(input).context("failed to parse config TOML")?;
+    if let Some(table) = value.as_table() {
+        reject_retired_sop_config(table)?;
+    }
     crate::providers::reject_retired_model_provider_config(&value)?;
     let from = detect_version(&value)?;
     if from == CURRENT_SCHEMA_VERSION {
@@ -803,6 +862,9 @@ pub fn ensure_disk_at_current_version(path: &Path) -> Result<()> {
     };
     let value: toml::Value =
         toml::from_str(&raw).context("failed to parse config TOML for version check")?;
+    if let Some(table) = value.as_table() {
+        reject_retired_sop_config(table)?;
+    }
     crate::providers::reject_retired_model_provider_config(&value)?;
     let from = detect_version(&value)?;
     if from == CURRENT_SCHEMA_VERSION {
@@ -1306,6 +1368,8 @@ enabled = "not-a-bool"
         // `[heartbeat]` reverted to its serde default; load did not panic.
         assert!(!cfg.heartbeat.enabled);
         assert_eq!(cfg.heartbeat.interval_minutes, 30);
+        assert_eq!(cfg.degraded_sections, vec!["heartbeat"]);
+        assert!(cfg.degraded_security.is_empty());
     }
 
     #[test]
@@ -1314,6 +1378,7 @@ enabled = "not-a-bool"
         // operator can reach a repair surface and overwrite the file.
         let cfg = migrate_to_current_resilient("this is not valid TOML {{{");
         assert_eq!(cfg.schema_version, Config::default().schema_version);
+        assert_eq!(cfg.degraded_security, vec![WHOLE_CONFIG_SENTINEL]);
     }
 
     #[test]
@@ -1567,6 +1632,54 @@ enabled = "not-a-bool"
             "no `.backup` should be created on the no-op path; got {}",
             backup.display()
         );
+    }
+}
+
+#[cfg(test)]
+mod retired_sop_tests {
+    use super::*;
+
+    #[test]
+    fn retired_sop_config_rejects_v1_v2_v3() {
+        for version in 1..=CURRENT_SCHEMA_VERSION {
+            for body in [
+                "[sop]\n",
+                "sop = false\n",
+                "sop = []\n",
+                "[sop]\napproval_mode = \"out_of_band_required\"\n\
+                 approval_timeout_action = \"cancel\"\nstep_scope_enforce = true\n\
+                 untrusted_input_guard = \"block\"\n\
+                 [sop.approval.groups.private_group]\nmembers = [\"private-member\"]\n\
+                 [sop.approval.policies.private_policy]\n\
+                 required_group = \"private_group\"\nrequest_route = \"channel:private-route\"\n",
+            ] {
+                let raw = format!("schema_version = {version}\n{body}");
+                for result in [
+                    migrate_to_current(&raw).map(|_| ()),
+                    migrate_file(&raw).map(|_| ()),
+                ] {
+                    let error = result.expect_err("retired SOP must reject before migration");
+                    assert!(error.is::<RetiredSopConfigError>());
+                    assert_eq!(error.to_string(), RETIRED_SOP_CONFIG_MESSAGE);
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn retired_sop_config_preserves_resilient_degradation() {
+        let raw = "schema_version = 3\n[sop]\n\
+                   approval_mode = \"out_of_band_required\"\nuntrusted_input_guard = \"block\"\n";
+        let report = migrate_to_current_salvaged(raw);
+        assert_eq!(report.dropped_security, vec![WHOLE_CONFIG_SENTINEL]);
+        assert!(
+            report.dropped.is_empty(),
+            "SOP must not be a benign section prune"
+        );
+        let config = migrate_to_current_resilient(raw);
+        assert_eq!(config.degraded_security, vec![WHOLE_CONFIG_SENTINEL]);
+        assert!(config.degraded_sections.is_empty());
+        assert!(config.sop.is_empty());
     }
 }
 
