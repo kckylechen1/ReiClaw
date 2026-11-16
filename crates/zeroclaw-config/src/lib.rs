@@ -21,6 +21,7 @@ pub mod env_overrides;
 pub mod helpers;
 #[cfg(feature = "i18n")]
 pub mod i18n;
+mod load;
 pub mod migration;
 pub mod multi_agent;
 pub mod node_allowlist;
