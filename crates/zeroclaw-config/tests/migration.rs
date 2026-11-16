@@ -13,12 +13,24 @@ use zeroclaw_config::validation_warnings::ValidationWarning;
 
 const V1_FIXTURE: &str = include_str!("../fixtures/v1.toml");
 
+/// The historical fixture remains immutable. Successful migration tests model
+/// the operator explicitly removing the retired SOP block, keeping every shared
+/// migration, backup, comment and encryption assertion on the remaining input.
+fn v1_fixture_without_retired_sop() -> String {
+    let mut fixture = V1_FIXTURE
+        .parse::<toml_edit::DocumentMut>()
+        .expect("historical V1 fixture parses");
+    assert!(fixture.remove("sop").is_some());
+    fixture.to_string()
+}
+
 fn v3_config() -> Config {
-    migrate_to_current(V1_FIXTURE).expect("V1 fixture migrates to current schema")
+    migrate_to_current(&v1_fixture_without_retired_sop())
+        .expect("V1 fixture migrates to current schema")
 }
 
 fn v3_value() -> toml::Value {
-    let migrated = migrate_file(V1_FIXTURE)
+    let migrated = migrate_file(&v1_fixture_without_retired_sop())
         .expect("migrate_file succeeds")
         .expect("migration ran (V1 → V3)");
     toml::from_str(&migrated).expect("migrate_file output parses as TOML")
@@ -44,6 +56,22 @@ fn chain_produces_valid_v3() {
         cfg.schema_version, CURRENT_SCHEMA_VERSION,
         "migrated config must carry current schema_version"
     );
+}
+
+#[test]
+fn historical_v1_fixture_requires_sop_retirement() {
+    for result in [
+        migrate_to_current(V1_FIXTURE).map(|_| ()),
+        migrate_file(V1_FIXTURE).map(|_| ()),
+    ] {
+        let error = result.expect_err("unmodified legacy SOP input must reject");
+        assert!(error.to_string().contains("[sop] is retired"));
+    }
+
+    let mut expected: toml::Value = toml::from_str(V1_FIXTURE).unwrap();
+    expected.as_table_mut().unwrap().remove("sop").unwrap();
+    let derived: toml::Value = toml::from_str(&v1_fixture_without_retired_sop()).unwrap();
+    assert_eq!(derived, expected, "the live sample removes only SOP");
 }
 
 #[test]
@@ -892,7 +920,7 @@ daily_limit_usd = 10.0
 
 #[test]
 fn migrate_file_is_none_when_already_current() {
-    let v3_string = migrate_file(V1_FIXTURE)
+    let v3_string = migrate_file(&v1_fixture_without_retired_sop())
         .expect("first migrate succeeds")
         .expect("first migrate ran");
     let again = migrate_file(&v3_string).expect("second migrate succeeds");
@@ -910,7 +938,8 @@ fn migrate_file_is_none_when_already_current() {
 fn file_api_writes_backup_first() {
     let dir = tempfile::tempdir().expect("tempdir");
     let path = dir.path().join("config.toml");
-    std::fs::write(&path, V1_FIXTURE).expect("seed V1 fixture");
+    let fixture = v1_fixture_without_retired_sop();
+    std::fs::write(&path, &fixture).expect("seed V1 fixture without retired SOP");
 
     let report: MigrateReport = migrate_file_in_place(&path)
         .expect("migrate_file_in_place succeeds")
@@ -924,7 +953,7 @@ fn file_api_writes_backup_first() {
     );
     let backup_contents = std::fs::read_to_string(&backup_path).expect("read backup");
     assert_eq!(
-        backup_contents, V1_FIXTURE,
+        backup_contents, fixture,
         "backup must contain the original V1 input verbatim"
     );
 
@@ -948,7 +977,9 @@ fn file_api_writes_backup_first() {
 fn file_api_no_op_when_already_current() {
     let dir = tempfile::tempdir().expect("tempdir");
     let path = dir.path().join("config.toml");
-    let v3 = migrate_file(V1_FIXTURE).unwrap().unwrap();
+    let v3 = migrate_file(&v1_fixture_without_retired_sop())
+        .unwrap()
+        .unwrap();
     std::fs::write(&path, &v3).expect("seed V3");
     let report = migrate_file_in_place(&path).expect("migrate_file_in_place succeeds");
     assert!(
@@ -966,7 +997,9 @@ fn file_api_no_op_when_already_current() {
 fn ensure_disk_at_current_version_passes_for_v3() {
     let dir = tempfile::tempdir().unwrap();
     let path = dir.path().join("config.toml");
-    let v3 = migrate_file(V1_FIXTURE).unwrap().unwrap();
+    let v3 = migrate_file(&v1_fixture_without_retired_sop())
+        .unwrap()
+        .unwrap();
     std::fs::write(&path, &v3).unwrap();
     ensure_disk_at_current_version(&path).expect("V3 disk passes the gate");
 }
@@ -975,7 +1008,7 @@ fn ensure_disk_at_current_version_passes_for_v3() {
 fn ensure_disk_at_current_version_blocks_stale() {
     let dir = tempfile::tempdir().unwrap();
     let path = dir.path().join("config.toml");
-    std::fs::write(&path, V1_FIXTURE).unwrap();
+    std::fs::write(&path, v1_fixture_without_retired_sop()).unwrap();
     let err = ensure_disk_at_current_version(&path)
         .expect_err("V1 disk fails the gate")
         .to_string();
@@ -990,6 +1023,34 @@ fn ensure_disk_at_current_version_passes_for_missing_file() {
     let dir = tempfile::tempdir().unwrap();
     let missing = dir.path().join("does_not_exist.toml");
     ensure_disk_at_current_version(&missing).expect("missing file is treated as fresh install");
+}
+
+#[test]
+fn retired_sop_rejects_disk_edits_without_rewriting_or_backing_up() {
+    for version in 1..=CURRENT_SCHEMA_VERSION {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("config.toml");
+        let raw = format!(
+            "schema_version = {version}\n[sop.approval.groups.private_group]\n\
+             members = [\"private-member\"]\n"
+        );
+        std::fs::write(&path, &raw).unwrap();
+
+        for result in [
+            migrate_file_in_place(&path).map(|_| ()),
+            ensure_disk_at_current_version(&path),
+        ] {
+            let error = result
+                .expect_err("retired SOP must stop disk edits")
+                .to_string();
+            assert!(error.contains("[sop] is retired"), "{error}");
+            assert!(!error.contains("private_group"));
+            assert!(!error.contains("private-member"));
+        }
+        assert_eq!(std::fs::read_to_string(&path).unwrap(), raw);
+        assert!(!path.with_extension("toml.backup").exists());
+        assert_eq!(std::fs::read_dir(dir.path()).unwrap().count(), 1);
+    }
 }
 
 // ─────────────────────────────────────────────────────────────
@@ -2051,6 +2112,35 @@ fn generate_every_version_migrates_and_validates() {
 }
 
 #[test]
+fn generate_never_emits_retired_sop_config() {
+    let dir = tempfile::tempdir().unwrap();
+    for target in 1..=CURRENT_SCHEMA_VERSION {
+        for encrypt_secrets in [false, true] {
+            let raw = generate(
+                target,
+                &GenerateOptions {
+                    encrypt_secrets,
+                    secret_store_dir: Some(dir.path()),
+                },
+            )
+            .unwrap();
+            let value: toml::Value = toml::from_str(&raw).unwrap();
+            assert!(
+                value.get("sop").is_none(),
+                "generated V{target} contains SOP"
+            );
+            migrate_to_current(&raw).expect("generated config must remain loadable");
+        }
+    }
+    assert!(
+        toml::from_str::<toml::Value>(V1_FIXTURE)
+            .unwrap()
+            .get("sop")
+            .is_some()
+    );
+}
+
+#[test]
 fn generate_never_emits_retired_config_surfaces() {
     // The seed fixture predates retirements and the migration lenses pass
     // unknown nested tables through, so the generator must strip retired
@@ -2558,7 +2648,8 @@ fn encryption_covers_every_schema_secret_field() {
     )
     .expect("encrypted generate succeeds");
     let encrypted: toml::Value = toml::from_str(&raw).expect("encrypted output parses");
-    let plaintext_cfg = migrate_to_current(V1_FIXTURE).expect("V1 fixture migrates");
+    let plaintext_cfg =
+        migrate_to_current(&v1_fixture_without_retired_sop()).expect("V1 fixture migrates");
 
     let mut missed = Vec::new();
     for field in plaintext_cfg

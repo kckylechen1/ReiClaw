@@ -855,6 +855,9 @@ impl Config {
             // drops are recorded on `degraded_security` for exposure gating.
             // Strict validation lives in `zeroclaw config migrate`.
             if let Some(raw) = raw_root.as_ref() {
+                if let Some(table) = raw.as_table() {
+                    crate::migration::reject_retired_sop_config(table)?;
+                }
                 crate::providers::reject_retired_model_provider_config(raw)?;
             }
             let salvage = crate::migration::migrate_to_current_salvaged(&contents);
