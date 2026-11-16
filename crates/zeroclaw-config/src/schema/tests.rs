@@ -235,15 +235,20 @@ async fn retired_sop_run_config_keys_fail_parse_loudly() {
 /// The retired run-side config keys must FAIL config parse
 /// with an actionable message, never silently no-op.
 use super::*;
+use crate::load::{
+    ConfigResolutionSource, ExtraNestedModelProviderTable, config_dir_creation_error,
+    expand_tilde_path, resolve_runtime_config_dirs, try_resolve_macos_homebrew_config_dir,
+};
 use std::ffi::OsString;
 #[cfg(unix)]
 use std::os::unix::fs::PermissionsExt;
-#[cfg(unix)]
 use std::path::Path;
 use std::path::PathBuf;
 use tempfile::TempDir;
+use tokio::fs;
 use tokio::sync::MutexGuard;
 use tokio::test;
+use zeroclaw_api::runtime_status::RuntimeConfigKind;
 
 struct EnvValueGuard {
     key: &'static str,
@@ -14685,14 +14690,15 @@ fn config_with_dispatchable_agent(agent: AliasedAgentConfig) -> Config {
 /// `Config::agent_is_dispatchable`, which routes through
 /// `resolved_risk_profile_alias`).
 ///
-/// This re-reads this file's own production source (everything before
-/// `mod tests`, so this doc comment's own mentions of the field name
-/// can't trip itself) and fails if a `.risk_profile` dot-access (the
-/// singular field, not the `.risk_profiles` map) appears inside any
-/// function other than the allowlisted ones below. Reverting
+/// This scans `schema.rs` and every extracted production module:
+/// `state.rs`, `validate.rs`, `save.rs`, and `load.rs`. Everything before
+/// each `mod tests` is checked, so test comments cannot trip the guard.
+/// A `.risk_profile` dot-access (the singular field, not the `.risk_profiles`
+/// map) is rejected inside any function other than the allowlisted ones below.
+/// Reverting
 /// `reachable_delegate_target_configs` back to `caller.risk_profile.trim()`
 /// / `agent.risk_profile.trim()` turns this red; so does adding a new
-/// raw read anywhere else in the file's production code.
+/// raw read anywhere else in those modules' production code.
 ///
 /// Known limit (cold review of 3a3e2a92f): the matcher is line-local,
 /// so a read split across lines (`agent.` newline `risk_profile`)
@@ -14702,8 +14708,28 @@ fn config_with_dispatchable_agent(agent: AliasedAgentConfig) -> Config {
 /// it private) remain the real fix if evasion ever becomes a concern.
 #[test]
 async fn no_new_raw_risk_profile_reads_outside_the_resolver_and_validation() {
-    const SRC: &str = include_str!(concat!(env!("CARGO_MANIFEST_DIR"), "/src/schema.rs"));
-    let production_src = SRC.split("mod tests").next().unwrap_or(SRC);
+    const SOURCES: &[(&str, &str)] = &[
+        (
+            "schema.rs",
+            include_str!(concat!(env!("CARGO_MANIFEST_DIR"), "/src/schema.rs")),
+        ),
+        (
+            "validate.rs",
+            include_str!(concat!(env!("CARGO_MANIFEST_DIR"), "/src/validate.rs")),
+        ),
+        (
+            "save.rs",
+            include_str!(concat!(env!("CARGO_MANIFEST_DIR"), "/src/save.rs")),
+        ),
+        (
+            "load.rs",
+            include_str!(concat!(env!("CARGO_MANIFEST_DIR"), "/src/load.rs")),
+        ),
+        (
+            "state.rs",
+            include_str!(concat!(env!("CARGO_MANIFEST_DIR"), "/src/state.rs")),
+        ),
+    ];
 
     // Functions that legitimately read `agent.risk_profile` (or, for the
     // resolver, `cards[card].risk_profile`) directly:
@@ -14720,27 +14746,31 @@ async fn no_new_raw_risk_profile_reads_outside_the_resolver_and_validation() {
         "validate",
     ];
 
-    let mut current_fn: Option<&str> = None;
     let mut offenders = Vec::new();
 
-    for (i, line) in production_src.lines().enumerate() {
-        if let Some(name) = fn_name_declared_on(line) {
-            current_fn = Some(name);
-        }
+    for &(name, src) in SOURCES {
+        let production_src = src.split("mod tests").next().unwrap_or(src);
+        let mut current_fn: Option<&str> = None;
+        for (i, line) in production_src.lines().enumerate() {
+            if let Some(name) = fn_name_declared_on(line) {
+                current_fn = Some(name);
+            }
 
-        if line.trim_start().starts_with("//") {
-            continue; // doc comments and line comments never gate anything
-        }
+            if line.trim_start().starts_with("//") {
+                continue; // doc comments and line comments never gate anything
+            }
 
-        if line_reads_raw_risk_profile_field(line)
-            && !current_fn.is_some_and(|f| ALLOWED_FNS.contains(&f))
-        {
-            offenders.push(format!(
-                "line {} (fn {:?}): {}",
-                i + 1,
-                current_fn,
-                line.trim()
-            ));
+            if line_reads_raw_risk_profile_field(line)
+                && !current_fn.is_some_and(|f| ALLOWED_FNS.contains(&f))
+            {
+                offenders.push(format!(
+                    "{}:{} (fn {:?}): {}",
+                    name,
+                    i + 1,
+                    current_fn,
+                    line.trim()
+                ));
+            }
         }
     }
 

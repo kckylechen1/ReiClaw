@@ -21,6 +21,7 @@ pub mod env_overrides;
 pub mod helpers;
 #[cfg(feature = "i18n")]
 pub mod i18n;
+mod load;
 pub mod migration;
 pub mod multi_agent;
 pub mod node_allowlist;
@@ -31,16 +32,19 @@ pub mod policy_defaults;
 pub mod presets;
 pub mod provider_aliases;
 pub mod providers;
+mod save;
 pub mod scattered_types;
 pub mod schema;
 pub mod secrets;
 pub mod sections;
 pub mod skill_bundles;
+mod state;
 pub mod tachi;
 pub mod tasks;
 pub mod tokens;
 pub mod traits;
 pub mod typed_value;
+mod validate;
 pub mod validation_warnings;
 
 /// Shim module so `Configurable` derive macro's generated `crate::config::*` paths resolve.
