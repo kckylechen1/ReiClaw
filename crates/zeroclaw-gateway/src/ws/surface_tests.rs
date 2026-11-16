@@ -127,31 +127,42 @@ async fn three_surfaces_render_same_turn_without_changing_soul_or_shared_history
     let soul = SoulProfileStore::shared(&data_dir).unwrap();
     soul.set_principles("web", SoulPrinciples { items: vec!["Keep owner authority explicit.".into()] }, 0, 1).unwrap();
     soul.ensure_seeded("web", "web", 1).unwrap();
+    soul.set_identity("web", zeroclaw_memory::companion::SoulIdentity {
+        name: "web".into(), self_description: None, primary_language: None, pronouns: None,
+    }, 1, 2).unwrap();
     let before = serde_json::to_value(soul.profile("web").unwrap()).unwrap();
-    chat.owner_config = Some(Arc::new(zeroclaw_config::schema::Config { data_dir, ..Default::default() }));
+    chat.owner_config = Some(Arc::new(zeroclaw_config::schema::Config { data_dir: data_dir.clone(), ..Default::default() }));
     {
         let mut config = chat.state.config.write();
+        config.data_dir = data_dir;
         config.agents.insert("web".into(), zeroclaw_config::schema::AliasedAgentConfig { enabled: true, ..Default::default() });
         config.providers.models.openai.insert("default".into(), zeroclaw_config::schema::OpenAIModelProviderConfig { base: zeroclaw_config::schema::ModelProviderConfig { model: Some("test-model".into()), ..Default::default() } });
     }
     let retained = chat.attach_key("gw_shared\u{1f}web").await;
     chat.gate.add_permits(3);
     let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let address = listener.local_addr().unwrap();
     let options = ConnectOptions { gateway: format!("ws://{}", listener.local_addr().unwrap()), agent: "web".into(), session_id: Some("shared".into()), token: None };
     let app = axum::Router::new().route("/ws/chat", axum::routing::get(handle_ws_chat)).with_state(chat.state.clone());
     let exchange = async {
         let mut web = Client::connect_with_surface(&options, "web").await.unwrap();
         let mut cli = Client::connect_with_surface(&options, "cli").await.unwrap();
-        let mut voice = Client::connect_with_surface(&options, "voice").await.unwrap();
+        // Carrier projection is admitted in the query, before session_start.
+        let (status, mut voice) = super::device_tests::DeviceWire::upgrade(address,
+            "agent=web&session_id=shared&surface=voice&voice_provider=moss-live", "").await;
+        assert_eq!(status, 101);
+        assert_eq!(voice.until("session_start").await["voice_projection"]["version"], 1);
+        voice.send(json!({"type":"connect", "surface":"voice"})).await;
+        voice.until("connected").await;
         let canonical = "# Result\n\n**Do not** pay `0`.\n\n| Item | Count |\n|---|---|\n| 苹果 | 0 |";
         for origin in ["web", "cli", "voice"] {
             let input = format!("echo:{canonical}");
             match origin {
-                "web" => web.send_message(&input).await.unwrap(),
-                "cli" => cli.send_message(&input).await.unwrap(),
-                _ => voice.send_message(&input).await.unwrap(),
+                "web" => { web.send_message(&input).await.unwrap(); },
+                "cli" => { cli.send_message(&input).await.unwrap(); },
+                _ => voice.send(json!({"type":"message", "content": input})).await,
             };
-            for (name, client) in [("web", &mut web), ("cli", &mut cli), ("voice", &mut voice)] {
+            for (name, client) in [("web", &mut web), ("cli", &mut cli)] {
                 loop {
                     match client.next_frame().await.unwrap().unwrap() {
                         Frame::Done { full_response, .. } => {
@@ -163,6 +174,7 @@ async fn three_surfaces_render_same_turn_without_changing_soul_or_shared_history
                     }
                 }
             }
+            assert_eq!(voice.until("done").await["full_response"], zeroclaw_runtime::spoken::render(canonical));
         }
         {
         let prompts = chat.systems.lock();
@@ -176,7 +188,7 @@ async fn three_surfaces_render_same_turn_without_changing_soul_or_shared_history
         let session = retained.conversation.agent.lock().await;
         let replies: Vec<_> = session.agent.history().iter().filter_map(|m| match m { zeroclaw_api::model_provider::ConversationMessage::Chat(m) if m.role == "assistant" => Some(m.content.as_str()), _ => None }).collect();
         assert_eq!(replies, vec![canonical; 3]);
-        web.close().await.unwrap(); cli.close().await.unwrap(); voice.close().await.unwrap();
+        web.close().await.unwrap(); cli.close().await.unwrap(); voice.send_opcode(8, &[]).await;
     };
     tokio::select! {
         result = axum::serve(listener, app.into_make_service()) => panic!("server stopped: {result:?}"),

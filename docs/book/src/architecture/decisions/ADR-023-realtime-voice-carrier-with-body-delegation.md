@@ -97,7 +97,7 @@ The boundary is enforced by the carrier's instructions and by measurement (§7),
 
 **Which agent.** The voice surface connects to one configured agent alias. The projection and every delegated turn use that same alias, so the carrier sounds like the agent that answers delegated requests. That alias is the owner's main agent (owner decision, 2026-11-16), so the robot shares the one Soul used on every other surface. The voice surface's limits come from the surface rules: unverified input, no approval by voice, and no owner ingress. They do not come from a separate restricted agent.
 
-**Where it is delivered.** When a voice-surface connection opens (`/ws/chat` with `surface=voice`, using the device bridge `chat` operation; the credential also holds `cancel` for §4), the body returns a versioned `voice_projection` field on the `connected` acknowledgement.
+**Where it is delivered.** When a voice-surface connection opens (`/ws/chat` with `surface=voice&voice_provider=moss-live`, using the device bridge `chat` operation; the credential also holds `cancel` for §4), the body returns a versioned `voice_projection` field on the initial `session_start` acknowledgement. `connected` is the later, optional `connect` negotiation reply; it carries no projection. Voice must be declared in the query, not introduced by a later `connect` frame.
 
 - This changes the protected `/ws/chat` contract. It is versioned and stays behind the default-off `voice-surface` feature, like ADR-021 §4.
 - No new bridge operation is added.
@@ -120,11 +120,22 @@ The boundary is enforced by the carrier's instructions and by measurement (§7),
 
 **Voice export consent.** User Model heads get a separate, owner-only export-consent field. It is distinct from `Scope`: `Scope` decides where a head applies, and consent decides whether its text may leave the body to a carrier.
 
-- Consent is recorded per head and bound to the carrier provider identity. Changing provider requires fresh consent.
+- Consent is recorded per exact head revision and bound to the carrier provider identity. A new head revision or a different provider requires fresh consent.
 - Nothing has consent by default.
+- Revocation takes effect on subsequent projection reads immediately; a projection already delivered to a carrier cannot be recalled. The adapter must close a window to discard bytes it already received.
 - This is a change to the protected User Model store. It needs its own reviewed slice.
 
-**Fail closed.** If the projection cannot be produced, the adapter does not open the carrier session. That covers an unreadable Soul store; the degraded "identity unavailable" rendering; legacy `SOUL.md`/`IDENTITY.md` without an owner Identity revision; and an unknown alias. The robot gives a fixed local cue instead of speaking without a Soul.
+**Kernel wire and consent API (slices 2–3).** All new surfaces require `voice-surface`:
+
+- `voice_provider` is a case-sensitive identifier of 1–64 ASCII lowercase letters, digits or hyphens, starting with a letter or digit. Examples: `moss-live`, `openai-realtime`. The adapter declares it; the kernel does not attest which external service the adapter contacts.
+- `voice_projection` v1 has exactly `version` (1), `provider`, `identity`, `tone`, `principles`, and `owner_facts`. The last four are rendered strings, with an empty string for an absent optional section. Identity and Principles use `persona_projection` renderers; Tone uses its same effective-dial resolver and renderer, excluding exemplars. Owner facts use the bounded User Model renderer after consent, provenance and Scope filtering for the alias, channel `wss`, and canonical session key `gw_<session_id>`. No raw revision objects are sent.
+- Operator-only `GET /api/user-model/heads/{revision_id}/voice-consent?provider=moss-live` returns the latest `receipt` or `null` (no consent).
+- Operator-only `PUT /api/user-model/heads/{revision_id}/voice-consent` accepts `{"provider":"moss-live","action":"grant","expected_consent_revision":0}`. `action` is `grant` or `revoke`; CAS starts at 0 and thereafter uses the returned receipt's `revision`. Grant requires that exact fact revision to remain the current head. Revoke can also retire an old head. Conflicts return HTTP 409, code `VOICE_CONSENT_CONFLICT`; receipts identify the server-assigned reviewer `owner_operator`.
+- `UserModelStore` owns the additive `user_model_voice_consent_receipts` table in the existing owner-only `user_model.db`. Feature-enabled open creates the table and append-only triggers idempotently. The unique `(head_revision_id, provider, revision)` index orders consent decisions. There is no backfill, new store, Scope rewrite or default grant. Older binaries ignore the table; re-enabling the feature reuses its receipts. Active heads, provenance and consent are read together in one transaction, without an export cache.
+
+**Fail closed.** If the projection cannot be produced, the adapter does not open the carrier session. That covers an unreadable Soul store; the degraded "identity unavailable" rendering; legacy `SOUL.md`/`IDENTITY.md` without an owner Identity revision; an unknown alias; a missing or invalid `voice_provider`; and unreadable User Model consent. The robot gives a fixed local cue instead of speaking without a Soul.
+
+Missing/invalid provider and unknown alias refuse the HTTP upgrade with a typed error (`VOICE_PROVIDER_REQUIRED`, `VOICE_PROVIDER_INVALID`, `VOICE_UNKNOWN_ALIAS`). Store/Identity failures send a WebSocket `error` and close before `session_start`, with code `VOICE_SOUL_UNAVAILABLE`, `VOICE_OWNER_IDENTITY_REQUIRED`, `VOICE_USER_MODEL_UNAVAILABLE`, or `VOICE_PROJECTION_UNAVAILABLE`. A late switch to voice returns `VOICE_QUERY_REQUIRED`. These errors carry no projection. Non-voice acknowledgement frames are unchanged, and ignore `voice_provider`.
 
 ### 4. Delegation goes through the voice surface
 
@@ -193,7 +204,7 @@ Negative:
    - configure operator token hashes so that paired tokens lose management authority;
    - before the cutover, list the clients that rely on paired-token management.
 2. **Voice export consent** on User Model heads: owner-only, per head, bound to the provider.
-3. **Handshake projection:** add a versioned `voice_projection` to the voice-surface `connected` acknowledgement, with tests for fail-closed behavior and for the exclusion of the Story layer, exemplars and unconsented heads.
+3. **Handshake projection:** add a versioned `voice_projection` to the voice-surface `session_start` acknowledgement, with tests for fail-closed behavior and for the exclusion of the Story layer, exemplars and unconsented heads.
 4. **Adapter delegation** (Robotic repository):
    - map carrier delegation to scoped voice-surface turns with separately labelled inputs, commentary and thinking replies, and cancellation;
    - remove the adapter's own identity text from the carrier instructions.

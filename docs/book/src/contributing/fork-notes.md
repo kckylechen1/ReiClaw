@@ -70,6 +70,23 @@ See [runtime internals](../agents/internals.md#repeated-tool-failure-recovery).
 - **MCP `__` auto-admit is opt-in.** The default `mcp_discovered_tool_policy` is `explicit_only`. Setting `auto_admit` on a risk profile admits any unlisted `<server>__<tool>`, so keep write tools off the MCP servers such a profile connects to.
 - **Approvals.** Local grants persist in `data_dir/approvals.db` with an `approval_audit` trail. Node grants and receipts are not built yet (#62).
 
+## ADR-023 voice consent and projection
+
+The kernel's default-off `voice-surface` implementation adds owner consent
+receipts to the existing User Model store and a closed `session_start`
+projection. `UserModelStore` owns the additive table; Scope and existing
+revision authority stay unchanged. The existing `persona_projection` Identity
+and Principles renderers and effective Tone resolver supply the persona bytes.
+The adapter, credentials and running gateway configuration are outside this
+leaf. See [ADR-023](../architecture/decisions/ADR-023-realtime-voice-carrier-with-body-delegation.md)
+for the API, query parameter, migration and fail-closed codes.
+
+The locally available upstream comparison commit
+`1c1cd118ac536a1dd1bc79b9cce69cbdc04e4f29` has no `UserModelStore`,
+`persona_projection`, or voice export consent implementation under `src` or
+`crates`. This is a fork-specific extension of the governed stores already
+here, not a code port. No remote was contacted for this comparison.
+
 ## Phone candidate-history pages
 
 The #379 history leaf extends the existing operator-only

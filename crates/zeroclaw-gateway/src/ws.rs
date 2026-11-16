@@ -28,6 +28,8 @@ mod device;
 pub(crate) mod intake;
 mod surface;
 pub(crate) mod turn_control;
+#[cfg(feature = "voice-surface")]
+mod voice_projection;
 
 /// Default wall-clock budget for the operator to answer an
 /// `approval_request` frame before the channel auto-denies. Mirrors the
@@ -89,6 +91,8 @@ pub struct WsQuery {
     #[serde(default, alias = "workspaceDir", alias = "workspace_dir")]
     pub workspace_dir: Option<String>,
     pub surface: Option<String>,
+    #[cfg(feature = "voice-surface")]
+    pub voice_provider: Option<String>,
 }
 
 pub(crate) fn extract_ws_token<'a>(
@@ -231,6 +235,10 @@ pub async fn handle_ws_chat(
     {
         let cfg = state.config.read();
         if cfg.agent(&agent_alias).is_none() {
+            #[cfg(feature = "voice-surface")]
+            if params.surface.as_deref() == Some("voice") {
+                return voice_projection::Error::UnknownAlias.response();
+            }
             return (
                 axum::http::StatusCode::BAD_REQUEST,
                 format!(
@@ -264,6 +272,15 @@ pub async fn handle_ws_chat(
                 .into_response();
         }
     };
+    #[cfg(feature = "voice-surface")]
+    let voice_provider = if surface == Some(ChatSurface::Voice) {
+        match voice_projection::provider(params.voice_provider.as_deref()) {
+            Ok(provider) => Some(provider.to_owned()),
+            Err(error) => return error.response(),
+        }
+    } else {
+        None
+    };
     let session_id = params.session_id;
     let session_name = params.name;
     let session_cwd = params.cwd.or(params.workspace_dir);
@@ -283,6 +300,8 @@ pub async fn handle_ws_chat(
             session_name,
             session_cwd,
             surface,
+            #[cfg(feature = "voice-surface")]
+            voice_provider,
             auth_subject,
             bridge_scope,
             ) => {},
@@ -324,6 +343,7 @@ async fn handle_socket(
     session_name: Option<String>,
     session_cwd: Option<String>,
     mut surface: Option<ChatSurface>,
+    #[cfg(feature = "voice-surface")] voice_provider: Option<String>,
     // The transport-authenticated approval subject (paired-token hash), if the
     // connection was authenticated. Threaded to SOP approval frames so a policied
     // gate can be satisfied by an identified WS caller.
@@ -443,6 +463,28 @@ async fn handle_socket(
     }
 
     // Send session_start message to client
+    #[cfg(feature = "voice-surface")]
+    let voice_projection = if surface == Some(ChatSurface::Voice) {
+        let config = state.config.read().clone();
+        let alias = agent_alias.clone();
+        let key = session_key.clone();
+        let result = tokio::task::spawn_blocking(move || {
+            voice_projection::build(&config, &alias, &key, voice_provider.as_deref())
+        })
+        .await
+        .unwrap_or(Err(voice_projection::Error::Unavailable));
+        match result {
+            Ok(projection) => Some(projection),
+            Err(error) => {
+                let _ = sender
+                    .send(Message::Text(error.frame().to_string().into()))
+                    .await;
+                return;
+            }
+        }
+    } else {
+        None
+    };
     let mut session_start = serde_json::json!({
         "type": "session_start",
         "session_id": session_id,
@@ -453,6 +495,10 @@ async fn handle_socket(
     });
     if let Some(ref name) = effective_name {
         session_start["name"] = serde_json::Value::String(name.clone());
+    }
+    #[cfg(feature = "voice-surface")]
+    if let Some(projection) = voice_projection {
+        session_start["voice_projection"] = serde_json::json!(projection);
     }
     let _ = sender
         .send(Message::Text(session_start.to_string().into()))
@@ -477,6 +523,21 @@ async fn handle_socket(
                                 .into(),
                         ))
                         .await;
+                    return;
+                }
+                if let Ok(frame) = serde_json::from_str::<serde_json::Value>(&text)
+                    && frame["type"] == "connect"
+                    && frame["surface"] == "voice"
+                    && surface != Some(ChatSurface::Voice)
+                    && cfg!(feature = "voice-surface")
+                {
+                    // Voice must be declared before session_start; a late
+                    // surface switch would bypass the projection admission.
+                    let err = serde_json::json!({
+                        "type": "error", "code": "VOICE_QUERY_REQUIRED",
+                        "message": zeroclaw_runtime::i18n::get_required_cli_string("gateway-voice-projection-unavailable"),
+                    });
+                    let _ = sender.send(Message::Text(err.to_string().into())).await;
                     return;
                 }
                 if let Ok(frame) = serde_json::from_str::<serde_json::Value>(&text)
