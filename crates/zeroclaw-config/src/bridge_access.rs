@@ -375,9 +375,16 @@ mod confinement_tests {
         config
             .risk_profiles
             .insert("public".into(), public_profile());
+        config
+            .providers
+            .models
+            .ensure("ollama", "local")
+            .unwrap()
+            .model = Some("fixture".into());
         config.agents.insert(
             "edge".into(),
             crate::schema::AliasedAgentConfig {
+                model_provider: "ollama.local".into(),
                 risk_profile: "public".into(),
                 ..Default::default()
             },
