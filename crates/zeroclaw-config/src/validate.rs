@@ -1394,7 +1394,8 @@ impl Config {
                 );
             }
             if let Some(device) = &bridge.device {
-                if (device.risk_profile.is_some() || device.operations.iter().any(|op| op == "chat"))
+                if (device.risk_profile.is_some()
+                    || device.operations.iter().any(|op| op == "chat"))
                     && let Err(reason) = device.validated_profile(self)
                 {
                     validation_bail!(

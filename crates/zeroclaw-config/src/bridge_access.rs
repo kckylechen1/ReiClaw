@@ -372,27 +372,52 @@ mod confinement_tests {
     fn config_validation_enforces_device_profiles_and_namespace_isolation() {
         let mut config = Config::default();
         config.gateway.require_pairing = true;
-        config.risk_profiles.insert("public".into(), public_profile());
-        config.agents.insert("edge".into(), crate::schema::AliasedAgentConfig {
-            risk_profile: "public".into(),
-            ..Default::default()
-        });
-        config.gateway.bridges.insert("device".into(), GatewayBridgeConfig {
-            token_hash: "0f".repeat(32),
-            sessions: vec!["device-one".into()],
-            session_prefix: Some("edge-".into()),
-            device: Some(GatewayDeviceBridgeConfig {
-                agent: "edge".into(),
-                risk_profile: Some("public".into()),
-                operations: vec!["chat".into()],
-            }),
-            ..Default::default()
-        });
+        config
+            .risk_profiles
+            .insert("public".into(), public_profile());
+        config.agents.insert(
+            "edge".into(),
+            crate::schema::AliasedAgentConfig {
+                risk_profile: "public".into(),
+                ..Default::default()
+            },
+        );
+        config.gateway.bridges.insert(
+            "device".into(),
+            GatewayBridgeConfig {
+                token_hash: "0f".repeat(32),
+                sessions: vec!["device-one".into()],
+                session_prefix: Some("edge-".into()),
+                device: Some(GatewayDeviceBridgeConfig {
+                    agent: "edge".into(),
+                    risk_profile: Some("public".into()),
+                    operations: vec!["chat".into()],
+                }),
+                ..Default::default()
+            },
+        );
         config.validate().expect("valid public bridge");
 
-        for scenario in ["missing", "unknown", "full", "unbounded", "denied", "mcp", "approval", "prompt", "route"] {
+        for scenario in [
+            "missing",
+            "unknown",
+            "full",
+            "unbounded",
+            "denied",
+            "mcp",
+            "approval",
+            "prompt",
+            "route",
+        ] {
             let mut invalid = config.clone();
-            let device = invalid.gateway.bridges.get_mut("device").unwrap().device.as_mut().unwrap();
+            let device = invalid
+                .gateway
+                .bridges
+                .get_mut("device")
+                .unwrap()
+                .device
+                .as_mut()
+                .unwrap();
             let profile = invalid.risk_profiles.get_mut("public").unwrap();
             match scenario {
                 "missing" => device.risk_profile = None,
@@ -403,23 +428,55 @@ mod confinement_tests {
                     profile.allowed_tools = Some(vec!["shell".into()]);
                     profile.auto_approve = vec!["shell".into()];
                 }
-                "mcp" => profile.mcp_discovered_tool_policy = crate::autonomy::McpDiscoveredToolPolicy::AutoAdmit,
+                "mcp" => {
+                    profile.mcp_discovered_tool_policy =
+                        crate::autonomy::McpDiscoveredToolPolicy::AutoAdmit
+                }
                 "approval" => profile.auto_approve.clear(),
                 "prompt" => profile.always_ask.push("web_search_tool".into()),
-                "route" => profile.approval_route = Some(toml::from_str("approver_channel = 'owner'").unwrap()),
+                "route" => {
+                    profile.approval_route =
+                        Some(toml::from_str("approver_channel = 'owner'").unwrap())
+                }
                 _ => unreachable!(),
             }
             let error = invalid.validate().expect_err(scenario).to_string();
-            assert!(error.contains("gateway.bridges.device.device.risk_profile"), "{scenario}: {error}");
+            assert!(
+                error.contains("gateway.bridges.device.device.risk_profile"),
+                "{scenario}: {error}"
+            );
         }
 
         let mut delegation = config.clone();
-        let device = delegation.gateway.bridges.get_mut("device").unwrap().device.as_mut().unwrap();
+        let device = delegation
+            .gateway
+            .bridges
+            .get_mut("device")
+            .unwrap()
+            .device
+            .as_mut()
+            .unwrap();
         device.risk_profile = None;
         device.operations = vec!["tachi_start".into(), "tachi_status".into()];
-        delegation.validate().expect("delegation-only bridge needs no chat profile");
-        delegation.gateway.bridges.get_mut("device").unwrap().device.as_mut().unwrap().risk_profile = Some("absent".into());
-        assert!(delegation.validate().unwrap_err().to_string().contains("risk_profile"));
+        delegation
+            .validate()
+            .expect("delegation-only bridge needs no chat profile");
+        delegation
+            .gateway
+            .bridges
+            .get_mut("device")
+            .unwrap()
+            .device
+            .as_mut()
+            .unwrap()
+            .risk_profile = Some("absent".into());
+        assert!(
+            delegation
+                .validate()
+                .unwrap_err()
+                .to_string()
+                .contains("risk_profile")
+        );
 
         for (sessions, prefix, overlap) in [
             (vec!["device-one"], None, true),
@@ -430,12 +487,15 @@ mod confinement_tests {
             (vec!["owner"], Some("other-"), false),
         ] {
             let mut candidate = config.clone();
-            candidate.gateway.bridges.insert("other".into(), GatewayBridgeConfig {
-                token_hash: "a1".repeat(32),
-                sessions: sessions.into_iter().map(str::to_owned).collect(),
-                session_prefix: prefix.map(str::to_owned),
-                ..Default::default()
-            });
+            candidate.gateway.bridges.insert(
+                "other".into(),
+                GatewayBridgeConfig {
+                    token_hash: "a1".repeat(32),
+                    sessions: sessions.into_iter().map(str::to_owned).collect(),
+                    session_prefix: prefix.map(str::to_owned),
+                    ..Default::default()
+                },
+            );
             if overlap {
                 let error = candidate.validate().unwrap_err().to_string();
                 assert!(error.contains("session namespace overlaps"), "{error}");

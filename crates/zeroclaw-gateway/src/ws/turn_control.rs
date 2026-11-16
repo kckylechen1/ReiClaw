@@ -109,8 +109,8 @@ fn log_refusal(scope: &WsTurnScope, alias: &str, request: &str, code: &str, atta
 /// `done` succeeds; `aborted`/`error` fail (matching the legacy cancel
 /// logging); anything else is unknown — never a silent success.
 fn log_terminal(conversation: &str, request: Option<&str>, turn: &str, outcome: &str) {
-    let (session_key, agent) = crate::ws_conversation::conversation_identity(conversation)
-        .unwrap_or((conversation, ""));
+    let (session_key, agent) =
+        crate::ws_conversation::conversation_identity(conversation).unwrap_or((conversation, ""));
     let session_id = session_key
         .strip_prefix(super::GW_SESSION_PREFIX)
         .unwrap_or(session_key);

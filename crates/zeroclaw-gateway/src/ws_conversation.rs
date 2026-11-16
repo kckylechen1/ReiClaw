@@ -597,10 +597,7 @@ impl<A> ConversationHub<A> {
         self.slots
             .lock()
             .iter()
-            .filter(|(key, _)| {
-                conversation_identity(key)
-                    .is_some_and(|(key, _)| key == session)
-            })
+            .filter(|(key, _)| conversation_identity(key).is_some_and(|(key, _)| key == session))
             .filter_map(|(_, slot)| slot.get().cloned())
             .collect()
     }
@@ -1312,11 +1309,17 @@ mod tests {
         let (_owner, _) = attach(&hub, "gw_owner-session\u{1f}edge").await;
         for key in [&first, &second] {
             assert_eq!(key.rsplit_once('\u{1f}').unwrap().1, "edge");
-            assert_eq!(conversation_identity(key), Some(("gw_device-session", "edge")));
+            assert_eq!(
+                conversation_identity(key),
+                Some(("gw_device-session", "edge"))
+            );
         }
         assert_eq!(hub.session_conversations("gw_device-session").len(), 2);
         assert_eq!(hub.session_conversations("gw_owner-session").len(), 1);
-        assert_eq!(conversation_identity("gw_device\u{1f}raw\u{1f}edge"), Some(("gw_device\u{1f}raw", "edge")));
+        assert_eq!(
+            conversation_identity("gw_device\u{1f}raw\u{1f}edge"),
+            Some(("gw_device\u{1f}raw", "edge"))
+        );
     }
 
     #[test]

@@ -1135,8 +1135,11 @@ async fn device_full_agent_is_confined_on_every_non_voice_surface() {
             config.risk_profiles.get_mut("test").unwrap().level = zeroclaw_config::autonomy::AutonomyLevel::Full;
             config.risk_profiles.get_mut("test").unwrap().allowed_tools = None;
             let public = config.risk_profiles.get_mut("public-device").unwrap();
-            public.allowed_tools = Some(vec!["public__probe".into()]);
-            public.auto_approve = vec!["public__probe".into()];
+            // Keep one real public tool registered so the provider's adversarial
+            // native calls reach dispatch; the skill-shaped name must stay absent.
+            public.allowed_tools = Some(vec!["web_search_tool".into(), "public__probe".into()]);
+            public.auto_approve = vec!["web_search_tool".into(), "public__probe".into()];
+            config.web_search.enabled = true;
             config.memory.auto_save = true;
             config.agents.get_mut("device-agent").unwrap().memory.backend = zeroclaw_config::multi_agent::MemoryBackendKind::Markdown;
         }
@@ -1251,13 +1254,31 @@ async fn device_turn_prompt_excludes_private_context_but_owner_keeps_it() {
 async fn device_tool_rounds_stop_at_three_or_the_agents_lower_limit() {
     for limit in [2, 7] {
         let fixture = DeviceFixture::new(&["chat"]).await;
-        fixture.state.config.write().runtime_profiles.get_mut("test").unwrap().max_tool_iterations = limit;
+        {
+            let mut config = fixture.state.config.write();
+            config.runtime_profiles.get_mut("test").unwrap().max_tool_iterations = limit;
+            let public = config.risk_profiles.get_mut("public-device").unwrap();
+            public.allowed_tools = Some(vec!["web_search_tool".into()]);
+            public.auto_approve = vec!["web_search_tool".into()];
+            config.web_search.enabled = true;
+        }
         let mut client = fixture.socket(DEVICE_TOKEN).await;
         client.send(json!({"type":"message", "id":"cap", "content":"device-cap-probe"})).await;
         let error = client.until("error").await;
         assert_eq!(error["code"], "AGENT_ERROR");
         assert!(error["message"].as_str().unwrap().contains("maximum tool iterations"));
-        assert_eq!(fixture.seen.lock().len(), limit.min(3));
+        let seen = fixture.seen.lock();
+        // Amendment 1 caps tool rounds. The streaming path then makes exactly
+        // one tools-free summary request; it cannot execute another tool round.
+        let (summary, rounds) = seen.split_last().unwrap();
+        assert_eq!(rounds.len(), limit.min(3));
+        for round in rounds {
+            assert_eq!(round["tools"].as_array().unwrap().len(), 1);
+            assert_eq!(round["tools"][0]["function"]["name"], "web_search_tool");
+        }
+        assert!(summary["tools"].is_null());
+        assert!(summary["messages"].as_array().unwrap().last().unwrap()["content"]
+            .as_str().unwrap().contains("maximum number of tool iterations"));
     }
 }
 
