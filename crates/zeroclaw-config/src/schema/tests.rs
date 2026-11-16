@@ -14685,14 +14685,14 @@ fn config_with_dispatchable_agent(agent: AliasedAgentConfig) -> Config {
 /// `Config::agent_is_dispatchable`, which routes through
 /// `resolved_risk_profile_alias`).
 ///
-/// This re-reads this file's own production source (everything before
-/// `mod tests`, so this doc comment's own mentions of the field name
-/// can't trip itself) and fails if a `.risk_profile` dot-access (the
+/// This scans the schema and extracted validation production sources
+/// (everything before each `mod tests`, so test comments cannot trip
+/// the guard) and fails if a `.risk_profile` dot-access (the
 /// singular field, not the `.risk_profiles` map) appears inside any
 /// function other than the allowlisted ones below. Reverting
 /// `reachable_delegate_target_configs` back to `caller.risk_profile.trim()`
 /// / `agent.risk_profile.trim()` turns this red; so does adding a new
-/// raw read anywhere else in the file's production code.
+/// raw read anywhere else in those modules' production code.
 ///
 /// Known limit (cold review of 3a3e2a92f): the matcher is line-local,
 /// so a read split across lines (`agent.` newline `risk_profile`)
@@ -14702,8 +14702,16 @@ fn config_with_dispatchable_agent(agent: AliasedAgentConfig) -> Config {
 /// it private) remain the real fix if evasion ever becomes a concern.
 #[test]
 async fn no_new_raw_risk_profile_reads_outside_the_resolver_and_validation() {
-    const SRC: &str = include_str!(concat!(env!("CARGO_MANIFEST_DIR"), "/src/schema.rs"));
-    let production_src = SRC.split("mod tests").next().unwrap_or(SRC);
+    const SOURCES: &[(&str, &str)] = &[
+        (
+            "schema.rs",
+            include_str!(concat!(env!("CARGO_MANIFEST_DIR"), "/src/schema.rs")),
+        ),
+        (
+            "validate.rs",
+            include_str!(concat!(env!("CARGO_MANIFEST_DIR"), "/src/validate.rs")),
+        ),
+    ];
 
     // Functions that legitimately read `agent.risk_profile` (or, for the
     // resolver, `cards[card].risk_profile`) directly:
@@ -14720,27 +14728,31 @@ async fn no_new_raw_risk_profile_reads_outside_the_resolver_and_validation() {
         "validate",
     ];
 
-    let mut current_fn: Option<&str> = None;
     let mut offenders = Vec::new();
 
-    for (i, line) in production_src.lines().enumerate() {
-        if let Some(name) = fn_name_declared_on(line) {
-            current_fn = Some(name);
-        }
+    for &(name, src) in SOURCES {
+        let production_src = src.split("mod tests").next().unwrap_or(src);
+        let mut current_fn: Option<&str> = None;
+        for (i, line) in production_src.lines().enumerate() {
+            if let Some(name) = fn_name_declared_on(line) {
+                current_fn = Some(name);
+            }
 
-        if line.trim_start().starts_with("//") {
-            continue; // doc comments and line comments never gate anything
-        }
+            if line.trim_start().starts_with("//") {
+                continue; // doc comments and line comments never gate anything
+            }
 
-        if line_reads_raw_risk_profile_field(line)
-            && !current_fn.is_some_and(|f| ALLOWED_FNS.contains(&f))
-        {
-            offenders.push(format!(
-                "line {} (fn {:?}): {}",
-                i + 1,
-                current_fn,
-                line.trim()
-            ));
+            if line_reads_raw_risk_profile_field(line)
+                && !current_fn.is_some_and(|f| ALLOWED_FNS.contains(&f))
+            {
+                offenders.push(format!(
+                    "{}:{} (fn {:?}): {}",
+                    name,
+                    i + 1,
+                    current_fn,
+                    line.trim()
+                ));
+            }
         }
     }
 
