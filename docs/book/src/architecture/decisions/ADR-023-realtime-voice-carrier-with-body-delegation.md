@@ -2,7 +2,7 @@
 id: ADR-023
 title: Realtime voice carrier with delegation to the body
 date: 2026-11-16
-status: proposed
+status: accepted
 relates-to:
   - ADR-014
   - ADR-015
@@ -24,9 +24,11 @@ relates-to:
 
 ## Status
 
-Proposed on 2026-11-16 by the owner's decision. It is not accepted until the owner approves it. Merging this document records a proposal. It does not change a protected contract or activate a feature.
+Proposed and accepted by the owner on 2026-11-16. Acceptance records the architecture; it does not by itself change a protected contract or activate a feature. Each implementation slice below is reviewed separately.
 
-### What it supersedes in ADR-021 (on acceptance)
+The owner resolved the alias question on acceptance: the voice surface uses the owner's main agent, so the robot and every other surface share one Soul (§3).
+
+### What it supersedes in ADR-021
 
 This ADR is the new ADR that ADR-021 §10 requires before a front harness may answer directly or gain another tool. For the carrier mode defined here, it replaces these parts of ADR-021:
 
@@ -41,9 +43,9 @@ This ADR is the new ADR that ADR-021 §10 requires before a front harness may an
 
 All other ADR-021 decisions stay in force, including §2 (device and adapter split), §3 (echo cancellation), §4 (body streaming), §5 (interruption), §6 (playback evidence), §7 (bounded listening; voice input is never owner evidence), §8 (attention), the rest of §9, the §10 fallback to the cascaded path, and the §11 latency targets.
 
-### What it amends elsewhere (on acceptance)
+### What it amends elsewhere
 
-- **ADR-017 §3 and §4.** ADR-017 places spoken everyday questions such as the weather in the body's L0 and states that "the owner talks only to the body". Under this ADR, public, non-personal questions may be answered by the carrier while it speaks with the body's projected persona. Everything personal or consequential still goes to the body. ADR-017 is annotated when this ADR is accepted.
+- **ADR-017 §3 and §4.** ADR-017 places spoken everyday questions such as the weather in the body's L0 and states that "the owner talks only to the body". Under this ADR, public, non-personal questions may be answered by the carrier while it speaks with the body's projected persona. Everything personal or consequential still goes to the body. ADR-017 carries an amendment note.
 - **ADR-019, Yonbo Client.** The rule that "the adapter injects no persona or memory of its own" is tightened. The adapter's carrier instructions contain only routing and delegation rules; identity comes only from the kernel projection (§3).
 
 ## Context
@@ -93,7 +95,7 @@ The boundary is enforced by the carrier's instructions and by measurement (§7),
 
 ### 3. The kernel projects a voice persona; nothing raw leaves the body
 
-**Which agent.** The voice surface connects to one configured agent alias. The projection and every delegated turn use that same alias, so the carrier sounds like the agent that answers delegated requests. The owner chooses the alias. Whether it is the owner's main agent or a dedicated restricted agent is an open question below.
+**Which agent.** The voice surface connects to one configured agent alias. The projection and every delegated turn use that same alias, so the carrier sounds like the agent that answers delegated requests. That alias is the owner's main agent (owner decision, 2026-11-16), so the robot shares the one Soul used on every other surface. The voice surface's limits come from the surface rules: unverified input, no approval by voice, and no owner ingress. They do not come from a separate restricted agent.
 
 **Where it is delivered.** When a voice-surface connection opens (`/ws/chat` with `surface=voice`, using the device bridge `chat` operation; the credential also holds `cancel` for §4), the body returns a versioned `voice_projection` field on the `connected` acknowledgement.
 
@@ -210,5 +212,4 @@ Issue #374 remains the execution index. Each slice is one reviewed PR.
 
 ## Open questions
 
-- Which agent alias the voice surface uses: the owner's main agent, which gives one Soul for every surface, or a dedicated restricted agent with its own Soul. This decides whether the robot and the desktop share one personality.
 - Whether carrier-handled exchanges should ever be offered for an owner-reviewed memory path.
