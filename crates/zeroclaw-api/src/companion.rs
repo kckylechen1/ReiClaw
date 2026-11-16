@@ -16,6 +16,29 @@ use serde::{Deserialize, Serialize};
 
 use crate::principal::PrincipalId;
 
+/// Owner export decision for one exact User Model revision and carrier.
+#[cfg(feature = "voice-surface")]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum VoiceConsentAction {
+    Grant,
+    Revoke,
+}
+
+/// Append-only export receipt; it carries no fact text or credential.
+#[cfg(feature = "voice-surface")]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+pub struct VoiceConsentReceipt {
+    pub id: String,
+    pub head_revision_id: String,
+    pub provider: String,
+    /// Monotonic within this exact (head revision, provider) pair.
+    pub revision: u64,
+    pub action: VoiceConsentAction,
+    pub reviewer: String,
+    pub at_unix: u64,
+}
+
 /// Under what authority a companion-memory mutation was made.
 ///
 /// Serialized literals are the outbox `authority_class` tokens.

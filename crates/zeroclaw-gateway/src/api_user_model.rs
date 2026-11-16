@@ -18,6 +18,10 @@ use zeroclaw_memory::companion::{
 
 use crate::AppState;
 
+#[cfg(feature = "voice-surface")]
+#[path = "api_user_model_voice.rs"]
+pub(crate) mod voice;
+
 /// The process-wide store handle for `data_dir`, shared with the per-turn
 /// owner-profile projection. The sqlite file is the source of truth.
 fn cached_store(data_dir: &std::path::Path) -> Result<Arc<UserModelStore>, String> {
@@ -396,6 +400,9 @@ mod tests {
     use super::*;
     use axum::http::HeaderValue;
     use http_body_util::BodyExt;
+
+    #[cfg(feature = "voice-surface")]
+    include!("api_user_model_voice_tests.rs");
 
     fn loopback_peer() -> SocketAddr {
         SocketAddr::from(([127, 0, 0, 1], 9))

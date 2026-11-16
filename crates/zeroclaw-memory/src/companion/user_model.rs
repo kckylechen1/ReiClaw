@@ -23,6 +23,12 @@ use parking_lot::Mutex;
 use rusqlite::Connection;
 use zeroclaw_infra::sqlite_perms::harden_sqlite_owner_only;
 
+#[cfg(feature = "voice-surface")]
+#[path = "user_model_voice.rs"]
+mod voice;
+#[cfg(feature = "voice-surface")]
+pub use voice::{VoiceConsentAction, VoiceConsentReceipt, validate_voice_provider};
+
 /// The shared User Model reflection queue is bounded independently of Soul.
 pub const USER_MODEL_MAX_OPEN_REFLECTION_CANDIDATES: usize = 3;
 pub const USER_MODEL_STATEMENT_MAX_BYTES: usize = 240;
@@ -310,6 +316,8 @@ impl UserModelStore {
              CREATE INDEX IF NOT EXISTS idx_user_model_revisions_key_created_valid
                 ON user_model_revisions (semantic_key, created_at_unix, valid_from_unix);",
         )?;
+        #[cfg(feature = "voice-surface")]
+        voice::migrate(&conn)?;
         harden_sqlite_owner_only(&db_path);
         Ok(Self {
             conn: Mutex::new(conn),
@@ -924,51 +932,7 @@ impl UserModelStore {
     ) -> Result<Vec<UserModelRevision>, rusqlite::Error> {
         let heads = self.active_heads(as_of_unix)?;
         let conn = self.conn.lock();
-        let mut admitted = Vec::new();
-        for head in heads {
-            if !is_owner_correction_key(&head.semantic_key) {
-                admitted.push(head);
-                continue;
-            }
-            let Some(candidate) = head.source_candidate.as_deref() else {
-                // Historical owner statements have no candidate provenance.
-                admitted.push(head);
-                continue;
-            };
-            let provenance = conn.query_row(
-                "SELECT semantic_key, scope, evidence FROM user_model_candidates WHERE id = ?1",
-                [candidate],
-                |row| {
-                    Ok((
-                        row.get::<_, String>(0)?,
-                        row.get::<_, String>(1)?,
-                        row.get::<_, String>(2)?,
-                    ))
-                },
-            );
-            let (key, scope, evidence) = match provenance {
-                Ok(value) => value,
-                Err(rusqlite::Error::QueryReturnedNoRows) => continue,
-                Err(error) => return Err(error),
-            };
-            // Pre-U5 producers created global candidates, including candidates
-            // later narrowed to a session. Their keys were never reserved.
-            if scope == "global" {
-                admitted.push(head);
-                continue;
-            }
-            let Some(Scope::Session(session)) = Scope::parse(&scope) else {
-                continue;
-            };
-            if key == head.semantic_key
-                && scope == head.scope
-                && scope == Scope::Session(session.clone()).to_string()
-                && correction_evidence_matches(&evidence, agent, &session, &key)
-            {
-                admitted.push(head);
-            }
-        }
-        Ok(admitted)
+        admit_agent_heads(&conn, heads, agent)
     }
 
     /// Active, applicable revisions as of `as_of_unix` (`None` = now).
@@ -994,6 +958,59 @@ impl UserModelStore {
         let conn = self.conn.lock();
         active_heads_from_connection(&conn, as_of, None)
     }
+}
+
+// Shared by ordinary projection and the voice export's single read transaction.
+fn admit_agent_heads(
+    conn: &Connection,
+    heads: Vec<UserModelRevision>,
+    agent: &str,
+) -> Result<Vec<UserModelRevision>, rusqlite::Error> {
+    let mut admitted = Vec::new();
+    for head in heads {
+        if !is_owner_correction_key(&head.semantic_key) {
+            admitted.push(head);
+            continue;
+        }
+        let Some(candidate) = head.source_candidate.as_deref() else {
+            // Historical owner statements have no candidate provenance.
+            admitted.push(head);
+            continue;
+        };
+        let provenance = conn.query_row(
+            "SELECT semantic_key, scope, evidence FROM user_model_candidates WHERE id = ?1",
+            [candidate],
+            |row| {
+                Ok((
+                    row.get::<_, String>(0)?,
+                    row.get::<_, String>(1)?,
+                    row.get::<_, String>(2)?,
+                ))
+            },
+        );
+        let (key, scope, evidence) = match provenance {
+            Ok(value) => value,
+            Err(rusqlite::Error::QueryReturnedNoRows) => continue,
+            Err(error) => return Err(error),
+        };
+        // Pre-U5 producers created global candidates, including candidates
+        // later narrowed to a session. Their keys were never reserved.
+        if scope == "global" {
+            admitted.push(head);
+            continue;
+        }
+        let Some(Scope::Session(session)) = Scope::parse(&scope) else {
+            continue;
+        };
+        if key == head.semantic_key
+            && scope == head.scope
+            && scope == Scope::Session(session.clone()).to_string()
+            && correction_evidence_matches(&evidence, agent, &session, &key)
+        {
+            admitted.push(head);
+        }
+    }
+    Ok(admitted)
 }
 
 const ACTIVE_HEADS_SQL: &str =

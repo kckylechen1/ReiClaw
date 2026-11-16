@@ -31,6 +31,7 @@ portable_kernel = { package = "portable-kernel", version = "1.9.0", git = "https
 tempfile = { version = "3.26", optional = true }
 
 [features]
+voice-surface = ["zeroclaw-api/voice-surface"]
 tachi = ["dep:portable_kernel", "dep:tempfile", "rusqlite/backup", "rusqlite/functions"]
 
 [dev-dependencies]

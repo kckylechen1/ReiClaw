@@ -95,7 +95,7 @@ memory-tachi = ["zeroclaw-memory/tachi"]
 observability-prometheus = ["zeroclaw-runtime/observability-prometheus"]
 gateway-voice-duplex = []
 # Explicit opt-in to spoken-text presentation; no audio transport.
-voice-surface = []
+voice-surface = ["zeroclaw-memory/voice-surface"]
 # Enables OPTIONS /api/config* responses with the schemars-generated
 # JSON Schema body. Turning it off returns a small placeholder instead.
 schema-export = ["zeroclaw-config/schema-export", "zeroclaw-runtime/schema-export", "dep:schemars"]
