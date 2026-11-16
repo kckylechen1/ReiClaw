@@ -179,6 +179,15 @@ pub async fn handle_ws_chat(
     {
         return voice_projection::Error::DeviceCredentialRequired.response();
     }
+    #[cfg(feature = "voice-surface")]
+    if params.surface.as_deref() == Some("voice")
+        && bridge_scope
+            .as_ref()
+            .and_then(|(_, b)| b.device.as_ref())
+            .is_some_and(|d| d.validated_profile(&state.config.read()).is_err())
+    {
+        return voice_projection::Error::InvalidDeviceProfile.response();
+    }
     let auth_subject = if let Some((bridge, scope)) = &bridge_scope {
         let allowed = params
             .session_id
@@ -220,7 +229,18 @@ pub async fn handle_ws_chat(
         let hash = zeroclaw_config::tokens::hash_token(presented);
         (!presented.is_empty() && state.pairing.tokens().contains(&hash)).then_some(hash)
     };
-    let bridge_scope = bridge_scope.map(|(name, initial)| device::Binding { name, initial });
+    let bridge_scope = bridge_scope
+        .map(|(name, initial)| device::Binding::new(name, initial, &state.config.read()));
+
+    if params.session_id.as_deref().is_some_and(|session| {
+        !device::namespace_allowed(&state.config.read(), bridge_scope.as_ref(), session)
+    }) {
+        return (
+            axum::http::StatusCode::FORBIDDEN,
+            axum::Json(device::refusal("BRIDGE_BINDING_REJECTED")),
+        )
+            .into_response();
+    }
 
     // Echo Sec-WebSocket-Protocol if the client requests our sub-protocol.
     // Absence is allowed: `/ws/chat` is not fail-closed on a missing token.
@@ -365,6 +385,16 @@ async fn handle_socket(
 
     // Resolve session ID: use provided or generate a new UUID
     let session_id = session_id.unwrap_or_else(|| uuid::Uuid::new_v4().to_string());
+    if !device::namespace_allowed(&state.config.read(), bridge_scope.as_ref(), &session_id) {
+        let _ = sender
+            .send(Message::Text(
+                device::refusal("BRIDGE_BINDING_REJECTED")
+                    .to_string()
+                    .into(),
+            ))
+            .await;
+        return;
+    }
     let session_key = format!("{GW_SESSION_PREFIX}{session_id}");
     let lifecycle = state.ws_conversations.session_lifecycle(&session_key);
     // Match the sanitized form persisted by memory backend migrations.
@@ -601,6 +631,20 @@ async fn handle_socket(
                             return;
                         }
                         if let Some(sid) = &cp.session_id {
+                            if !device::namespace_allowed(
+                                &state.config.read(),
+                                bridge_scope.as_ref(),
+                                sid,
+                            ) {
+                                let _ = sender
+                                    .send(Message::Text(
+                                        device::refusal("BRIDGE_BINDING_REJECTED")
+                                            .to_string()
+                                            .into(),
+                                    ))
+                                    .await;
+                                return;
+                            }
                             memory_session_id =
                                 zeroclaw_api::session_keys::sanitize_session_key(sid);
                             ::zeroclaw_log::record!(
@@ -641,6 +685,16 @@ async fn handle_socket(
         }
     }
 
+    if !device::namespace_allowed(&state.config.read(), bridge_scope.as_ref(), &session_id) {
+        let _ = sender
+            .send(Message::Text(
+                device::refusal("BRIDGE_BINDING_REJECTED")
+                    .to_string()
+                    .into(),
+            ))
+            .await;
+        return;
+    }
     // Recheck after the asynchronous handshake, before stamping or constructing an Agent.
     if let Some(binding) = &bridge_scope
         && !binding.allows(&state.config.read(), &agent_alias, &session_id, "chat")
@@ -709,7 +763,21 @@ async fn handle_socket(
     } else {
         lifecycle_guard
     };
-    let conversation_key = format!("{session_key}\u{1f}{agent_alias}");
+    let credential_key = bridge_scope
+        .as_ref()
+        .filter(|b| b.device_bound())
+        .map(|b| {
+            zeroclaw_config::tokens::hash_token(&format!(
+                "{}:{:?}",
+                b.initial.token_hash, b.profile
+            ))
+        })
+        .unwrap_or_default();
+    let conversation_key = if credential_key.is_empty() {
+        format!("{session_key}\u{1f}{agent_alias}")
+    } else {
+        crate::ws_conversation::device_conversation_key(&session_key, &agent_alias, &credential_key)
+    };
     let attached = state
         .ws_conversations
         .attach(&conversation_key, |seed| {
@@ -720,6 +788,7 @@ async fn handle_socket(
                 &session_key,
                 &session_cwd,
                 memory_session_id.clone(),
+                bridge_scope.as_ref(),
                 seed,
             )
         })
@@ -996,6 +1065,7 @@ struct WsTurnScope {
 /// Build the agent for a new shared conversation and wire its approval
 /// prompts to the conversation's subscribers. Also returns the history-trim
 /// event from restoring the stored messages, if restoring trimmed them.
+#[allow(clippy::too_many_arguments)]
 async fn build_ws_session(
     config: &zeroclaw_config::schema::Config,
     state: &AppState,
@@ -1003,26 +1073,40 @@ async fn build_ws_session(
     session_key: &str,
     session_cwd: &Path,
     memory_session_id: String,
+    binding: Option<&device::Binding>,
     seed: Seed,
 ) -> anyhow::Result<(WsSession, Option<zeroclaw_api::agent::TurnEvent>)> {
-    let ws_memory = match resolve_ws_memory_handle(config, agent_alias).await {
-        Ok(memory) => memory,
-        Err(e) => {
-            ::zeroclaw_log::record!(
-                WARN,
-                ::zeroclaw_log::Event::new(module_path!(), ::zeroclaw_log::Action::Note)
-                    .with_outcome(::zeroclaw_log::EventOutcome::Failure)
-                    .with_attrs(::serde_json::json!({
-                        "agent": agent_alias,
-                        "error": format!("{e:#}"),
-                    })),
-                "WS per-agent memory resolution failed; consolidation disabled for session"
-            );
-            None
+    let device_bound = binding.is_some_and(device::Binding::device_bound);
+    let ws_memory = if device_bound {
+        None
+    } else {
+        match resolve_ws_memory_handle(config, agent_alias).await {
+            Ok(memory) => memory,
+            Err(e) => {
+                ::zeroclaw_log::record!(
+                    WARN,
+                    ::zeroclaw_log::Event::new(module_path!(), ::zeroclaw_log::Action::Note)
+                        .with_outcome(::zeroclaw_log::EventOutcome::Failure)
+                        .with_attrs(::serde_json::json!({
+                            "agent": agent_alias,
+                            "error": format!("{e:#}"),
+                        })),
+                    "WS per-agent memory resolution failed; consolidation disabled for session"
+                );
+                None
+            }
         }
     };
 
-    let mut agent =
+    let mut agent = if let Some(device) = binding.and_then(|b| b.initial.device.as_ref()) {
+        zeroclaw_runtime::agent::Agent::from_device_bridge_config(
+            config,
+            agent_alias,
+            session_cwd,
+            device,
+        )
+        .await?
+    } else {
         zeroclaw_runtime::agent::Agent::from_live_config_with_session_cwd_and_mcp_backchannel(
             Arc::clone(&state.config),
             agent_alias,
@@ -1030,7 +1114,8 @@ async fn build_ws_session(
             true,
             false,
         )
-        .await?;
+        .await?
+    };
     agent.add_prompt_section(Box::new(surface::Section));
     // Keep ONE ingress identity for the WebSocket turn: the turn span records
     // `channel = "wss"`, and observer events derive from `Agent.channel_name`,
@@ -2766,7 +2851,12 @@ async fn process_chat_message(
 
             // Fire-and-forget curated-memory consolidation (sqlite Memory).
             // Companion capture is a separate seam and already ran above.
-            if state.auto_save {
+            if state.auto_save
+                && !scope
+                    .bridge
+                    .as_ref()
+                    .is_some_and(device::Binding::device_bound)
+            {
                 if let Some(mem) = ws_memory.clone() {
                     // The agent's provider/model after the turn, not the
                     // gateway-wide boot default (upstream #10637).

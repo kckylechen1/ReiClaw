@@ -148,6 +148,7 @@ pub struct Agent {
     /// The owner-profile section assembled for the current turn, appended at
     /// the end of the system prompt. Empty when nothing applies.
     user_model_section: String,
+    device_bound: bool,
     #[cfg(test)]
     turn_datetime: Option<Arc<dyn Fn() -> chrono::DateTime<chrono::Local> + Send + Sync>>,
 }
@@ -752,6 +753,7 @@ impl AgentBuilder {
             live_pacing_config: None,
             turn_context: self.turn_context,
             user_model_section: String::new(),
+            device_bound: false,
             channel_name: self.channel_name.unwrap_or_else(|| "agent".to_string()),
             #[cfg(test)]
             turn_datetime: self.turn_datetime,
@@ -1374,6 +1376,16 @@ impl Agent {
         else {
             return;
         };
+        if self.device_bound {
+            self.prompt_builder.set_persona(
+                crate::agent::persona_projection::device_persona_projection(
+                    &config,
+                    &self.agent_alias,
+                ),
+            );
+            self.user_model_section.clear();
+            return;
+        }
         let session = crate::agent::announce_claim::current_session_key()
             .or_else(|| self.memory_session_id.clone())
             .unwrap_or_default();

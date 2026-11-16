@@ -232,6 +232,10 @@ owner; the existing session backend and Conversation remain the history and
 turn owners. See [restricted device bridges](../gateway/api.md#restricted-device-bridges)
 for bindings, per-operation grants, revocation and downgrade discipline.
 Chat authority never grants owner approval or Operator learning provenance.
+ADR-023 Amendment 1 additionally binds chat policy to `device.risk_profile`,
+reserves each device namespace, omits private prompt/memory context, denies
+approval prompts, and caps tool rounds at three independently of surface.
+The optional profile field is required for chat, including voice admission.
 
 Upstream `zeroclaw-labs/zeroclaw` was inspected at
 `5d4b18d335780af8bf15979b2f45e541f91c5eb9`, against fork baseline
