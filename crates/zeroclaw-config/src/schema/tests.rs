@@ -14685,7 +14685,7 @@ fn config_with_dispatchable_agent(agent: AliasedAgentConfig) -> Config {
 /// `Config::agent_is_dispatchable`, which routes through
 /// `resolved_risk_profile_alias`).
 ///
-/// This scans the schema and extracted validation production sources
+/// This scans the schema and extracted behavior production sources
 /// (everything before each `mod tests`, so test comments cannot trip
 /// the guard) and fails if a `.risk_profile` dot-access (the
 /// singular field, not the `.risk_profiles` map) appears inside any
@@ -14710,6 +14710,10 @@ async fn no_new_raw_risk_profile_reads_outside_the_resolver_and_validation() {
         (
             "validate.rs",
             include_str!(concat!(env!("CARGO_MANIFEST_DIR"), "/src/validate.rs")),
+        ),
+        (
+            "save.rs",
+            include_str!(concat!(env!("CARGO_MANIFEST_DIR"), "/src/save.rs")),
         ),
     ];
 
