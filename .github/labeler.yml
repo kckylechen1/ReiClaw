@@ -355,12 +355,6 @@
           - "src/providers/compatible.rs"
           - "crates/zeroclaw-providers/src/compatible.rs"
 
-"provider:copilot":
-  - changed-files:
-      - any-glob-to-any-file:
-          - "src/providers/copilot.rs"
-          - "crates/zeroclaw-providers/src/copilot.rs"
-
 "provider:gemini":
   - changed-files:
       - any-glob-to-any-file:

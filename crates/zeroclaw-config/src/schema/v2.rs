@@ -497,8 +497,6 @@ fn normalize_provider_type(
         "hunyuan" | "tencent" => Some("hunyuan"),
         // Qianfan/Baidu: was qianfan|baidu
         "qianfan" | "baidu" => Some("qianfan"),
-        // Copilot: was copilot|github-copilot
-        "copilot" | "github-copilot" => Some("copilot"),
         // OVH: was ovhcloud|ovh
         "ovhcloud" | "ovh" => Some("ovh"),
         // OpenCode: was opencode|opencode-zen, opencode-go folded as alias=go
