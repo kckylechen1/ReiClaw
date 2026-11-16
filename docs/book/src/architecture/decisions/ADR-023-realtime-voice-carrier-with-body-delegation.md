@@ -248,6 +248,8 @@ Accepted by the owner on 2026-11-16.
 
 Permissions for device-bridge turns bind to the bridge credential, independent of `surface`.
 
+The rules below define the public tier, which every device bridge gets in v1. The owner-tier slice (A3) may relax exactly the memory and cron/schedule deny entries, `exclude_memory`, and the User Model exclusion, and only for a bridge explicitly marked owner-tier, through its own reviewed change. Shell and process, file, messaging and channel, session, and `tool_search` stay denied for every device bridge.
+
 **Profile and validation.** `[gateway.bridges.<name>.device]` names a `risk_profile`. Config validation requires all of the following:
 
 - the profile exists and its level is not `full`;
@@ -308,7 +310,7 @@ This replaces the order of the original slices 4–6.
 
 ### A6. Acceptance additions
 
-1. An agent at `full`, reached through a device bridge, cannot call shell, file, messaging, memory or session tools. Non-device paths are unchanged.
+1. An agent at `full`, reached through a public-tier device bridge, cannot call shell, file, messaging, memory, session or cron tools. Non-device paths are unchanged.
 2. Device-bound turns write no memory, run no consolidation, and receive no User Model, Story or exemplar text.
 3. A device bridge whose profile fails A2 validation is refused for voice. An approval prompt on a device-bound turn is denied without waiting.
 4. On `/ws/chat`, device session namespaces cannot be shared with non-device connections.
