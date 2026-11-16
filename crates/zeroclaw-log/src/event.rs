@@ -152,7 +152,6 @@ pub const ATTRIBUTION_FIELDS: &[&str] = &[
     "runtime_profile",
     "memory_namespace",
     "skill_bundle",
-    "knowledge_bundle",
     "mcp_bundle",
     "peer_group",
     "sop_name",
