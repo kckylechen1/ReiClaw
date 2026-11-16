@@ -732,14 +732,7 @@ pub trait Memory: Send + Sync + crate::attribution::Attributable {
         let entries = self
             .recall(query, fetch_limit, session_id, since, until)
             .await?;
-        Ok(match filter {
-            Some(pred) => entries
-                .into_iter()
-                .filter(|e| pred(e))
-                .take(limit)
-                .collect(),
-            None => entries.into_iter().take(limit).collect(),
-        })
+        Ok(apply_recall_filter(entries, limit, filter.as_ref()))
     }
 
     #[doc(hidden)]
@@ -763,14 +756,7 @@ pub trait Memory: Send + Sync + crate::attribution::Attributable {
         let entries = self
             .recall_namespaced(namespace, query, fetch_limit, session_id, since, until)
             .await?;
-        Ok(match filter {
-            Some(pred) => entries
-                .into_iter()
-                .filter(|e| pred(e))
-                .take(limit)
-                .collect(),
-            None => entries.into_iter().take(limit).collect(),
-        })
+        Ok(apply_recall_filter(entries, limit, filter.as_ref()))
     }
 
     #[doc(hidden)]
@@ -801,14 +787,25 @@ pub trait Memory: Send + Sync + crate::attribution::Attributable {
                 until,
             )
             .await?;
-        Ok(match filter {
-            Some(pred) => entries
-                .into_iter()
-                .filter(|e| pred(e))
-                .take(limit)
-                .collect(),
-            None => entries.into_iter().take(limit).collect(),
-        })
+        Ok(apply_recall_filter(entries, limit, filter.as_ref()))
+    }
+}
+
+/// Shared tail of the three `*_with_filter` default methods: apply the
+/// caller's recall predicate (over-fetched with `refill_limit`) and trim to
+/// `limit`.
+fn apply_recall_filter(
+    entries: Vec<MemoryEntry>,
+    limit: usize,
+    filter: Option<&std::sync::Arc<RecallEntryPredicate>>,
+) -> Vec<MemoryEntry> {
+    match filter {
+        Some(pred) => entries
+            .into_iter()
+            .filter(|e| pred(e))
+            .take(limit)
+            .collect(),
+        None => entries.into_iter().take(limit).collect(),
     }
 }
 

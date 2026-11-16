@@ -354,7 +354,7 @@ pub(crate) fn open_store(
     )?)
 }
 
-pub(crate) fn utf8(path: &Path) -> Result<&str> {
+fn utf8(path: &Path) -> Result<&str> {
     path.to_str().context("kernel database path is not UTF-8")
 }
 
@@ -477,8 +477,8 @@ pub(crate) fn refuse_occupied_target(path: &Path) -> Result<()> {
 }
 
 pub(crate) struct HeldDirectory {
-    pub(crate) path: PathBuf,
-    pub(crate) file: File,
+    path: PathBuf,
+    file: File,
     #[cfg(unix)]
     owner_uid: Option<u32>,
 }
