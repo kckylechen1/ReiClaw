@@ -21,7 +21,6 @@ pub(crate) const SUPPORTED_PROXY_SERVICE_KEYS: &[&str] = &[
     "model_provider.glm",
     "model_provider.ollama",
     "model_provider.openai",
-    "model_provider.openrouter",
     "channel.dingtalk",
     "channel.discord",
     "channel.qq",

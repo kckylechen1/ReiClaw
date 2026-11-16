@@ -19,7 +19,7 @@ use zeroclaw_tool_call_parser::{
 };
 
 /// Build assistant history entry in JSON format for native tool-call APIs.
-/// `convert_messages` in the OpenRouter model_provider parses this JSON to reconstruct
+/// `convert_messages` in the OpenAI-compatible model providers parses this JSON to reconstruct
 /// the proper `NativeMessage` with structured `tool_calls`.
 pub(crate) fn build_native_assistant_history(
     text: &str,

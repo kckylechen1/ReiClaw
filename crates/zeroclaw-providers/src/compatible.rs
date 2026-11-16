@@ -1834,14 +1834,6 @@ fn sse_bytes_to_chunks(
     .boxed()
 }
 
-/// Convert SSE byte stream to structured streaming events.
-pub(crate) fn sse_bytes_to_events(
-    response: reqwest::Response,
-    count_tokens: bool,
-) -> stream::BoxStream<'static, StreamResult<StreamEvent>> {
-    sse_bytes_to_events_for_contract(response, count_tokens, false)
-}
-
 fn sse_bytes_to_events_for_contract(
     response: reqwest::Response,
     count_tokens: bool,

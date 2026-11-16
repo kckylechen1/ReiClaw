@@ -50,13 +50,13 @@ pub use schema::{
     LmstudioModelProviderConfig, MinimaxModelProviderConfig, MistralModelProviderConfig,
     MoonshotModelProviderConfig, NebiusModelProviderConfig, NovitaModelProviderConfig,
     NscaleModelProviderConfig, NvidiaModelProviderConfig, OllamaModelProviderConfig,
-    OpenAIModelProviderConfig, OpenRouterModelProviderConfig, OpencodeModelProviderConfig,
-    OsaurusModelProviderConfig, OvhModelProviderConfig, PerplexityModelProviderConfig,
-    QianfanModelProviderConfig, QwenModelProviderConfig, RekaModelProviderConfig,
-    SambanovaModelProviderConfig, SglangModelProviderConfig, SiliconflowModelProviderConfig,
-    StepfunModelProviderConfig, SyntheticModelProviderConfig, TogetherModelProviderConfig,
-    VeniceModelProviderConfig, VercelModelProviderConfig, VllmModelProviderConfig,
-    XaiModelProviderConfig, YiModelProviderConfig, ZaiModelProviderConfig,
+    OpenAIModelProviderConfig, OpencodeModelProviderConfig, OsaurusModelProviderConfig,
+    OvhModelProviderConfig, PerplexityModelProviderConfig, QianfanModelProviderConfig,
+    QwenModelProviderConfig, RekaModelProviderConfig, SambanovaModelProviderConfig,
+    SglangModelProviderConfig, SiliconflowModelProviderConfig, StepfunModelProviderConfig,
+    SyntheticModelProviderConfig, TogetherModelProviderConfig, VeniceModelProviderConfig,
+    VercelModelProviderConfig, VllmModelProviderConfig, XaiModelProviderConfig,
+    YiModelProviderConfig, ZaiModelProviderConfig,
 };
 pub use traits::HasPropKind;
 pub use traits::PropFieldInfo;

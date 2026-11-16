@@ -1500,7 +1500,7 @@ mod tests {
     #[test]
     fn providers_picker_sources_from_list_providers() {
         // Single source of truth: zeroclaw_providers::list_model_providers().
-        // Anthropic / OpenAI / OpenRouter must surface in the picker.
+        // Anthropic / OpenAI / Gemini must surface in the picker.
         let cfg = empty_cfg();
         let items = providers_picker(&cfg);
         let names: Vec<&str> = items.iter().map(|i| i.key.as_str()).collect();
@@ -1509,10 +1509,7 @@ mod tests {
             "expected anthropic in picker, got: {names:?}"
         );
         assert!(names.contains(&"openai"), "expected openai in picker");
-        assert!(
-            names.contains(&"openrouter"),
-            "expected openrouter in picker"
-        );
+        assert!(names.contains(&"gemini"), "expected gemini in picker");
 
         // Display name is human-readable, not the canonical key.
         let anthropic = items.iter().find(|i| i.key == "anthropic").unwrap();

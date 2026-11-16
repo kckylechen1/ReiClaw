@@ -13,7 +13,6 @@ pub mod models_dev;
 pub mod multimodal;
 pub mod openai;
 pub mod openai_codex;
-pub mod openrouter;
 pub mod openrouter_catalog;
 pub mod pricing;
 pub mod reliable;
@@ -943,7 +942,6 @@ fn resolve_model_provider_credential(
 /// must precede `sk-`).
 const KEY_PREFIX_MODEL_PROVIDERS: &[(&str, &str)] = &[
     ("sk-ant-", "anthropic"),
-    ("sk-or-", "openrouter"),
     ("sk-", "openai"),
     ("gsk_", "groq"),
     ("pplx-", "perplexity"),
@@ -1817,7 +1815,6 @@ pub fn default_model_provider_url(name: &str) -> Option<&'static str> {
     match name {
         "anthropic" => Some(anthropic::BASE_URL),
         "openai" => Some(openai::BASE_URL),
-        "openrouter" => Some(openrouter::BASE_URL),
         "ollama" => Some(OllamaEndpoint::default().uri()),
         "gemini" => Some(gemini::BASE_URL),
         "vercel" => Some(<VercelModelProviderConfig as CompatFamilySpec>::DEFAULT_URL),
@@ -1902,7 +1899,6 @@ pub fn list_model_providers() -> Vec<ModelProviderInfo> {
         &mut out,
         ModelProviderCategory::Primary,
         &[
-            ("openrouter", "OpenRouter", false),
             ("anthropic", "Anthropic", false),
             ("openai", "OpenAI", false),
             ("ollama", "Ollama", true),
@@ -2083,37 +2079,10 @@ pub async fn fetch_context_window(
     config: &zeroclaw_config::schema::ModelProviderConfig,
 ) -> Option<usize> {
     match provider_type {
-        "openrouter" => fetch_openrouter_context_window(config).await,
         "together" | "groq" | "fireworks" | "deepinfra" | "hyperbolic" | "anyscale" | "novita"
         | "nebius" => fetch_openai_compatible_context_window(provider_type, config).await,
         _ => None, // anthropic, openai, ollama, etc. don't expose it
     }
-}
-
-async fn fetch_openrouter_context_window(
-    config: &zeroclaw_config::schema::ModelProviderConfig,
-) -> Option<usize> {
-    let client = reqwest::Client::new();
-    let url = config
-        .uri
-        .as_deref()
-        .filter(|s| !s.is_empty() && *s != "<unset>")
-        .unwrap_or("https://openrouter.ai/api/v1/models");
-    let resp = client
-        .get(url)
-        .send()
-        .await
-        .ok()?
-        .json::<serde_json::Value>()
-        .await
-        .ok()?;
-    let model = config.model.as_deref().unwrap_or("");
-    resp["data"]
-        .as_array()?
-        .iter()
-        .find(|m| m["id"].as_str() == Some(model))?["context_length"]
-        .as_u64()
-        .map(|v| v as usize)
 }
 
 async fn fetch_openai_compatible_context_window(
