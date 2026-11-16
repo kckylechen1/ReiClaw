@@ -19,13 +19,13 @@ use super::schema::{
     MoonshotModelProviderConfig, MorphModelProviderConfig, NearaiModelProviderConfig,
     NebiusModelProviderConfig, NovitaModelProviderConfig, NscaleModelProviderConfig,
     NvidiaModelProviderConfig, OllamaModelProviderConfig, OpenAIModelProviderConfig,
-    OpenRouterModelProviderConfig, OpencodeModelProviderConfig, OsaurusModelProviderConfig,
-    OvhModelProviderConfig, PerplexityModelProviderConfig, QianfanModelProviderConfig,
-    QwenModelProviderConfig, RekaModelProviderConfig, SambanovaModelProviderConfig,
-    SglangModelProviderConfig, SiliconflowModelProviderConfig, StepfunModelProviderConfig,
-    SyntheticModelProviderConfig, TogetherModelProviderConfig, UpstageModelProviderConfig,
-    VeniceModelProviderConfig, VercelModelProviderConfig, VllmModelProviderConfig,
-    XaiModelProviderConfig, YiModelProviderConfig, ZaiModelProviderConfig,
+    OpencodeModelProviderConfig, OsaurusModelProviderConfig, OvhModelProviderConfig,
+    PerplexityModelProviderConfig, QianfanModelProviderConfig, QwenModelProviderConfig,
+    RekaModelProviderConfig, SambanovaModelProviderConfig, SglangModelProviderConfig,
+    SiliconflowModelProviderConfig, StepfunModelProviderConfig, SyntheticModelProviderConfig,
+    TogetherModelProviderConfig, UpstageModelProviderConfig, VeniceModelProviderConfig,
+    VercelModelProviderConfig, VllmModelProviderConfig, XaiModelProviderConfig,
+    YiModelProviderConfig, ZaiModelProviderConfig,
 };
 use super::schema::{
     AssemblyAiTranscriptionProviderConfig, DeepgramTranscriptionProviderConfig,
@@ -168,6 +168,7 @@ pub const RETIRED_MODEL_PROVIDER_NAMES: &[&str] = &[
     "kilo-cli",
     "copilot",
     "github-copilot",
+    "openrouter",
 ];
 
 pub fn reject_retired_model_provider(name: &str) -> anyhow::Result<()> {
@@ -267,7 +268,6 @@ macro_rules! for_each_model_provider_slot {
             (hunyuan, "hunyuan", HunyuanModelProviderConfig),
             (qianfan, "qianfan", QianfanModelProviderConfig),
             (baichuan, "baichuan", BaichuanModelProviderConfig),
-            (openrouter, "openrouter", OpenRouterModelProviderConfig),
             (ollama, "ollama", OllamaModelProviderConfig),
             (gemini, "gemini", GeminiModelProviderConfig),
             (together, "together", TogetherModelProviderConfig),

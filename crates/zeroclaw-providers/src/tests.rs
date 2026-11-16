@@ -16,14 +16,14 @@ fn provider_http_client_trusts_both_webpki_and_native_roots() {
 
 #[test]
 fn resolve_provider_credential_returns_trimmed_override() {
-    let resolved = resolve_model_provider_credential("openrouter", Some("  explicit-key  "));
+    let resolved = resolve_model_provider_credential("groq", Some("  explicit-key  "));
     assert_eq!(resolved, Some("explicit-key".to_string()));
 }
 
 #[test]
 fn resolve_provider_credential_filters_empty_override() {
-    assert!(resolve_model_provider_credential("openrouter", Some("   ")).is_none());
-    assert!(resolve_model_provider_credential("openrouter", None).is_none());
+    assert!(resolve_model_provider_credential("groq", Some("   ")).is_none());
+    assert!(resolve_model_provider_credential("groq", None).is_none());
 }
 
 #[test]
@@ -108,8 +108,6 @@ fn factory_resolves_builtin_families_and_aliases() {
     // one) must construct from a bare name. `None` rows are families
     // that run without a key (local servers or managed auth).
     let cases: &[(&str, Option<&str>)] = &[
-        ("openrouter", Some("provider-test-credential")),
-        ("openrouter", None),
         ("anthropic", Some("provider-test-credential")),
         ("openai", Some("provider-test-credential")),
         ("ollama", None),
@@ -674,7 +672,7 @@ fn route_provider_options_clear_primary_only_state_for_bare_routes() {
     };
     let config = zeroclaw_config::schema::Config::default();
 
-    let route_options = options_for_provider_ref(&config, "openrouter", &inherited);
+    let route_options = options_for_provider_ref(&config, "anthropic", &inherited);
 
     assert_eq!(route_options.provider_kind, None);
     assert_eq!(route_options.provider_api_url, None);
@@ -700,7 +698,7 @@ fn routed_bare_provider_does_not_inherit_primary_endpoint() {
         Some("http://primary.example/v1")
     );
 
-    let route_options = options_for_provider_ref(&config, "openrouter", &options);
+    let route_options = options_for_provider_ref(&config, "anthropic", &options);
 
     assert_eq!(route_options.provider_kind, None);
     assert_eq!(route_options.provider_api_url, None);
@@ -709,8 +707,8 @@ fn routed_bare_provider_does_not_inherit_primary_endpoint() {
 #[test]
 fn routed_primary_alias_kind_does_not_leak_to_canonical_route_provider() {
     use zeroclaw_config::schema::{
-        ModelProviderConfig, ModelRouteConfig, OpenAIModelProviderConfig,
-        OpenRouterModelProviderConfig,
+        AnthropicModelProviderConfig, ModelProviderConfig, ModelRouteConfig,
+        OpenAIModelProviderConfig,
     };
 
     let mut config = zeroclaw_config::schema::Config::default();
@@ -724,9 +722,9 @@ fn routed_primary_alias_kind_does_not_leak_to_canonical_route_provider() {
             },
         },
     );
-    config.providers.models.openrouter.insert(
+    config.providers.models.anthropic.insert(
         "route".to_string(),
-        OpenRouterModelProviderConfig {
+        AnthropicModelProviderConfig {
             base: ModelProviderConfig::default(),
         },
     );
@@ -741,8 +739,8 @@ fn routed_primary_alias_kind_does_not_leak_to_canonical_route_provider() {
         &config.reliability,
         &[ModelRouteConfig {
             hint: "fast".to_string(),
-            model_provider: "openrouter.route".to_string(),
-            model: "openrouter/auto".to_string(),
+            model_provider: "anthropic.route".to_string(),
+            model: "claude-test".to_string(),
             api_key: None,
         }],
         "gpt-test",
@@ -1024,7 +1022,6 @@ async fn ollama_private_remote_lists_models_without_auth() {
 #[test]
 fn factory_all_canonical_model_providers_create_successfully() {
     let canonical = [
-        "openrouter",
         "anthropic",
         "openai",
         "ollama",
@@ -1322,16 +1319,6 @@ fn scrub_github_fine_grained_pat() {
 
 #[test]
 fn api_key_prefix_cross_provider_mismatch() {
-    // Anthropic key used with openrouter
-    assert_eq!(
-        check_api_key_prefix("openrouter", "sk-ant-api03-xyz"),
-        Some("anthropic")
-    );
-    // OpenRouter key used with anthropic
-    assert_eq!(
-        check_api_key_prefix("anthropic", "sk-or-v1-xyz"),
-        Some("openrouter")
-    );
     // Anthropic key used with openai
     assert_eq!(
         check_api_key_prefix("openai", "sk-ant-xyz"),
@@ -1344,7 +1331,7 @@ fn api_key_prefix_cross_provider_mismatch() {
 #[test]
 fn factory_rejects_retired_telnyx_credentials_for_retained_providers() {
     let retired_key = "KEY-private-telnyx-fixture";
-    for destination in ["openai", "anthropic", "openrouter", "xai"] {
+    for destination in ["openai", "anthropic", "xai"] {
         assert_eq!(
             check_api_key_prefix(destination, retired_key),
             Some("telnyx")
@@ -1363,7 +1350,6 @@ fn factory_rejects_retired_telnyx_credentials_for_retained_providers() {
 #[test]
 fn api_key_prefix_correct_match() {
     assert_eq!(check_api_key_prefix("anthropic", "sk-ant-api03-xyz"), None);
-    assert_eq!(check_api_key_prefix("openrouter", "sk-or-v1-xyz"), None);
     assert_eq!(check_api_key_prefix("openai", "sk-proj-xyz"), None);
     assert_eq!(check_api_key_prefix("groq", "gsk_xyz"), None);
 }
@@ -2325,15 +2311,7 @@ fn retired_model_providers_fail_before_alias_or_kind_override_can_reroute() {
     }
     // Regular Gemini, its existing OAuth path, and the Kilo HTTP gateway are
     // distinct consumers and remain covered by the existing adapter tests.
-    for retained in [
-        "anthropic",
-        "openai",
-        "openrouter",
-        "gemini",
-        "google",
-        "xai",
-        "kilo",
-    ] {
+    for retained in ["anthropic", "openai", "gemini", "google", "xai", "kilo"] {
         assert!(
             create_model_provider(retained, Some("provider-test-credential")).is_ok(),
             "{retained}"

@@ -1767,7 +1767,7 @@ schema_version = 3
 api_key = "private-anthropic-key"
 [providers.models.openai.azure]
 model = "gpt-4o"
-[providers.models.openrouter.telnyx]
+[providers.models.glm.telnyx]
 api_key = "private-openrouter-key"
 [providers.models.gemini.gemini_cli]
 auth_mode = "o_auth"

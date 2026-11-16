@@ -751,7 +751,7 @@ fn fold_providers_globals_into_models(
             None => match aliased_models.keys().next() {
                 Some(k) => (k.clone(), "default".to_string(), None, Vec::new()),
                 None => (
-                    "openrouter".to_string(),
+                    "openai".to_string(),
                     "default".to_string(),
                     None,
                     Vec::new(),

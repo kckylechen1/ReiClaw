@@ -551,11 +551,11 @@ mod tests {
         config
             .providers
             .models
-            .ensure("openrouter", "test-agent")
+            .ensure("openai", "test-agent")
             .expect("known family");
         config.agents.entry("test-agent".to_string()).or_insert(
             zeroclaw_config::schema::AliasedAgentConfig {
-                model_provider: "openrouter.test-agent".into(),
+                model_provider: "openai.test-agent".into(),
                 risk_profile: "test-agent".into(),
                 runtime_profile: "test-agent".into(),
                 ..Default::default()

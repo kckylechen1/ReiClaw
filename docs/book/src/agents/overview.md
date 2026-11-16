@@ -63,7 +63,7 @@ used to add a second, policy-gated hand-off path is removed; see
 ```text
                     agents.researcher          agents.support
                     ─────────────────          ──────────────
-  model provider     openrouter.prod ◀───────── openrouter.prod   (same one)
+  model provider     openai.prod ◀───────────── openai.prod       (same one)
   risk profile       hardened                   permissive        (diverge)
   channel            discord.main               slack.helpdesk    (diverge)
   peers              └──────▶ peer group on discord.main ◀───────┘

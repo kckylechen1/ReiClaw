@@ -417,7 +417,7 @@ enum Commands {
     /// path. Interactive: the flags below pre-seed checklist selectors
     /// but do not skip them; a terminal is required.
     Quickstart {
-        /// Provider type (anthropic / openai / openrouter / ollama).
+        /// Provider type (anthropic / openai / ollama).
         #[arg(long)]
         model_provider: Option<String>,
 
@@ -514,7 +514,7 @@ Examples:
         #[arg(short, long)]
         message: Option<String>,
 
-        /// Model provider to use (openrouter, anthropic, openai, openai-codex)
+        /// Model provider to use (anthropic, openai, ollama, openai-codex)
         #[arg(short = 'p', long = "model-provider", alias = "provider")]
         model_provider: Option<String>,
 

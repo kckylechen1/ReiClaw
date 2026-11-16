@@ -22,14 +22,14 @@ group = "example"
 table = true
 
 [[var]]
-path = "providers.models.openrouter.prod_v2.model"
-comment = "Set a model on a non-default OpenRouter alias (alias with underscore is fine)"
-value = "anthropic/claude-sonnet-4-6"
+path = "providers.models.anthropic.prod_v2.model"
+comment = "Set a model on a non-default Anthropic alias (alias with underscore is fine)"
+value = "claude-sonnet-4-6"
 group = "example"
 
 [[var]]
-path = "providers.models.openrouter.prod_v2.api_key"
-value = "sk-or-..."
+path = "providers.models.anthropic.prod_v2.api_key"
+value = "sk-ant-..."
 group = "example"
 
 [[var]]
@@ -104,8 +104,8 @@ group = "bridge_sh"
 prefix = "export "
 
 [[var]]
-path = "providers.models.openrouter.home.api_key"
-value = "\"$OPENROUTER_API_KEY\""
+path = "providers.models.groq.home.api_key"
+value = "\"$GROQ_API_KEY\""
 group = "bridge_sh"
 prefix = "export "
 

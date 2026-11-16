@@ -82,13 +82,14 @@ impl V1Config {
             None
         } else {
             // V1 runtime hardcoded "openrouter" as the fallback when
-            // default_provider was unset; preserve that so a stock V1 install
-            // round-trips.
+            // default_provider was unset. That family is retired and its
+            // configs fail the retired-family gate, so a stock V1 install
+            // lands on the openai default instead.
             let default_provider_key: String = default_provider
                 .as_ref()
                 .and_then(|v| v.as_str())
                 .map(str::to_string)
-                .unwrap_or_else(|| "openrouter".to_string());
+                .unwrap_or_else(|| "openai".to_string());
 
             let mut models_table: toml::Table = model_providers.into_iter().collect();
 

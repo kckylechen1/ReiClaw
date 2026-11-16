@@ -2813,8 +2813,8 @@ schema_version = 2
 format = "aieos"
 aieos_inline = "{\"placeholder\":true}"
 
-[providers.models.openrouter]
-model = "anthropic/claude-sonnet-4-5"
+[providers.models.openai]
+model = "gpt-test"
 api_key = "sk-test"
 "#,
     );
@@ -2849,12 +2849,12 @@ schema_version = 2
 [identity]
 format = "openclaw"
 
-[providers.models.openrouter]
-model = "anthropic/claude-sonnet-4-5"
+[providers.models.openai]
+model = "gpt-test"
 api_key = "sk-test"
 
 [agents.scout]
-model_provider = "openrouter.openrouter"
+model_provider = "openai.main"
 risk_profile = "default"
 runtime_profile = "default"
 

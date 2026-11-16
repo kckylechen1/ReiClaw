@@ -19,7 +19,6 @@ pub fn catalog_source_for(family: &str) -> Option<(Option<&'static str>, Option<
         "openai" => (Some("openai"), Some("openai")),
         "anthropic" => (Some("anthropic"), Some("anthropic")),
         "gemini" => (Some("google"), Some("google")),
-        "openrouter" => (Some("openrouter"), Some("openrouter")),
         "minimax" => (Some("minimax"), Some("minimax")),
         "lmstudio" => (Some("lmstudio"), None),
         "kilo" => (Some("kilo"), None),
