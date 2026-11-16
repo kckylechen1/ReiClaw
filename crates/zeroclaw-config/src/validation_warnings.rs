@@ -195,6 +195,7 @@ pub const RETIRED_CONFIG_SURFACES: &[(&str, &str)] = &[
     ("channels.git", "retired_channel_transport_removed"),
     ("channels.voice_call", "retired_channel_transport_removed"),
     ("channels.voice_wake", "retired_channel_transport_removed"),
+    ("channels.voice_duplex", "retired_channel_transport_removed"),
     ("channels.amqp", "retired_channel_transport_removed"),
     ("channels.whatsapp", "retired_channel_transport_removed"),
     ("channels.feishu", "retired_channel_transport_removed"),
@@ -241,6 +242,10 @@ pub const RETIRED_CONFIG_SURFACES: &[(&str, &str)] = &[
     ),
     (
         "channels_config.voice_wake",
+        "retired_channel_transport_removed",
+    ),
+    (
+        "channels_config.voice_duplex",
         "retired_channel_transport_removed",
     ),
     ("channels_config.amqp", "retired_channel_transport_removed"),

@@ -148,7 +148,7 @@ impl PropKind {
 #[derive(Debug, Clone, Copy)]
 pub struct NestedOptionEntry {
     /// snake_case field name on the parent struct (e.g. `"telegram"`,
-    /// `"voice_duplex"`).
+    /// `"webhook"`).
     pub field: &'static str,
     /// `true` when the parent struct's field is `Some(_)`.
     pub present: bool,

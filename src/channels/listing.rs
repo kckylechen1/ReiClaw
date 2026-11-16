@@ -232,6 +232,7 @@ mod tests {
             "Git",
             "Voice Call",
             "Voice Wake",
+            "Voice Duplex",
             "AMQP",
         ] {
             assert!(!compiled.contains(removed));
@@ -279,16 +280,14 @@ mod tests {
 
     #[test]
     fn channel_compile_specs_cover_schema_channel_types() {
-        let out_of_scope = BTreeSet::from([
-            // Voice duplex is a gateway event-stream config surface, not a
-            // Channel implementation with its own feature.
-            "voice_duplex",
-        ]);
-
-        for channel_type in zeroclaw_config::schema::v2::V3_CHANNEL_TYPES {
-            if out_of_scope.contains(channel_type) {
-                continue;
-            }
+        // The frozen migration lens keeps historical kinds. Only retained
+        // transports must still have a compile spec; ADR-023 retired duplex.
+        let live_types: Vec<_> = zeroclaw_config::schema::v2::V3_CHANNEL_TYPES
+            .iter()
+            .filter(|kind| !zeroclaw_config::schema::is_retired_transport(kind))
+            .collect();
+        assert!(!live_types.is_empty(), "retained channel sample is empty");
+        for channel_type in live_types {
             let kebab = channel_type.replace('_', "-");
             assert!(
                 CHANNEL_COMPILE_SPECS.iter().any(|spec| spec

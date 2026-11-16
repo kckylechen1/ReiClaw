@@ -669,6 +669,58 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn walker_tombstones_voice_duplex_without_changing_live_channels() {
+        let _guard = super::env_test_lock().await;
+        for (name, value, path) in [
+            (
+                "ZEROCLAW_channels__voice_duplex__legacy__enabled",
+                "true",
+                "channels.voice_duplex",
+            ),
+            (
+                "ZEROCLAW_channels__voice_duplex__legacy__excluded_tools",
+                "[\"shell\",\"file_write\"]",
+                "channels.voice_duplex",
+            ),
+            (
+                "ZEROCLAW_channels_config__voice_duplex__enabled",
+                "true",
+                "channels_config.voice_duplex",
+            ),
+            (
+                "ZEROCLAW_channels_config__voice_duplex__excluded_tools",
+                "[\"shell\",\"file_write\"]",
+                "channels_config.voice_duplex",
+            ),
+        ] {
+            let _value = EnvVarGuard::set(name, value);
+            let mut config = Config::default();
+            let applied = apply_env_overrides(&mut config).unwrap();
+            assert!(applied.paths.is_empty());
+            assert!(applied.snapshots.is_empty());
+            assert!(config.dirty_paths.is_empty());
+            assert!(!config.channels.has_any_enabled());
+            assert!(config.peer_groups.is_empty());
+            assert_eq!(applied.tombstone_warnings.len(), 1);
+            assert_eq!(applied.tombstone_warnings[0].path, path);
+            assert_eq!(
+                applied.tombstone_warnings[0].code,
+                "retired_channel_transport_removed"
+            );
+        }
+
+        // A retained channel may still use that spelling as its alias. Only
+        // the retired type prefix is ignored; no new voice permission is made.
+        let _retained =
+            EnvVarGuard::set("ZEROCLAW_channels__webhook__voice_duplex__enabled", "true");
+        let mut config = Config::default();
+        let applied = apply_env_overrides(&mut config).unwrap();
+        assert!(config.channels.webhook["voice_duplex"].enabled);
+        assert_eq!(applied.paths.len(), 1);
+        assert!(applied.tombstone_warnings.is_empty());
+    }
+
+    #[tokio::test]
     async fn walker_field_tombstone_ignores_retired_delegate_keys() {
         // Field-lane tombstones (RETIRED_CONFIG_FIELDS): an env override
         // naming a removed delegate config field is ignored with the

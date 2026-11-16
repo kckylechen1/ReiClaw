@@ -1864,19 +1864,84 @@ native_chrome_path = "/usr/bin/chromium"
 }
 
 #[test]
-fn v2_channels_voice_duplex_block_alias_wraps() {
-    let raw = r#"
-default_provider = "openai"
-default_model = "gpt-4o-mini"
+fn v2_retained_channel_blocks_alias_wrap() {
+    let retained: Vec<_> = zeroclaw_config::schema::v2::V3_CHANNEL_TYPES
+        .iter()
+        .copied()
+        .filter(|kind| !zeroclaw_config::schema::is_retired_transport(kind))
+        .collect();
+    assert!(
+        !retained.is_empty(),
+        "alias wrapping needs retained samples"
+    );
+    for kind in retained {
+        // Build each sample from its retained schema defaults, including any
+        // required fields, instead of pinning this shared guarantee to one type.
+        let mut sample = Config::default();
+        sample
+            .create_map_key(&format!("channels.{kind}"), "default")
+            .unwrap();
+        sample
+            .set_prop(&format!("channels.{kind}.default.enabled"), "false")
+            .unwrap();
+        let sample = toml::Value::try_from(&sample).unwrap();
+        let mut channels = toml::Table::new();
+        channels.insert(
+            kind.to_string(),
+            sample["channels"][kind]["default"].clone(),
+        );
+        let legacy = toml::Table::from_iter([
+            ("default_provider".to_string(), "openai".into()),
+            ("default_model".to_string(), "gpt-4o-mini".into()),
+            ("channels_config".to_string(), toml::Value::Table(channels)),
+        ]);
+        let raw = toml::to_string(&legacy).unwrap();
+        let cfg = migrate_to_current(&raw)
+            .expect("retained flat V2 block must alias-wrap, not deserialize as flat struct");
+        assert_eq!(cfg.schema_version, CURRENT_SCHEMA_VERSION);
+        let migrated = toml::Value::try_from(&cfg).unwrap();
+        assert_eq!(
+            migrated["channels"][kind]["default"]["enabled"].as_bool(),
+            Some(false),
+            "the disabled {kind} instance must remain under its default alias"
+        );
+    }
+}
 
-[channels_config.voice_duplex]
-enabled = false
-"#;
-    let cfg = migrate_to_current(raw)
-        .expect("voice_duplex flat V2 block must alias-wrap, not deserialize as flat struct");
-    // enabled = false drops the block entirely (T7 enabled-keep filter),
-    // so we just assert the migration succeeded.
-    assert_eq!(cfg.schema_version, CURRENT_SCHEMA_VERSION);
+#[test]
+fn retired_voice_duplex_does_not_activate_or_grant_another_surface() {
+    for (stamp, root, alias) in [
+        ("", "channels_config", ""),
+        ("schema_version = 2\n", "channels", ""),
+        ("schema_version = 3\n", "channels", ".default"),
+    ] {
+        let path = format!("{root}.voice_duplex");
+        let raw = format!(
+            "{stamp}[{path}{alias}]\nenabled = true\nexcluded_tools = ['shell', 'file_write']\n\
+             [{root}.webhook{alias}]\nenabled = true\nport = 8080\n"
+        );
+        let config = migrate_to_current(&raw).expect("retired voice config must load");
+        assert_eq!(config.channels.webhook["default"].port, 8080);
+        assert!(config.peer_groups.is_empty());
+        assert!(config.channels.is_retired_channel("voice_duplex"));
+        assert!(!config.channels.is_known_channel("voice_duplex"));
+        assert!(!config.channels.is_channel_deliverable("voice_duplex"));
+        assert!(
+            config
+                .channels_by_alias()
+                .iter()
+                .all(|channel| channel.channel_type != "voice_duplex")
+        );
+        assert!(
+            !toml::to_string(&config)
+                .unwrap()
+                .contains("[channels.voice_duplex")
+        );
+        let warnings = zeroclaw_config::validation_warnings::retired_section_tombstones(&raw);
+        assert_eq!(warnings.len(), 1);
+        assert_eq!(warnings[0].path, path);
+        assert_eq!(warnings[0].code, "retired_channel_transport_removed");
+    }
 }
 
 #[test]

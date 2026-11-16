@@ -94,6 +94,14 @@ See [runtime internals](../agents/internals.md#repeated-tool-failure-recovery).
 
 ## ADR-023 voice consent and projection
 
+The legacy `gateway-voice-duplex` event logger and its `VoiceDuplexConfig`
+are retired under ADR-023 §8. The existing retired-transport and config-warning
+registries identify both `channels.voice_duplex` and its historical
+`channels_config.voice_duplex` spelling. Old event frames use the existing
+unknown-message refusal and never become chat input. No old alias, excluded
+tool list or grant is mapped to the current voice surface. The Node path and
+the default-off `voice-surface` implementation below retain their authority.
+
 The kernel's default-off `voice-surface` implementation adds owner consent
 receipts to the existing User Model store and a closed `session_start`
 projection. `UserModelStore` owns the additive table; Scope and existing

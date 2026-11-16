@@ -1,6 +1,6 @@
 # Channels: Overview
 
-A **channel** is a messaging surface the agent talks through. One ZeroClaw instance can bind multiple channels simultaneously; but since the in-process channel runners were retired with the `zeroclaw-channels` crate (#579, #581), the live channel surfaces are the ones that run **through the gateway**: bridges over `/ws/chat`, webhook ingress, the always-on CLI, ACP sessions, and the voice-duplex Node path.
+A **channel** is a messaging surface the agent talks through. One ZeroClaw instance can bind multiple channels simultaneously; but since the in-process channel runners were retired with the `zeroclaw-channels` crate (#579, #581), the retained surfaces run **through the gateway**: bridges over `/ws/chat`, webhook ingress, the always-on CLI, ACP sessions, and the opt-in spoken-text voice surface.
 
 An agent lists the channels it answers on; see [Agents](../agents/overview.md) for how channels attach to an agent (and how a [peer group](./peer-groups.md) lets agents on a shared channel address each other).
 
@@ -16,7 +16,7 @@ A **bridge** is a channel that runs as its own process and attaches to the gatew
 | Telegram | Gateway bridge (`zeroclaw-bridge-telegram`) | [Other chat platforms](./chat-others.md) |
 | Webhook | Gateway ingress (`[channels.webhook]`) | [Webhooks](./webhook.md) |
 | ACP (Agent Client Protocol) | JSON-RPC 2.0 over stdio: editor/IDE sessions | [ACP](./acp.md) |
-| Voice duplex | Edge devices joining through the gateway as Nodes (`[channels.voice_duplex]`) | [Voice & telephony](./voice.md) |
+| Voice surface (opt-in) | Spoken text over `/ws/chat` with `surface=voice`; audio belongs to the adapter | [Voice & telephony](./voice.md) |
 | Gateway REST/WS | HTTP + WebSocket (`gateway`, enabled by default) | [Gateway](../gateway/api.md) |
 
 ### Retained tool configuration
@@ -38,7 +38,11 @@ slices. Leftover sections, including their V1 `channels_config` spelling,
 produce retirement warnings at load and are discarded; they do not activate
 a channel.
 
-Per-family retirement pages: [Other chat platforms](./chat-others.md) (Notion) · [Social](./social.md) (retired social transports) · [Voice](./voice.md) (voice duplex Node path).
+The unused `voice_duplex` event logger and its channel configuration are also
+retired under [ADR-023](../architecture/decisions/ADR-023-realtime-voice-carrier-with-body-delegation.md#8-scope).
+It is not the current voice surface or the Node capability path.
+
+Per-family retirement pages: [Other chat platforms](./chat-others.md) (Notion) · [Social](./social.md) (retired social transports) · [Voice](./voice.md) (legacy voice transports and event logger).
 
 > **Also retired earlier:** the MQTT and filesystem SOP-trigger channels were retired when the SOP run side was removed; their sections are **rejected at config parse** with the migration message ([MQTT](./mqtt.md), [Filesystem](./filesystem.md)). The retired transport sections above load with a retirement warning and are discarded.
 

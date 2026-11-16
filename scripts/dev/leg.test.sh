@@ -76,7 +76,7 @@ check 0 \
 run bash scripts/dev/leg.sh channels
 check 0 \
   'test --locked -p zeroclaw-gateway --features zeroclaw-gateway/nodes\,zeroclaw-gateway/memory-tachi' \
-  'test --locked -p zeroclaw-gateway --features zeroclaw-gateway/nodes\,zeroclaw-gateway/memory-tachi\,zeroclaw-gateway/voice-surface -- surface_tests'
+  'test --locked -p zeroclaw-gateway --features zeroclaw-gateway/nodes\,zeroclaw-gateway/memory-tachi\,zeroclaw-gateway/voice-surface -- ws::tests::'
 
 # Run the actual CI step's shell (its env is set as in the workflow), not a copy
 # of its command construction. No YAML dependency is needed for this block.

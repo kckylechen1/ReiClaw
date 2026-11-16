@@ -357,6 +357,79 @@ async fn wait_provider(fixture: &DeviceFixture, count: usize) {
 }
 
 #[tokio::test]
+async fn retired_voice_frames_reject_without_claiming_legacy_or_negotiated_turns() {
+    for negotiated in [false, true] {
+        let fixture = DeviceFixture::new(&["chat", "cancel"]).await;
+        // An unrestricted paired owner reaches the normal unknown-type guard;
+        // a scoped device would refuse earlier at its operation allowlist.
+        let mut client = fixture.socket(OWNER_TOKEN).await;
+        let epoch = if negotiated {
+            Some(negotiate(&mut client).await)
+        } else {
+            None
+        };
+        let id = uuid::Uuid::new_v4().to_string();
+        for mut frame in [
+            json!({"type":"speech_start"}),
+            json!({"type":"speech_end", "transcript":"retired voice transcript", "content":"not a chat message"}),
+            json!({"type":"barge_in"}),
+            json!({"type":"tts_cancel"}),
+            json!({"type":"tts_chunk", "audio_b64":"AAAA", "format":"mp3"}),
+        ] {
+            frame["id"] = json!(id);
+            frame["request_id"] = json!(id);
+            client.send(frame).await;
+            let reply = client.next().await.expect("explicit retired-frame refusal");
+            let (kind, code) = if negotiated {
+                ("turn_error", "UNKNOWN_OPERATION")
+            } else {
+                ("error", "UNKNOWN_MESSAGE_TYPE")
+            };
+            assert_eq!(reply["type"], kind, "{reply}");
+            assert_eq!(reply["code"], code, "{reply}");
+        }
+        assert!(fixture.seen.lock().is_empty());
+        let conversations = fixture
+            .state
+            .ws_conversations
+            .session_conversations("gw_device-session");
+        assert_eq!(conversations.len(), 1);
+        let conversation = &conversations[0];
+        assert!(!conversation.is_running());
+        assert!(conversation.active_turn_id().is_none());
+        assert!(conversation.agent.lock().await.agent.history().is_empty());
+        // No persisted user row means no transcript or owner-ingress evidence.
+        assert!(
+            fixture
+                .state
+                .session_backend
+                .as_ref()
+                .unwrap()
+                .load_with_timestamps("gw_device-session")
+                .is_empty()
+        );
+
+        // Reusing the ID must admit one real turn, not return a consumed claim.
+        if let Some(epoch) = epoch {
+            client
+                .send(request(&epoch, &id, "live turn still works"))
+                .await;
+            let ack = client.until("turn_ack").await;
+            assert_eq!(ack["status"], "accepted");
+            assert_eq!(ack["request_id"], id);
+            let turn = ack["turn_id"].as_str().unwrap();
+            let events = terminal(&mut client, &id, turn).await;
+            assert_eq!(events.last().unwrap()["event"]["outcome"], "done");
+        } else {
+            fixture
+                .send_turn(&mut client, &id, "live turn still works")
+                .await;
+        }
+        assert_eq!(fixture.seen.lock().len(), 1);
+    }
+}
+
+#[tokio::test]
 async fn s2_wire_normal_turn_has_correlated_chunks_and_terminal() {
     let fixture = DeviceFixture::new(&["chat"]).await;
     let mut client = fixture.socket(DEVICE_TOKEN).await;

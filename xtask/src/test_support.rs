@@ -9,7 +9,7 @@
 //! (`ChannelsConfig::channels()`, `is_retired_transport`) decides retained vs
 //! retired, and the root package `[features]` table decides which features exist
 //! at all. Retained samples are restricted to the surfaces #584 protects (CLI,
-//! Telegram, gateway webhook, the voice-duplex Node path, ACP, Email, Discord —
+//! Telegram, gateway webhook, ACP, Email, Discord —
 //! docs/book/src/channels/overview.md), so a routine retirement batch can never
 //! empty them, and every consumer calls [`require_non_empty`] **before** looping
 //! over a derived list: an empty list is a loud end-state failure, never a loop
@@ -44,7 +44,7 @@ const LAST_RETIRED_SCHEMA: &str = "the sampled distribution rows or target polic
 
 /// Cause: no protected channel surface ships a row any more.
 const PROTECTED_SURFACE: &str = "no #584-protected channel surface (CLI, Telegram, \
-     gateway webhook, the voice-duplex Node path, ACP, Email, Discord) ships a channel row any \
+     gateway webhook, ACP, Email, Discord) ships a channel row any \
      more. #584 forbids retiring one, so either a batch retired a protected surface — revert it \
      — or the batch that removes the last channel row of the campaign landed, and it must DELETE \
      this consumer with `PROTECTED_RETAINED_KINDS` / `channel_features` rather than leave the \
@@ -71,13 +71,14 @@ pub fn require_non_empty(subject: &str, cause: Cause, len: usize) {
 /// Channel kinds #584 protects. Retained-presence samples may only come from
 /// here (`cli` and `acp_server` carry no `channel-*` feature of their own but
 /// stay listed so the restriction reads as the full protected set).
+/// ADR-023 explicitly retires the former voice-duplex event shell; the live
+/// voice surface is not a channel-registry sample.
 pub const PROTECTED_RETAINED_KINDS: &[&str] = &[
     "acp_server",
     "cli",
     "discord",
     "email",
     "telegram",
-    "voice_duplex",
     "webhook",
 ];
 
