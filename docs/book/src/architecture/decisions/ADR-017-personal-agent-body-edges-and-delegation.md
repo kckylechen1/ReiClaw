@@ -23,6 +23,8 @@ Accepted by the owner on 2026-09-23. It restores the product direction of issues
 
 Amended on 2026-09-24 to follow the direction baseline in #388: upstream reuse comes first, a replacement is proven before code is deleted, and hardware leaves the body for a Node host instead of being dropped (§2, §5, §7). The reading order for implementation work is #388, then the execution index #374, then the child issue.
 
+Amended on 2026-11-16 by [ADR-023](./ADR-023-realtime-voice-carrier-with-body-delegation.md). The robot's realtime voice carrier may answer public, non-personal questions (such as the weather) itself while it speaks with the body's projected persona. Everything personal or consequential is still delegated to the body. This narrows the §3 L0 placement of spoken everyday questions and the §4 rule "the owner talks only to the body" for that carrier only.
+
 Amended on 2026-09-26 for #381: §8 records how ZeroClaw maps onto Tachi's `tachi_staff` tool, and the Context now describes the launch path Tachi's Staff route really takes (CLI and opencode processes, not `acpx` or native ACP).
 
 Amended on 2026-11-10, after the owner confirmed the positioning in review: the product is a framework for agents whose actions have real consequences, and the personal body is its first deployment, not its whole scope (Context, §2). The decisions in §1 to §8 are unchanged. #388 still words the direction as "not a general agent framework"; until the owner reconciles that issue, this record states the confirmed positioning and #388 keeps governing reuse, module boundaries and replace-before-delete. The contract work that follows from it is tracked in #630.
