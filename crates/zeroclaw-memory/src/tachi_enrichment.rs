@@ -23,7 +23,7 @@ use portable_kernel::MemoryStore;
 use std::collections::HashSet;
 use std::sync::Arc;
 use zeroclaw_api::model_provider::ModelProvider;
-use zeroclaw_providers::ProviderDispatch;
+use zeroclaw_provider_dispatch::ProviderDispatch;
 
 /// Max raw entries enriched in one pass (unattended batch bound).
 const ENRICHMENT_BATCH_LIMIT: usize = 16;

@@ -12,7 +12,7 @@ use crate::traits::{
 };
 use zeroclaw_api::model_provider::ModelProvider;
 use zeroclaw_config::schema::MemoryConfig;
-use zeroclaw_providers::ProviderDispatch;
+use zeroclaw_provider_dispatch::ProviderDispatch;
 
 /// Output of consolidation extraction.
 #[derive(Debug, serde::Deserialize)]

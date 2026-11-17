@@ -1,6 +1,6 @@
 [workspace]
 # The root package is an implicit member; an explicit "." defeats path exclusions.
-members = ["crates/zeroclaw-api", "crates/zeroclaw-infra", "crates/zeroclaw-config", "crates/zeroclaw-schema-markdown", "crates/zeroclaw-cost", "crates/zeroclaw-http", "crates/zeroclaw-platform", "crates/zeroclaw-policy", "crates/zeroclaw-log", "crates/zeroclaw-spawn", "crates/zeroclaw-providers", "crates/zeroclaw-memory", "crates/zeroclaw-tools", "crates/zeroclaw-runtime", "crates/zeroclaw-eval", "crates/zeroclaw-gateway", "crates/zeroclaw-gateway-client", "bridges/acp", "bridges/telegram", "crates/zeroclaw-tool-call-parser", "crates/zeroclaw-macros", "tools/fill-translations", "xtask"]
+members = ["crates/zeroclaw-api", "crates/zeroclaw-infra", "crates/zeroclaw-config", "crates/zeroclaw-schema-markdown", "crates/zeroclaw-cost", "crates/zeroclaw-http", "crates/zeroclaw-platform", "crates/zeroclaw-policy", "crates/zeroclaw-log", "crates/zeroclaw-spawn", "crates/zeroclaw-providers", "crates/zeroclaw-provider-dispatch", "crates/zeroclaw-memory", "crates/zeroclaw-tools", "crates/zeroclaw-runtime", "crates/zeroclaw-eval", "crates/zeroclaw-gateway", "crates/zeroclaw-gateway-client", "bridges/acp", "bridges/telegram", "crates/zeroclaw-tool-call-parser", "crates/zeroclaw-macros", "tools/fill-translations", "xtask"]
 resolver = "2"
 exclude = ["vendor/async-imap", "vendor/async-imap/examples"]
 
@@ -24,6 +24,7 @@ zeroclaw-config = { path = "crates/zeroclaw-config", version = "0.8.3", default-
 zeroclaw-log = { path = "crates/zeroclaw-log", version = "0.8.3" }
 zeroclaw-spawn = { path = "crates/zeroclaw-spawn", version = "0.8.3" }
 zeroclaw-providers = { path = "crates/zeroclaw-providers", version = "0.8.3" }
+zeroclaw-provider-dispatch = { path = "crates/zeroclaw-provider-dispatch", version = "0.8.3" }
 zeroclaw-memory = { path = "crates/zeroclaw-memory", version = "0.8.3" }
 zeroclaw-tools = { path = "crates/zeroclaw-tools", version = "0.8.3", default-features = false }
 zeroclaw-runtime = { path = "crates/zeroclaw-runtime", version = "0.8.3", default-features = false }

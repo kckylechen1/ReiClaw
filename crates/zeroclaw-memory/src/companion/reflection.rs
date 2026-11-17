@@ -661,7 +661,7 @@ pub async fn reflect(
         }
 
         let (provider, model) = model()?;
-        match zeroclaw_providers::ProviderDispatch::from_ref(provider.as_ref())
+        match zeroclaw_provider_dispatch::ProviderDispatch::from_ref(provider.as_ref())
             .chat_with_system(Some(REFLECTION_SYSTEM_PROMPT), &input, &model, None)
             .await
         {

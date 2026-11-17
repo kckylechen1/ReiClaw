@@ -11,7 +11,7 @@ use zeroclaw_api::model_provider::{
     ChatMessage, ChatRequest, ChatResponse, ModelInfo, ModelProvider, StreamChunk, StreamEvent,
     StreamOptions, StreamResult,
 };
-use zeroclaw_providers::ProviderDispatch;
+use zeroclaw_provider_dispatch::ProviderDispatch;
 
 struct EverythingFake {
     alias: String,

@@ -97,6 +97,16 @@ Each tool is registered via factory and described to the model via Fluent-locali
 
 ## Layer: Support
 
+### `zeroclaw-provider-dispatch`
+
+Attributed model calls through `zeroclaw-api::ModelProvider`. Owns the existing
+`ProviderDispatch` and borrowed `ProviderDispatchRef` wrappers, including
+stream attribution. It depends on the shared API and logging crates, without
+linking concrete provider implementations. Memory consolidation, enrichment and
+reflection use this boundary directly; `zeroclaw-providers` keeps re-exports
+for its existing callers. Provider factories, credentials and routing policy
+remain with their existing owners.
+
 ### `zeroclaw-schema-markdown`
 
 Stateless Markdown and HTML field rendering from a supplied JSON Schema value.

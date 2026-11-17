@@ -13,11 +13,11 @@ echo "==> rust quality: provider dispatch gate (no direct ModelProvider method c
 
 # Methods covered by ProviderDispatch / ProviderDispatchRef. Adding a new
 # method to the dispatcher requires extending this list in lockstep with
-# the dispatch.rs file.
+# crates/zeroclaw-provider-dispatch/src/lib.rs.
 PROTECTED_METHODS='\.(chat|stream_chat|simple_chat|chat_with_system|chat_with_history|chat_with_tools|list_models|list_models_with_pricing|warmup)\('
 
 # We allow:
-#   - dispatch.rs and its integration tests (the implementation + its
+#   - The provider-dispatch owner and its integration tests (implementation +
 #     dedicated test fakes).
 #   - Any code inside a `tests/` directory (root `tests/` suites,
 #     `crates/*/tests/` integration tests), and any `tests.rs` module
@@ -50,8 +50,8 @@ fi
 
 VIOLATIONS=$(printf '%s\n' "$RG_OUTPUT" | awk -F: '
     BEGIN {
-        allowed["crates/zeroclaw-providers/src/dispatch.rs"] = 1
-        allowed["crates/zeroclaw-providers/tests/dispatch_integration.rs"] = 1
+        allowed["crates/zeroclaw-provider-dispatch/src/lib.rs"] = 1
+        allowed["crates/zeroclaw-provider-dispatch/tests/dispatch_integration.rs"] = 1
     }
     function read_file_lines(file,    cmd, raw_line, lineno) {
         cmd = "cat " file " 2>/dev/null"
@@ -167,7 +167,7 @@ if [ -n "$VIOLATIONS" ]; then
     echo "❌ Direct ModelProvider method calls found outside the dispatcher:"
     echo "$VIOLATIONS"
     echo
-    echo "Route the call through zeroclaw_providers::ProviderDispatch:"
+    echo "Route the call through zeroclaw_provider_dispatch::ProviderDispatch:"
     echo "    ProviderDispatch::new(provider.clone()).<method>(...)        // Arc<dyn ModelProvider>"
     echo "    ProviderDispatch::from_ref(&*provider).<method>(...)         // &dyn ModelProvider"
     echo
