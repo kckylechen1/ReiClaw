@@ -30,6 +30,8 @@ The owner resolved the alias question on acceptance: the voice surface uses the 
 
 Amendment 1 (accepted by the owner on 2026-11-16) binds what a delegated turn may do to the device bridge credential, adds a later owner tier through speaker verification, and reorders the remaining slices. Where it conflicts with §1–§4, Amendment 1 governs.
 
+Amendment 2 (accepted by the owner on 2026-11-17) fixes one wire protocol for every carrier and moves provider-specific code out of the voice client. Where it conflicts with §1 or slice 4, Amendment 2 governs.
+
 ### What it supersedes in ADR-021
 
 This ADR is the new ADR that ADR-021 §10 requires before a front harness may answer directly or gain another tool. For the carrier mode defined here, it replaces these parts of ADR-021:
@@ -74,7 +76,7 @@ The realtime speech-to-speech service (MOSS Live, OpenAI Realtime, or a successo
 - it cannot approve anything;
 - it receives no gateway credential; the adapter holds all credentials.
 
-The carrier and its provider are chosen in the adapter's configuration. Replacing the carrier does not change the body.
+The carrier and its provider are chosen in the adapter's configuration. Replacing the carrier does not change the body. Under Amendment 2 it does not change the voice client either.
 
 ### 2. What the carrier answers, and what it delegates
 
@@ -321,3 +323,64 @@ This replaces the order of the original slices 4–6.
 - Whether carrier-handled exchanges should ever be offered for an owner-reviewed memory path.
 - Which low-risk reversible actions, if any, the owner tier may perform (A3).
 - Whether device-bound turns use a lighter model, and the daily budget (A2).
+
+## Amendment 2: one carrier protocol, providers outside the client
+
+Accepted by the owner on 2026-11-17.
+
+### B1. Why
+
+- The Robotic voice client speaks the MOSS Live wire protocol directly. `crates/yonbo-voice/src/moss.rs` mixes three things: the MOSS protocol, the adapter's own carrier instructions, and the tool-call and audio-turn bookkeeping. MOSS event names also appear in `session.rs`, `events.rs` and `presentation.rs`. Switching to OpenAI Realtime or another carrier would mean rewriting the client, which contradicts §1.
+- ZeroClaw core is already retiring per-provider families (#699, #707). A per-provider layer in each voice client repeats the same cost in another place.
+- The resident wake trial on 2026-11-17 found that MOSS rejects a `response.create` that carries instructions and a text `conversation.item.create` (`invalid_public_request`). Provider gaps are real, and they belong in one place.
+
+### B2. Decision: the voice client speaks only the OpenAI Realtime protocol
+
+- The voice client implements one carrier protocol: the OpenAI Realtime WebSocket protocol. It contains no provider-specific event names or framing.
+- Providers that speak this protocol are reached directly, or through a pinned external gateway such as the LiteLLM proxy `/v1/realtime` endpoint.
+- A provider that does not speak it, such as MOSS Live, gets a standalone translator. The translator exposes an OpenAI Realtime endpoint on loopback and speaks the provider's protocol upstream. It is the only provider-specific code we maintain, and it lives outside ZeroClaw and outside the voice client.
+- A translator implements the protocol subset the client uses and fails visibly on anything else. That subset is session configuration (instructions, tools, audio format, server voice activity detection), audio input, speech start and stop, input transcripts, output audio and transcripts, function calls and function outputs, `response.create`, and response completion and cancellation.
+- When a provider cannot express something in the subset, the translator says so with a typed error. It never fakes success.
+
+### B3. Provider identity and consent
+
+- `voice_provider` (§3) names the external service whose servers receive the projection. It does not name the wire protocol or a local endpoint.
+- It is configured explicitly next to the carrier endpoint. The client never infers it from the endpoint or the protocol.
+- A gateway that routes by model name must map each configured model to exactly one upstream provider. Changing that upstream is a provider change and needs fresh voice export consent (§3).
+
+### B4. Credentials and endpoints
+
+- Provider credentials belong to whatever serves the carrier endpoint: the translator or the gateway. When the client connects to a provider directly, they sit in the client's private configuration. They never enter a repository.
+- Translator and gateway endpoints listen on loopback only.
+- The client still holds the device bridge credential for the body (§4). No carrier process receives it.
+
+### B5. Behavior that moves out of the provider code
+
+- **Carrier instructions.** Routing and delegation rules are provider-neutral text in the client. Identity comes only from the projection (§3).
+- **Wake greeting.** A carrier cannot be relied on to speak first. MOSS cannot, per B1. After a wake, the client may queue an owner-provided local prompt clip ahead of live microphone audio, so the carrier answers with a greeting.
+  - The clip is adapter-authored, not owner speech.
+  - It is excluded from the speaker transcript sent to the body (§4).
+  - It contains no owner data.
+- **Turn bookkeeping.** Call ownership, duplicate suppression, cancellation, barge-in and timers are provider-neutral. They key on protocol identifiers, not provider identifiers.
+
+### B6. Slice changes and acceptance additions
+
+A5 item 3, the original slice 4, now covers the following, as separate reviewed PRs:
+
+1. **The voice client as an OpenAI Realtime client.** This includes:
+   - carrier persona from the projection;
+   - delegation mapping under §4;
+   - the wake greeting under B5;
+   - removal of `moss.rs`.
+2. **A MOSS Live translator**, under B2.
+3. **The Robotic slot-A recipe.** The resident wake trial found three manual steps; the recipe must cover them or check them in preflight:
+   - the microphone array's capture device;
+   - the speaker route after boot;
+   - the keyword-spotting thresholds.
+
+Acceptance additions:
+
+1. Switching between MOSS Live (through the translator) and an OpenAI Realtime provider changes only configuration: endpoint, model, `voice_provider` and credential location. Neither switch changes the voice client source.
+2. No provider-specific event name appears in the voice client.
+3. The translator rejects anything outside the subset in B2 with a typed error, with tests.
+4. The resident wake regression passes through the translator: wake, greeting, a public question, and a delegated question.
