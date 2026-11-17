@@ -494,11 +494,6 @@ fn resolve_delivery_rejects_native_channels_without_a_delivery_bridge() {
         .channels
         .webhook
         .insert("default".into(), Default::default());
-    config
-        .channels
-        .voice_duplex
-        .insert("default".into(), Default::default());
-
     for channel in [
         "telegram",
         "discord",

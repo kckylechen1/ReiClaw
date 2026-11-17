@@ -80,7 +80,7 @@
         "features": [
           "zeroclaw-gateway/voice-surface"
         ],
-        "filter": "surface_tests"
+        "filter": "ws::tests::"
       }
     ]
   },

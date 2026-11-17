@@ -37,8 +37,6 @@ pub mod session_queue;
 pub mod sse;
 pub mod static_files;
 pub mod tls;
-#[cfg(feature = "gateway-voice-duplex")]
-pub mod voice_duplex;
 pub mod ws;
 pub mod ws_approval;
 pub mod ws_bridge;

@@ -441,6 +441,52 @@ fn retired_sop_is_absent_from_serialization_and_editable_metadata() {
     }
 }
 
+#[::core::prelude::v1::test]
+fn retired_voice_duplex_is_absent_from_channel_surfaces() {
+    let mut config: Config = toml::from_str(
+        "[channels.voice_duplex.legacy]\nenabled = true\nexcluded_tools = ['shell', 'file_write']\n",
+    )
+    .unwrap();
+    // The old restrictions do not become grants on another channel or voice
+    // surface. The whole former capability is unavailable, even when enabled.
+    assert!(!config.channels.has_any_enabled());
+    assert!(config.channels_by_alias().is_empty());
+    assert!(config.peer_groups.is_empty());
+    assert!(config.channels.is_retired_channel("voice_duplex"));
+    assert!(!config.channels.is_known_channel("voice_duplex"));
+    assert!(!config.channels.is_channel_configured("voice_duplex"));
+    assert!(!config.channels.is_channel_deliverable("voice_duplex"));
+    assert!(
+        serde_json::to_value(&config.channels)
+            .unwrap()
+            .get("voice_duplex")
+            .is_none()
+    );
+    assert!(
+        toml::Value::try_from(&config.channels)
+            .unwrap()
+            .get("voice_duplex")
+            .is_none()
+    );
+    assert!(
+        config
+            .prop_fields()
+            .iter()
+            .all(|field| !field.name.starts_with("channels.voice_duplex."))
+    );
+    assert!(config.get_map_keys("channels.voice_duplex").is_none());
+    assert!(
+        config
+            .set_prop("channels.voice_duplex.legacy.enabled", "true")
+            .is_err()
+    );
+    #[cfg(feature = "schema-export")]
+    {
+        let schema = serde_json::to_value(schemars::schema_for!(ChannelsConfig)).unwrap();
+        assert!(schema["properties"].get("voice_duplex").is_none());
+    }
+}
+
 #[test]
 async fn mcp_bundles_empty_grants_no_servers() {
     // Secure by default: omission is not a grant.
@@ -1883,7 +1929,6 @@ async fn config_toml_roundtrip() {
             discord: HashMap::new(),
             webhook: HashMap::new(),
             email: HashMap::new(),
-            voice_duplex: HashMap::new(),
             mqtt: HashMap::new(),
             filesystem: HashMap::new(),
             message_timeout_secs: 300,
@@ -4267,6 +4312,15 @@ async fn load_or_init_warns_about_retired_batch_c_channel_settings() {
         ("voice_wake", "wake_word = 'synthetic-retired-credential'"),
         ("amqp", "amqp_url = 'amqp://synthetic:synthetic-retired-credential@example.test'\nexchange = 'synthetic-exchange'\nrouting_keys = ['synthetic-key']"),
     ]).await;
+}
+
+#[test]
+async fn load_or_init_warns_about_retired_voice_duplex_settings() {
+    assert_retired_channel_settings_load_with_warning(&[(
+        "voice_duplex",
+        "excluded_tools = ['shell', 'file_write']",
+    )])
+    .await;
 }
 
 #[test]
@@ -14289,7 +14343,8 @@ async fn channel_presence_names_are_unique_and_undeliverable_set_is_fixed() {
     for (name, _, _, _) in presence {
         assert!(seen.insert(name), "duplicate channel_presence name: {name}");
     }
-    // Non-deliverable = retired transports + the input-only voice_duplex.
+    // Schema-deleted transports have no presence row, including the retired
+    // voice-duplex event logger. The retained rows all support delivery.
     let mut undeliverable: Vec<&str> = presence
         .iter()
         .filter(|(_, _, deliverable, _)| !*deliverable)
@@ -14301,7 +14356,6 @@ async fn channel_presence_names_are_unique_and_undeliverable_set_is_fixed() {
         .into_iter()
         .filter(|kind| !SCHEMA_DELETED.contains(kind))
         .collect();
-    expected.extend_from_slice(&["voice_duplex"]);
     expected.sort_unstable();
     assert_eq!(
         undeliverable, expected,
@@ -14334,6 +14388,7 @@ const SCHEMA_DELETED: &[&str] = &[
     "git",
     "voice_call",
     "voice_wake",
+    "voice_duplex",
     "amqp",
     "feishu",
     "whatsapp",
@@ -14350,10 +14405,9 @@ async fn retired_transport_kinds_complement_the_live_surfaces() {
     live.sort_unstable();
     assert_eq!(
         live,
-        ["discord", "email", "telegram", "voice_duplex", "webhook"],
+        ["discord", "email", "telegram", "webhook"],
         "the non-retired registry must be exactly the retained surfaces: \
-         telegram bridge, webhook ingress, email/discord tool config, and \
-         the voice-duplex Node path (#584)"
+          telegram bridge, webhook ingress, and email/discord tool config"
     );
 
     // Every RETIRED_TRANSPORT_KINDS entry still resolves through the
@@ -14387,6 +14441,7 @@ async fn retired_transport_kinds_complement_the_live_surfaces() {
     assert!(crate::schema::is_retired_transport("whatsapp-web"));
     assert!(crate::schema::is_retired_transport("wecom-ws"));
     assert!(crate::schema::is_retired_transport("voice-wake"));
+    assert!(crate::schema::is_retired_transport("voice-duplex"));
     assert!(!crate::schema::is_retired_transport("telegram"));
     let cfg = ChannelsConfig::default();
     assert!(!cfg.is_known_channel("Slack"));

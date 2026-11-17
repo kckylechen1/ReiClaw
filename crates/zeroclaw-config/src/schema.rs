@@ -9608,9 +9608,11 @@ pub struct CustomTunnelConfig {
 /// The retained channel surfaces are exactly the complement:
 /// `telegram` (gateway bridge), `webhook` (gateway ingress), `email`
 /// (email_search/email_read tool configuration), `discord` (Discord
-/// archive-query tool configuration), `voice_duplex` (Node path), and the
-/// always-on CLI. Do not add a kind here without a consumer-graph review,
-/// and do not remove one without the deletion evidence #584 requires.
+/// archive-query tool configuration), and the always-on CLI. The legacy
+/// `voice_duplex` event logger is retired under ADR-023; the separate voice
+/// surface does not inherit its settings. Do not add a kind here without a
+/// consumer-graph review, and do not remove one without the deletion evidence
+/// #584 requires.
 pub const RETIRED_TRANSPORT_KINDS: &[&str] = &[
     "slack",
     "mattermost",
@@ -9637,6 +9639,7 @@ pub const RETIRED_TRANSPORT_KINDS: &[&str] = &[
     "git",
     "voice_call",
     "voice_wake",
+    "voice_duplex",
     "amqp",
 ];
 
@@ -9682,10 +9685,6 @@ pub struct ChannelsConfig {
     #[serde(default, skip_serializing_if = "HashMap::is_empty")]
     #[nested]
     pub email: HashMap<String, crate::scattered_types::EmailConfig>,
-    /// Voice duplex instances (`[channels.voice_duplex.<alias>]`).
-    #[serde(default, skip_serializing_if = "HashMap::is_empty")]
-    #[nested]
-    pub voice_duplex: HashMap<String, VoiceDuplexConfig>,
     /// MQTT SOP listener instances — RETIRED. The section now
     /// fails config parse with the migration message instead of silently
     /// no-op'ing. Field removed with the run-side config sweep.
@@ -9826,24 +9825,21 @@ impl ChannelsConfig {
             || self.discord.values().any(|c| c.enabled)
             || self.webhook.values().any(|c| c.enabled)
             || self.email.values().any(|c| c.enabled)
-            || self.voice_duplex.values().any(|c| c.enabled)
     }
 
     /// One `(canonical_name, configured, deliverable, retired)` row per
     /// channel in the registry. Single source for name-addressed channel
     /// lookups so no surface has to hardcode a subset of the channel list.
-    /// `deliverable` is `false` for input-only transports whose
-    /// `Channel::send` is a no-op (voice_duplex is input-only) and for
-    /// retired transports (`retired`), so a name-addressed outbound surface
+    /// `deliverable` distinguishes transports with an outbound delivery path,
+    /// so a name-addressed outbound surface
     /// such as `heartbeat.target` refuses them at validation instead of
     /// accepting a target the delivery layer silently drops.
-    pub fn channel_presence(&self) -> [(&'static str, bool, bool, bool); 5] {
+    pub fn channel_presence(&self) -> [(&'static str, bool, bool, bool); 4] {
         [
             ("telegram", !self.telegram.is_empty(), true, false),
             ("discord", !self.discord.is_empty(), true, false),
             ("webhook", !self.webhook.is_empty(), true, false),
             ("email", !self.email.is_empty(), true, false),
-            ("voice_duplex", !self.voice_duplex.is_empty(), false, false),
         ]
     }
 
@@ -9876,10 +9872,8 @@ impl ChannelsConfig {
     }
 
     /// Whether `name` (case-insensitive) names a channel that can actually
-    /// deliver an outbound message. Input-only transports (voice_duplex) are
-    /// known and may be configured, but their `Channel::send` is a no-op or
-    /// absent, so they are not valid outbound targets; retired transports are
-    /// not deliverable either — no delivery path exists for them.
+    /// deliver an outbound message. Retired transports are not deliverable:
+    /// no delivery path exists for them.
     pub fn is_channel_deliverable(&self, name: &str) -> bool {
         let needle = name.to_ascii_lowercase();
         self.channel_presence()
@@ -9908,7 +9902,6 @@ impl Default for ChannelsConfig {
             discord: HashMap::new(),
             webhook: HashMap::new(),
             email: HashMap::new(),
-            voice_duplex: HashMap::new(),
             mqtt: HashMap::new(),
             filesystem: HashMap::new(),
             message_timeout_secs: default_channel_message_timeout_secs(),
@@ -10881,25 +10874,6 @@ impl Default for AuditConfig {
             sign_events: false,
         }
     }
-}
-
-/// Voice duplex configuration (`[channels.voice_duplex]`).
-///
-/// Enables full-duplex voice event handling over WebSocket.
-/// When disabled (default), voice events are rejected as unknown types.
-#[derive(Debug, Clone, Serialize, Deserialize, Configurable, Default)]
-#[cfg_attr(feature = "schema-export", derive(schemars::JsonSchema))]
-pub struct VoiceDuplexConfig {
-    /// Whether this channel is active. The runtime only loads channels whose
-    /// `enabled = true`. Default: `false` so an operator who pastes a partial
-    /// `[channels.<type>.<alias>]` block doesn't accidentally bring a channel
-    /// live before the rest of its config is filled in.
-    #[serde(default)]
-    pub enabled: bool,
-    /// Tools excluded from this channel's tool spec. When set, these tools
-    /// are not exposed to the model when responding via this channel.
-    #[serde(default)]
-    pub excluded_tools: Vec<String>,
 }
 
 // ── Security ops config ─────────────────────────────────────────

@@ -969,27 +969,6 @@ async fn handle_socket(
             break;
         }
 
-        // ── Voice duplex event dispatch (gated by feature flag + runtime config) ──
-        #[cfg(feature = "gateway-voice-duplex")]
-        {
-            // Multi-instance shape: presence in the map = enabled.
-            let duplex_enabled = !state.config.read().channels.voice_duplex.is_empty();
-            if !turn_negotiated
-                && duplex_enabled
-                && device::permitted(&state, &scope, &agent_alias, "voice")
-            {
-                if let Some(voice_event) = crate::voice_duplex::try_parse_voice_event(&text) {
-                    if let Some(error_frame) = crate::voice_duplex::handle_voice_event(voice_event)
-                    {
-                        let _ = sender
-                            .send(Message::Text(error_frame.to_string().into()))
-                            .await;
-                    }
-                    continue;
-                }
-            }
-        }
-
         let extension = turn_negotiated
             || serde_json::from_str::<serde_json::Value>(&text)
                 .is_ok_and(|frame| frame["type"] == "turn_control");
