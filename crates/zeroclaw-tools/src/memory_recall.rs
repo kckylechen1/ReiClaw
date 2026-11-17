@@ -74,7 +74,7 @@ impl Tool for MemoryRecallTool {
 
         // Validate date strings
         if let Some(s) = since
-            && chrono::DateTime::parse_from_rfc3339(s).is_err()
+            && zeroclaw_api::time::parse_rfc3339(s).is_err()
         {
             return Ok(ToolResult {
                 success: false,
@@ -85,7 +85,7 @@ impl Tool for MemoryRecallTool {
             });
         }
         if let Some(u) = until
-            && chrono::DateTime::parse_from_rfc3339(u).is_err()
+            && zeroclaw_api::time::parse_rfc3339(u).is_err()
         {
             return Ok(ToolResult {
                 success: false,
@@ -97,8 +97,8 @@ impl Tool for MemoryRecallTool {
         }
         if let (Some(s), Some(u)) = (since, until)
             && let (Ok(s_dt), Ok(u_dt)) = (
-                chrono::DateTime::parse_from_rfc3339(s),
-                chrono::DateTime::parse_from_rfc3339(u),
+                zeroclaw_api::time::parse_rfc3339(s),
+                zeroclaw_api::time::parse_rfc3339(u),
             )
             && s_dt >= u_dt
         {

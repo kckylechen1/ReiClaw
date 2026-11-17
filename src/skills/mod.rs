@@ -963,7 +963,7 @@ async fn handle_bundle_remove(
     // skips that path, so it isn't re-scanned as live skills) now that the
     // config change is on disk.
     if let Some(dir) = bundle_dir {
-        let ts = chrono::Utc::now().format("%Y%m%d%H%M%S");
+        let ts = jiff::Timestamp::now().strftime("%Y%m%d%H%M%S");
         let archive = install_root
             .join("shared")
             .join("skills")

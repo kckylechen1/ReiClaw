@@ -1,7 +1,6 @@
 use super::*;
 use crate::agent::dispatcher::{NativeToolDispatcher, ToolDispatcher, XmlToolDispatcher};
 use async_trait::async_trait;
-use chrono::TimeZone;
 use parking_lot::Mutex;
 use std::collections::HashMap;
 use std::sync::atomic::{AtomicUsize, Ordering};
@@ -96,7 +95,7 @@ impl SteeringMemoryStub {
                 key: key.to_string(),
                 content: content.to_string(),
                 category,
-                timestamp: chrono::Utc::now().to_rfc3339(),
+                timestamp: zeroclaw_api::time::format_rfc3339(jiff::Timestamp::now()),
                 session_id: session_id.map(str::to_string),
                 score: None,
                 namespace: namespace.unwrap_or("default").to_string(),
@@ -225,9 +224,9 @@ async fn steering_at_tool_boundary_keeps_enrichment_and_cancellation_precedence(
         let observer = Arc::new(CapturingObserver::default());
         let (steering_tx, mut steering_rx) = tokio::sync::mpsc::channel(4);
         let cancel = tokio_util::sync::CancellationToken::new();
-        let fixed = chrono::DateTime::parse_from_rfc3339("2026-01-01T12:00:00+00:00")
+        let fixed = zeroclaw_api::time::parse_rfc3339("2026-01-01T12:00:00+00:00")
             .unwrap()
-            .with_timezone(&chrono::Local);
+            .to_zoned(jiff::tz::TimeZone::system());
         let mut agent = Agent::builder()
             .model_provider(Box::new(TranscriptCaptureModelProvider {
                 seen_messages: seen.clone(),
@@ -253,7 +252,10 @@ async fn steering_at_tool_boundary_keeps_enrichment_and_cancellation_precedence(
             .observer(observer.clone())
             .tool_dispatcher(Box::new(NativeToolDispatcher))
             .workspace_dir(tmp.path().to_path_buf())
-            .turn_datetime(move || fixed)
+            .turn_datetime({
+                let fixed = fixed.clone();
+                move || fixed.clone()
+            })
             .build()
             .unwrap();
         let (events, _rx) = tokio::sync::mpsc::channel(64);
@@ -291,7 +293,7 @@ async fn steering_at_tool_boundary_keeps_enrichment_and_cancellation_precedence(
             );
             let expected = format!(
                 "[{}] use the corrected destination",
-                fixed.format("%Y-%m-%d %H:%M:%S %Z")
+                fixed.strftime("%Y-%m-%d %H:%M:%S %:z")
             );
             assert!(
                 captured[1]
@@ -827,10 +829,10 @@ async fn dated_turns_share_an_undated_system_prefix_across_entry_points() {
     let mut expected_dates = Vec::new();
     for streamed in [false, true] {
         for timestamp in ["2026-01-01T12:00:00+00:00", "2026-01-02T12:00:00+00:00"] {
-            let fixed = chrono::DateTime::parse_from_rfc3339(timestamp)
+            let fixed = zeroclaw_api::time::parse_rfc3339(timestamp)
                 .unwrap()
-                .with_timezone(&chrono::Local);
-            expected_dates.push(fixed.format("%Y-%m-%d %H:%M:%S %Z").to_string());
+                .to_zoned(jiff::tz::TimeZone::system());
+            expected_dates.push(fixed.strftime("%Y-%m-%d %H:%M:%S %:z").to_string());
             let mut agent = Agent::builder()
                 .model_provider(Box::new(TranscriptCaptureModelProvider {
                     responses: Mutex::new(vec![]),
@@ -842,7 +844,10 @@ async fn dated_turns_share_an_undated_system_prefix_across_entry_points() {
                 .tool_dispatcher(Box::new(NativeToolDispatcher))
                 .workspace_dir(workspace.path().to_path_buf())
                 .model_name("fixture-model".into())
-                .turn_datetime(move || fixed)
+                .turn_datetime({
+                    let fixed = fixed.clone();
+                    move || fixed.clone()
+                })
                 .build()
                 .unwrap();
             if streamed {
@@ -1179,10 +1184,10 @@ struct CapturingObserver {
     events: parking_lot::Mutex<Vec<ObserverEvent>>,
 }
 
-fn fixed_response_cache_turn_datetime() -> chrono::DateTime<chrono::Local> {
-    chrono::Local
-        .with_ymd_and_hms(2026, 6, 25, 12, 0, 0)
-        .single()
+fn fixed_response_cache_turn_datetime() -> jiff::Zoned {
+    jiff::civil::date(2026, 6, 25)
+        .at(12, 0, 0, 0)
+        .to_zoned(jiff::tz::TimeZone::system())
         .expect("fixed local test timestamp")
 }
 
@@ -4709,7 +4714,7 @@ async fn response_cache_does_not_cross_serve_memory_conditioned_answers() {
                 key: "deploy".into(),
                 content: self.content.clone(),
                 category: MemoryCategory::Core,
-                timestamp: chrono::Utc::now().to_rfc3339(),
+                timestamp: zeroclaw_api::time::format_rfc3339(jiff::Timestamp::now()),
                 session_id: None,
                 score: None,
                 namespace: "default".into(),
@@ -4782,9 +4787,9 @@ async fn response_cache_does_not_cross_serve_memory_conditioned_answers() {
     // Frozen clock so both turns share a byte-identical bare transcript (the
     // per-turn `[CURRENT DATE & TIME]` prefix is otherwise second-precision),
     // which is what makes the two pre-injection cache keys collide.
-    let fixed = chrono::DateTime::parse_from_rfc3339("2026-01-01T00:00:00+00:00")
+    let fixed = zeroclaw_api::time::parse_rfc3339("2026-01-01T00:00:00+00:00")
         .unwrap()
-        .with_timezone(&chrono::Local);
+        .to_zoned(jiff::tz::TimeZone::system());
     let observer: Arc<dyn Observer> = Arc::from(crate::observability::NoopObserver {});
 
     let last_user = |seen: &Arc<Mutex<Vec<Vec<ChatMessage>>>>| -> String {
@@ -4821,7 +4826,10 @@ async fn response_cache_does_not_cross_serve_memory_conditioned_answers() {
             .workspace_dir(std::path::PathBuf::from("/tmp"))
             .model_name("test-model".into())
             .temperature(Some(0.0))
-            .turn_datetime(move || fixed)
+            .turn_datetime({
+                let fixed = fixed.clone();
+                move || fixed.clone()
+            })
             .build()
             .expect("agent builder should succeed")
     };

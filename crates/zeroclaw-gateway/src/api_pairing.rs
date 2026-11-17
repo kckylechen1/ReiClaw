@@ -6,7 +6,6 @@ use axum::{
     http::{HeaderMap, StatusCode, header},
     response::{IntoResponse, Json},
 };
-use chrono::{DateTime, Utc};
 use parking_lot::Mutex;
 use rusqlite::Connection;
 use serde::{Deserialize, Serialize};
@@ -20,8 +19,10 @@ pub struct DeviceInfo {
     pub id: String,
     pub name: Option<String>,
     pub device_type: Option<String>,
-    pub paired_at: DateTime<Utc>,
-    pub last_seen: DateTime<Utc>,
+    #[serde(with = "zeroclaw_api::time::serde")]
+    pub paired_at: jiff::Timestamp,
+    #[serde(with = "zeroclaw_api::time::serde")]
+    pub last_seen: jiff::Timestamp,
     pub ip_address: Option<String>,
     /// macOS TCC permissions (and equivalent on other OSes) the device reports as granted.
     /// Pushed by the desktop app via POST /api/devices/me/capabilities.
@@ -77,12 +78,10 @@ impl DeviceRegistry {
                 let last_seen_str: String = row.get(5)?;
                 let ip_address: Option<String> = row.get(6)?;
                 let capabilities_json: Option<String> = row.get(7)?;
-                let paired_at = DateTime::parse_from_rfc3339(&paired_at_str)
-                    .map(|dt| dt.with_timezone(&Utc))
-                    .unwrap_or_else(|_| Utc::now());
-                let last_seen = DateTime::parse_from_rfc3339(&last_seen_str)
-                    .map(|dt| dt.with_timezone(&Utc))
-                    .unwrap_or_else(|_| Utc::now());
+                let paired_at = zeroclaw_api::time::parse_rfc3339(&paired_at_str)
+                    .unwrap_or_else(|_| jiff::Timestamp::now());
+                let last_seen = zeroclaw_api::time::parse_rfc3339(&last_seen_str)
+                    .unwrap_or_else(|_| jiff::Timestamp::now());
                 let capabilities = capabilities_json
                     .as_deref()
                     .and_then(|s| serde_json::from_str::<Vec<String>>(s).ok());
@@ -142,8 +141,8 @@ impl DeviceRegistry {
                 info.id,
                 info.name,
                 info.device_type,
-                info.paired_at.to_rfc3339(),
-                info.last_seen.to_rfc3339(),
+                zeroclaw_api::time::format_rfc3339(info.paired_at),
+                zeroclaw_api::time::format_rfc3339(info.last_seen),
                 info.ip_address,
                 capabilities_json,
             ],
@@ -158,8 +157,8 @@ impl DeviceRegistry {
     ) -> Result<usize, rusqlite::Error> {
         let conn = self.open_db()?;
         let mut cache = self.cache.lock();
-        let now = Utc::now();
-        let now_str = now.to_rfc3339();
+        let now = jiff::Timestamp::now();
+        let now_str = zeroclaw_api::time::format_rfc3339(now);
         let mut inserted = 0usize;
         for token_hash in token_hashes {
             if cache.contains_key(token_hash) {
@@ -208,12 +207,10 @@ impl DeviceRegistry {
             let last_seen_str: String = row.get(5)?;
             let ip_address: Option<String> = row.get(6)?;
             let capabilities_json: Option<String> = row.get(7)?;
-            let paired_at = DateTime::parse_from_rfc3339(&paired_at_str)
-                .map(|dt| dt.with_timezone(&Utc))
-                .unwrap_or_else(|_| Utc::now());
-            let last_seen = DateTime::parse_from_rfc3339(&last_seen_str)
-                .map(|dt| dt.with_timezone(&Utc))
-                .unwrap_or_else(|_| Utc::now());
+            let paired_at = zeroclaw_api::time::parse_rfc3339(&paired_at_str)
+                .unwrap_or_else(|_| jiff::Timestamp::now());
+            let last_seen = zeroclaw_api::time::parse_rfc3339(&last_seen_str)
+                .unwrap_or_else(|_| jiff::Timestamp::now());
             let capabilities = capabilities_json
                 .as_deref()
                 .and_then(|s| serde_json::from_str::<Vec<String>>(s).ok());
@@ -261,7 +258,7 @@ impl DeviceRegistry {
     }
 
     pub fn update_last_seen(&self, token_hash: &str) {
-        let now = Utc::now();
+        let now = jiff::Timestamp::now();
         // Last-seen is a best-effort touch — a write failure here is
         // observable (the row's last_seen stays stale) but does not affect
         // pairing or revocation, so swallow the error rather than poisoning
@@ -269,7 +266,7 @@ impl DeviceRegistry {
         if let Ok(conn) = self.open_db() {
             let _ = conn.execute(
                 "UPDATE devices SET last_seen = ?1 WHERE token_hash = ?2",
-                rusqlite::params![now.to_rfc3339(), token_hash],
+                rusqlite::params![zeroclaw_api::time::format_rfc3339(now), token_hash],
             );
         }
         if let Some(device) = self.cache.lock().get_mut(token_hash) {
@@ -286,14 +283,18 @@ impl DeviceRegistry {
         let updated = conn
             .execute(
                 "UPDATE devices SET capabilities = ?1, last_seen = ?2 WHERE token_hash = ?3",
-                rusqlite::params![json, Utc::now().to_rfc3339(), token_hash],
+                rusqlite::params![
+                    json,
+                    zeroclaw_api::time::format_rfc3339(jiff::Timestamp::now()),
+                    token_hash
+                ],
             )
             .unwrap_or(0);
         if updated > 0
             && let Some(device) = self.cache.lock().get_mut(token_hash)
         {
             device.capabilities = Some(capabilities);
-            device.last_seen = Utc::now();
+            device.last_seen = jiff::Timestamp::now();
         }
         updated > 0
     }
@@ -312,8 +313,10 @@ pub struct PairingStore {
 #[derive(Debug, Clone, Serialize)]
 struct PendingPairing {
     code: String,
-    created_at: DateTime<Utc>,
-    expires_at: DateTime<Utc>,
+    #[serde(with = "zeroclaw_api::time::serde")]
+    created_at: jiff::Timestamp,
+    #[serde(with = "zeroclaw_api::time::serde")]
+    expires_at: jiff::Timestamp,
     client_ip: Option<String>,
     attempts: u32,
 }
@@ -325,7 +328,7 @@ impl PairingStore {
 
     pub fn pending_count(&self) -> usize {
         let mut pending = self.pending.lock();
-        pending.retain(|p| p.expires_at > Utc::now());
+        pending.retain(|p| p.expires_at > jiff::Timestamp::now());
         pending.len()
     }
 }
@@ -420,8 +423,8 @@ pub async fn submit_pairing_enhanced(
                         id: uuid::Uuid::new_v4().to_string(),
                         name: device_name,
                         device_type,
-                        paired_at: Utc::now(),
-                        last_seen: Utc::now(),
+                        paired_at: jiff::Timestamp::now(),
+                        last_seen: jiff::Timestamp::now(),
                         ip_address: Some(client_id),
                         capabilities: None,
                     },

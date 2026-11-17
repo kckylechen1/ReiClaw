@@ -5,7 +5,6 @@ use crate::session_backend::{
     SessionMetadata, SessionQuery, SessionState,
 };
 use anyhow::{Context, Result};
-use chrono::{DateTime, Duration, Utc};
 use parking_lot::Mutex;
 use rusqlite::{Connection, params};
 use std::path::{Path, PathBuf};
@@ -325,7 +324,7 @@ impl SqliteSessionBackend {
         let tx = conn
             .transaction_with_behavior(rusqlite::TransactionBehavior::Immediate)
             .map_err(std::io::Error::other)?;
-        let now = Utc::now().to_rfc3339();
+        let now = zeroclaw_api::time::format_rfc3339(jiff::Timestamp::now());
         tx.execute(
             "INSERT INTO sessions (session_key, role, content, created_at, message_source)
              VALUES (?1, ?2, ?3, ?4, ?5)",
@@ -440,8 +439,7 @@ impl SessionBackend for SqliteSessionBackend {
             let created_at_raw: Option<String> = row.get(2).ok();
             let created_at = created_at_raw
                 .as_deref()
-                .and_then(|s| chrono::DateTime::parse_from_rfc3339(s).ok())
-                .map(|dt| dt.with_timezone(&Utc));
+                .and_then(|s| zeroclaw_api::time::parse_rfc3339(s).ok());
             Ok(TimestampedMessage {
                 message: ChatMessage { role, content },
                 created_at,
@@ -527,7 +525,7 @@ impl SessionBackend for SqliteSessionBackend {
         // used for transient streaming snapshots. The final content will
         // be correct in the sessions table for load().
 
-        let now = chrono::Utc::now().to_rfc3339();
+        let now = zeroclaw_api::time::format_rfc3339(jiff::Timestamp::now());
         conn.execute(
             "UPDATE session_metadata SET last_activity = ?1 WHERE session_key = ?2",
             params![now, session_key],
@@ -575,12 +573,10 @@ impl SessionBackend for SqliteSessionBackend {
             let room_id: Option<String> = row.get(7)?;
             let sender_id: Option<String> = row.get(8)?;
 
-            let created = DateTime::parse_from_rfc3339(&created_str)
-                .map(|dt| dt.with_timezone(&Utc))
-                .unwrap_or_else(|_| Utc::now());
-            let activity = DateTime::parse_from_rfc3339(&activity_str)
-                .map(|dt| dt.with_timezone(&Utc))
-                .unwrap_or_else(|_| Utc::now());
+            let created = zeroclaw_api::time::parse_rfc3339(&created_str)
+                .unwrap_or_else(|_| jiff::Timestamp::now());
+            let activity = zeroclaw_api::time::parse_rfc3339(&activity_str)
+                .unwrap_or_else(|_| jiff::Timestamp::now());
 
             #[allow(clippy::cast_sign_loss, clippy::cast_possible_truncation)]
             Ok(SessionMetadata {
@@ -607,7 +603,11 @@ impl SessionBackend for SqliteSessionBackend {
         let tx = conn
             .transaction_with_behavior(rusqlite::TransactionBehavior::Immediate)
             .map_err(std::io::Error::other)?;
-        let cutoff = (Utc::now() - Duration::hours(i64::from(ttl_hours))).to_rfc3339();
+        let cutoff = zeroclaw_api::time::format_rfc3339(
+            jiff::Timestamp::now()
+                .checked_sub(jiff::SignedDuration::from_hours(i64::from(ttl_hours)))
+                .map_err(std::io::Error::other)?,
+        );
 
         // Find stale sessions
         let stale_keys: Vec<String> = {
@@ -678,7 +678,7 @@ impl SessionBackend for SqliteSessionBackend {
         if count > 0 {
             tx.execute(
                 "UPDATE session_metadata SET message_count = 0, last_activity = ?1 WHERE session_key = ?2",
-                params![Utc::now().to_rfc3339(), session_key],
+                params![zeroclaw_api::time::format_rfc3339(jiff::Timestamp::now()), session_key],
             )
             .map_err(std::io::Error::other)?;
         }
@@ -810,12 +810,10 @@ impl SessionBackend for SqliteSessionBackend {
                 let room_id: Option<String> = row.get(7)?;
                 let sender_id: Option<String> = row.get(8)?;
 
-                let created = DateTime::parse_from_rfc3339(&created_str)
-                    .map(|dt| dt.with_timezone(&Utc))
-                    .unwrap_or_else(|_| Utc::now());
-                let activity = DateTime::parse_from_rfc3339(&activity_str)
-                    .map(|dt| dt.with_timezone(&Utc))
-                    .unwrap_or_else(|_| Utc::now());
+                let created = zeroclaw_api::time::parse_rfc3339(&created_str)
+                    .unwrap_or_else(|_| jiff::Timestamp::now());
+                let activity = zeroclaw_api::time::parse_rfc3339(&activity_str)
+                    .unwrap_or_else(|_| jiff::Timestamp::now());
 
                 #[allow(clippy::cast_sign_loss, clippy::cast_possible_truncation)]
                 Ok(SessionMetadata {
@@ -841,7 +839,7 @@ impl SessionBackend for SqliteSessionBackend {
         turn_id: Option<&str>,
     ) -> std::io::Result<()> {
         let conn = self.conn.lock();
-        let now = Utc::now().to_rfc3339();
+        let now = zeroclaw_api::time::format_rfc3339(jiff::Timestamp::now());
         let started_at = if state == "running" {
             Some(now.as_str())
         } else {
@@ -914,9 +912,10 @@ impl SessionBackend for SqliteSessionBackend {
             Err(rusqlite::Error::QueryReturnedNoRows) => {}
             Err(e) => return Err(std::io::Error::other(e)),
         }
-        let cutoff = (Utc::now()
-            - Duration::minutes(i64::from(REQUEST_RECEIPT_PROTECTION_MINUTES)))
-        .to_rfc3339();
+        let cutoff = zeroclaw_api::time::format_rfc3339(
+            jiff::Timestamp::now()
+                - jiff::SignedDuration::from_mins(i64::from(REQUEST_RECEIPT_PROTECTION_MINUTES)),
+        );
         let per_session: i64 = tx
             .query_row(
                 "SELECT COUNT(*) FROM session_requests WHERE session_key = ?1",
@@ -949,7 +948,7 @@ impl SessionBackend for SqliteSessionBackend {
                 "protected request receipt capacity exhausted",
             ));
         }
-        let now = Utc::now().to_rfc3339();
+        let now = zeroclaw_api::time::format_rfc3339(jiff::Timestamp::now());
         tx.execute("INSERT INTO session_requests (session_key, request_id, state, accepted_at, updated_at) VALUES (?1, ?2, ?3, ?4, ?4)", params![session_key, request_id, state, now]).map_err(std::io::Error::other)?;
         tx.commit().map_err(std::io::Error::other)?;
         Ok(Some(RequestReceipt::Recorded))
@@ -965,7 +964,12 @@ impl SessionBackend for SqliteSessionBackend {
         conn.execute(
             "UPDATE session_requests SET state = ?1, updated_at = ?2
              WHERE session_key = ?3 AND request_id = ?4",
-            params![state, Utc::now().to_rfc3339(), session_key, request_id],
+            params![
+                state,
+                zeroclaw_api::time::format_rfc3339(jiff::Timestamp::now()),
+                session_key,
+                request_id
+            ],
         )
         .map_err(std::io::Error::other)?;
         Ok(())
@@ -980,11 +984,8 @@ impl SessionBackend for SqliteSessionBackend {
                 let state: String = row.get(0)?;
                 let turn_id: Option<String> = row.get(1)?;
                 let started_str: Option<String> = row.get(2)?;
-                let turn_started_at = started_str.and_then(|s| {
-                    chrono::DateTime::parse_from_rfc3339(&s)
-                        .ok()
-                        .map(|dt| dt.with_timezone(&Utc))
-                });
+                let turn_started_at =
+                    started_str.and_then(|s| zeroclaw_api::time::parse_rfc3339(&s).ok());
                 Ok(SessionState {
                     state,
                     turn_id,
@@ -1019,12 +1020,10 @@ impl SessionBackend for SqliteSessionBackend {
             let channel_id: Option<String> = row.get(6)?;
             let room_id: Option<String> = row.get(7)?;
             let sender_id: Option<String> = row.get(8)?;
-            let created = DateTime::parse_from_rfc3339(&created_str)
-                .map(|dt| dt.with_timezone(&Utc))
-                .unwrap_or_else(|_| Utc::now());
-            let activity = DateTime::parse_from_rfc3339(&activity_str)
-                .map(|dt| dt.with_timezone(&Utc))
-                .unwrap_or_else(|_| Utc::now());
+            let created = zeroclaw_api::time::parse_rfc3339(&created_str)
+                .unwrap_or_else(|_| jiff::Timestamp::now());
+            let activity = zeroclaw_api::time::parse_rfc3339(&activity_str)
+                .unwrap_or_else(|_| jiff::Timestamp::now());
             #[allow(clippy::cast_sign_loss, clippy::cast_possible_truncation)]
             Ok(SessionMetadata {
                 key,
@@ -1047,8 +1046,15 @@ impl SessionBackend for SqliteSessionBackend {
 
     fn list_stuck_sessions(&self, threshold_secs: u64) -> Vec<SessionMetadata> {
         let conn = self.conn.lock();
-        #[allow(clippy::cast_possible_wrap)]
-        let cutoff = (Utc::now() - chrono::Duration::seconds(threshold_secs as i64)).to_rfc3339();
+        let Ok(threshold_secs) = i64::try_from(threshold_secs) else {
+            return Vec::new();
+        };
+        let Ok(cutoff) =
+            jiff::Timestamp::now().checked_sub(jiff::SignedDuration::from_secs(threshold_secs))
+        else {
+            return Vec::new();
+        };
+        let cutoff = zeroclaw_api::time::format_rfc3339(cutoff);
         let mut stmt = match conn.prepare(
             "SELECT session_key, created_at, last_activity, message_count, name, agent_alias, channel_id, room_id, sender_id
              FROM session_metadata
@@ -1069,12 +1075,10 @@ impl SessionBackend for SqliteSessionBackend {
             let channel_id: Option<String> = row.get(6)?;
             let room_id: Option<String> = row.get(7)?;
             let sender_id: Option<String> = row.get(8)?;
-            let created = DateTime::parse_from_rfc3339(&created_str)
-                .map(|dt| dt.with_timezone(&Utc))
-                .unwrap_or_else(|_| Utc::now());
-            let activity = DateTime::parse_from_rfc3339(&activity_str)
-                .map(|dt| dt.with_timezone(&Utc))
-                .unwrap_or_else(|_| Utc::now());
+            let created = zeroclaw_api::time::parse_rfc3339(&created_str)
+                .unwrap_or_else(|_| jiff::Timestamp::now());
+            let activity = zeroclaw_api::time::parse_rfc3339(&activity_str)
+                .unwrap_or_else(|_| jiff::Timestamp::now());
             #[allow(clippy::cast_sign_loss, clippy::cast_possible_truncation)]
             Ok(SessionMetadata {
                 key,
@@ -1145,12 +1149,10 @@ impl SessionBackend for SqliteSessionBackend {
                         Ok(SessionMetadata {
                             key: key.clone(),
                             name,
-                            created_at: DateTime::parse_from_rfc3339(&created_str)
-                                .map(|dt| dt.with_timezone(&Utc))
-                                .unwrap_or_else(|_| Utc::now()),
-                            last_activity: DateTime::parse_from_rfc3339(&activity_str)
-                                .map(|dt| dt.with_timezone(&Utc))
-                                .unwrap_or_else(|_| Utc::now()),
+                            created_at: zeroclaw_api::time::parse_rfc3339(&created_str)
+                                .unwrap_or_else(|_| jiff::Timestamp::now()),
+                            last_activity: zeroclaw_api::time::parse_rfc3339(&activity_str)
+                                .unwrap_or_else(|_| jiff::Timestamp::now()),
                             #[allow(clippy::cast_sign_loss, clippy::cast_possible_truncation)]
                             message_count: count as usize,
                             agent_alias,
@@ -1172,7 +1174,7 @@ impl SessionBackend for SqliteSessionBackend {
         } else {
             Some(agent_alias)
         };
-        let now = Utc::now().to_rfc3339();
+        let now = zeroclaw_api::time::format_rfc3339(jiff::Timestamp::now());
         conn.execute(
             "INSERT INTO session_metadata (session_key, created_at, last_activity, message_count, agent_alias)
              VALUES (?1, ?2, ?3, 0, ?4)
@@ -1208,7 +1210,7 @@ impl SessionBackend for SqliteSessionBackend {
         let channel_id = normalize(context.channel_id);
         let room_id = normalize(context.room_id);
         let sender_id = normalize(context.sender_id);
-        let now = Utc::now().to_rfc3339();
+        let now = zeroclaw_api::time::format_rfc3339(jiff::Timestamp::now());
         conn.execute(
             "INSERT INTO session_metadata
                 (session_key, created_at, last_activity, message_count, channel_id, room_id, sender_id)
@@ -1403,7 +1405,9 @@ mod tests {
         // Insert a session with old timestamp
         {
             let conn = backend.conn.lock();
-            let old_time = (Utc::now() - Duration::hours(100)).to_rfc3339();
+            let old_time = zeroclaw_api::time::format_rfc3339(
+                jiff::Timestamp::now() - jiff::SignedDuration::from_hours(100),
+            );
             conn.execute(
                 "INSERT INTO sessions (session_key, role, content, created_at) VALUES (?1, ?2, ?3, ?4)",
                 params!["old_session", "user", "ancient", old_time],
@@ -1430,7 +1434,9 @@ mod tests {
     fn cleanup_stale_sweeps_request_receipts() {
         let tmp = TempDir::new().unwrap();
         let backend = SqliteSessionBackend::new(tmp.path()).unwrap();
-        let old_time = (Utc::now() - Duration::hours(100)).to_rfc3339();
+        let old_time = zeroclaw_api::time::format_rfc3339(
+            jiff::Timestamp::now() - jiff::SignedDuration::from_hours(100),
+        );
 
         // A stale session with a receipt, and an old orphaned receipt whose
         // session never got a metadata row.
@@ -1582,9 +1588,12 @@ mod tests {
             })
         );
         // Capacity may reclaim receipts only after the protected retry window.
-        let old = (Utc::now()
-            - Duration::minutes(i64::from(REQUEST_RECEIPT_PROTECTION_MINUTES) + 1))
-        .to_rfc3339();
+        let old = zeroclaw_api::time::format_rfc3339(
+            jiff::Timestamp::now()
+                - jiff::SignedDuration::from_mins(
+                    i64::from(REQUEST_RECEIPT_PROTECTION_MINUTES) + 1,
+                ),
+        );
         backend
             .conn
             .lock()
@@ -1639,9 +1648,12 @@ mod tests {
             backend.record_request("gw_0", "r1", "accepted").unwrap(),
             Some(RequestReceipt::Duplicate { .. })
         ));
-        let old = (Utc::now()
-            - Duration::minutes(i64::from(REQUEST_RECEIPT_PROTECTION_MINUTES) + 1))
-        .to_rfc3339();
+        let old = zeroclaw_api::time::format_rfc3339(
+            jiff::Timestamp::now()
+                - jiff::SignedDuration::from_mins(
+                    i64::from(REQUEST_RECEIPT_PROTECTION_MINUTES) + 1,
+                ),
+        );
         backend
             .conn
             .lock()
@@ -1849,7 +1861,9 @@ mod tests {
         // Manually set an old turn_started_at
         {
             let conn = backend.conn.lock();
-            let old_time = (Utc::now() - Duration::seconds(600)).to_rfc3339();
+            let old_time = zeroclaw_api::time::format_rfc3339(
+                jiff::Timestamp::now() - jiff::SignedDuration::from_secs(600),
+            );
             conn.execute(
                 "UPDATE session_metadata SET state = 'running', turn_id = 'old', turn_started_at = ?1 WHERE session_key = 's1'",
                 params![old_time],

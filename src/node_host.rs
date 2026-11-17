@@ -201,7 +201,7 @@ pub async fn run() -> Result<()> {
                             let refusal = if !authenticated || connection_id != connection { Some("stale_connection") }
                                 else if cap_revision != revision || !caps.contains(&cap) { Some("capability_changed") }
                                 else if grant_proof.is_some() || !validate_args(&cap, &args) || args_digest(&args) != digest { Some("unsupported_or_invalid") }
-                                else if !chrono::DateTime::parse_from_rfc3339(&deadline).is_ok_and(|d| d > chrono::Utc::now()) { Some("deadline_expired") }
+                                else if !zeroclaw_api::time::parse_rfc3339(&deadline).is_ok_and(|d| d > jiff::Timestamp::now()) { Some("deadline_expired") }
                                 else { None };
                             let result = if let Some(reason) = refusal {
                                 NodeToGateway::Result { call_id: call_id.clone(), connection_id: connection.clone(), success: false, output: String::new(), error: Some(reason.into()) }

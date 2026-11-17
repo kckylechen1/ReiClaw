@@ -9,7 +9,7 @@ use super::CompanionStore;
 /// Seed the stored shape of an ordinary pre-U4 capture, using a real outbox commit.
 /// This fixture does not implement the retired capture execution contract.
 pub(super) fn seed_legacy_capture(store: &CompanionStore, turn_id: &str) -> CaptureReceipt {
-    let persisted_at = chrono::Utc::now().to_rfc3339();
+    let persisted_at = zeroclaw_api::time::format_rfc3339(jiff::Timestamp::now());
     let event_id = format!("capture:{turn_id}");
     let stored = serde_json::json!({
         "outcome": "not_evaluated",

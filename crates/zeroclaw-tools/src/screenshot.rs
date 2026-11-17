@@ -55,7 +55,7 @@ impl ScreenshotTool {
 
     /// Execute the screenshot capture and return the result.
     async fn capture(&self, args: serde_json::Value) -> anyhow::Result<ToolResult> {
-        let timestamp = chrono::Utc::now().format("%Y%m%d_%H%M%S");
+        let timestamp = jiff::Timestamp::now().strftime("%Y%m%d_%H%M%S");
         let filename = args
             .get("filename")
             .and_then(|v| v.as_str())

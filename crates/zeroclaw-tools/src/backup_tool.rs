@@ -75,7 +75,7 @@ impl BackupTool {
         // created inside a blocking step that re-verifies the workspace
         // and root chain, and verified again below — defense against a
         // collision or a swap, not a substitute for the checks.
-        let ts = chrono::Utc::now().format("%Y%m%dT%H%M%SZ");
+        let ts = jiff::Timestamp::now().strftime("%Y%m%dT%H%M%SZ");
         let name = format!("backup-{ts}-{}", uuid::Uuid::new_v4().simple());
         let backup_dir = root_link.path.join(&name);
         let root_chain = vec![ws_link.clone(), root_link.clone()];
@@ -446,11 +446,11 @@ impl BackupTool {
                 .created()
                 .or_else(|_| meta.modified())
                 .unwrap_or(std::time::SystemTime::UNIX_EPOCH);
-            let dt: chrono::DateTime<chrono::Utc> = created.into();
+            let dt = jiff::Timestamp::try_from(created)?;
             items.push(json!({
                 "name": name,
                 "file_count": file_count,
-                "created": dt.to_rfc3339(),
+                "created": zeroclaw_api::time::format_rfc3339(dt),
             }));
         }
         Ok(ToolResult {
@@ -1403,9 +1403,9 @@ mod tests {
         // such a link.
         let backups = tmp.path().join("backups");
         std::fs::create_dir_all(&backups).unwrap();
-        let now = chrono::Utc::now();
+        let now = jiff::Timestamp::now();
         for delta in [0, 1] {
-            let ts = (now + chrono::Duration::seconds(delta)).format("%Y%m%dT%H%M%SZ");
+            let ts = (now + jiff::SignedDuration::from_secs(delta)).strftime("%Y%m%dT%H%M%SZ");
             let link = backups.join(format!("backup-{ts}"));
             std::os::unix::fs::symlink(outside.path(), &link).unwrap();
         }

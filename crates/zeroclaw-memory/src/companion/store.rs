@@ -285,7 +285,7 @@ mod tests {
     }
 
     fn probe_entry(id: &str, text: &str) -> MemoryEntry {
-        let now = chrono::Local::now().to_rfc3339();
+        let now = zeroclaw_api::time::format_rfc3339_zoned(&jiff::Zoned::now());
         MemoryEntry {
             id: id.into(),
             path: "/companion/probe".into(),

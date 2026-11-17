@@ -10,8 +10,8 @@ use crate::cron::{
 use crate::security::SecurityPolicy;
 use crate::tools::task_context::TaskIdentity;
 use anyhow::Result;
-use chrono::{DateTime, Utc};
 use futures_util::{StreamExt, stream};
+use jiff::Timestamp;
 use std::future::Future;
 use std::process::Stdio;
 use std::sync::Arc;
@@ -19,6 +19,7 @@ use tokio::process::Command;
 use tokio::time::{self, Duration};
 use tokio_util::sync::CancellationToken;
 use tokio_util::task::{AbortOnDropHandle, TaskTracker};
+use zeroclaw_api::time::format_rfc3339;
 use zeroclaw_config::schema::Config;
 use zeroclaw_config::schema::{CronJobDecl, CronScheduleDecl};
 use zeroclaw_infra::process::{OverflowBehavior, ProcessLimits, ProcessOutcome, run_bounded};
@@ -205,8 +206,8 @@ pub struct ManualCronRunResult {
     pub status: String,
     pub output: String,
     pub duration_ms: i64,
-    pub started_at: DateTime<Utc>,
-    pub finished_at: DateTime<Utc>,
+    pub started_at: Timestamp,
+    pub finished_at: Timestamp,
 }
 
 pub struct CronDeliveryOutcome {
@@ -227,7 +228,7 @@ pub async fn deliver_and_classify_run_result(
     execution_success: bool,
     mut output: String,
     context: CronDeliveryContext,
-    started_at: DateTime<Utc>,
+    started_at: Timestamp,
 ) -> CronDeliveryOutcome {
     // Bound delivery while the scheduler still holds the job claim. A
     // channel send that never returns would otherwise pin `locked_at`
@@ -239,7 +240,7 @@ pub async fn deliver_and_classify_run_result(
         let d_job = job.clone();
         let d_output = output.clone();
         let handle = spawn_owned_cron_task(async move {
-            deliver_if_configured(&d_config, &d_job, &d_output, &started_at.to_rfc3339()).await
+            deliver_if_configured(&d_config, &d_job, &d_output, &format_rfc3339(started_at)).await
         });
         match wait_owned_cron_task(CRON_DELIVERY_TIMEOUT, handle).await {
             Ok(Ok(res)) => res,
@@ -362,10 +363,10 @@ pub async fn run_manual_job(
     context: CronDeliveryContext,
     event_tx: &EventBroadcast,
 ) -> ManualCronRunResult {
-    let started_at = Utc::now();
+    let started_at = Timestamp::now();
     let (success, output) = execute_job_now(config, job).await;
-    let finished_at = Utc::now();
-    let duration_ms = (finished_at - started_at).num_milliseconds();
+    let finished_at = Timestamp::now();
+    let duration_ms = finished_at.duration_since(started_at).as_millis() as i64;
     let outcome =
         deliver_and_classify_run_result(config, job, success, output, context, started_at).await;
 
@@ -402,7 +403,7 @@ pub async fn run_manual_job(
             "delivery_status": outcome.delivery_status,
             "output": &outcome.output,
             "manual": true,
-            "timestamp": finished_at.to_rfc3339(),
+            "timestamp": format_rfc3339(finished_at),
         }));
     }
 
@@ -570,7 +571,7 @@ async fn run_scheduler(
         // until the next process restart.
         match reclaim_stale_locks(
             &config,
-            Utc::now(),
+            Timestamp::now(),
             Duration::from_secs(STALE_LOCK_TTL_SECS),
         ) {
             Ok(0) => {}
@@ -592,7 +593,7 @@ async fn run_scheduler(
             ),
         }
 
-        let jobs = match due_jobs(&config, Utc::now()) {
+        let jobs = match due_jobs(&config, Timestamp::now()) {
             Ok(jobs) => jobs,
             Err(e) => {
                 crate::health::mark_component_error(SCHEDULER_COMPONENT, e.to_string());
@@ -639,7 +640,7 @@ async fn catch_up_overdue_jobs(
     event_tx: &EventBroadcast,
     task_identities: &TaskIdentity,
 ) {
-    let now = Utc::now();
+    let now = Timestamp::now();
     let jobs = match all_overdue_jobs(config, now) {
         Ok(jobs) => jobs,
         Err(e) => {
@@ -681,7 +682,7 @@ async fn catch_up_overdue_jobs(
 }
 
 async fn skip_missed_jobs_on_startup(config: &Config) {
-    let now = Utc::now();
+    let now = Timestamp::now();
     let jobs = match all_overdue_jobs(config, now) {
         Ok(jobs) => jobs,
         Err(e) => {
@@ -844,7 +845,7 @@ async fn execute_job_with_retry(
         }
 
         if attempt < retries {
-            let jitter_ms = u64::from(Utc::now().timestamp_subsec_millis() % 250);
+            let jitter_ms = u64::from(Timestamp::now().subsec_millisecond().unsigned_abs() % 250);
             time::sleep(Duration::from_millis(backoff_ms + jitter_ms)).await;
             backoff_ms = (backoff_ms.saturating_mul(2)).min(30_000);
         }
@@ -855,7 +856,7 @@ async fn execute_job_with_retry(
 
 fn claim_due_jobs(config: &Config, jobs: Vec<CronJob>) -> Vec<CronJob> {
     jobs.into_iter()
-        .filter(|job| match claim_job(config, &job.id, Utc::now()) {
+        .filter(|job| match claim_job(config, &job.id, Timestamp::now()) {
             Ok(true) => true,
             Ok(false) => {
                 ::zeroclaw_log::record!(
@@ -949,7 +950,7 @@ async fn process_due_jobs(
                 "execution_success": execution_success,
                 "delivery_status": delivery_status,
                 "output": output,
-                "timestamp": chrono::Utc::now().to_rfc3339(),
+                "timestamp": format_rfc3339(Timestamp::now()),
             }));
         }
     }
@@ -966,7 +967,7 @@ async fn execute_and_persist_job(
     crate::health::mark_component_ok(component);
     warn_if_high_frequency_agent_job(job);
 
-    let started_at = Utc::now();
+    let started_at = Timestamp::now();
     let span = zeroclaw_log::attribution_span!(job);
     let (success, output) = Box::pin(execute_job_with_retry(
         config,
@@ -977,7 +978,7 @@ async fn execute_and_persist_job(
     ))
     .instrument(span)
     .await;
-    let finished_at = Utc::now();
+    let finished_at = Timestamp::now();
     let run_outcome = Box::pin(persist_job_result(
         config,
         job,
@@ -1268,10 +1269,10 @@ async fn persist_job_result(
     job: &CronJob,
     success: bool,
     output: &str,
-    started_at: DateTime<Utc>,
-    finished_at: DateTime<Utc>,
+    started_at: Timestamp,
+    finished_at: Timestamp,
 ) -> PersistedRunOutcome {
-    let duration_ms = (finished_at - started_at).num_milliseconds();
+    let duration_ms = finished_at.duration_since(started_at).as_millis() as i64;
     let outcome = deliver_and_classify_run_result(
         config,
         job,
@@ -1290,7 +1291,7 @@ async fn persist_job_result(
         RunCompletionAction::Reschedule
     };
 
-    let job_state_at = Utc::now();
+    let job_state_at = Timestamp::now();
     let exec_status_str = if outcome.execution_success {
         "success"
     } else {
@@ -1379,10 +1380,10 @@ fn is_high_frequency_agent_job(job: &CronJob) -> bool {
     match &job.schedule {
         Schedule::Every { every_ms } => *every_ms < 5 * 60 * 1000,
         Schedule::Cron { .. } => {
-            let now = Utc::now();
+            let now = Timestamp::now();
             next_run_for_schedule(&job.schedule, now)
                 .and_then(|a| next_run_for_schedule(&job.schedule, a).map(|b| (a, b)))
-                .map(|(a, b)| (b - a).num_minutes() < 5)
+                .map(|(a, b)| b.duration_since(a).as_mins() < 5)
                 .unwrap_or(false)
         }
         Schedule::At { .. } => false,

@@ -1,5 +1,4 @@
 use anyhow::Result;
-use chrono::{DateTime, Duration, Local, NaiveDate, Utc};
 use rusqlite::{Connection, params};
 use serde::{Deserialize, Serialize};
 use std::fs;
@@ -69,11 +68,11 @@ pub fn enrichment_is_due(workspace_dir: &Path) -> Result<bool> {
     let Some(last_run_at) = state.last_run_at else {
         return Ok(true);
     };
-    let last = match DateTime::parse_from_rfc3339(&last_run_at) {
-        Ok(ts) => ts.with_timezone(&Utc),
-        Err(_) => return Ok(true),
+    let Ok(last) = zeroclaw_api::time::parse_rfc3339(&last_run_at) else {
+        return Ok(true);
     };
-    Ok(Utc::now().signed_duration_since(last) >= Duration::hours(HYGIENE_INTERVAL_HOURS))
+    Ok(jiff::Timestamp::now().duration_since(last)
+        >= jiff::SignedDuration::from_hours(HYGIENE_INTERVAL_HOURS))
 }
 
 /// Record that an enrichment pass was attempted (advances the 12h cadence).
@@ -83,7 +82,7 @@ pub fn enrichment_mark_ran(workspace_dir: &Path) -> Result<()> {
         fs::create_dir_all(parent)?;
     }
     let state = EnrichmentCadenceState {
-        last_run_at: Some(Utc::now().to_rfc3339()),
+        last_run_at: Some(zeroclaw_api::time::format_rfc3339(jiff::Timestamp::now())),
     };
     fs::write(path, serde_json::to_vec_pretty(&state)?)?;
     Ok(())
@@ -160,12 +159,12 @@ fn should_run_now(workspace_dir: &Path) -> Result<bool> {
         return Ok(true);
     };
 
-    let last = match DateTime::parse_from_rfc3339(&last_run_at) {
-        Ok(ts) => ts.with_timezone(&Utc),
-        Err(_) => return Ok(true),
+    let Ok(last) = zeroclaw_api::time::parse_rfc3339(&last_run_at) else {
+        return Ok(true);
     };
 
-    Ok(Utc::now().signed_duration_since(last) >= Duration::hours(HYGIENE_INTERVAL_HOURS))
+    Ok(jiff::Timestamp::now().duration_since(last)
+        >= jiff::SignedDuration::from_hours(HYGIENE_INTERVAL_HOURS))
 }
 
 fn write_state(workspace_dir: &Path, report: &HygieneReport) -> Result<()> {
@@ -175,7 +174,7 @@ fn write_state(workspace_dir: &Path, report: &HygieneReport) -> Result<()> {
     }
 
     let state = HygieneState {
-        last_run_at: Some(Utc::now().to_rfc3339()),
+        last_run_at: Some(zeroclaw_api::time::format_rfc3339(jiff::Timestamp::now())),
         last_report: report.clone(),
     };
     let json = serde_json::to_vec_pretty(&state)?;
@@ -200,7 +199,11 @@ fn archive_daily_memory_files(workspace_dir: &Path, archive_after_days: u32) -> 
     let archive_dir = memory_dir.join("archive");
     fs::create_dir_all(&archive_dir)?;
 
-    let cutoff = Local::now().date_naive() - Duration::days(i64::from(archive_after_days));
+    let cutoff = jiff::Zoned::now()
+        .date()
+        .checked_sub(jiff::SignedDuration::from_hours(
+            i64::from(archive_after_days) * 24,
+        ))?;
     let mut moved = 0_u64;
 
     for entry in fs::read_dir(&memory_dir)? {
@@ -244,7 +247,11 @@ fn archive_session_files(workspace_dir: &Path, archive_after_days: u32) -> Resul
     let archive_dir = sessions_dir.join("archive");
     fs::create_dir_all(&archive_dir)?;
 
-    let cutoff_date = Local::now().date_naive() - Duration::days(i64::from(archive_after_days));
+    let cutoff_date = jiff::Zoned::now()
+        .date()
+        .checked_sub(jiff::SignedDuration::from_hours(
+            i64::from(archive_after_days) * 24,
+        ))?;
     let cutoff_time = SystemTime::now()
         .checked_sub(StdDuration::from_secs(
             u64::from(archive_after_days) * 24 * 60 * 60,
@@ -299,7 +306,11 @@ fn purge_memory_archives(workspace_dir: &Path, purge_after_days: u32) -> Result<
         return Ok(0);
     }
 
-    let cutoff = Local::now().date_naive() - Duration::days(i64::from(purge_after_days));
+    let cutoff = jiff::Zoned::now()
+        .date()
+        .checked_sub(jiff::SignedDuration::from_hours(
+            i64::from(purge_after_days) * 24,
+        ))?;
     let mut removed = 0_u64;
 
     for entry in fs::read_dir(&archive_dir)? {
@@ -337,7 +348,11 @@ fn purge_session_archives(workspace_dir: &Path, purge_after_days: u32) -> Result
         return Ok(0);
     }
 
-    let cutoff_date = Local::now().date_naive() - Duration::days(i64::from(purge_after_days));
+    let cutoff_date = jiff::Zoned::now()
+        .date()
+        .checked_sub(jiff::SignedDuration::from_hours(
+            i64::from(purge_after_days) * 24,
+        ))?;
     let cutoff_time = SystemTime::now()
         .checked_sub(StdDuration::from_secs(
             u64::from(purge_after_days) * 24 * 60 * 60,
@@ -388,7 +403,9 @@ fn prune_audit_entries(workspace_dir: &Path, retention_days: u32) -> Result<()> 
 
     let conn = Connection::open(db_path)?;
     conn.execute_batch("PRAGMA journal_mode = WAL; PRAGMA synchronous = NORMAL;")?;
-    let cutoff = (Local::now() - Duration::days(i64::from(retention_days))).to_rfc3339();
+    let cutoff = zeroclaw_api::time::format_rfc3339_zoned(&jiff::Zoned::now().checked_sub(
+        jiff::SignedDuration::from_hours(i64::from(retention_days) * 24),
+    )?);
 
     let affected = conn.execute(
         "DELETE FROM memory_audit WHERE timestamp < ?1",
@@ -408,7 +425,7 @@ fn prune_audit_entries(workspace_dir: &Path, retention_days: u32) -> Result<()> 
     Ok(())
 }
 
-fn memory_date_from_filename(filename: &str) -> Option<NaiveDate> {
+fn memory_date_from_filename(filename: &str) -> Option<jiff::civil::Date> {
     let stem = filename.strip_suffix(".md")?;
     // Split on '_' first (handles YYYY-MM-DD_suffix.md).
     let date_part = stem.split('_').next().unwrap_or(stem);
@@ -419,10 +436,10 @@ fn memory_date_from_filename(filename: &str) -> Option<NaiveDate> {
     } else {
         date_part
     };
-    NaiveDate::parse_from_str(date_str, "%Y-%m-%d").ok()
+    jiff::civil::Date::strptime("%Y-%m-%d", date_str).ok()
 }
 
-fn date_prefix(filename: &str) -> Option<NaiveDate> {
+fn date_prefix(filename: &str) -> Option<jiff::civil::Date> {
     if filename.len() < 10 {
         return None;
     }
@@ -433,7 +450,7 @@ fn date_prefix(filename: &str) -> Option<NaiveDate> {
         }
         i
     };
-    NaiveDate::parse_from_str(&filename[..boundary], "%Y-%m-%d").ok()
+    jiff::civil::Date::strptime("%Y-%m-%d", &filename[..boundary]).ok()
 }
 
 fn is_older_than(path: &Path, cutoff: SystemTime) -> bool {
@@ -517,10 +534,10 @@ mod tests {
         let workspace = tmp.path();
         fs::create_dir_all(workspace.join("memory")).unwrap();
 
-        let old = (Local::now().date_naive() - Duration::days(10))
-            .format("%Y-%m-%d")
+        let old = (jiff::Zoned::now().date() - jiff::SignedDuration::from_hours(10 * 24))
+            .strftime("%Y-%m-%d")
             .to_string();
-        let today = Local::now().date_naive().format("%Y-%m-%d").to_string();
+        let today = jiff::Zoned::now().date().strftime("%Y-%m-%d").to_string();
 
         let old_file = workspace.join("memory").join(format!("{old}.md"));
         let today_file = workspace.join("memory").join(format!("{today}.md"));
@@ -547,8 +564,8 @@ mod tests {
         let workspace = tmp.path();
         fs::create_dir_all(workspace.join("sessions")).unwrap();
 
-        let old = (Local::now().date_naive() - Duration::days(10))
-            .format("%Y-%m-%d")
+        let old = (jiff::Zoned::now().date() - jiff::SignedDuration::from_hours(10 * 24))
+            .strftime("%Y-%m-%d")
             .to_string();
         let old_name = format!("{old}-agent.log");
         let old_file = workspace.join("sessions").join(&old_name);
@@ -659,8 +676,8 @@ mod tests {
         let workspace = tmp.path();
         fs::create_dir_all(workspace.join("memory")).unwrap();
 
-        let old_a = (Local::now().date_naive() - Duration::days(10))
-            .format("%Y-%m-%d")
+        let old_a = (jiff::Zoned::now().date() - jiff::SignedDuration::from_hours(10 * 24))
+            .strftime("%Y-%m-%d")
             .to_string();
         let file_a = workspace.join("memory").join(format!("{old_a}.md"));
         fs::write(&file_a, "first").unwrap();
@@ -668,8 +685,8 @@ mod tests {
         run_if_due(&default_cfg(), workspace).unwrap();
         assert!(!file_a.exists(), "first old file should be archived");
 
-        let old_b = (Local::now().date_naive() - Duration::days(9))
-            .format("%Y-%m-%d")
+        let old_b = (jiff::Zoned::now().date() - jiff::SignedDuration::from_hours(9 * 24))
+            .strftime("%Y-%m-%d")
             .to_string();
         let file_b = workspace.join("memory").join(format!("{old_b}.md"));
         fs::write(&file_b, "second").unwrap();
@@ -689,11 +706,11 @@ mod tests {
         let archive_dir = workspace.join("memory").join("archive");
         fs::create_dir_all(&archive_dir).unwrap();
 
-        let old = (Local::now().date_naive() - Duration::days(40))
-            .format("%Y-%m-%d")
+        let old = (jiff::Zoned::now().date() - jiff::SignedDuration::from_hours(40 * 24))
+            .strftime("%Y-%m-%d")
             .to_string();
-        let keep = (Local::now().date_naive() - Duration::days(5))
-            .format("%Y-%m-%d")
+        let keep = (jiff::Zoned::now().date() - jiff::SignedDuration::from_hours(5 * 24))
+            .strftime("%Y-%m-%d")
             .to_string();
 
         let old_file = archive_dir.join(format!("{old}.md"));
@@ -711,21 +728,21 @@ mod tests {
     fn date_from_filename_handles_hyphen_suffix() {
         let d = memory_date_from_filename("2026-03-28-1442.md");
         assert!(d.is_some(), "YYYY-MM-DD-HHMM.md should be parsed");
-        assert_eq!(d.unwrap(), NaiveDate::from_ymd_opt(2026, 3, 28).unwrap());
+        assert_eq!(d.unwrap(), jiff::civil::Date::new(2026, 3, 28).unwrap());
     }
 
     #[test]
     fn date_from_filename_handles_underscore_suffix() {
         let d = memory_date_from_filename("2026-03-28_session_notes.md");
         assert!(d.is_some(), "YYYY-MM-DD_suffix.md should be parsed");
-        assert_eq!(d.unwrap(), NaiveDate::from_ymd_opt(2026, 3, 28).unwrap());
+        assert_eq!(d.unwrap(), jiff::civil::Date::new(2026, 3, 28).unwrap());
     }
 
     #[test]
     fn date_from_filename_plain_date() {
         let d = memory_date_from_filename("2026-03-28.md");
         assert!(d.is_some(), "YYYY-MM-DD.md should be parsed");
-        assert_eq!(d.unwrap(), NaiveDate::from_ymd_opt(2026, 3, 28).unwrap());
+        assert_eq!(d.unwrap(), jiff::civil::Date::new(2026, 3, 28).unwrap());
     }
 
     fn seed_audit_db(workspace: &Path) -> PathBuf {
@@ -744,8 +761,10 @@ mod tests {
              );",
         )
         .unwrap();
-        let stale = (Local::now() - Duration::days(45)).to_rfc3339();
-        let fresh = Local::now().to_rfc3339();
+        let stale = zeroclaw_api::time::format_rfc3339_zoned(
+            &(jiff::Zoned::now() - jiff::SignedDuration::from_hours(45 * 24)),
+        );
+        let fresh = zeroclaw_api::time::format_rfc3339_zoned(&jiff::Zoned::now());
         conn.execute(
             "INSERT INTO memory_audit (operation, timestamp) VALUES ('store', ?1)",
             params![stale],

@@ -208,7 +208,7 @@ impl zeroclaw_runtime::observability::Observer for BroadcastObserver {
                     "model_provider": model_provider,
                     "model": model,
                     "messages_count": messages_count,
-                    "timestamp": chrono::Utc::now().to_rfc3339(),
+                    "timestamp": zeroclaw_api::time::format_rfc3339(jiff::Timestamp::now()),
                 });
                 add_optional_string(&mut json, "channel", channel);
                 add_optional_string(&mut json, "agent_alias", agent_alias);
@@ -232,7 +232,7 @@ impl zeroclaw_runtime::observability::Observer for BroadcastObserver {
                     "tool": tool,
                     "duration_ms": duration.as_millis(),
                     "success": success,
-                    "timestamp": chrono::Utc::now().to_rfc3339(),
+                    "timestamp": zeroclaw_api::time::format_rfc3339(jiff::Timestamp::now()),
                 });
                 add_optional_string(&mut json, "channel", channel);
                 add_optional_string(&mut json, "agent_alias", agent_alias);
@@ -252,7 +252,7 @@ impl zeroclaw_runtime::observability::Observer for BroadcastObserver {
                     "type": "tool_call_start",
                     "source": "observability",
                     "tool": tool,
-                    "timestamp": chrono::Utc::now().to_rfc3339(),
+                    "timestamp": zeroclaw_api::time::format_rfc3339(jiff::Timestamp::now()),
                 });
                 add_optional_string(&mut json, "channel", channel);
                 add_optional_string(&mut json, "agent_alias", agent_alias);
@@ -266,7 +266,7 @@ impl zeroclaw_runtime::observability::Observer for BroadcastObserver {
                     "source": "observability",
                     "component": component,
                     "message": message,
-                    "timestamp": chrono::Utc::now().to_rfc3339(),
+                    "timestamp": zeroclaw_api::time::format_rfc3339(jiff::Timestamp::now()),
                 })
             }
             zeroclaw_runtime::observability::ObserverEvent::AgentStart {
@@ -281,7 +281,7 @@ impl zeroclaw_runtime::observability::Observer for BroadcastObserver {
                     "source": "observability",
                     "model_provider": model_provider,
                     "model": model,
-                    "timestamp": chrono::Utc::now().to_rfc3339(),
+                    "timestamp": zeroclaw_api::time::format_rfc3339(jiff::Timestamp::now()),
                 });
                 add_optional_string(&mut json, "channel", channel);
                 add_optional_string(&mut json, "agent_alias", agent_alias);
@@ -318,7 +318,7 @@ impl zeroclaw_runtime::observability::Observer for BroadcastObserver {
                     "input_tokens": input_tokens,
                     "output_tokens": output_tokens,
                     "cost_usd": cost_usd,
-                    "timestamp": chrono::Utc::now().to_rfc3339(),
+                    "timestamp": zeroclaw_api::time::format_rfc3339(jiff::Timestamp::now()),
                 });
                 add_optional_string(&mut json, "channel", channel);
                 add_optional_string(&mut json, "agent_alias", agent_alias);
@@ -339,7 +339,7 @@ impl zeroclaw_runtime::observability::Observer for BroadcastObserver {
                     "dropped_messages": dropped_messages,
                     "kept_turns": kept_turns,
                     "reason": reason,
-                    "timestamp": chrono::Utc::now().to_rfc3339(),
+                    "timestamp": zeroclaw_api::time::format_rfc3339(jiff::Timestamp::now()),
                 });
                 add_optional_string(&mut json, "channel", channel);
                 add_optional_string(&mut json, "agent_alias", agent_alias);

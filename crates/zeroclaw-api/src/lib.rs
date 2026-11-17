@@ -32,6 +32,7 @@ pub mod schema;
 pub mod session_keys;
 pub mod subagent_v1;
 pub mod tachi_staff;
+pub mod time;
 pub mod tone;
 pub mod tool;
 

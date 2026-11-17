@@ -190,8 +190,8 @@ impl TaskListSection {
             let one_line = neutralize_markers(&item.description.replace(['\n', '\r'], " "));
             let reminder = item
                 .remind_at
-                .and_then(|ts| chrono::DateTime::<chrono::Utc>::from_timestamp(ts, 0))
-                .map(|dt| format!(" ⏰ {}", dt.format("%Y-%m-%dT%H:%MZ")))
+                .and_then(|ts| jiff::Timestamp::from_second(ts).ok())
+                .map(|dt| format!(" ⏰ {}", dt.strftime("%Y-%m-%dT%H:%MZ")))
                 .unwrap_or_default();
             lines.push(format!(
                 "- [{}] {}{} ({})",

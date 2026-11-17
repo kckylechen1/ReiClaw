@@ -6,7 +6,6 @@
 //! are never reclaimed automatically.
 
 use super::SqliteSessionBackend;
-use chrono::Utc;
 use rusqlite::{Connection, OptionalExtension, TransactionBehavior, params};
 use std::io;
 use zeroclaw_api::bridge_intake::{BridgeInput, BridgeReceipt, BridgeResume, BridgeSource};
@@ -286,7 +285,7 @@ impl SqliteSessionBackend {
                        SELECT cursor FROM bridge_sources
                        WHERE bridge_sources.source_key = bridge_inputs.source_key
                    )",
-                [Utc::now().timestamp() - RETAIN_SECONDS],
+                [zeroclaw_api::time::epoch_second(jiff::Timestamp::now()) - RETAIN_SECONDS],
             )
             .map_err(io::Error::other)?;
             if !has_capacity(&tx, source, bytes)? {
@@ -306,7 +305,7 @@ impl SqliteSessionBackend {
                 input.request_id,
                 input.payload,
                 input.state,
-                Utc::now().timestamp()
+                zeroclaw_api::time::epoch_second(jiff::Timestamp::now())
             ],
         )
         .map_err(io::Error::other)?;

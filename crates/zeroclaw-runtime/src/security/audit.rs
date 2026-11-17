@@ -3,7 +3,6 @@
 //! This makes the trail tamper-evident — modifying any entry invalidates all subsequent hashes.
 
 use anyhow::{Result, bail};
-use chrono::{DateTime, Utc};
 use parking_lot::Mutex;
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
@@ -66,7 +65,8 @@ pub struct SecurityContext {
 /// Complete audit event with Merkle hash-chain fields.
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct AuditEvent {
-    pub timestamp: DateTime<Utc>,
+    #[serde(with = "zeroclaw_api::time::serde")]
+    pub timestamp: jiff::Timestamp,
     pub event_id: String,
     pub event_type: AuditEventType,
     pub actor: Option<Actor>,
@@ -95,7 +95,7 @@ impl AuditEvent {
     /// Create a new audit event
     pub fn new(event_type: AuditEventType) -> Self {
         Self {
-            timestamp: Utc::now(),
+            timestamp: jiff::Timestamp::now(),
             event_id: Uuid::new_v4().to_string(),
             event_type,
             actor: None,

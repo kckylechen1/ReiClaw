@@ -1,6 +1,5 @@
 use crate::auth::profiles::TokenSet;
 use anyhow::{Context, Result};
-use chrono::Utc;
 use reqwest::Client;
 use serde::Deserialize;
 use std::time::{Duration, Instant};
@@ -184,13 +183,12 @@ async fn parse_token_response(response: reqwest::Response) -> Result<TokenSet> {
         .await
         .context("Failed to parse email OAuth2 token response")?;
 
-    let expires_at = token.expires_in.and_then(|seconds| {
-        if seconds <= 0 {
-            None
-        } else {
-            Some(Utc::now() + chrono::Duration::seconds(seconds))
-        }
-    });
+    let expires_at = token
+        .expires_in
+        .filter(|seconds| *seconds > 0)
+        .map(|seconds| jiff::Timestamp::now().checked_add(jiff::SignedDuration::from_secs(seconds)))
+        .transpose()
+        .context("OAuth token expiry is outside the supported range")?;
 
     Ok(TokenSet {
         access_token: token.access_token,

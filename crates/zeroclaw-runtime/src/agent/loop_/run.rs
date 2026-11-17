@@ -533,7 +533,7 @@ pub async fn run(
 
             // Memory context is injected once in the engine, keyed on the
             // ingress origin (agent::memory_inject).
-            let now = chrono::Local::now().format("%Y-%m-%d %H:%M:%S %Z");
+            let now = jiff::Zoned::now().strftime("%Y-%m-%d %H:%M:%S %:z");
             let enriched = format!("[{now}] {effective_msg}");
             let mut history = vec![
                 ChatMessage::system(&system_prompt),

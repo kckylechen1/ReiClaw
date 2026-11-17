@@ -1,70 +1,119 @@
 use crate::cron::Schedule;
 use anyhow::{Context, Result};
-use chrono::{DateTime, Duration as ChronoDuration, Utc};
-use cron::Schedule as CronExprSchedule;
+use jiff::{
+    SignedDuration, Timestamp,
+    tz::{AmbiguousOffset, TimeZone},
+};
+use jiff_cron::{Schedule as CronExprSchedule, TimeUnitSpec};
 use std::str::FromStr;
+use zeroclaw_api::time::{format_rfc3339, format_rfc3339_zoned};
 
-pub fn next_run_for_schedule(schedule: &Schedule, from: DateTime<Utc>) -> Result<DateTime<Utc>> {
+pub fn next_run_for_schedule(schedule: &Schedule, from: Timestamp) -> Result<Timestamp> {
     match schedule {
-        Schedule::Cron { expr, tz } => {
-            let normalized = normalize_expression(expr)?;
-            let cron = CronExprSchedule::from_str(&normalized)
-                .with_context(|| format!("Invalid cron expression: {expr}"))?;
-
-            if let Some(tz_name) = tz {
-                let timezone = chrono_tz::Tz::from_str(tz_name)
-                    .with_context(|| format!("Invalid IANA timezone: {tz_name}"))?;
-                let localized_from = from.with_timezone(&timezone);
-                let next_local = cron.after(&localized_from).next().ok_or_else(|| {
-                    ::zeroclaw_log::record!(
-                        WARN,
-                        ::zeroclaw_log::Event::new(module_path!(), ::zeroclaw_log::Action::Fail)
-                            .with_outcome(::zeroclaw_log::EventOutcome::Failure)
-                            .with_attrs(::serde_json::json!({"expr": expr})),
-                        "cron schedule: no future occurrence for expression"
-                    );
-                    anyhow::Error::msg(format!("No future occurrence for expression: {expr}"))
-                })?;
-                Ok(next_local.with_timezone(&Utc))
-            } else {
-                // Default to OS local timezone so schedules match user
-                // expectations instead of always using UTC.
-                let local_from = from.with_timezone(&chrono::Local);
-                let next_local = cron.after(&local_from).next().ok_or_else(|| {
-                    ::zeroclaw_log::record!(
-                        WARN,
-                        ::zeroclaw_log::Event::new(module_path!(), ::zeroclaw_log::Action::Fail)
-                            .with_outcome(::zeroclaw_log::EventOutcome::Failure)
-                            .with_attrs(::serde_json::json!({"expr": expr})),
-                        "cron schedule: no future occurrence for expression"
-                    );
-                    anyhow::Error::msg(format!("No future occurrence for expression: {expr}"))
-                })?;
-                Ok(next_local.with_timezone(&Utc))
-            }
-        }
+        Schedule::Cron { expr, tz } => next_cron_run(expr, tz.as_deref(), from),
         Schedule::At { at } => Ok(*at),
         Schedule::Every { every_ms } => {
             if *every_ms == 0 {
                 anyhow::bail!("Invalid schedule: every_ms must be > 0");
             }
             let ms = i64::try_from(*every_ms).context("every_ms is too large")?;
-            let delta = ChronoDuration::milliseconds(ms);
-            from.checked_add_signed(delta).ok_or_else(|| {
+            let delta = SignedDuration::from_millis(ms);
+            from.checked_add(delta).map_err(|error| {
                 ::zeroclaw_log::record!(
                     ERROR,
                     ::zeroclaw_log::Event::new(module_path!(), ::zeroclaw_log::Action::Fail)
                         .with_outcome(::zeroclaw_log::EventOutcome::Failure)
                         .with_attrs(::serde_json::json!({"every_ms": *every_ms})),
-                    "cron schedule: every_ms overflowed DateTime arithmetic"
+                    "cron schedule: every_ms overflowed timestamp arithmetic"
                 );
-                anyhow::Error::msg("every_ms overflowed DateTime")
+                anyhow::Error::new(error).context("every_ms overflowed timestamp")
             })
         }
     }
 }
 
-pub fn validate_schedule(schedule: &Schedule, now: DateTime<Utc>) -> Result<()> {
+fn next_cron_run(expr: &str, tz_name: Option<&str>, from: Timestamp) -> Result<Timestamp> {
+    let normalized = normalize_expression(expr)?;
+    let cron = CronExprSchedule::from_str(&normalized)
+        .with_context(|| format!("Invalid cron expression: {expr}"))?;
+    // Keep weekday authority in the parsed schedule, but evaluate the other
+    // fields separately so an excluded weekday can be skipped as one day.
+    // jiff-cron's own weekday loop otherwise visits each second for schedules
+    // such as `* * * * * MON` while searching across excluded days.
+    let calendar_expression = normalized
+        .split_whitespace()
+        .enumerate()
+        .map(|(index, field)| if index == 5 { "*" } else { field })
+        .collect::<Vec<_>>()
+        .join(" ");
+    let calendar = CronExprSchedule::from_str(&calendar_expression)
+        .with_context(|| format!("Invalid cron expression: {expr}"))?;
+    let timezone = match tz_name {
+        Some(name) => {
+            TimeZone::get(name).with_context(|| format!("Invalid IANA timezone: {name}"))?
+        }
+        None => TimeZone::try_system().context("Failed to determine local timezone for cron")?,
+    };
+
+    // Enumerate civil fields in UTC, then resolve them in the real timezone.
+    // This preserves the retained scheduler's wall-clock policy: nonexistent
+    // local times are skipped; a repeated local time uses its earlier instant.
+    // It also keeps zoned arithmetic from shifting a 02:30 job into a DST gap.
+    // Clearing fractions avoids jiff-cron 0.3's rounded-candidate fast path,
+    // which checks date/time fields but does not check the weekday.
+    let mut cursor = from
+        .to_zoned(timezone.clone())
+        .datetime()
+        .with()
+        .subsec_nanosecond(0)
+        .build()?
+        .to_zoned(TimeZone::UTC)?;
+    loop {
+        let previous = cursor.timestamp();
+        let Some(wall) = calendar.after(cursor).next() else {
+            break;
+        };
+        if wall.timestamp() <= previous {
+            anyhow::bail!("Cron expression did not advance: {expr}");
+        }
+        if !cron
+            .days_of_week()
+            .includes(wall.weekday().to_sunday_one_offset() as u32)
+        {
+            cursor = wall
+                .with()
+                .hour(23)
+                .minute(59)
+                .second(59)
+                .subsec_nanosecond(0)
+                .build()?;
+            continue;
+        }
+        cursor = wall.clone();
+        let candidate = timezone.to_ambiguous_timestamp(wall.datetime());
+        if matches!(candidate.offset(), AmbiguousOffset::Gap { .. }) {
+            continue;
+        }
+        let candidate = candidate.earlier()?;
+        // In the second half of a fall-back fold, the earlier instance of a
+        // later wall-clock value can already be in the past. Never return it
+        // and make the scheduler repeatedly select an already-due job.
+        if candidate > from {
+            return Ok(candidate);
+        }
+    }
+
+    ::zeroclaw_log::record!(
+        WARN,
+        ::zeroclaw_log::Event::new(module_path!(), ::zeroclaw_log::Action::Fail)
+            .with_outcome(::zeroclaw_log::EventOutcome::Failure)
+            .with_attrs(::serde_json::json!({"expr": expr})),
+        "cron schedule: no future occurrence for expression"
+    );
+    anyhow::bail!("No future occurrence for expression: {expr}")
+}
+
+pub fn validate_schedule(schedule: &Schedule, now: Timestamp) -> Result<()> {
     match schedule {
         Schedule::Cron { expr, .. } => {
             let _ = normalize_expression(expr)?;
@@ -73,14 +122,15 @@ pub fn validate_schedule(schedule: &Schedule, now: DateTime<Utc>) -> Result<()> 
         }
         Schedule::At { at } => {
             if *at <= now {
+                let local = TimeZone::system();
                 anyhow::bail!(
                     "Invalid schedule: 'at' must be in the future \
                      (now_utc={}, now_local={}, at_utc={}, at_local={}, delta_seconds={})",
-                    now.to_rfc3339(),
-                    now.with_timezone(&chrono::Local).to_rfc3339(),
-                    at.to_rfc3339(),
-                    at.with_timezone(&chrono::Local).to_rfc3339(),
-                    (*at - now).num_seconds()
+                    format_rfc3339(now),
+                    format_rfc3339_zoned(&now.to_zoned(local.clone())),
+                    format_rfc3339(*at),
+                    format_rfc3339_zoned(&at.to_zoned(local)),
+                    at.duration_since(now).as_secs()
                 );
             }
             Ok(())
@@ -262,16 +312,24 @@ fn normalize_weekday_field(field: &str) -> Result<String> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use chrono::{Datelike, Offset, TimeZone};
+    use jiff::civil::{Weekday, date};
+
+    fn utc(year: i16, month: i8, day: i8, hour: i8, minute: i8, second: i8) -> Timestamp {
+        date(year, month, day)
+            .at(hour, minute, second, 0)
+            .to_zoned(TimeZone::UTC)
+            .unwrap()
+            .timestamp()
+    }
 
     #[test]
     fn next_run_for_schedule_supports_every_and_at() {
-        let now = Utc::now();
+        let now = Timestamp::now();
         let every = Schedule::Every { every_ms: 60_000 };
         let next = next_run_for_schedule(&every, now).unwrap();
         assert!(next > now);
 
-        let at = now + ChronoDuration::minutes(10);
+        let at = now + SignedDuration::from_mins(10);
         let at_schedule = Schedule::At { at };
         let next_at = next_run_for_schedule(&at_schedule, now).unwrap();
         assert_eq!(next_at, at);
@@ -279,14 +337,14 @@ mod tests {
 
     #[test]
     fn next_run_for_schedule_supports_timezone() {
-        let from = Utc.with_ymd_and_hms(2026, 2, 16, 0, 0, 0).unwrap();
+        let from = utc(2026, 2, 16, 0, 0, 0);
         let schedule = Schedule::Cron {
             expr: "0 9 * * *".into(),
             tz: Some("America/Los_Angeles".into()),
         };
 
         let next = next_run_for_schedule(&schedule, from).unwrap();
-        assert_eq!(next, Utc.with_ymd_and_hms(2026, 2, 16, 17, 0, 0).unwrap());
+        assert_eq!(next, utc(2026, 2, 16, 17, 0, 0));
     }
 
     #[test]
@@ -386,53 +444,53 @@ mod tests {
     fn weekday_1_5_schedules_monday_through_friday() {
         // 2026-02-16 is a Monday. With "0 9 * * 1-5" (Mon-Fri at 09:00 UTC),
         // the next run from Sunday 2026-02-15 should be Monday 2026-02-16.
-        let sunday = Utc.with_ymd_and_hms(2026, 2, 15, 0, 0, 0).unwrap();
+        let sunday = utc(2026, 2, 15, 0, 0, 0);
         let schedule = Schedule::Cron {
             expr: "0 9 * * 1-5".into(),
             tz: Some("UTC".into()),
         };
         let next = next_run_for_schedule(&schedule, sunday).unwrap();
         // Should be Monday 2026-02-16 at 09:00 UTC (weekday = Mon)
-        assert_eq!(next, Utc.with_ymd_and_hms(2026, 2, 16, 9, 0, 0).unwrap());
-        assert_eq!(next.weekday(), chrono::Weekday::Mon);
+        assert_eq!(next, utc(2026, 2, 16, 9, 0, 0));
+        assert_eq!(next.to_zoned(TimeZone::UTC).weekday(), Weekday::Monday);
     }
 
     #[test]
     fn weekday_1_5_does_not_fire_on_saturday_or_sunday() {
         // From Friday evening, next run should skip Sat/Sun → Monday
-        let friday_evening = Utc.with_ymd_and_hms(2026, 2, 20, 18, 0, 0).unwrap();
+        let friday_evening = utc(2026, 2, 20, 18, 0, 0);
         let schedule = Schedule::Cron {
             expr: "0 9 * * 1-5".into(),
             tz: Some("UTC".into()),
         };
         let next = next_run_for_schedule(&schedule, friday_evening).unwrap();
         // Should be Monday 2026-02-23 at 09:00 UTC
-        assert_eq!(next, Utc.with_ymd_and_hms(2026, 2, 23, 9, 0, 0).unwrap());
-        assert_eq!(next.weekday(), chrono::Weekday::Mon);
+        assert_eq!(next, utc(2026, 2, 23, 9, 0, 0));
+        assert_eq!(next.to_zoned(TimeZone::UTC).weekday(), Weekday::Monday);
     }
 
     #[test]
     fn weekday_0_means_sunday() {
         // "0 10 * * 0" should fire on Sunday only
-        let monday = Utc.with_ymd_and_hms(2026, 2, 16, 0, 0, 0).unwrap();
+        let monday = utc(2026, 2, 16, 0, 0, 0);
         let schedule = Schedule::Cron {
             expr: "0 10 * * 0".into(),
             tz: Some("UTC".into()),
         };
         let next = next_run_for_schedule(&schedule, monday).unwrap();
-        assert_eq!(next.weekday(), chrono::Weekday::Sun);
+        assert_eq!(next.to_zoned(TimeZone::UTC).weekday(), Weekday::Sunday);
     }
 
     #[test]
     fn weekday_7_means_sunday() {
         // "0 10 * * 7" should also fire on Sunday (alias)
-        let monday = Utc.with_ymd_and_hms(2026, 2, 16, 0, 0, 0).unwrap();
+        let monday = utc(2026, 2, 16, 0, 0, 0);
         let schedule = Schedule::Cron {
             expr: "0 10 * * 7".into(),
             tz: Some("UTC".into()),
         };
         let next = next_run_for_schedule(&schedule, monday).unwrap();
-        assert_eq!(next.weekday(), chrono::Weekday::Sun);
+        assert_eq!(next.to_zoned(TimeZone::UTC).weekday(), Weekday::Sunday);
     }
 
     #[test]
@@ -441,7 +499,7 @@ mod tests {
         // Sunday-alias fix it normalized to the non-ascending `7-1`, which
         // cron 0.15 rejects, so this would have errored (and the `.unwrap()`
         // below would panic) instead of producing the next weekend run.
-        let monday = Utc.with_ymd_and_hms(2026, 2, 16, 0, 0, 0).unwrap();
+        let monday = utc(2026, 2, 16, 0, 0, 0);
         let schedule = Schedule::Cron {
             expr: "0 10 * * 6-7".into(),
             tz: Some("UTC".into()),
@@ -449,34 +507,34 @@ mod tests {
 
         // First run is Saturday 2026-02-21 at 10:00 UTC.
         let saturday = next_run_for_schedule(&schedule, monday).unwrap();
+        assert_eq!(saturday, utc(2026, 2, 21, 10, 0, 0));
         assert_eq!(
-            saturday,
-            Utc.with_ymd_and_hms(2026, 2, 21, 10, 0, 0).unwrap()
+            saturday.to_zoned(TimeZone::UTC).weekday(),
+            Weekday::Saturday
         );
-        assert_eq!(saturday.weekday(), chrono::Weekday::Sat);
 
         // The following run is the very next day, Sunday 2026-02-22.
         let sunday = next_run_for_schedule(&schedule, saturday).unwrap();
-        assert_eq!(sunday, Utc.with_ymd_and_hms(2026, 2, 22, 10, 0, 0).unwrap());
-        assert_eq!(sunday.weekday(), chrono::Weekday::Sun);
+        assert_eq!(sunday, utc(2026, 2, 22, 10, 0, 0));
+        assert_eq!(sunday.to_zoned(TimeZone::UTC).weekday(), Weekday::Sunday);
     }
 
     #[test]
     fn stepped_full_week_sunday_alias_range_fires_every_other_day() {
-        let monday = Utc.with_ymd_and_hms(2026, 2, 16, 0, 0, 0).unwrap();
+        let monday = utc(2026, 2, 16, 0, 0, 0);
         let schedule = Schedule::Cron {
             expr: "0 10 * * 0-7/2".into(),
             tz: Some("UTC".into()),
         };
 
         let next = next_run_for_schedule(&schedule, monday).unwrap();
-        assert_eq!(next, Utc.with_ymd_and_hms(2026, 2, 17, 10, 0, 0).unwrap());
-        assert_eq!(next.weekday(), chrono::Weekday::Tue);
+        assert_eq!(next, utc(2026, 2, 17, 10, 0, 0));
+        assert_eq!(next.to_zoned(TimeZone::UTC).weekday(), Weekday::Tuesday);
     }
 
     #[test]
     fn no_tz_defaults_to_local_timezone() {
-        let from = Utc.with_ymd_and_hms(2026, 6, 15, 12, 0, 0).unwrap();
+        let from = utc(2026, 6, 15, 12, 0, 0);
         let schedule_no_tz = Schedule::Cron {
             expr: "0 9 * * *".into(),
             tz: None,
@@ -489,11 +547,140 @@ mod tests {
         let next_utc = next_run_for_schedule(&schedule_utc, from).unwrap();
         assert!(next_local > from);
         assert!(next_utc > from);
-        let local_offset = chrono::Local::now().offset().fix().local_minus_utc();
+        let local_offset = from.to_zoned(TimeZone::system()).offset().seconds();
         if local_offset == 0 {
             assert_eq!(next_local, next_utc);
         } else {
             assert_ne!(next_local, next_utc);
         }
+    }
+
+    #[test]
+    fn fractional_start_still_checks_weekday_and_excludes_the_current_second() {
+        let monday_only = Schedule::Cron {
+            expr: "10 * * * MON".into(),
+            tz: Some("UTC".into()),
+        };
+        // Rounding this Tuesday up to 12:10 must not bypass the Monday field.
+        let from = "2026-02-17T12:09:59.500Z".parse().unwrap();
+        assert_eq!(
+            next_run_for_schedule(&monday_only, from).unwrap(),
+            utc(2026, 2, 23, 0, 10, 0),
+        );
+        let every_minute = Schedule::Cron {
+            expr: "* * * * *".into(),
+            tz: Some("UTC".into()),
+        };
+        for from in [
+            "2026-02-17T12:10:00Z",
+            "2026-02-17T12:10:00.000000001Z",
+            "2026-02-17T12:10:59.999999999Z",
+        ] {
+            let from = from.parse().unwrap();
+            assert_eq!(
+                next_run_for_schedule(&every_minute, from).unwrap(),
+                utc(2026, 2, 17, 12, 11, 0),
+            );
+        }
+    }
+
+    #[test]
+    fn spring_gap_is_skipped_across_repeated_production_calls() {
+        let schedule = Schedule::Cron {
+            expr: "30 2 * * *".into(),
+            tz: Some("America/Los_Angeles".into()),
+        };
+        let last_before_gap = utc(2026, 3, 7, 10, 30, 0);
+        let first = next_run_for_schedule(&schedule, last_before_gap).unwrap();
+        let second = next_run_for_schedule(&schedule, first).unwrap();
+        // March 8 has no 02:30. Do not turn that missing occurrence into 03:00
+        // or 03:30; the retained policy moves to the next scheduled civil day.
+        assert_eq!(first, utc(2026, 3, 9, 9, 30, 0));
+        assert_eq!(second, utc(2026, 3, 10, 9, 30, 0));
+    }
+
+    #[test]
+    fn fall_fold_uses_one_earlier_instance_and_never_returns_a_past_run() {
+        let schedule = Schedule::Cron {
+            expr: "30 1 * * *".into(),
+            tz: Some("America/Los_Angeles".into()),
+        };
+        let before_fold = utc(2026, 10, 31, 8, 30, 0);
+        let first = next_run_for_schedule(&schedule, before_fold).unwrap();
+        let second = next_run_for_schedule(&schedule, first).unwrap();
+        assert_eq!(first, utc(2026, 11, 1, 8, 30, 0));
+        assert_eq!(second, utc(2026, 11, 2, 9, 30, 0));
+
+        // 01:15 in the later (PST) half of the fold. Resolving the next 01:30
+        // to its earlier PDT instance would go backwards to 08:30 UTC.
+        let later_half = utc(2026, 11, 1, 9, 15, 0);
+        let next = next_run_for_schedule(&schedule, later_half).unwrap();
+        assert_eq!(next, second);
+        assert!(next > later_half);
+    }
+
+    #[test]
+    fn native_fields_preserve_weekday_and_day_intersection_semantics() {
+        let from = utc(2026, 2, 16, 12, 0, 0);
+        let native_sunday = Schedule::Cron {
+            expr: "0 0 10 * * 1".into(),
+            tz: Some("UTC".into()),
+        };
+        assert_eq!(
+            next_run_for_schedule(&native_sunday, from).unwrap(),
+            utc(2026, 2, 22, 10, 0, 0),
+        );
+        let day_and_weekday = Schedule::Cron {
+            expr: "0 0 10 1 * MON 2027".into(),
+            tz: Some("UTC".into()),
+        };
+        assert_eq!(
+            next_run_for_schedule(&day_and_weekday, utc(2027, 1, 2, 0, 0, 0)).unwrap(),
+            utc(2027, 2, 1, 10, 0, 0),
+        );
+        let expired = Schedule::Cron {
+            expr: "0 0 10 * * * 2025".into(),
+            tz: Some("UTC".into()),
+        };
+        assert!(next_run_for_schedule(&expired, from).is_err());
+        let invalid_timezone = Schedule::Cron {
+            expr: "0 10 * * *".into(),
+            tz: Some("Invalid/Timezone".into()),
+        };
+        assert!(next_run_for_schedule(&invalid_timezone, from).is_err());
+    }
+
+    #[test]
+    fn second_level_weekday_search_preserves_month_day_and_year_constraints() {
+        let every_second_on_monday = Schedule::Cron {
+            expr: "* * * * * MON".into(),
+            tz: Some("UTC".into()),
+        };
+        assert_eq!(
+            next_run_for_schedule(&every_second_on_monday, utc(2026, 2, 17, 0, 0, 0)).unwrap(),
+            utc(2026, 2, 23, 0, 0, 0),
+        );
+        let first_monday_in_2027 = Schedule::Cron {
+            expr: "* * * 1 Jan-Mar MON 2027".into(),
+            tz: Some("UTC".into()),
+        };
+        assert_eq!(
+            next_run_for_schedule(&first_monday_in_2027, utc(2026, 12, 31, 23, 59, 59)).unwrap(),
+            utc(2027, 2, 1, 0, 0, 0),
+        );
+    }
+
+    #[test]
+    fn interval_schedule_preserves_nanoseconds_and_checks_overflow() {
+        let schedule = Schedule::Every { every_ms: 1_250 };
+        let from = "2026-02-17T12:10:00.123456789Z".parse().unwrap();
+        assert_eq!(
+            next_run_for_schedule(&schedule, from).unwrap(),
+            "2026-02-17T12:10:01.373456789Z"
+                .parse::<Timestamp>()
+                .unwrap(),
+        );
+        assert!(next_run_for_schedule(&schedule, Timestamp::MAX).is_err());
+        assert!(next_run_for_schedule(&Schedule::Every { every_ms: u64::MAX }, from).is_err());
     }
 }

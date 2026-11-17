@@ -3,7 +3,6 @@
 //! auto-created, output truncated, history pruned to a configurable limit.
 
 use anyhow::{Context, Result};
-use chrono::{DateTime, Utc};
 use rusqlite::{Connection, params};
 use std::path::{Path, PathBuf};
 
@@ -16,8 +15,8 @@ pub struct HeartbeatRun {
     pub id: i64,
     pub task_text: String,
     pub task_priority: String,
-    pub started_at: DateTime<Utc>,
-    pub finished_at: DateTime<Utc>,
+    pub started_at: jiff::Timestamp,
+    pub finished_at: jiff::Timestamp,
     pub status: String, // "ok" or "error"
     pub output: Option<String>,
     pub duration_ms: i64,
@@ -28,8 +27,8 @@ pub fn record_run(
     workspace_dir: &Path,
     task_text: &str,
     task_priority: &str,
-    started_at: DateTime<Utc>,
-    finished_at: DateTime<Utc>,
+    started_at: jiff::Timestamp,
+    finished_at: jiff::Timestamp,
     status: &str,
     output: Option<&str>,
     duration_ms: i64,
@@ -46,8 +45,8 @@ pub fn record_run(
             params![
                 task_text,
                 task_priority,
-                started_at.to_rfc3339(),
-                finished_at.to_rfc3339(),
+                zeroclaw_api::time::format_rfc3339(started_at),
+                zeroclaw_api::time::format_rfc3339(finished_at),
                 status,
                 bounded_output.as_deref(),
                 duration_ms,
@@ -192,10 +191,10 @@ fn truncate_output(output: &str) -> String {
     truncated
 }
 
-fn parse_rfc3339(raw: &str) -> Result<DateTime<Utc>> {
-    let parsed = DateTime::parse_from_rfc3339(raw)
+fn parse_rfc3339(raw: &str) -> Result<jiff::Timestamp> {
+    let parsed = zeroclaw_api::time::parse_rfc3339(raw)
         .with_context(|| format!("Invalid RFC3339 timestamp in heartbeat DB: {raw}"))?;
-    Ok(parsed.with_timezone(&Utc))
+    Ok(parsed)
 }
 
 fn sql_err(err: anyhow::Error) -> rusqlite::Error {
@@ -205,17 +204,16 @@ fn sql_err(err: anyhow::Error) -> rusqlite::Error {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use chrono::Duration as ChronoDuration;
     use tempfile::TempDir;
 
     #[test]
     fn record_and_list_runs() {
         let tmp = TempDir::new().unwrap();
-        let base = Utc::now();
+        let base = jiff::Timestamp::now();
 
         for i in 0..3 {
-            let start = base + ChronoDuration::seconds(i);
-            let end = start + ChronoDuration::milliseconds(100);
+            let start = base + jiff::SignedDuration::from_secs(i);
+            let end = start + jiff::SignedDuration::from_millis(100);
             record_run(
                 tmp.path(),
                 &format!("Task {i}"),
@@ -239,11 +237,11 @@ mod tests {
     #[test]
     fn prunes_old_runs() {
         let tmp = TempDir::new().unwrap();
-        let base = Utc::now();
+        let base = jiff::Timestamp::now();
 
         for i in 0..5 {
-            let start = base + ChronoDuration::seconds(i);
-            let end = start + ChronoDuration::milliseconds(50);
+            let start = base + jiff::SignedDuration::from_secs(i);
+            let end = start + jiff::SignedDuration::from_millis(50);
             record_run(
                 tmp.path(),
                 "Task",
@@ -265,7 +263,7 @@ mod tests {
     #[test]
     fn list_runs_zero_limit_returns_empty() {
         let tmp = TempDir::new().unwrap();
-        let now = Utc::now();
+        let now = jiff::Timestamp::now();
 
         record_run(
             tmp.path(),
@@ -287,7 +285,7 @@ mod tests {
     #[test]
     fn run_stats_counts_correctly() {
         let tmp = TempDir::new().unwrap();
-        let now = Utc::now();
+        let now = jiff::Timestamp::now();
 
         record_run(tmp.path(), "A", "high", now, now, "ok", None, 10, 50).unwrap();
         record_run(
@@ -313,7 +311,7 @@ mod tests {
     #[test]
     fn truncates_large_output() {
         let tmp = TempDir::new().unwrap();
-        let now = Utc::now();
+        let now = jiff::Timestamp::now();
         let big = "x".repeat(MAX_OUTPUT_BYTES + 512);
 
         record_run(

@@ -1,5 +1,4 @@
 use anyhow::{Context, Result};
-use chrono::{DateTime, Datelike, NaiveDate, Utc};
 use parking_lot::{Mutex, MutexGuard, RwLock};
 use std::collections::HashMap;
 use std::fs::{self, File, OpenOptions};
@@ -263,8 +262,8 @@ impl CostTracker {
 
     pub fn get_summary_in_bounds(
         &self,
-        from: Option<DateTime<Utc>>,
-        to: Option<DateTime<Utc>>,
+        from: Option<jiff::Timestamp>,
+        to: Option<jiff::Timestamp>,
     ) -> Result<CostSummary> {
         let (daily_cost, monthly_cost, records, rejected_records) = {
             let mut storage = self.lock_storage();
@@ -363,13 +362,15 @@ impl CostTracker {
             // Per-agent view: re-aggregate day/month from persisted records.
             let mut daily_total = 0.0;
             let mut monthly_total = 0.0;
-            let today = Utc::now().date_naive();
-            let now = Utc::now();
+            let today = jiff::tz::Offset::UTC
+                .to_datetime(jiff::Timestamp::now())
+                .date();
+            let now = jiff::tz::Offset::UTC.to_datetime(jiff::Timestamp::now());
             for record in &daily_records {
                 if record.agent_alias.as_deref() != Some(alias) {
                     continue;
                 }
-                let ts = record.usage.timestamp.naive_utc();
+                let ts = jiff::tz::Offset::UTC.to_datetime(record.usage.timestamp);
                 if ts.date() == today {
                     daily_total += record.usage.cost_usd;
                 }
@@ -398,7 +399,7 @@ impl CostTracker {
     }
 
     /// Get the daily cost for a specific date.
-    pub fn get_daily_cost(&self, date: NaiveDate) -> Result<f64> {
+    pub fn get_daily_cost(&self, date: jiff::civil::Date) -> Result<f64> {
         let storage = self.lock_storage();
         storage.get_cost_for_date(date)
     }
@@ -646,7 +647,7 @@ struct CostStorage {
     /// Cached total for the current UTC month.
     monthly_cost_usd: f64,
     /// Day represented by `daily_cost_usd`.
-    cached_day: NaiveDate,
+    cached_day: jiff::civil::Date,
     /// Year represented by `monthly_cost_usd`.
     cached_year: i32,
     /// Month represented by `monthly_cost_usd`.
@@ -662,14 +663,14 @@ impl CostStorage {
             fs::create_dir_all(parent)
                 .with_context(|| format!("Failed to create directory {}", parent.display()))?;
         }
-        let now = Utc::now();
+        let now = jiff::tz::Offset::UTC.to_datetime(jiff::Timestamp::now());
         Ok(Self {
             path: path.to_path_buf(),
             daily_cost_usd: 0.0,
             monthly_cost_usd: 0.0,
-            cached_day: now.date_naive(),
-            cached_year: now.year(),
-            cached_month: now.month(),
+            cached_day: now.date(),
+            cached_year: i32::from(now.year()),
+            cached_month: u32::from(now.month().unsigned_abs()),
             aggregates_current: false,
         })
     }
@@ -751,18 +752,20 @@ impl CostStorage {
         Ok(rejected_records)
     }
 
-    fn rebuild_aggregates(&mut self, day: NaiveDate, year: i32, month: u32) -> Result<()> {
+    fn rebuild_aggregates(&mut self, day: jiff::civil::Date, year: i32, month: u32) -> Result<()> {
         let mut daily_cost = 0.0;
         let mut monthly_cost = 0.0;
 
         self.for_each_record(|record| {
-            let timestamp = record.usage.timestamp.naive_utc();
+            let timestamp = jiff::tz::Offset::UTC.to_datetime(record.usage.timestamp);
 
             if timestamp.date() == day {
                 daily_cost += record.usage.cost_usd;
             }
 
-            if timestamp.year() == year && timestamp.month() == month {
+            if i32::from(timestamp.year()) == year
+                && u32::from(timestamp.month().unsigned_abs()) == month
+            {
                 monthly_cost += record.usage.cost_usd;
             }
         })?;
@@ -778,10 +781,10 @@ impl CostStorage {
     }
 
     fn ensure_period_cache_current(&mut self) -> Result<()> {
-        let now = Utc::now();
-        let day = now.date_naive();
-        let year = now.year();
-        let month = now.month();
+        let now = jiff::tz::Offset::UTC.to_datetime(jiff::Timestamp::now());
+        let day = now.date();
+        let year = i32::from(now.year());
+        let month = u32::from(now.month().unsigned_abs());
 
         if !self.aggregates_current
             || day != self.cached_day
@@ -811,11 +814,13 @@ impl CostStorage {
         file.sync_all()
             .with_context(|| format!("Failed to sync cost storage at {}", self.path.display()))?;
 
-        let timestamp = record.usage.timestamp.naive_utc();
+        let timestamp = jiff::tz::Offset::UTC.to_datetime(record.usage.timestamp);
         if timestamp.date() == self.cached_day {
             self.daily_cost_usd += record.usage.cost_usd;
         }
-        if timestamp.year() == self.cached_year && timestamp.month() == self.cached_month {
+        if i32::from(timestamp.year()) == self.cached_year
+            && u32::from(timestamp.month().unsigned_abs()) == self.cached_month
+        {
             self.monthly_cost_usd += record.usage.cost_usd;
         }
         Ok(())
@@ -836,8 +841,8 @@ impl CostStorage {
         let month = self.cached_month;
         let mut out = Vec::new();
         let rejected_records = self.for_each_record(|record| {
-            let ts = record.usage.timestamp.naive_utc();
-            if ts.year() == year && ts.month() == month {
+            let ts = jiff::tz::Offset::UTC.to_datetime(record.usage.timestamp);
+            if i32::from(ts.year()) == year && u32::from(ts.month().unsigned_abs()) == month {
                 out.push(record);
             }
         })?;
@@ -846,8 +851,8 @@ impl CostStorage {
 
     fn records_in_bounds(
         &mut self,
-        from: Option<DateTime<Utc>>,
-        to: Option<DateTime<Utc>>,
+        from: Option<jiff::Timestamp>,
+        to: Option<jiff::Timestamp>,
     ) -> Result<(Vec<CostRecord>, usize)> {
         let mut out = Vec::new();
         let rejected_records = self.for_each_record(|record| {
@@ -896,11 +901,15 @@ impl CostStorage {
     }
 
     /// Get cost for a specific date.
-    fn get_cost_for_date(&self, date: NaiveDate) -> Result<f64> {
+    fn get_cost_for_date(&self, date: jiff::civil::Date) -> Result<f64> {
         let mut cost = 0.0;
 
         self.for_each_record(|record| {
-            if record.usage.timestamp.naive_utc().date() == date {
+            if jiff::tz::Offset::UTC
+                .to_datetime(record.usage.timestamp)
+                .date()
+                == date
+            {
                 cost += record.usage.cost_usd;
             }
         })?;
@@ -913,8 +922,10 @@ impl CostStorage {
         let mut cost = 0.0;
 
         self.for_each_record(|record| {
-            let timestamp = record.usage.timestamp.naive_utc();
-            if timestamp.year() == year && timestamp.month() == month {
+            let timestamp = jiff::tz::Offset::UTC.to_datetime(record.usage.timestamp);
+            if i32::from(timestamp.year()) == year
+                && u32::from(timestamp.month().unsigned_abs()) == month
+            {
                 cost += record.usage.cost_usd;
             }
         })?;
@@ -942,7 +953,6 @@ fn new_record(
 mod tests {
     use super::*;
     use crate::calculate_token_usage;
-    use chrono::Utc;
     use tempfile::TempDir;
 
     fn enabled_config() -> CostConfig {
@@ -1289,7 +1299,13 @@ mod tests {
         file.sync_all().unwrap();
 
         let tracker = CostTracker::new(enabled_config(), tmp.path()).unwrap();
-        let today_cost = tracker.get_daily_cost(Utc::now().date_naive()).unwrap();
+        let today_cost = tracker
+            .get_daily_cost(
+                jiff::tz::Offset::UTC
+                    .to_datetime(jiff::Timestamp::now())
+                    .date(),
+            )
+            .unwrap();
         assert!((today_cost - valid_usage.cost_usd).abs() < f64::EPSILON);
     }
 

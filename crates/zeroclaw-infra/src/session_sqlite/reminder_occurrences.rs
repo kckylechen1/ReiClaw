@@ -237,7 +237,7 @@ impl super::SqliteSessionBackend {
                 params![
                     occurrence_id,
                     OCC_STATE_ENQUEUED,
-                    chrono::Utc::now().timestamp(),
+                    zeroclaw_api::time::epoch_second(jiff::Timestamp::now()),
                     OCC_STATE_SCHEDULED
                 ],
             )

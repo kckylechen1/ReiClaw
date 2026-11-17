@@ -217,7 +217,7 @@ fn migrate_inner(
     let receipt = MigrationReceipt {
         format: "zeroclaw.kernel.migration/v1".into(),
         receipt_namespace: RECEIPT_NAMESPACE.into(), receipt_key: receipt_key.clone(),
-        approved_by: approved_by.into(), created_at: chrono::Utc::now().to_rfc3339(),
+        approved_by: approved_by.into(), created_at: zeroclaw_api::time::format_rfc3339(jiff::Timestamp::now()),
         source: original.clone(), destination: final_path.clone(),
         source_revision: format::LEGACY_REVISION.into(), source_schema: 38, target_schema,
         source_profile: inventory.schema.profile.clone(), target_profile: "portable_kernel".into(),

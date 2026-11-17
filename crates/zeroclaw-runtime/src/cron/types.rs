@@ -1,4 +1,4 @@
-use chrono::{DateTime, Utc};
+use jiff::Timestamp;
 use serde::{Deserialize, Serialize};
 
 pub fn deserialize_maybe_stringified<T: serde::de::DeserializeOwned>(
@@ -88,7 +88,8 @@ pub enum Schedule {
         tz: Option<String>,
     },
     At {
-        at: DateTime<Utc>,
+        #[serde(with = "zeroclaw_api::time::serde")]
+        at: Timestamp,
     },
     Every {
         every_ms: u64,
@@ -159,9 +160,12 @@ pub struct CronJob {
     /// How the job was created: `"imperative"` (CLI/API) or `"declarative"` (config).
     #[serde(default = "default_source")]
     pub source: String,
-    pub created_at: DateTime<Utc>,
-    pub next_run: DateTime<Utc>,
-    pub last_run: Option<DateTime<Utc>>,
+    #[serde(with = "zeroclaw_api::time::serde")]
+    pub created_at: Timestamp,
+    #[serde(with = "zeroclaw_api::time::serde")]
+    pub next_run: Timestamp,
+    #[serde(default, with = "zeroclaw_api::time::serde::optional")]
+    pub last_run: Option<Timestamp>,
     pub last_status: Option<String>,
     pub last_output: Option<String>,
 }
@@ -170,8 +174,10 @@ pub struct CronJob {
 pub struct CronRun {
     pub id: i64,
     pub job_id: String,
-    pub started_at: DateTime<Utc>,
-    pub finished_at: DateTime<Utc>,
+    #[serde(with = "zeroclaw_api::time::serde")]
+    pub started_at: Timestamp,
+    #[serde(with = "zeroclaw_api::time::serde")]
+    pub finished_at: Timestamp,
     pub status: String,
     pub output: Option<String>,
     pub duration_ms: Option<i64>,
@@ -269,5 +275,26 @@ mod tests {
     fn job_type_try_from_rejects_invalid_values() {
         assert!(JobType::try_from("").is_err());
         assert!(JobType::try_from("unknown").is_err());
+    }
+
+    #[test]
+    fn at_schedule_preserves_the_existing_utc_wire_format() {
+        let input = serde_json::json!({
+            "kind": "at",
+            "at": "2030-01-02T03:04:05.123400+05:30",
+        });
+        let schedule: Schedule = serde_json::from_value(input).unwrap();
+        let encoded = serde_json::to_value(&schedule).unwrap();
+        assert_eq!(
+            encoded,
+            serde_json::json!({
+                "kind": "at",
+                "at": "2030-01-01T21:34:05.123400Z",
+            })
+        );
+        assert_eq!(
+            serde_json::from_value::<Schedule>(encoded).unwrap(),
+            schedule
+        );
     }
 }

@@ -37,7 +37,6 @@ use crate::kernel_store::{KernelStoreKind, MIGRATE_CLI_HINT};
 use crate::point_scope::PointScope;
 use anyhow::Context;
 use async_trait::async_trait;
-use chrono::{DateTime, SecondsFormat, Utc};
 use parking_lot::{Mutex, RwLock};
 use portable_kernel::{DbOpenContext, HybridWeights, MemoryStore, SearchOptions};
 use sha2::{Digest, Sha256};
@@ -433,25 +432,25 @@ impl TachiMemory {
         Self::metadata_str(&entry.metadata, METADATA_SUPERSEDED_BY).is_some_and(|s| !s.is_empty())
     }
 
-    pub(crate) fn format_utc_millis(dt: DateTime<Utc>) -> String {
-        dt.to_rfc3339_opts(SecondsFormat::Millis, true)
+    pub(crate) fn format_utc_millis(dt: jiff::Timestamp) -> String {
+        zeroclaw_api::time::format_rfc3339_millis(dt)
     }
 
-    pub(crate) fn format_utc_nanos(dt: DateTime<Utc>) -> String {
-        dt.to_rfc3339_opts(SecondsFormat::Nanos, true)
+    pub(crate) fn format_utc_nanos(dt: jiff::Timestamp) -> String {
+        zeroclaw_api::time::format_rfc3339_nanos(dt)
     }
 
     pub(crate) fn canonical_sort_nanos(raw: &str) -> String {
-        DateTime::parse_from_rfc3339(raw)
-            .map(|dt| Self::format_utc_nanos(dt.with_timezone(&Utc)))
+        zeroclaw_api::time::parse_rfc3339(raw)
+            .map(Self::format_utc_nanos)
             .unwrap_or_else(|_| raw.to_string())
     }
 
     pub(crate) fn effective_updated_sort_key(entry: &portable_kernel::MemoryEntry) -> String {
         if let Some(raw_updated) = Self::metadata_str(&entry.metadata, METADATA_ZC_UPDATED_AT)
-            && let Ok(parsed) = DateTime::parse_from_rfc3339(&raw_updated)
+            && let Ok(parsed) = zeroclaw_api::time::parse_rfc3339(&raw_updated)
         {
-            let utc = parsed.with_timezone(&Utc);
+            let utc = parsed;
             if Self::format_utc_millis(utc) == entry.timestamp {
                 return Self::format_utc_nanos(utc);
             }
@@ -517,10 +516,8 @@ impl TachiMemory {
         }
     }
 
-    fn parse_rfc3339_utc(raw: &str) -> Option<DateTime<Utc>> {
-        DateTime::parse_from_rfc3339(raw)
-            .ok()
-            .map(|dt| dt.with_timezone(&Utc))
+    fn parse_rfc3339_utc(raw: &str) -> Option<jiff::Timestamp> {
+        zeroclaw_api::time::parse_rfc3339(raw).ok()
     }
 
     fn entry_in_window(timestamp: &str, since: Option<&str>, until: Option<&str>) -> bool {
@@ -733,7 +730,7 @@ impl TachiMemory {
         } else {
             self.compute_embedding(content).await
         };
-        let now_dt = Utc::now();
+        let now_dt = jiff::Timestamp::now();
         let now_millis = Self::format_utc_millis(now_dt);
         let now_nanos = Self::format_utc_nanos(now_dt);
         let importance = importance.unwrap_or(0.7);
@@ -1223,7 +1220,7 @@ impl TachiMemory {
             return Ok(());
         }
 
-        let now_utc = Self::format_utc_millis(Utc::now());
+        let now_utc = Self::format_utc_millis(jiff::Timestamp::now());
         let query_hash = Self::fnv1a_query_hash(query);
         let promote_legacy =
             !portable_kernel::recall_config::RecallConfig::get().use_provenance_recency;
@@ -1865,7 +1862,7 @@ impl Memory for TachiMemory {
                 .transaction_with_behavior(rusqlite::TransactionBehavior::Immediate)
                 .context("failed to begin tachi supersede transaction")?;
             let json_path = format!("$.{METADATA_SUPERSEDED_BY}");
-            let now_utc = Self::format_utc_millis(Utc::now());
+            let now_utc = Self::format_utc_millis(jiff::Timestamp::now());
             for id in &ids {
                 anyhow::ensure!(
                     !id.starts_with("wiki-rem:"),

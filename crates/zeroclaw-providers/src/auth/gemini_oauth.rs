@@ -4,7 +4,6 @@ use crate::auth::oauth_common::{parse_query_params, url_decode, url_encode};
 use crate::auth::profiles::TokenSet;
 use anyhow::{Context, Result};
 use base64::Engine;
-use chrono::Utc;
 use reqwest::Client;
 use serde::Deserialize;
 use std::collections::BTreeMap;
@@ -137,7 +136,9 @@ pub async fn exchange_code_for_tokens(
 
     let expires_at = token_response
         .expires_in
-        .map(|secs| Utc::now() + chrono::Duration::seconds(secs));
+        .map(|secs| jiff::Timestamp::now().checked_add(jiff::SignedDuration::from_secs(secs)))
+        .transpose()
+        .context("OAuth token expiry is outside the supported range")?;
 
     Ok(TokenSet {
         access_token: token_response.access_token,
@@ -191,7 +192,9 @@ pub async fn refresh_access_token(
 
     let expires_at = token_response
         .expires_in
-        .map(|secs| Utc::now() + chrono::Duration::seconds(secs));
+        .map(|secs| jiff::Timestamp::now().checked_add(jiff::SignedDuration::from_secs(secs)))
+        .transpose()
+        .context("OAuth token expiry is outside the supported range")?;
 
     Ok(TokenSet {
         access_token: token_response.access_token,
@@ -285,7 +288,11 @@ pub async fn poll_device_code_tokens(
 
             let expires_at = token_response
                 .expires_in
-                .map(|secs| Utc::now() + chrono::Duration::seconds(secs));
+                .map(|secs| {
+                    jiff::Timestamp::now().checked_add(jiff::SignedDuration::from_secs(secs))
+                })
+                .transpose()
+                .context("OAuth token expiry is outside the supported range")?;
 
             return Ok(TokenSet {
                 access_token: token_response.access_token,

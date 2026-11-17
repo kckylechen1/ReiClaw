@@ -2452,7 +2452,7 @@ impl zeroclaw_memory::Memory for StaticRecallMemory {
             key: "remembered".into(),
             content: "the server is prod-3".into(),
             category: MemoryCategory::Core,
-            timestamp: chrono::Utc::now().to_rfc3339(),
+            timestamp: zeroclaw_api::time::format_rfc3339(jiff::Timestamp::now()),
             session_id: None,
             score: None,
             namespace: "default".into(),

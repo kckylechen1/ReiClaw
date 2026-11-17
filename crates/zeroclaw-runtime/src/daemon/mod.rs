@@ -1,5 +1,4 @@
 use anyhow::Result;
-use chrono::Utc;
 use std::path::PathBuf;
 use tokio::task::JoinHandle;
 use tokio::time::Duration;
@@ -539,7 +538,7 @@ fn spawn_state_writer(config: Config) -> JoinHandle<()> {
             if let Some(obj) = json.as_object_mut() {
                 obj.insert(
                     "written_at".into(),
-                    serde_json::json!(Utc::now().to_rfc3339()),
+                    serde_json::json!(zeroclaw_api::time::format_rfc3339(jiff::Timestamp::now())),
                 );
             }
             let data = serde_json::to_vec_pretty(&json).unwrap_or_else(|_| b"{}".to_vec());
@@ -1154,12 +1153,12 @@ async fn run_heartbeat_worker(config: Config, task_identities: TaskIdentity) -> 
         let dm_config = config.clone();
         zeroclaw_spawn::spawn!(async move {
             let check_interval = Duration::from_secs(60);
-            let timeout = chrono::Duration::minutes(i64::from(deadman_timeout));
+            let timeout = jiff::SignedDuration::from_mins(i64::from(deadman_timeout));
             loop {
                 tokio::time::sleep(check_interval).await;
                 let last_tick = dm_metrics.lock().last_tick_at;
                 if let Some(last) = last_tick
-                    && chrono::Utc::now() - last > timeout
+                    && jiff::Timestamp::now().duration_since(last) > timeout
                 {
                     let alert = format!(
                         "⚠️ Heartbeat dead-man's switch: no tick in {deadman_timeout} minutes"
@@ -1424,12 +1423,12 @@ async fn run_heartbeat_worker(config: Config, task_identities: TaskIdentity) -> 
                     crate::health::mark_component_ok("heartbeat");
                     #[allow(clippy::cast_possible_truncation)]
                     let duration_ms = task_start.elapsed().as_millis() as i64;
-                    let now = chrono::Utc::now();
+                    let now = jiff::Timestamp::now();
                     let _ = crate::heartbeat::store::record_run(
                         &config.data_dir,
                         &task.text,
                         &task.priority.to_string(),
-                        now - chrono::Duration::milliseconds(duration_ms),
+                        now - jiff::SignedDuration::from_millis(duration_ms),
                         now,
                         "ok",
                         Some(output.as_str()),
@@ -1536,12 +1535,12 @@ async fn run_heartbeat_worker(config: Config, task_identities: TaskIdentity) -> 
                     tick_had_error = true;
                     #[allow(clippy::cast_possible_truncation)]
                     let duration_ms = task_start.elapsed().as_millis() as i64;
-                    let now = chrono::Utc::now();
+                    let now = jiff::Timestamp::now();
                     let _ = crate::heartbeat::store::record_run(
                         &config.data_dir,
                         &task.text,
                         &task.priority.to_string(),
-                        now - chrono::Duration::milliseconds(duration_ms),
+                        now - jiff::SignedDuration::from_millis(duration_ms),
                         now,
                         "error",
                         Some(&e.to_string()),

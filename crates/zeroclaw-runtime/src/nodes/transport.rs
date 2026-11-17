@@ -1,7 +1,6 @@
 //! Corporate-friendly secure node transport using standard HTTPS + HMAC-SHA256 authentication.
 
 use anyhow::{Result, bail};
-use chrono::Utc;
 use hmac::{Hmac, Mac};
 use sha2::Sha256;
 
@@ -40,7 +39,7 @@ pub fn verify_request(
     signature: &str,
     max_age_secs: i64,
 ) -> Result<bool> {
-    let now = Utc::now().timestamp();
+    let now = zeroclaw_api::time::epoch_second(jiff::Timestamp::now());
     if (now - timestamp).abs() > max_age_secs {
         bail!("Request timestamp too old or too far in future");
     }
@@ -88,7 +87,7 @@ impl NodeTransport {
         payload: serde_json::Value,
     ) -> Result<serde_json::Value> {
         let body = serde_json::to_vec(&payload)?;
-        let timestamp = Utc::now().timestamp();
+        let timestamp = zeroclaw_api::time::epoch_second(jiff::Timestamp::now());
         let nonce = uuid::Uuid::new_v4().to_string();
         let signature = sign_request(&self.shared_secret, &body, timestamp, &nonce)?;
 
@@ -159,7 +158,7 @@ mod tests {
 
     #[test]
     fn verify_request_accepts_valid_signature() {
-        let now = Utc::now().timestamp();
+        let now = zeroclaw_api::time::epoch_second(jiff::Timestamp::now());
         let sig = sign_request(TEST_SECRET, b"payload", now, "nonce-a").unwrap();
         let ok = verify_request(TEST_SECRET, b"payload", now, "nonce-a", &sig, 300).unwrap();
         assert!(ok, "Valid signature must pass verification");
@@ -167,7 +166,7 @@ mod tests {
 
     #[test]
     fn verify_request_rejects_tampered_payload() {
-        let now = Utc::now().timestamp();
+        let now = zeroclaw_api::time::epoch_second(jiff::Timestamp::now());
         let sig = sign_request(TEST_SECRET, b"original", now, "nonce-b").unwrap();
         let ok = verify_request(TEST_SECRET, b"tampered", now, "nonce-b", &sig, 300).unwrap();
         assert!(!ok, "Tampered payload must fail verification");
@@ -175,7 +174,7 @@ mod tests {
 
     #[test]
     fn verify_request_rejects_expired_timestamp() {
-        let old = Utc::now().timestamp() - 600;
+        let old = zeroclaw_api::time::epoch_second(jiff::Timestamp::now()) - 600;
         let sig = sign_request(TEST_SECRET, b"data", old, "nonce-c").unwrap();
         let result = verify_request(TEST_SECRET, b"data", old, "nonce-c", &sig, 300);
         assert!(result.is_err(), "Expired timestamp must be rejected");
@@ -183,7 +182,7 @@ mod tests {
 
     #[test]
     fn verify_request_rejects_wrong_secret() {
-        let now = Utc::now().timestamp();
+        let now = zeroclaw_api::time::epoch_second(jiff::Timestamp::now());
         let sig = sign_request(TEST_SECRET, b"data", now, "nonce-d").unwrap();
         let ok = verify_request("wrong-secret", b"data", now, "nonce-d", &sig, 300).unwrap();
         assert!(!ok, "Wrong secret must fail verification");
@@ -207,7 +206,7 @@ mod tests {
     #[test]
     fn node_transport_verify_incoming_valid() {
         let transport = NodeTransport::new(TEST_SECRET.into());
-        let now = Utc::now().timestamp();
+        let now = zeroclaw_api::time::epoch_second(jiff::Timestamp::now());
         let payload = b"test-body";
         let nonce = "incoming-nonce";
         let sig = sign_request(TEST_SECRET, payload, now, nonce).unwrap();

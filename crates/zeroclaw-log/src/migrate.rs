@@ -22,7 +22,7 @@ pub fn migrate_legacy_jsonl_in_place(path: &Path) -> Result<()> {
     let tmp = path.with_extension(format!(
         "migrate.{}.{}",
         std::process::id(),
-        chrono::Utc::now().timestamp_nanos_opt().unwrap_or_default()
+        jiff::Timestamp::now().as_nanosecond()
     ));
     let (out_file, mut temp_cleanup) = create_migration_temp(&tmp)?;
     let mut out = BufWriter::new(out_file);
@@ -237,7 +237,7 @@ fn convert_legacy_to_current(legacy: Value) -> Value {
 
     let id = get_str("id").unwrap_or_else(|| uuid::Uuid::new_v4().to_string());
     let timestamp = get_str("timestamp")
-        .unwrap_or_else(|| chrono::Utc::now().to_rfc3339_opts(chrono::SecondsFormat::Millis, true));
+        .unwrap_or_else(|| zeroclaw_api::time::format_rfc3339_millis(jiff::Timestamp::now()));
     let event_type = get_str("event_type").unwrap_or_else(|| "legacy".to_string());
     let success = legacy.get("success").and_then(Value::as_bool);
     let outcome = match success {

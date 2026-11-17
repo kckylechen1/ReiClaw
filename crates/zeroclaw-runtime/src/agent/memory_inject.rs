@@ -409,7 +409,7 @@ mod tests {
             content: content.to_string(),
             category,
             // A current timestamp keeps time decay a no-op in tests.
-            timestamp: chrono::Utc::now().to_rfc3339(),
+            timestamp: zeroclaw_api::time::format_rfc3339(jiff::Timestamp::now()),
             session_id: None,
             score,
             namespace: "default".into(),
@@ -1155,10 +1155,10 @@ mod tests {
         category: MemoryCategory,
         score: Option<f64>,
         importance: Option<f64>,
-        timestamp: chrono::DateTime<chrono::Utc>,
+        timestamp: jiff::Timestamp,
     ) -> MemoryEntry {
         MemoryEntry {
-            timestamp: timestamp.to_rfc3339(),
+            timestamp: zeroclaw_api::time::format_rfc3339(timestamp),
             importance,
             ..entry(key, content, category, score)
         }
@@ -1169,7 +1169,7 @@ mod tests {
     /// scored entry old enough for time decay to drop it, and an autosave
     /// key the skip set filters on every arm. Recall order is fixture order.
     fn golden_corpus() -> Vec<MemoryEntry> {
-        let now = chrono::Utc::now();
+        let now = jiff::Timestamp::now();
         vec![
             scored_entry(
                 "alpha",
@@ -1212,7 +1212,7 @@ mod tests {
                 MemoryCategory::Daily,
                 Some(0.6),
                 Some(0.4),
-                now - chrono::Duration::days(60),
+                now - jiff::SignedDuration::from_hours(24 * 60),
             ),
             scored_entry(
                 "user_msg_9",
@@ -1415,7 +1415,7 @@ mod tests {
 
     #[tokio::test]
     async fn rerank_on_mmr_drops_near_duplicate_and_reorders() {
-        let now = chrono::Utc::now();
+        let now = jiff::Timestamp::now();
         let pool = vec![
             scored_entry(
                 "a",
@@ -1566,7 +1566,7 @@ mod tests {
 
     #[tokio::test]
     async fn rerank_bounds_unlimited_recall_sentinel_before_backend_and_scan() {
-        let now = chrono::Utc::now();
+        let now = jiff::Timestamp::now();
         let mut pool: Vec<MemoryEntry> = (0..rerank::MAX_CANDIDATE_POOL)
             .map(|i| {
                 scored_entry(
@@ -1636,7 +1636,7 @@ mod tests {
 
     #[tokio::test]
     async fn rerank_output_still_flows_through_budget_caps() {
-        let now = chrono::Utc::now();
+        let now = jiff::Timestamp::now();
         let pool: Vec<MemoryEntry> = (0..6)
             .map(|i| {
                 scored_entry(
@@ -1717,7 +1717,7 @@ mod tests {
     /// all five eligible facts render instead of only four.
     #[tokio::test]
     async fn rerank_eligibility_filter_frees_slots_for_valid_candidates() {
-        let now = chrono::Utc::now();
+        let now = jiff::Timestamp::now();
         let pool = vec![
             // Ineligible (`_history` key) yet outranks every fact.
             scored_entry(

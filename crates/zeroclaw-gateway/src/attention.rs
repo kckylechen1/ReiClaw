@@ -1,8 +1,7 @@
 //! Live attention evaluation. UTC instants map to local wall time, so both
 //! occurrences of a folded hour are quiet and skipped spring times need no guess.
 use anyhow::{Context, Result};
-use chrono::{DateTime, NaiveTime, Utc};
-use chrono_tz::Tz;
+use jiff::{civil::Time, tz::TimeZone};
 use zeroclaw_config::attention::AttentionConfig;
 
 pub(crate) fn permits(
@@ -11,19 +10,15 @@ pub(crate) fn permits(
     recipient: &str,
     source_kind: &str,
     source_id: &str,
-    now: DateTime<Utc>,
+    now: jiff::Timestamp,
 ) -> Result<bool> {
     let Some(policy) = policy else {
         return Ok(true);
     };
-    let timezone: Tz = policy
-        .timezone
-        .parse()
-        .context("attention_invalid_timezone")?;
-    let start = NaiveTime::parse_from_str(&policy.quiet_start, "%H:%M")
-        .context("attention_invalid_quiet_start")?;
-    let end = NaiveTime::parse_from_str(&policy.quiet_end, "%H:%M")
-        .context("attention_invalid_quiet_end")?;
+    let timezone = TimeZone::get(&policy.timezone).context("attention_invalid_timezone")?;
+    let start =
+        Time::strptime("%H:%M", &policy.quiet_start).context("attention_invalid_quiet_start")?;
+    let end = Time::strptime("%H:%M", &policy.quiet_end).context("attention_invalid_quiet_end")?;
     // Validate the complete policy before permitting even an authorized bypass.
     if policy.important_sources.iter().any(|source| {
         source.bridge == bridge
@@ -33,7 +28,7 @@ pub(crate) fn permits(
     }) {
         return Ok(true);
     }
-    let local = now.with_timezone(&timezone).time();
+    let local = now.to_zoned(timezone).time();
     let quiet = if start < end {
         local >= start && local < end
     } else {
@@ -80,7 +75,17 @@ mod tests {
         policy.important_sources[0].recipient = "owner".into();
         assert!(allowed(&policy, "2026-11-01T06:30:00Z"));
         policy.timezone.clear();
-        assert!(permits(Some(&policy), "tg", "owner", "cron", "job", Utc::now()).is_err());
+        assert!(
+            permits(
+                Some(&policy),
+                "tg",
+                "owner",
+                "cron",
+                "job",
+                jiff::Timestamp::now()
+            )
+            .is_err()
+        );
     }
     #[test]
     fn overnight_edges_and_absent_policy_use_no_host_clock() {

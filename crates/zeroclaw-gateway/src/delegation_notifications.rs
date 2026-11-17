@@ -1255,7 +1255,11 @@ mod tests {
             // its legacy marker back into a wildcard over future destinations.
             assert!(
                 outbox
-                    .claim("tg", &old_id, chrono::Utc::now().timestamp())
+                    .claim(
+                        "tg",
+                        &old_id,
+                        zeroclaw_api::time::epoch_second(jiff::Timestamp::now())
+                    )
                     .unwrap()
             );
             outbox.mark_sent("tg", &old_id).unwrap();
@@ -1290,7 +1294,7 @@ mod tests {
                 let (tmp, original, old_id, _) = legacy_notice_fixture(Some("thread-a"), marked);
                 let outbox = BridgeOutbox::shared(tmp.path()).unwrap();
                 let source_id = "butler\u{1f}legacy-request";
-                let now = chrono::Utc::now().timestamp();
+                let now = zeroclaw_api::time::epoch_second(jiff::Timestamp::now());
                 match state {
                     "accepted" => {
                         outbox
@@ -1377,7 +1381,11 @@ mod tests {
         let outbox = BridgeOutbox::shared(tmp.path()).unwrap();
         assert!(
             outbox
-                .claim("tg", &old_id, chrono::Utc::now().timestamp())
+                .claim(
+                    "tg",
+                    &old_id,
+                    zeroclaw_api::time::epoch_second(jiff::Timestamp::now())
+                )
                 .unwrap()
         );
         outbox.mark_sent("tg", &old_id).unwrap();
