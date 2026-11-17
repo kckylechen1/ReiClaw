@@ -79,8 +79,8 @@ pub fn build_report(config: &Config, agent_alias: &str) -> Result<SecurityStatus
     );
 
     let secret_fields = config.secret_fields();
-    let prop_fields = config.prop_fields();
-    let classification_counts = credential_classification_counts(&prop_fields);
+    let prop_schema = config.prop_schema();
+    let classification_counts = credential_classification_counts(&prop_schema);
     let classified_fields_total = classification_counts.values().sum();
 
     let mut warnings = Vec::new();
@@ -406,7 +406,7 @@ fn parse_sandbox_backend(name: &str) -> SandboxBackend {
 }
 
 fn credential_classification_counts(
-    fields: &[zeroclaw_config::config::PropFieldInfo],
+    fields: &[zeroclaw_config::config::PropFieldSpec],
 ) -> BTreeMap<String, usize> {
     let mut counts = BTreeMap::new();
     for field in fields {

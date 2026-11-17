@@ -63,6 +63,8 @@ fn has_serde_meta(field: &syn::Field, ident: &str) -> bool {
 /// - `decrypt_secrets(&mut self, store: &SecretStore) -> Result<()>`
 ///
 /// ## Property methods
+/// - `prop_schema(&self) -> Vec<PropFieldSpec>` — paths, types and security annotations
+/// - `prop_paths(&self) -> Vec<String>` — enumerate paths without serializing values
 /// - `prop_fields(&self) -> Vec<PropFieldInfo>` — enumerate all fields
 /// - `get_prop(&self, name: &str) -> Result<String>` — get current value as string
 /// - `set_prop(&mut self, name: &str, value_str: &str) -> Result<()>` — parse string and set
@@ -173,17 +175,20 @@ pub fn derive_configurable(input: TokenStream) -> TokenStream {
     let mut restore_ops = Vec::new();
 
     // ── Property codegen accumulators ──
+    let mut prop_spec_entries = Vec::new();
     let mut prop_field_entries = Vec::new();
     let mut prop_names: Vec<String> = Vec::new();
     let mut prop_kind_tokens = Vec::new();
     let mut prop_display_secret_terminal_arms = Vec::new();
     let mut prop_is_option_flags = Vec::new();
     let mut prop_is_secret_arms = Vec::new();
+    let mut nested_prop_schema = Vec::new();
     let mut nested_prop_fields = Vec::new();
     let mut nested_get_prop = Vec::new();
     let mut nested_set_prop = Vec::new();
     let mut nested_prop_is_secret = Vec::new();
     let mut dynamic_secret_map_prop_fields = Vec::new();
+    let mut dynamic_secret_map_prop_schema = Vec::new();
     let mut dynamic_secret_map_get_prop = Vec::new();
     let mut dynamic_secret_map_set_prop = Vec::new();
     let mut dynamic_secret_map_prop_is_secret = Vec::new();
@@ -341,6 +346,17 @@ pub fn derive_configurable(input: TokenStream) -> TokenStream {
                 } else {
                     quote! { &mut self.#field_ident }
                 };
+                dynamic_secret_map_prop_schema.push(quote! {
+                    if let Some(map) = #map_expr {
+                        fields.extend(map.keys().map(|key| crate::config::PropFieldSpec {
+                            name: format!("{}.{}", #full_name_lit, key),
+                            kind: crate::config::PropKind::String,
+                            is_secret: true,
+                            derived_from_secret: false,
+                            credential_class: #credential_class_expr,
+                        }));
+                    }
+                });
                 dynamic_secret_map_prop_fields.push(quote! {
                     if let Some(map) = #map_expr {
                         for (key, value) in map {
@@ -829,6 +845,32 @@ pub fn derive_configurable(input: TokenStream) -> TokenStream {
                         }
                     });
 
+                    nested_prop_schema.push(quote! {
+                        {
+                            let inner_prefix = <#inner_ty>::configurable_prefix();
+                            let outer_base = if Self::configurable_prefix().is_empty() {
+                                #field_name_lit.to_string()
+                            } else {
+                                format!("{}.{}", Self::configurable_prefix(), #field_name_lit)
+                            };
+                            for (outer_key, inner_map) in &self.#field_ident {
+                                for (inner_key, inner) in inner_map {
+                                    let base = format!("{outer_base}.{outer_key}.{inner_key}");
+                                    for mut field in inner.prop_schema() {
+                                        let leaf = field.name.strip_prefix(inner_prefix)
+                                            .and_then(|s| s.strip_prefix('.'))
+                                            .unwrap_or(field.name.as_str());
+                                        field.name = if leaf.is_empty() {
+                                            base.clone()
+                                        } else {
+                                            format!("{base}.{leaf}")
+                                        };
+                                        fields.push(field);
+                                    }
+                                }
+                            }
+                        }
+                    });
                     nested_prop_fields.push(quote! {
                         {
                             let inner_prefix = <#inner_ty>::configurable_prefix();
@@ -1172,6 +1214,30 @@ pub fn derive_configurable(input: TokenStream) -> TokenStream {
                         }
                     });
 
+                    nested_prop_schema.push(quote! {
+                        {
+                            let inner_prefix = <#value_ty>::configurable_prefix();
+                            let outer_prefix = if Self::configurable_prefix().is_empty() {
+                                #field_name_lit.to_string()
+                            } else {
+                                format!("{}.{}", Self::configurable_prefix(), #field_name_lit)
+                            };
+                            for (key, inner) in &self.#field_ident {
+                                let base = format!("{outer_prefix}.{key}");
+                                for mut field in inner.prop_schema() {
+                                    let leaf = field.name.strip_prefix(inner_prefix)
+                                        .and_then(|s| s.strip_prefix('.'))
+                                        .unwrap_or(field.name.as_str());
+                                    field.name = if leaf.is_empty() {
+                                        base.clone()
+                                    } else {
+                                        format!("{base}.{leaf}")
+                                    };
+                                    fields.push(field);
+                                }
+                            }
+                        }
+                    });
                     nested_prop_fields.push(quote! {
                         {
                             let inner_prefix = <#value_ty>::configurable_prefix();
@@ -1383,6 +1449,11 @@ pub fn derive_configurable(input: TokenStream) -> TokenStream {
                 });
 
                 // ── Nested property delegation (Option<T>) ──
+                nested_prop_schema.push(quote! {
+                    if let Some(inner) = &self.#field_ident {
+                        fields.extend(inner.prop_schema());
+                    }
+                });
                 nested_prop_fields.push(quote! {
                     if let Some(inner) = &self.#field_ident {
                         fields.extend(inner.prop_fields());
@@ -1653,6 +1724,10 @@ pub fn derive_configurable(input: TokenStream) -> TokenStream {
 
                 if let Some(nk_field) = &natural_key_field {
                     let nk_field_lit = nk_field.clone();
+                    let nk_field_ident = match syn::parse_str::<syn::Ident>(nk_field) {
+                        Ok(ident) => ident,
+                        Err(err) => return err.to_compile_error().into(),
+                    };
                     // get_map_keys: enumerate live natural keys. Order
                     // matches Vec insertion order so the TUI alias list
                     // is stable across reloads.
@@ -1769,6 +1844,46 @@ pub fn derive_configurable(input: TokenStream) -> TokenStream {
                         }
                     });
 
+                    nested_prop_schema.push(quote! {
+                        {
+                            let inner_prefix = <#vec_inner_ty>::configurable_prefix();
+                            let outer_prefix = if Self::configurable_prefix().is_empty() {
+                                #vec_field_name_lit.to_string()
+                            } else {
+                                format!("{}.{}", Self::configurable_prefix(), #vec_field_name_lit)
+                            };
+                            let nk_path = if inner_prefix.is_empty() {
+                                #nk_field_lit.to_string()
+                            } else {
+                                format!("{inner_prefix}.{}", #nk_field_lit)
+                            };
+                            for (idx, inner) in self.#field_ident.iter().enumerate() {
+                                // Natural keys are strings. Read the typed key directly:
+                                // get_prop would serialize the entry just to find its name.
+                                let nk = &inner.#nk_field_ident;
+                                let key = if nk.is_empty() {
+                                    format!("<unnamed-{idx}>")
+                                } else {
+                                    nk.clone()
+                                };
+                                let base = format!("{outer_prefix}.{key}");
+                                for mut field in inner.prop_schema() {
+                                    if field.name == nk_path {
+                                        continue;
+                                    }
+                                    let leaf = field.name.strip_prefix(inner_prefix)
+                                        .and_then(|s| s.strip_prefix('.'))
+                                        .unwrap_or(field.name.as_str());
+                                    field.name = if leaf.is_empty() {
+                                        base.clone()
+                                    } else {
+                                        format!("{base}.{leaf}")
+                                    };
+                                    fields.push(field);
+                                }
+                            }
+                        }
+                    });
                     nested_prop_fields.push(quote! {
                         {
                             let inner_prefix = <#vec_inner_ty>::configurable_prefix();
@@ -2172,6 +2287,29 @@ pub fn derive_configurable(input: TokenStream) -> TokenStream {
 
                 let field_ty = &field.ty;
                 if is_serde_flatten {
+                    nested_prop_schema.push(quote! {
+                        {
+                            let outer_prefix = Self::configurable_prefix();
+                            let inner_prefix = <#field_ty>::configurable_prefix();
+                            for mut field in self.#field_ident.prop_schema() {
+                                let leaf = if inner_prefix.is_empty() {
+                                    field.name.as_str()
+                                } else {
+                                    field.name.strip_prefix(inner_prefix)
+                                        .and_then(|s| s.strip_prefix('.'))
+                                        .unwrap_or(field.name.as_str())
+                                };
+                                field.name = if outer_prefix.is_empty() {
+                                    leaf.to_string()
+                                } else if leaf.is_empty() {
+                                    outer_prefix.to_string()
+                                } else {
+                                    format!("{outer_prefix}.{leaf}")
+                                };
+                                fields.push(field);
+                            }
+                        }
+                    });
                     nested_prop_fields.push(quote! {
                         {
                             let outer_prefix = Self::configurable_prefix();
@@ -2354,6 +2492,31 @@ pub fn derive_configurable(input: TokenStream) -> TokenStream {
                         }
                     });
                     // ── Nested property delegation (non-Option, non-flatten) ──
+                    nested_prop_schema.push(quote! {
+                        {
+                            let inner_prefix = <#field_ty>::configurable_prefix();
+                            let nested_prefix = if Self::configurable_prefix().is_empty() {
+                                #plain_field_name_lit.to_string()
+                            } else {
+                                format!("{}.{}", Self::configurable_prefix(), #plain_field_name_lit)
+                            };
+                            for mut field in self.#field_ident.prop_schema() {
+                                let leaf = if inner_prefix.is_empty() {
+                                    field.name.as_str()
+                                } else {
+                                    field.name.strip_prefix(inner_prefix)
+                                        .and_then(|s| s.strip_prefix('.'))
+                                        .unwrap_or(field.name.as_str())
+                                };
+                                field.name = if leaf.is_empty() {
+                                    nested_prefix.clone()
+                                } else {
+                                    format!("{nested_prefix}.{leaf}")
+                                };
+                                fields.push(field);
+                            }
+                        }
+                    });
                     nested_prop_fields.push(quote! {
                         {
                             let inner_prefix = <#field_ty>::configurable_prefix();
@@ -2577,6 +2740,17 @@ pub fn derive_configurable(input: TokenStream) -> TokenStream {
         });
         prop_is_option_flags.push(is_option);
 
+        let spec_expr = quote! {
+            crate::config::PropFieldSpec {
+                name: #full_name_lit.to_string(),
+                kind: #kind_token,
+                is_secret: #is_secret,
+                derived_from_secret: #derived_from_secret,
+                credential_class: #credential_class_expr,
+            }
+        };
+        prop_spec_entries.push(spec_expr.clone());
+
         if is_vec {
             let inner_value_expr = if is_option {
                 quote! { self.#field_ident.as_ref() }
@@ -2585,6 +2759,7 @@ pub fn derive_configurable(input: TokenStream) -> TokenStream {
             };
             prop_field_entries.push(quote! {
                 {
+                    let spec = #spec_expr;
                     let display_value: String = match #inner_value_expr {
                         None => crate::config::UNSET_DISPLAY.to_string(),
                         Some(v) if v.is_empty() => crate::config::UNSET_DISPLAY.to_string(),
@@ -2602,16 +2777,16 @@ pub fn derive_configurable(input: TokenStream) -> TokenStream {
                         },
                     };
                     crate::config::PropFieldInfo {
-                        name: #full_name_lit.to_string(),
+                        name: spec.name,
                         category: #category_lit,
                         display_value,
                         type_hint: #type_hint_lit,
-                        kind: #kind_token,
-                        is_secret: #is_secret,
+                        kind: spec.kind,
+                        is_secret: spec.is_secret,
                         enum_variants: #enum_variants_expr,
                         description: #description_lit,
-                        derived_from_secret: #derived_from_secret,
-                        credential_class: #credential_class_expr,
+                        derived_from_secret: spec.derived_from_secret,
+                        credential_class: spec.credential_class,
                         tab: #tab_token,
                         alias_source: #alias_source_expr,
                         multiline: #is_multiline,
@@ -2622,16 +2797,12 @@ pub fn derive_configurable(input: TokenStream) -> TokenStream {
             prop_field_entries.push(quote! {
                 crate::config::make_prop_field(
                     __table.as_ref(),
-                    #full_name_lit,
+                    #spec_expr,
                     #serde_name_lit,
                     #category_lit,
                     #type_hint_lit,
-                    #kind_token,
-                    #is_secret,
                     #enum_variants_expr,
                     #description_lit,
-                    #derived_from_secret,
-                    #credential_class_expr,
                     #tab_token,
                     &<#inner_ty as crate::config::HasPropKind>::display_secret_terminals(),
                     #alias_source_expr,
@@ -2795,7 +2966,21 @@ pub fn derive_configurable(input: TokenStream) -> TokenStream {
                 }
             }
 
-            /// Returns metadata about all property fields on this struct and nested children.
+            /// Enumerate field paths, types and security annotations without
+            /// serializing field values or constructing display metadata.
+            pub fn prop_schema(&self) -> Vec<crate::config::PropFieldSpec> {
+                let mut fields = vec![#(#prop_spec_entries),*];
+                #(#nested_prop_schema)*
+                #(#dynamic_secret_map_prop_schema)*
+                fields
+            }
+
+            /// Enumerate the same paths as `prop_fields`, without display values.
+            pub fn prop_paths(&self) -> Vec<String> {
+                self.prop_schema().into_iter().map(|field| field.name).collect()
+            }
+
+            /// Returns display metadata and values for this struct and nested children.
             pub fn prop_fields(&self) -> Vec<crate::config::PropFieldInfo> {
                 let __table = toml::Value::try_from(self)
                     .ok()

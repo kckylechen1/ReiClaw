@@ -41,6 +41,19 @@ pub enum CredentialSurfaceClass {
     RequiresFollowUp,
 }
 
+/// Value-free field metadata derived from the config schema.
+///
+/// Core consumers use `prop_schema()` for paths, type coercion and credential
+/// classification without serializing config values or constructing UI strings.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct PropFieldSpec {
+    pub name: String,
+    pub kind: PropKind,
+    pub is_secret: bool,
+    pub derived_from_secret: bool,
+    pub credential_class: Option<CredentialSurfaceClass>,
+}
+
 #[derive(
     Debug, Clone, Copy, PartialEq, Eq, Hash, Default, serde::Serialize, serde::Deserialize,
 )]

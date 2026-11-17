@@ -1,7 +1,7 @@
 // Keep config and Configurable-generated paths compatible with the shared API owner.
 pub use zeroclaw_api::config_metadata::{
     ChannelConfig, ChannelInfo, ConfigTab, CredentialSurfaceClass, IntegrationDescriptor,
-    NestedOptionEntry, PropKind, SecretFieldInfo,
+    NestedOptionEntry, PropFieldSpec, PropKind, SecretFieldInfo,
 };
 
 /// Sentinel rendered for unset / `None` / empty config values during display.
@@ -231,7 +231,7 @@ impl HasPropKind for Vec<crate::schema::ToolFilterGroup> {
     const PROP_KIND: PropKind = PropKind::ObjectArray;
 }
 
-/// Describes a single property field discovered via `#[derive(Configurable)]`.
+/// Display metadata and current value for a field discovered via `Configurable`.
 #[derive(Clone)]
 pub struct PropFieldInfo {
     /// Full dotted name (e.g. `channels.telegram.draft-update-interval-ms`).
@@ -273,6 +273,17 @@ pub struct PropFieldInfo {
 }
 
 impl PropFieldInfo {
+    /// The schema portion of this display record, without its current value.
+    pub fn spec(&self) -> PropFieldSpec {
+        PropFieldSpec {
+            name: self.name.clone(),
+            kind: self.kind,
+            is_secret: self.is_secret,
+            derived_from_secret: self.derived_from_secret,
+            credential_class: self.credential_class,
+        }
+    }
+
     pub fn is_enum(&self) -> bool {
         self.enum_variants.is_some()
     }

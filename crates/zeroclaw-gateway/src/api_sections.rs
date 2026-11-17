@@ -352,9 +352,9 @@ pub async fn handle_sections(State(state): State<AppState>, headers: HeaderMap) 
     // First segment of every reachable prop path. BTreeSet for stable
     // alphabetical order and dedup.
     let mut roots: std::collections::BTreeSet<String> = cfg
-        .prop_fields()
+        .prop_paths()
         .iter()
-        .filter_map(|f| f.name.split('.').next().map(str::to_string))
+        .filter_map(|path| path.split('.').next().map(str::to_string))
         .collect();
 
     // System / housekeeping fields the user never edits via the dashboard.
@@ -376,7 +376,7 @@ pub async fn handle_sections(State(state): State<AppState>, headers: HeaderMap) 
     };
 
     // Ensure map-keyed sections surface as sidebar entries even when their
-    // HashMap is empty (prop_fields() only yields paths for populated
+    // HashMap is empty (prop_paths() only yields paths for populated
     // entries). First segments only — the prefix-dedup pass below drops
     // bare parent segments when a multi-segment child is present.
     let map_keyed_roots: std::collections::HashSet<&'static str> = all_map_paths
@@ -458,9 +458,9 @@ fn section_ready(cfg: &zeroclaw_config::schema::Config, key: &str, completed_mar
         Some(Section::RiskProfiles) => !cfg.risk_profiles.is_empty(),
         Some(Section::RuntimeProfiles) => !cfg.runtime_profiles.is_empty(),
         Some(Section::Storage) => cfg
-            .prop_fields()
+            .prop_paths()
             .iter()
-            .any(|field| field.name.starts_with("storage.")),
+            .any(|path| path.starts_with("storage.")),
         Some(Section::Memory) => completed_marker,
         Some(Section::Agents) => cfg.agents.iter().any(|(alias, agent)| {
             quickstart_agent_missing_requirements(cfg, alias, agent).is_empty()
@@ -722,14 +722,6 @@ fn memory_picker(cfg: &zeroclaw_config::schema::Config) -> Vec<PickerItem> {
 fn schema_walk_picker(cfg: &zeroclaw_config::schema::Config, section: &str) -> Vec<PickerItem> {
     let prefix_with_dot = format!("{section}.");
 
-    // Configured: any alias present on this type (has at least one entry in its HashMap).
-    let configured: std::collections::BTreeSet<String> = cfg
-        .prop_fields()
-        .iter()
-        .filter_map(|f| f.name.strip_prefix(&prefix_with_dot))
-        .filter_map(|suffix| suffix.split_once('.').map(|(head, _)| head.to_string()))
-        .collect();
-
     // All known channel/section types from schema metadata — statically known,
     // no HashMap entries needed.
     let all: std::collections::BTreeSet<String> =
@@ -745,10 +737,12 @@ fn schema_walk_picker(cfg: &zeroclaw_config::schema::Config, section: &str) -> V
 
     all.into_iter()
         .map(|name| {
-            // Channel configs no longer carry an `enabled` field; a channel is
-            // active when an enabled agent references it. Badge = "configured" when
-            // at least one alias exists, absent otherwise.
-            let badge = if configured.contains(&name) {
+            // This badge reports a populated typed map, regardless of whether
+            // an entry is enabled or referenced by an agent.
+            let badge = if cfg
+                .get_map_keys(&format!("{section}.{name}"))
+                .is_some_and(|keys| !keys.is_empty())
+            {
                 Some("configured".to_string())
             } else {
                 None
@@ -767,18 +761,12 @@ fn one_tier_alias_map_picker(
     cfg: &zeroclaw_config::schema::Config,
     section: &str,
 ) -> Vec<PickerItem> {
-    let prefix_with_dot = format!("{section}.");
-    let mut keys: std::collections::BTreeSet<String> = std::collections::BTreeSet::new();
-    for field in cfg.prop_fields() {
-        let Some(suffix) = field.name.strip_prefix(&prefix_with_dot) else {
-            continue;
-        };
-        let head = suffix.split_once('.').map_or(suffix, |(h, _)| h);
-        if head.is_empty() {
-            continue;
-        }
-        keys.insert(head.to_string());
-    }
+    let keys: std::collections::BTreeSet<String> = cfg
+        .get_map_keys(section)
+        .unwrap_or_default()
+        .into_iter()
+        .filter(|key| !key.is_empty())
+        .collect();
     keys.into_iter()
         .map(|key| PickerItem {
             key: key.clone(),
@@ -1857,6 +1845,27 @@ mod tests {
                 "`{section}.{alias}` should be badged `configured`",
             );
         }
+    }
+
+    #[test]
+    fn one_tier_alias_map_picker_preserves_complete_stored_keys() {
+        let mut cfg = empty_cfg();
+        cfg.risk_profiles
+            .insert("ops.eu".into(), Default::default());
+        cfg.risk_profiles.insert("ops".into(), Default::default());
+        let items = one_tier_alias_map_picker(&cfg, "risk_profiles");
+        assert_eq!(
+            items
+                .iter()
+                .map(|item| item.key.as_str())
+                .collect::<Vec<_>>(),
+            ["ops", "ops.eu"]
+        );
+        assert!(
+            items
+                .iter()
+                .all(|item| item.badge.as_deref() == Some("configured"))
+        );
     }
 
     #[test]

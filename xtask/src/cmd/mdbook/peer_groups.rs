@@ -213,9 +213,9 @@ fn config_section_label(path: &str) -> anyhow::Result<String> {
     let prefix = format!("{path}.");
     let is_schema_section = Config::map_key_sections().iter().any(|s| s.path == path)
         || Config::default()
-            .prop_fields()
+            .prop_paths()
             .iter()
-            .any(|f| f.name == path || f.name.starts_with(&prefix));
+            .any(|field| field == path || field.starts_with(&prefix));
     if !is_schema_section {
         anyhow::bail!("config-where section '{path}' is not a known config section");
     }
@@ -843,13 +843,13 @@ fn validate_env_var_paths(vars: &[EnvVarParams]) -> anyhow::Result<()> {
 fn validate_env_var_path(path: &str) -> anyhow::Result<()> {
     use zeroclaw_config::schema::Config;
     let config = Config::default();
-    let is_leaf = config.prop_fields().into_iter().any(|f| f.name == path);
+    let is_leaf = config.prop_paths().into_iter().any(|field| field == path);
     if is_leaf {
         return Ok(());
     }
     // Alias-bearing path: `<section>.<alias>[.<field>...]`. The segment after
     // the section is the operator-chosen alias (not a schema field), so it
-    // won't appear in `prop_fields()` — validating the section is the correct
+    // won't appear in `prop_paths()` — validating the section is the correct
     // check.
     let under_section = Config::map_key_sections().into_iter().any(|s| {
         path.strip_prefix(s.path)
