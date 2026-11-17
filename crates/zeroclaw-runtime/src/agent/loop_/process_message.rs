@@ -401,7 +401,6 @@ pub async fn process_message_with_task_identity(
                     &excluded_tools,
                     &agent.resolved.tool_call_dedup_exempt,
                     activated_handle_pm.as_ref(),
-                    None,
                     agent.resolved.strict_tool_parsing,
                     agent.resolved.parallel_tools,
                     agent.resolved.max_tool_result_chars,

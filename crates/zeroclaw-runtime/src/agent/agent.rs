@@ -193,6 +193,8 @@ pub struct StreamedTurnError {
     pub new_messages: Vec<ConversationMessage>,
 }
 
+/// Full config snapshot for routing, turn context, and side queries. Its
+/// historical name does not imply support for the retired model-switch tool.
 #[derive(Clone, Debug, Default)]
 pub struct ProviderSwitchConfig {
     pub config: Option<std::sync::Arc<zeroclaw_config::schema::Config>>,
@@ -1424,106 +1426,6 @@ impl Agent {
         }
         first.content = new_prompt;
         Ok(())
-    }
-
-    fn try_apply_model_switch(
-        &mut self,
-        current_effective_model: &str,
-        new_model_provider: String,
-        new_model: String,
-    ) -> Option<String> {
-        // Same-provider, same-model: nothing to do. The request is owned by
-        // the completed tool-loop scope, so there is no persistent slot to clear.
-        if new_model_provider == self.model_provider_name && new_model == current_effective_model {
-            return None;
-        }
-
-        ::zeroclaw_log::record!(
-            INFO,
-            ::zeroclaw_log::Event::new(module_path!(), ::zeroclaw_log::Action::Note),
-            &format!(
-                "Model switch detected in turn_streamed: {} {} -> {} {}",
-                self.model_provider_name, current_effective_model, new_model_provider, new_model
-            )
-        );
-
-        let switch_outcome: anyhow::Result<Box<dyn ModelProvider>> = match self
-            .provider_switch_config
-            .as_ref()
-            .and_then(|cfg| cfg.config.as_ref())
-        {
-            Some(full_config) => {
-                let agent_entry = full_config
-                    .resolved_model_provider_for_agent(&self.agent_alias)
-                    .map(|(_ty, _alias, entry)| entry);
-                let default_api_key = agent_entry.and_then(|e| e.api_key.as_deref());
-                let default_base_url = agent_entry.and_then(|e| e.uri.as_deref());
-
-                // Prefer a route-specific api_key when the switched
-                // provider/model matches a configured model_route entry.
-                let route_api_key = full_config
-                    .model_routes
-                    .iter()
-                    .find(|r| {
-                        r.model_provider.eq_ignore_ascii_case(&new_model_provider)
-                            && (r.model.eq_ignore_ascii_case(&new_model)
-                                || r.hint.eq_ignore_ascii_case(&new_model))
-                    })
-                    .and_then(|r| r.api_key.as_deref());
-                let api_key = route_api_key.or(default_api_key);
-
-                let runtime_options = new_model_provider
-                    .split_once('.')
-                    .map(|(family, alias)| {
-                        zeroclaw_providers::provider_runtime_options_for_alias(
-                            full_config.as_ref(),
-                            family,
-                            alias,
-                        )
-                    })
-                    .unwrap_or_default();
-
-                zeroclaw_providers::create_routed_model_provider_with_options(
-                    full_config.as_ref(),
-                    &new_model_provider,
-                    api_key,
-                    default_base_url,
-                    &full_config.reliability,
-                    &full_config.model_routes,
-                    &new_model,
-                    &runtime_options,
-                )
-            }
-            None => Err(anyhow::Error::msg(
-                "model_switch requested but agent has no provider_switch_config; \
-                 cannot rebuild provider safely",
-            )),
-        };
-
-        match switch_outcome {
-            Ok(new_prov) => {
-                // Commit state only after the provider was built
-                // successfully.
-                self.model_provider = Arc::from(new_prov);
-                self.model_provider_name = new_model_provider;
-                self.model_name = new_model.clone();
-                self.sync_side_query_model_config();
-                Some(new_model)
-            }
-            Err(e) => {
-                ::zeroclaw_log::record!(
-                    ERROR,
-                    ::zeroclaw_log::Event::new(module_path!(), ::zeroclaw_log::Action::Fail)
-                        .with_outcome(::zeroclaw_log::EventOutcome::Failure)
-                        .with_attrs(::serde_json::json!({"err": e.to_string()})),
-                    &format!(
-                        "Failed to apply model_switch in turn_streamed; staying on {} {}",
-                        self.model_provider_name, current_effective_model
-                    )
-                );
-                None
-            }
-        }
     }
 
     fn classify_model(&self, user_message: &str) -> String {

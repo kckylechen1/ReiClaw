@@ -6,7 +6,7 @@ use zeroclaw_api::model_provider::{ChatRequest, ChatResponse};
 use zeroclaw_config::schema::{MultimodalConfig, PacingConfig};
 use zeroclaw_providers::{ModelProvider, ProviderDispatch, multimodal};
 
-use super::{LoopKnobs, ModelSwitchCallback};
+use super::LoopKnobs;
 use crate::agent::tool_receipts::ReceiptGenerator;
 use crate::approval::ApprovalManager;
 use crate::hooks::HookRunner;
@@ -90,8 +90,6 @@ pub struct ResolvedAgentExecution<'a> {
     /// Activation set for on-demand (tool_search) MCP tools; shared so activated
     /// tools persist across iterations.
     pub activated_tools: Option<&'a Arc<Mutex<ActivatedToolSet>>>,
-    /// Back-channel for the `model_switch` tool.
-    pub model_switch_callback: Option<ModelSwitchCallback>,
     /// Loop-detection / ignore-tools / timing policy.
     pub pacing: &'a PacingConfig,
     /// Reject malformed tool-call protocol.
@@ -124,7 +122,6 @@ pub struct ResolvedIo<'a> {
     pub config: Option<&'a zeroclaw_config::schema::Config>,
     pub hooks: Option<&'a HookRunner>,
     pub activated_tools: Option<&'a Arc<Mutex<ActivatedToolSet>>>,
-    pub model_switch_callback: Option<ModelSwitchCallback>,
     pub receipt_generator: Option<&'a ReceiptGenerator>,
 }
 
@@ -164,7 +161,6 @@ impl<'a> ResolvedAgentExecution<'a> {
             excluded_tools: runtime.excluded_tools,
             dedup_exempt_tools: runtime.dedup_exempt_tools,
             activated_tools: io.activated_tools,
-            model_switch_callback: io.model_switch_callback,
             pacing: runtime.pacing,
             strict_tool_parsing: runtime.strict_tool_parsing,
             parallel_tools: runtime.parallel_tools,

@@ -10,7 +10,6 @@ pub mod cron_runs;
 pub mod cron_update;
 pub mod delegation;
 pub mod file_read;
-pub mod model_switch;
 pub mod notify;
 pub mod param_options;
 #[cfg(test)]
@@ -89,7 +88,6 @@ pub use cron_run::CronRunTool;
 pub use cron_runs::CronRunsTool;
 pub use cron_update::CronUpdateTool;
 pub use file_read::FileReadTool;
-pub use model_switch::ModelSwitchTool;
 pub use notify::NotifyTool;
 pub use read_skill::ReadSkillTool;
 pub use schedule::ScheduleTool;
@@ -442,10 +440,9 @@ fn reasoning_spawn_tool_for_registry(
 }
 
 /// Tool names retired from the ordinary model-visible registry. No assembly
-/// path may register them. Most entries
-/// keep their implementations compiled (operator surfaces and tests
-/// construct them directly); the SOP run tools below were deleted outright
-/// with the legacy run side. The registry totality test asserts this set.
+/// path may register them. Entries with retained operator consumers keep
+/// their implementations; tools without
+/// a retained consumer are deleted. The registry totality test asserts this set.
 #[cfg(test)]
 pub(crate) const RETIRED_OPERATOR_TOOL_NAMES: &[&str] = &[
     "model_routing_config",
@@ -710,10 +707,9 @@ pub fn all_tools_with_runtime(
         // routing/proxy state whose authority is operator-level. The
         // trusted surfaces are the gateway config API
         // (PUT/DELETE /api/config...) for routing and proxy config, the
-        // channel `/model` command for runtime model switching, and
-        // startup application of persisted proxy config. The tool
-        // implementations stay compiled and are re-exported below; they
-        // are simply never handed to the model.
+        // explicit owner model selection for runtime model switching, and
+        // startup application of persisted proxy config. These model tool
+        // implementations and their private mutation protocols are retired.
         Arc::new(GitOperationsTool::new(
             security.clone(),
             workspace_dir.to_path_buf(),

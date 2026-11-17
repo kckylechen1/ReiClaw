@@ -12,7 +12,7 @@ attributes logs. For configuring and running agents, start at
 Configured `Agent::turn` and streamed Agent turns read root `[pacing]` at the
 start of each API turn. Daemon-backed agents use their existing live config
 handle, so a reload applies to the next turn. Configless builders keep loop
-detection disabled. The guard spans steering and model-switch rounds within
+detection disabled. The guard spans steering rounds within
 that API call; a new call starts with fresh evidence.
 
 With `loop_detection_enabled`, identical completed failures reach an advisory

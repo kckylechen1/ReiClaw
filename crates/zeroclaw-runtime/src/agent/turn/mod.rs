@@ -39,12 +39,8 @@ pub(crate) use history_window::preflight_history_maintenance;
 pub use knobs::{LoopKnobs, MaxIterationBehavior};
 pub(crate) use max_iter::finish_after_max_iterations;
 pub(crate) use outcome::{DispatchedModelRoute, DispatchedModelRouteSink};
-pub use outcome::{
-    ModelSwitchCallback, ModelSwitchRequested, ToolLoopCancelled, is_model_switch_requested,
-    is_tool_loop_cancelled,
-};
 pub(crate) use outcome::{SteeringPending, StreamCancelledAfterOutput};
-pub(crate) use outcome::{current_model_switch_state, scope_model_switch_state};
+pub use outcome::{ToolLoopCancelled, is_tool_loop_cancelled};
 #[cfg(all(test, feature = "heavy-tests"))]
 pub(crate) use parse_response::build_native_assistant_history;
 pub(crate) use parse_response::{
@@ -274,8 +270,8 @@ pub async fn run_tool_call_loop(p: ToolLoop<'_>) -> Result<String> {
     run_tool_call_loop_with_guard(p, None, false, None, None).await
 }
 
-/// Agent owns this guard for the full API turn, including steering and model
-/// switch rounds. Low-level/channel callers keep their legacy detector.
+/// Agent owns this guard for the full API turn, including steering rounds.
+/// Low-level/channel callers keep their legacy detector.
 /// Steering yield is internal to streamed Agent enrichment; keep the public
 /// LoopKnobs shape and low-level drain behavior compatible for embedders.
 pub(crate) async fn run_tool_call_loop_with_guard(
@@ -324,7 +320,7 @@ pub(crate) async fn run_tool_call_loop_with_guard(
 }
 
 async fn run_tool_call_loop_turn(
-    mut p: ToolLoop<'_>,
+    p: ToolLoop<'_>,
     repetition_guard: Option<&std::sync::Mutex<repetition::RepetitionGuard>>,
     yield_to_steering: bool,
     side_query: Option<(
@@ -333,12 +329,6 @@ async fn run_tool_call_loop_turn(
     )>,
     dispatched_route: Option<&DispatchedModelRouteSink>,
 ) -> Result<String> {
-    let model_switch_state = p
-        .exec
-        .model_switch_callback
-        .clone()
-        .unwrap_or_else(|| Arc::new(std::sync::Mutex::new(None)));
-    p.exec.model_switch_callback = Some(Arc::clone(&model_switch_state));
     let ToolLoop {
         exec,
         history: raw_history,
@@ -379,7 +369,6 @@ async fn run_tool_call_loop_turn(
         excluded_tools,
         dedup_exempt_tools,
         activated_tools,
-        model_switch_callback,
         pacing,
         strict_tool_parsing,
         parallel_tools,
@@ -407,8 +396,8 @@ async fn run_tool_call_loop_turn(
             has_session,
             turn_memory.suppress,
         ) && let Some(last_user_idx) = turn_state.history.iter().rposition(|m| m.role == "user")
-            // Idempotence: a model-switch retry re-enters the engine with the
-            // same history; the preamble must not stack.
+            // Idempotence: re-entering the engine for steering can retain an
+            // enriched user message; the preamble must not stack.
             && !turn_state.history[last_user_idx]
                 .content
                 .starts_with(zeroclaw_memory::MEMORY_CONTEXT_OPEN)
@@ -497,17 +486,8 @@ async fn run_tool_call_loop_turn(
             return Err(ToolLoopCancelled.into());
         }
         // Adapted from upstream 641b766: the streamed Agent owns enrichment.
-        // A model switch from the previous batch must be applied first.
-        let switch_pending = model_switch_callback.as_ref().is_some_and(|callback| {
-            callback.lock().is_ok_and(|pending| {
-                pending
-                    .as_ref()
-                    .is_some_and(|(p, m)| p != provider_name || m != model)
-            })
-        });
         if yield_to_steering
             && iteration > 0
-            && !switch_pending
             && steering.as_deref().is_some_and(|rx| !rx.is_empty())
         {
             return Err(outcome::SteeringPending {
@@ -635,28 +615,6 @@ async fn run_tool_call_loop_turn(
                     },
                 );
             }
-        }
-
-        // Check if model switch was requested via model_switch tool
-        if let Some(ref callback) = model_switch_callback
-            && let Ok(guard) = callback.lock()
-            && let Some((new_model_provider, new_model)) = guard.as_ref()
-            && (new_model_provider != provider_name || new_model != model)
-        {
-            ::zeroclaw_log::record!(
-                INFO,
-                ::zeroclaw_log::Event::new(module_path!(), ::zeroclaw_log::Action::Migrate)
-                    .with_category(::zeroclaw_log::EventCategory::Provider),
-                &format!(
-                    "Model switch detected: {} {} -> {} {}",
-                    provider_name, model, new_model_provider, new_model
-                )
-            );
-            return Err(ModelSwitchRequested {
-                model_provider: new_model_provider.clone(),
-                model: new_model.clone(),
-            }
-            .into());
         }
 
         let mut iteration_tool_specs = build_iteration_tool_specs(
@@ -1046,7 +1004,6 @@ async fn run_tool_call_loop_turn(
                 tools_registry,
                 activated_tools,
                 excluded_tools,
-                model_switch_callback: model_switch_callback.as_ref(),
             },
             &mut seen_tool_signatures,
             &mut prompt_approval_tool_signatures,
@@ -1071,7 +1028,6 @@ async fn run_tool_call_loop_turn(
                 tools_registry,
                 activated_tools,
                 excluded_tools,
-                model_switch_callback: model_switch_callback.as_ref(),
             };
             let mut recovery_admitted = false;
             let mut retained_indices = Vec::new();
@@ -1112,7 +1068,6 @@ async fn run_tool_call_loop_turn(
                 tools_registry,
                 activated_tools,
                 excluded_tools,
-                model_switch_callback: model_switch_callback.as_ref(),
             };
             execute_tools_parallel(
                 &executable_calls,
@@ -1130,7 +1085,6 @@ async fn run_tool_call_loop_turn(
                 tools_registry,
                 activated_tools,
                 excluded_tools,
-                model_switch_callback: model_switch_callback.as_ref(),
             };
             execute_tools_sequential(
                 &executable_calls,

@@ -44,7 +44,6 @@ product integrations.
 | `send_message_to_peer`, `reasoning_subagent` | Agent-child execution and peer messaging are part of the agent execution model and must share risk profiles, tools, memory, and parent/child constraints. (The legacy `spawn_subagent` and `delegate` tools are retired; see the delegation retirement record.) |
 | `ask_user`, `escalate_to_human`, `reaction`, `poll`, `channel_room` | These are channel-bridging operator interaction primitives with late-bound channel handles and receipts. |
 | `sessions_current`, `sessions_list`, `sessions_history`, `sessions_send` | Session visibility and message sending must share the daemon/gateway session backend and agent ownership boundaries. |
-| `model_routing_config`, `model_switch`, `proxy_config` | Retired from the model surface. Routing and proxy configuration belong to the operator config API (`PUT/DELETE /api/config...`), runtime model switching to the channel `/model` command, and proxy application to startup + daemon reload. The tool implementations stay compiled but no assembly path registers them. See "Retired Operator Tools" below. |
 | `TodoWrite` | Maintains the agent's structured task list inside the runtime tool surface; keep its stable tool name and lifecycle behavior in core. |
 | `read_skill` and skill-defined tools with `kind = "shell"`, `kind = "http"`, or `kind = "builtin"` | Skills are an intended extension surface, but the runtime bridge that turns installed skills into tools is core. |
 
@@ -73,13 +72,14 @@ boundaries because they add platform, dependency, network, or UI surface area.
 
 These first-party tools are no longer part of the model-visible registry on any
 assembly path (ordinary, SubAgent, skill elevation, minimal or full
-composition). Their implementations stay compiled; the capability moved to a
-trusted surface or was deleted.
+composition). The capability moved to a trusted surface or was deleted.
+The `model_routing_config`, `model_switch`, and `proxy_config` implementations
+are deleted; their names remain reserved against tool registration.
 
 | Tool(s) | Trusted surface today |
 |---|---|
 | `model_routing_config` | `GET/PUT/DELETE /api/config...` (gateway config API, settings UI). Mutation actions additionally reject raw `api_key` values. |
-| `model_switch` | Channel `/model` and `/models` commands (per-sender runtime switch; the parent agent cannot switch its own model through a tool). |
+| `model_switch` | Explicit owner selection. The web model selector and `/model <type>.<alias>` command write `agents.<alias>.model_provider` through the gateway config API and reconnect the chat session. The agent cannot switch its own model through a tool. |
 | `proxy_config` | `PUT /api/config/proxy.*` persists the canonical `[proxy]` config; the daemon applies it at process startup (runtime global plus, for `scope = "environment"`, process env) and refreshes the runtime global on daemon reload. The `apply_env` / `clear_env` actions were deleted outright: live process-env manipulation had no consumer and restart application replaces it. |
 | `security_ops` | None (default-off diagnostics, unreachable by design). `security_ops.enabled` stays parseable; enabling it emits a startup/reload notice. |
 | `backup` | `POST/GET /api/agents/<alias>/backup`, `.../backup/{name}/verify`, `.../backup/{name}/restore` (operator bearer gated; restore keeps its `confirm` guard). |

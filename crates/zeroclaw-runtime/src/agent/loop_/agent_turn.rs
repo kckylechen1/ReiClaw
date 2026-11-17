@@ -13,8 +13,8 @@ use zeroclaw_providers::{ChatMessage, ModelProvider};
 
 use crate::agent::cost::TOOL_LOOP_COST_TRACKING_CONTEXT;
 use crate::agent::turn::{
-    LoopKnobs, ModelSwitchCallback, ResolvedAgentExecution, ResolvedIo, ResolvedModelAccess,
-    ResolvedRuntimeKnobs, ToolLoop, run_tool_call_loop,
+    LoopKnobs, ResolvedAgentExecution, ResolvedIo, ResolvedModelAccess, ResolvedRuntimeKnobs,
+    ToolLoop, run_tool_call_loop,
 };
 
 /// Execute a single turn of the agent loop: send messages, parse tool calls,
@@ -49,7 +49,6 @@ pub async fn agent_turn(
     excluded_tools: &[String],
     dedup_exempt_tools: &[String],
     activated_tools: Option<&std::sync::Arc<std::sync::Mutex<crate::tools::ActivatedToolSet>>>,
-    model_switch_callback: Option<ModelSwitchCallback>,
     strict_tool_parsing: bool,
     parallel_tools: bool,
     max_tool_result_chars: usize,
@@ -93,7 +92,6 @@ pub async fn agent_turn(
                 config,
                 hooks: None,
                 activated_tools,
-                model_switch_callback,
                 receipt_generator: None,
             },
             ResolvedRuntimeKnobs {
