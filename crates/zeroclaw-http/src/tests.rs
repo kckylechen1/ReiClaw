@@ -6,10 +6,11 @@ async fn env_override_lock() -> tokio::sync::MutexGuard<'static, ()> {
 }
 
 fn runtime_proxy_cache_contains(cache_key: &str) -> bool {
-    match runtime_proxy_client_cache().read() {
-        Ok(guard) => guard.contains_key(cache_key),
-        Err(poisoned) => poisoned.into_inner().contains_key(cache_key),
-    }
+    runtime_proxy_state()
+        .read()
+        .unwrap_or_else(|poisoned| poisoned.into_inner())
+        .clients
+        .contains_key(cache_key)
 }
 
 #[tokio::test]
@@ -24,7 +25,7 @@ async fn runtime_proxy_client_cache_reuses_default_profile_key() {
     );
     let cache_key = runtime_proxy_cache_key(&service_key, None, None);
 
-    clear_runtime_proxy_client_cache();
+    set_runtime_proxy_config(ProxyConfig::default());
     assert!(!runtime_proxy_cache_contains(&cache_key));
 
     let _ = build_runtime_proxy_client(&service_key);
@@ -73,12 +74,28 @@ async fn set_runtime_proxy_config_clears_runtime_proxy_client_cache() {
     );
     let cache_key = runtime_proxy_cache_key(&service_key, Some(30), Some(5));
 
-    clear_runtime_proxy_client_cache();
+    set_runtime_proxy_config(ProxyConfig::default());
     let _ = build_runtime_proxy_client_with_timeouts(&service_key, 30, 5);
     assert!(runtime_proxy_cache_contains(&cache_key));
 
     set_runtime_proxy_config(ProxyConfig::default());
     assert!(!runtime_proxy_cache_contains(&cache_key));
+}
+
+#[tokio::test]
+async fn runtime_proxy_reload_keeps_environment_changes_boot_only() {
+    let _guard = env_override_lock().await;
+    let before = snapshot_proxy_env();
+    set_runtime_proxy_config(ProxyConfig {
+        enabled: true,
+        scope: ProxyScope::Environment,
+        all_proxy: Some("http://reload.example:8080".into()),
+        ..Default::default()
+    });
+    let after = snapshot_proxy_env();
+    restore_proxy_env(&before);
+    set_runtime_proxy_config(ProxyConfig::default());
+    assert_eq!(after.prev, before.prev);
 }
 
 // Restart-equivalence for the retired live-env proxy actions: the
@@ -248,7 +265,7 @@ fn restore_proxy_env(snapshot: &ProxyEnvSnapshot) {
 }
 
 async fn assert_http_response(
-    listener: tokio::net::TcpListener,
+    listener: &tokio::net::TcpListener,
     client: reqwest::Client,
     url: &str,
     body: &str,
@@ -300,13 +317,89 @@ async fn reloaded_proxy_routes_the_next_cached_client_to_the_new_endpoint() {
             ..Default::default()
         });
         let request = assert_http_response(
-            listener,
+            &listener,
             build_runtime_proxy_client_with_timeouts("model_provider.openai", 2, 1),
             "http://proxy-target.invalid/probe",
             body,
         )
         .await;
         assert!(request.starts_with("GET http://proxy-target.invalid/probe HTTP/1.1\r\n"));
+    }
+    set_runtime_proxy_config(ProxyConfig::default());
+}
+
+#[tokio::test]
+async fn in_flight_proxy_build_cannot_repopulate_or_overwrite_cache_after_reload() {
+    use std::sync::mpsc;
+    use std::time::Duration;
+
+    let _guard = env_override_lock().await;
+    let service_key = "model_provider.concurrent_reload";
+    let cache_key = runtime_proxy_cache_key(service_key, Some(2), Some(1));
+
+    for warm_new_cache in [false, true] {
+        let old_proxy = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let new_proxy = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        set_runtime_proxy_config(ProxyConfig {
+            enabled: true,
+            all_proxy: Some(format!("http://{}", old_proxy.local_addr().unwrap())),
+            ..Default::default()
+        });
+
+        let (built_tx, built_rx) = mpsc::channel();
+        let (resume_tx, resume_rx) = mpsc::channel();
+        let pending_key = cache_key.clone();
+        let pending = std::thread::spawn(move || {
+            build_cached_proxy_client(pending_key, |config| {
+                let builder = reqwest::Client::builder()
+                    .timeout(Duration::from_secs(2))
+                    .connect_timeout(Duration::from_secs(1));
+                let client = apply_proxy_to_builder(config, builder, service_key)
+                    .build()
+                    .expect("old-generation client should build");
+                // Rendezvous after construction, before the shared production
+                // cache helper can publish. No timing-dependent sleeps.
+                built_tx.send(()).unwrap();
+                resume_rx
+                    .recv_timeout(Duration::from_secs(10))
+                    .expect("reload should release pending build");
+                client
+            })
+        });
+        built_rx
+            .recv_timeout(Duration::from_secs(10))
+            .expect("client should be ready before reload");
+
+        set_runtime_proxy_config(ProxyConfig {
+            enabled: true,
+            all_proxy: Some(format!("http://{}", new_proxy.local_addr().unwrap())),
+            ..Default::default()
+        });
+        if warm_new_cache {
+            let _ = build_runtime_proxy_client_with_timeouts(service_key, 2, 1);
+        }
+        resume_tx.send(()).unwrap();
+        let old_client = pending.join().expect("pending build should complete");
+        assert_eq!(runtime_proxy_cache_contains(&cache_key), warm_new_cache);
+
+        // An already-started caller keeps its snapshot, but the next public
+        // builder must use the new proxy, whether its cache was empty or warm.
+        let old_request = assert_http_response(
+            &old_proxy,
+            old_client,
+            "http://proxy-target.invalid/probe",
+            "in-flight snapshot",
+        )
+        .await;
+        assert!(old_request.starts_with("GET http://proxy-target.invalid/probe HTTP/1.1\r\n"));
+        let next_request = assert_http_response(
+            &new_proxy,
+            build_runtime_proxy_client_with_timeouts(service_key, 2, 1),
+            "http://proxy-target.invalid/probe",
+            "current generation",
+        )
+        .await;
+        assert!(next_request.starts_with("GET http://proxy-target.invalid/probe HTTP/1.1\r\n"));
     }
     set_runtime_proxy_config(ProxyConfig::default());
 }
@@ -331,7 +424,7 @@ async fn service_selectors_and_no_proxy_keep_direct_requests_direct() {
             .build()
             .unwrap();
     assert!(
-        assert_http_response(listener, client, &url, "service excluded")
+        assert_http_response(&listener, client, &url, "service excluded")
             .await
             .starts_with("GET /direct HTTP/1.1\r\n")
     );
@@ -343,7 +436,7 @@ async fn service_selectors_and_no_proxy_keep_direct_requests_direct() {
     let url = format!("http://{}/bypass", listener.local_addr().unwrap());
     assert!(
         assert_http_response(
-            listener,
+            &listener,
             build_runtime_proxy_client("memory.embeddings"),
             &url,
             "host excluded",
@@ -355,23 +448,25 @@ async fn service_selectors_and_no_proxy_keep_direct_requests_direct() {
 }
 
 #[tokio::test]
-async fn channel_override_uses_its_own_proxy_instead_of_the_runtime_proxy() {
+async fn channel_override_keeps_its_own_proxy_across_runtime_reload() {
     let _guard = env_override_lock().await;
-    let unused_proxy = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
-    set_runtime_proxy_config(ProxyConfig {
-        enabled: true,
-        all_proxy: Some(format!("http://{}", unused_proxy.local_addr().unwrap())),
-        ..Default::default()
-    });
     let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
     let override_url = format!("http://{}", listener.local_addr().unwrap());
-    let request = assert_http_response(
-        listener,
-        build_channel_proxy_client_with_timeouts("channel.telegram", Some(&override_url), 2, 1),
-        "http://channel-target.invalid/probe",
-        "channel override",
-    )
-    .await;
-    assert!(request.starts_with("GET http://channel-target.invalid/probe HTTP/1.1\r\n"));
+    for body in ["before reload", "after reload"] {
+        let unused_proxy = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        set_runtime_proxy_config(ProxyConfig {
+            enabled: true,
+            all_proxy: Some(format!("http://{}", unused_proxy.local_addr().unwrap())),
+            ..Default::default()
+        });
+        let request = assert_http_response(
+            &listener,
+            build_channel_proxy_client_with_timeouts("channel.telegram", Some(&override_url), 2, 1),
+            "http://channel-target.invalid/probe",
+            body,
+        )
+        .await;
+        assert!(request.starts_with("GET http://channel-target.invalid/probe HTTP/1.1\r\n"));
+    }
     set_runtime_proxy_config(ProxyConfig::default());
 }
