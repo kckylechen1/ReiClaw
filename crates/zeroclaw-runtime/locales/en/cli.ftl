@@ -869,7 +869,6 @@ cli-alias-no-changes = No changes made. Re-run with --yes to apply (or --dry-run
 cli-alias-warn-workspace-archive = warning: workspace archive failed: {$error}
 cli-alias-owned-cascaded = owned-state cascaded: memory {$memory} · cron {$cron} · acp {$acp} · sessions {$sessions} → {$archive}
 cli-alias-owned-repointed = owned-state re-pointed: memory {$memory} · cron {$cron} · acp {$acp} · sessions {$sessions}
-cli-alias-warn-workspace-move = warning: workspace move failed: {$error}
 cli-alias-warn = warning: {$warning}
 cli-alias-deleted = deleted {$section}.{$alias} (scrubbed {$count} reference(s))
 cli-alias-delete-refused-header = refused: {$count} hard reference(s) block the delete:

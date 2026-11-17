@@ -66,7 +66,7 @@ zeroclaw agents rename researcher analyst
 
 Both surfaces rewrite references to the alias, persist the config, move the default per-alias workspace, and re-point owned memory, cron, ACP, and session state. Custom workspace paths do not move because they are not derived from the alias. The reserved `default` alias cannot be renamed from or to.
 
-Read any warnings in the response. The config rename commits before workspace and owned-state migration, so warnings identify a side effect that still needs attention. The same gateway API rename request can be reissued to retry residue left under the old alias.
+Read any warnings in the response. The config rename commits before workspace and owned-state migration, so warnings identify a side effect that still needs attention. After addressing the failure, reissue the same CLI command or gateway API rename request to retry residue left under the old alias. When config already names the target, this retry does not save config again or change the target's current companion identity. A request with an absent source and no remaining residue is refused.
 
 ## Delete an agent
 

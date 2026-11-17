@@ -725,7 +725,6 @@ cli-alias-no-changes = 未做任何更改。请使用 --yes 重新运行以应�
 cli-alias-warn-workspace-archive = 警告：workspace 归档失败：{$error}
 cli-alias-owned-cascaded = 所属状态已级联：memory {$memory} · cron {$cron} · acp {$acp} · sessions {$sessions} → {$archive}
 cli-alias-owned-repointed = 所属状态已重新指向：memory {$memory} · cron {$cron} · acp {$acp} · sessions {$sessions}
-cli-alias-warn-workspace-move = 警告：workspace 移动失败：{$error}
 cli-alias-warn = 警告：{$warning}
 cli-alias-deleted = 已删除 {$section}.{$alias}（已清除 {$count} 个引用）
 cli-alias-delete-refused-header = 已拒绝：{$count} 个硬引用阻止了删除：
