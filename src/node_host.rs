@@ -9,8 +9,12 @@ use std::net::SocketAddr;
 use std::time::Duration;
 use tokio_tungstenite::tungstenite::{Message, client::IntoClientRequest};
 use zeroclaw_api::node::{GatewayToNode, NodeToGateway, WS_NODES_V2};
+use zeroclaw_api::node_capability;
 use zeroclaw_gateway::device_identity::{DeviceKeyPair, auth_message};
-use zeroclaw_gateway::nodes::invocation::{SAFE_CAPS, args_digest, validate_args};
+use zeroclaw_gateway::nodes::invocation::args_digest;
+
+// Local implementations are a separate fact from kernel eligibility and grants.
+const IMPLEMENTED_CAPABILITIES: &[&str] = &["system.info", "test.echo"];
 
 type Socket =
     tokio_tungstenite::WebSocketStream<tokio_tungstenite::MaybeTlsStream<tokio::net::TcpStream>>;
@@ -35,6 +39,16 @@ struct Session {
 
 fn emit(value: Value) {
     println!("{value}");
+}
+
+fn execute_capability(cap: &str, args: &Value) -> Result<String> {
+    match cap {
+        "system.info" => {
+            Ok(json!({"os": std::env::consts::OS, "arch": std::env::consts::ARCH}).to_string())
+        }
+        "test.echo" => Ok(args["text"].as_str().context("validated echo")?.to_owned()),
+        _ => bail!("unsupported_or_invalid"),
+    }
 }
 
 /// Prints a public enrollment key, then reads one operator-issued identity from
@@ -101,7 +115,10 @@ pub async fn run() -> Result<()> {
     #[cfg(test)]
     let mut hold_results = false;
     // Local reductions survive reconnect; a fresh connection grants nothing new.
-    let mut caps: Vec<String> = SAFE_CAPS.iter().map(|s| (*s).into()).collect();
+    let mut caps: Vec<String> = IMPLEMENTED_CAPABILITIES
+        .iter()
+        .filter_map(|name| node_capability::invocable(name).map(|spec| spec.name.to_owned()))
+        .collect();
     loop {
         let mut request = format!("ws://{}/ws/nodes", session.address).into_client_request()?;
         request
@@ -200,7 +217,7 @@ pub async fn run() -> Result<()> {
                             let identity = format!("{connection_id}:{cap_revision}:{cap}:{digest}:{deadline}");
                             let refusal = if !authenticated || connection_id != connection { Some("stale_connection") }
                                 else if cap_revision != revision || !caps.contains(&cap) { Some("capability_changed") }
-                                else if grant_proof.is_some() || !validate_args(&cap, &args) || args_digest(&args) != digest { Some("unsupported_or_invalid") }
+                                else if grant_proof.is_some() || !node_capability::invocable(&cap).is_some_and(|spec| spec.validate_args(&args)) || args_digest(&args) != digest { Some("unsupported_or_invalid") }
                                 else if !zeroclaw_api::time::parse_rfc3339(&deadline).is_ok_and(|d| d > jiff::Timestamp::now()) { Some("deadline_expired") }
                                 else { None };
                             let result = if let Some(reason) = refusal {
@@ -210,8 +227,7 @@ pub async fn run() -> Result<()> {
                                 result.clone()
                             } else {
                                 if seen.len() >= 1024 { bail!("session call limit reached; reconnect explicitly") }
-                                let output = if cap == "test.echo" { args["text"].as_str().context("validated echo")?.to_owned() }
-                                    else { json!({"os":std::env::consts::OS,"arch":std::env::consts::ARCH}).to_string() };
+                                let output = execute_capability(&cap, &args)?;
                                 let result = NodeToGateway::Result { call_id: call_id.clone(), connection_id: connection.clone(), success: true, output, error: None };
                                 // Reserve before returning any result; never evict/re-execute IDs.
                                 seen.insert(call_id.clone(), (identity, result.clone()));
@@ -232,5 +248,25 @@ pub async fn run() -> Result<()> {
                 }
             }
         }
+    }
+}
+
+#[cfg(test)]
+mod capability_tests {
+    use super::*;
+
+    #[test]
+    fn executor_rejects_unknown_names_instead_of_returning_system_info() {
+        assert!(execute_capability("unimplemented.action", &json!({})).is_err());
+        assert_eq!(
+            execute_capability("test.echo", &json!({"text": "echo"})).unwrap(),
+            "echo"
+        );
+        let info: Value =
+            serde_json::from_str(&execute_capability("system.info", &json!({})).unwrap()).unwrap();
+        assert_eq!(
+            info,
+            json!({"os": std::env::consts::OS, "arch": std::env::consts::ARCH})
+        );
     }
 }

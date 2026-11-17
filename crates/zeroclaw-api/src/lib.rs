@@ -20,6 +20,7 @@ pub mod media;
 pub mod memory_traits;
 pub mod model_provider;
 pub mod node;
+pub mod node_capability;
 pub mod observability_traits;
 pub mod peripherals_traits;
 pub mod plan;

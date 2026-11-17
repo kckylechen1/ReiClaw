@@ -71,6 +71,18 @@ to port; this fork extends its existing derive and typed provider iterators.
 The change removes that consumer coupling without adding another schema
 registry or claiming a measured build/runtime speedup.
 
+### Kernel-owned Node capability catalog
+
+Compared with upstream `zeroclaw-labs/zeroclaw` at
+`cda933e6b9937deacbcc0d4d2cd7f1ae5bb4500e`, this fork keeps capability definitions
+in `zeroclaw-api`, with Node hosts advertising only the names they implement.
+Upstream's v1 device-supplied schemas and `approved=true` shortcut are skipped;
+they do not preserve this fork's authenticated v2 admission boundary.
+The catalog introduced by #630 S1 contains only `system.info` and `test.echo`.
+Live advertisement, approved ceilings and requester grants still apply, and
+effect capabilities remain unavailable. Wire frames and durable stores do not
+change.
+
 ### Desktop backend continuity
 
 Compared with upstream `zeroclaw-labs/zeroclaw#11523`, merged as
