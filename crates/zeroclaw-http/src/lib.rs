@@ -8,9 +8,14 @@ use std::collections::HashMap;
 use std::sync::{OnceLock, RwLock};
 use zeroclaw_config::schema::{ProxyConfig, ProxyScope, normalize_proxy_url_option};
 
-static RUNTIME_PROXY_CONFIG: OnceLock<RwLock<ProxyConfig>> = OnceLock::new();
-static RUNTIME_PROXY_CLIENT_CACHE: OnceLock<RwLock<HashMap<String, reqwest::Client>>> =
-    OnceLock::new();
+static RUNTIME_PROXY_STATE: OnceLock<RwLock<RuntimeProxyState>> = OnceLock::new();
+
+#[derive(Default)]
+struct RuntimeProxyState {
+    config: ProxyConfig,
+    generation: u64,
+    clients: HashMap<String, reqwest::Client>,
+}
 
 fn apply_proxy_to_builder(
     config: &ProxyConfig,
@@ -98,23 +103,8 @@ fn set_proxy_env_pair(key: &str, value: Option<&str>) {
     }
 }
 
-fn runtime_proxy_state() -> &'static RwLock<ProxyConfig> {
-    RUNTIME_PROXY_CONFIG.get_or_init(|| RwLock::new(ProxyConfig::default()))
-}
-
-fn runtime_proxy_client_cache() -> &'static RwLock<HashMap<String, reqwest::Client>> {
-    RUNTIME_PROXY_CLIENT_CACHE.get_or_init(|| RwLock::new(HashMap::new()))
-}
-
-fn clear_runtime_proxy_client_cache() {
-    match runtime_proxy_client_cache().write() {
-        Ok(mut guard) => {
-            guard.clear();
-        }
-        Err(poisoned) => {
-            poisoned.into_inner().clear();
-        }
-    }
+fn runtime_proxy_state() -> &'static RwLock<RuntimeProxyState> {
+    RUNTIME_PROXY_STATE.get_or_init(|| RwLock::new(RuntimeProxyState::default()))
 }
 
 fn runtime_proxy_cache_key(
@@ -134,42 +124,49 @@ fn runtime_proxy_cache_key(
     )
 }
 
-fn runtime_proxy_cached_client(cache_key: &str) -> Option<reqwest::Client> {
-    match runtime_proxy_client_cache().read() {
-        Ok(guard) => guard.get(cache_key).cloned(),
-        Err(poisoned) => poisoned.into_inner().get(cache_key).cloned(),
-    }
-}
+/// Build from one config snapshot without holding the runtime lock during client
+/// construction. A reload invalidates both the cache and any pending insertion.
+/// Adapted from upstream cda933e6b9937deacbcc0d4d2cd7f1ae5bb4500e; this fork keeps
+/// config, generation and cache together in its HTTP runtime owner.
+fn build_cached_proxy_client(
+    cache_key: String,
+    build: impl FnOnce(&ProxyConfig) -> reqwest::Client,
+) -> reqwest::Client {
+    let (generation, config) = {
+        let state = runtime_proxy_state()
+            .read()
+            .unwrap_or_else(|poisoned| poisoned.into_inner());
+        if let Some(client) = state.clients.get(&cache_key) {
+            return client.clone();
+        }
+        (state.generation, state.config.clone())
+    };
 
-fn set_runtime_proxy_cached_client(cache_key: String, client: reqwest::Client) {
-    match runtime_proxy_client_cache().write() {
-        Ok(mut guard) => {
-            guard.insert(cache_key, client);
-        }
-        Err(poisoned) => {
-            poisoned.into_inner().insert(cache_key, client);
-        }
+    let client = build(&config);
+    let mut state = runtime_proxy_state()
+        .write()
+        .unwrap_or_else(|poisoned| poisoned.into_inner());
+    if state.generation == generation {
+        state.clients.insert(cache_key, client.clone());
     }
+    client
 }
 
 pub fn set_runtime_proxy_config(config: ProxyConfig) {
-    match runtime_proxy_state().write() {
-        Ok(mut guard) => {
-            *guard = config;
-        }
-        Err(poisoned) => {
-            *poisoned.into_inner() = config;
-        }
-    }
-
-    clear_runtime_proxy_client_cache();
+    let mut state = runtime_proxy_state()
+        .write()
+        .unwrap_or_else(|poisoned| poisoned.into_inner());
+    state.config = config;
+    state.generation = state.generation.wrapping_add(1);
+    state.clients.clear();
 }
 
 pub fn runtime_proxy_config() -> ProxyConfig {
-    match runtime_proxy_state().read() {
-        Ok(guard) => guard.clone(),
-        Err(poisoned) => poisoned.into_inner().clone(),
-    }
+    runtime_proxy_state()
+        .read()
+        .unwrap_or_else(|poisoned| poisoned.into_inner())
+        .config
+        .clone()
 }
 
 /// Reapply the persisted canonical `[proxy]` config at process startup.
@@ -219,25 +216,21 @@ pub fn apply_runtime_proxy_to_builder(
 
 pub fn build_runtime_proxy_client(service_key: &str) -> reqwest::Client {
     let cache_key = runtime_proxy_cache_key(service_key, None, None);
-    if let Some(client) = runtime_proxy_cached_client(&cache_key) {
-        return client;
-    }
-
-    let builder = apply_runtime_proxy_to_builder(reqwest::Client::builder(), service_key);
-    let client = builder.build().unwrap_or_else(|error| {
-        ::zeroclaw_log::record!(
-            WARN,
-            ::zeroclaw_log::Event::new(module_path!(), ::zeroclaw_log::Action::Note)
-                .with_outcome(::zeroclaw_log::EventOutcome::Unknown)
-                .with_attrs(
-                    ::serde_json::json!({"service_key": service_key, "error": error.to_string()})
-                ),
-            "Failed to build proxied client: "
-        );
-        reqwest::Client::new()
-    });
-    set_runtime_proxy_cached_client(cache_key, client.clone());
-    client
+    build_cached_proxy_client(cache_key, |config| {
+        let builder = apply_proxy_to_builder(config, reqwest::Client::builder(), service_key);
+        builder.build().unwrap_or_else(|error| {
+            ::zeroclaw_log::record!(
+                WARN,
+                ::zeroclaw_log::Event::new(module_path!(), ::zeroclaw_log::Action::Note)
+                    .with_outcome(::zeroclaw_log::EventOutcome::Unknown)
+                    .with_attrs(
+                        ::serde_json::json!({"service_key": service_key, "error": error.to_string()})
+                    ),
+                "Failed to build proxied client: "
+            );
+            reqwest::Client::new()
+        })
+    })
 }
 
 pub fn build_runtime_proxy_client_with_timeouts(
@@ -247,28 +240,24 @@ pub fn build_runtime_proxy_client_with_timeouts(
 ) -> reqwest::Client {
     let cache_key =
         runtime_proxy_cache_key(service_key, Some(timeout_secs), Some(connect_timeout_secs));
-    if let Some(client) = runtime_proxy_cached_client(&cache_key) {
-        return client;
-    }
-
-    let builder = reqwest::Client::builder()
-        .timeout(std::time::Duration::from_secs(timeout_secs))
-        .connect_timeout(std::time::Duration::from_secs(connect_timeout_secs));
-    let builder = apply_runtime_proxy_to_builder(builder, service_key);
-    let client = builder.build().unwrap_or_else(|error| {
-        ::zeroclaw_log::record!(
-            WARN,
-            ::zeroclaw_log::Event::new(module_path!(), ::zeroclaw_log::Action::Note)
-                .with_outcome(::zeroclaw_log::EventOutcome::Unknown)
-                .with_attrs(
-                    ::serde_json::json!({"service_key": service_key, "error": error.to_string()})
-                ),
-            "Failed to build proxied timeout client: "
-        );
-        reqwest::Client::new()
-    });
-    set_runtime_proxy_cached_client(cache_key, client.clone());
-    client
+    build_cached_proxy_client(cache_key, |config| {
+        let builder = reqwest::Client::builder()
+            .timeout(std::time::Duration::from_secs(timeout_secs))
+            .connect_timeout(std::time::Duration::from_secs(connect_timeout_secs));
+        let builder = apply_proxy_to_builder(config, builder, service_key);
+        builder.build().unwrap_or_else(|error| {
+            ::zeroclaw_log::record!(
+                WARN,
+                ::zeroclaw_log::Event::new(module_path!(), ::zeroclaw_log::Action::Note)
+                    .with_outcome(::zeroclaw_log::EventOutcome::Unknown)
+                    .with_attrs(
+                        ::serde_json::json!({"service_key": service_key, "error": error.to_string()})
+                    ),
+                "Failed to build proxied timeout client: "
+            );
+            reqwest::Client::new()
+        })
+    })
 }
 
 /// Build an HTTP client for a channel, using an explicit per-channel proxy URL
@@ -336,24 +325,20 @@ fn build_explicit_proxy_client(
             .map(|v| v.to_string())
             .unwrap_or_else(|| "none".to_string()),
     );
-    if let Some(client) = runtime_proxy_cached_client(&cache_key) {
-        return client;
-    }
-
-    let mut builder = reqwest::Client::builder();
-    if let Some(t) = timeout_secs {
-        builder = builder.timeout(std::time::Duration::from_secs(t));
-    }
-    if let Some(ct) = connect_timeout_secs {
-        builder = builder.connect_timeout(std::time::Duration::from_secs(ct));
-    }
-    builder = apply_explicit_proxy_to_builder(builder, service_key, proxy_url);
-    let client = builder.build().unwrap_or_else(|error| {
-        ::zeroclaw_log::record!(WARN, ::zeroclaw_log::Event::new(module_path!(), ::zeroclaw_log::Action::Note).with_outcome(::zeroclaw_log::EventOutcome::Unknown).with_attrs(::serde_json::json!({"service_key": service_key, "proxy_url": proxy_url, "error": error.to_string()})), "Failed to build channel proxy client: ");
-        reqwest::Client::new()
-    });
-    set_runtime_proxy_cached_client(cache_key, client.clone());
-    client
+    build_cached_proxy_client(cache_key, |_| {
+        let mut builder = reqwest::Client::builder();
+        if let Some(t) = timeout_secs {
+            builder = builder.timeout(std::time::Duration::from_secs(t));
+        }
+        if let Some(ct) = connect_timeout_secs {
+            builder = builder.connect_timeout(std::time::Duration::from_secs(ct));
+        }
+        builder = apply_explicit_proxy_to_builder(builder, service_key, proxy_url);
+        builder.build().unwrap_or_else(|error| {
+            ::zeroclaw_log::record!(WARN, ::zeroclaw_log::Event::new(module_path!(), ::zeroclaw_log::Action::Note).with_outcome(::zeroclaw_log::EventOutcome::Unknown).with_attrs(::serde_json::json!({"service_key": service_key, "proxy_url": proxy_url, "error": error.to_string()})), "Failed to build channel proxy client: ");
+            reqwest::Client::new()
+        })
+    })
 }
 
 /// Apply a single explicit proxy URL to a builder via `Proxy::all`.
