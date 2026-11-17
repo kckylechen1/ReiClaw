@@ -33,8 +33,6 @@ use std::sync::{Arc, OnceLock};
 use std::thread;
 use std::time::{Duration, Instant, SystemTime};
 
-use chrono::{DateTime, Utc};
-
 use crate::broadcast::current_broadcast_hook;
 use crate::config::{LlmRequestPayloadPolicy, LogConfig, ResolvedPolicy, StoragePolicy};
 use crate::event::LogEvent;
@@ -653,7 +651,7 @@ fn trim_to_last_entries(state: &Arc<WorkerState>) -> Result<()> {
     let tmp = state.policy.path.with_extension(format!(
         "tmp.{}.{}",
         std::process::id(),
-        chrono::Utc::now().timestamp_nanos_opt().unwrap_or_default(),
+        jiff::Timestamp::now().as_nanosecond(),
     ));
 
     {
@@ -743,8 +741,14 @@ fn maybe_rotate_for_date(state: &Arc<WorkerState>) -> Result<()> {
     if meta.len() == 0 {
         return Ok(());
     }
-    let modified: DateTime<Utc> = meta.modified().unwrap_or(SystemTime::UNIX_EPOCH).into();
-    if modified.date_naive() < Utc::now().date_naive() {
+    let modified: jiff::Timestamp =
+        jiff::Timestamp::try_from(meta.modified().unwrap_or(SystemTime::UNIX_EPOCH))
+            .context("log modification time is outside the supported range")?;
+    if jiff::tz::Offset::UTC.to_datetime(modified).date()
+        < jiff::tz::Offset::UTC
+            .to_datetime(jiff::Timestamp::now())
+            .date()
+    {
         rotate_active(state, modified)?;
     }
     Ok(())
@@ -770,13 +774,15 @@ fn maybe_rotate_for_size(state: &Arc<WorkerState>) -> Result<()> {
     if meta.len() >= max {
         // Stamp the archive with the file's last-write time (its newest event),
         // matching date rotation, so the archive name reflects its contents.
-        let when: DateTime<Utc> = meta.modified().unwrap_or(SystemTime::UNIX_EPOCH).into();
+        let when: jiff::Timestamp =
+            jiff::Timestamp::try_from(meta.modified().unwrap_or(SystemTime::UNIX_EPOCH))
+                .context("log modification time is outside the supported range")?;
         rotate_active(state, when)?;
     }
     Ok(())
 }
 
-fn rotate_active(state: &Arc<WorkerState>, when: DateTime<Utc>) -> Result<()> {
+fn rotate_active(state: &Arc<WorkerState>, when: jiff::Timestamp) -> Result<()> {
     let path = &state.policy.path;
     let archive = archive_path(path, when)?;
     fs::rename(path, &archive)
@@ -794,14 +800,14 @@ fn rotate_active(state: &Arc<WorkerState>, when: DateTime<Utc>) -> Result<()> {
 
 /// Build the archive path for `path`, stamping the timestamp before the
 /// extension and disambiguating same-second rotations with a numeric suffix.
-fn archive_path(path: &Path, when: DateTime<Utc>) -> Result<PathBuf> {
+fn archive_path(path: &Path, when: jiff::Timestamp) -> Result<PathBuf> {
     let dir = path.parent().unwrap_or_else(|| Path::new("."));
     let file_name = path
         .file_name()
         .and_then(|s| s.to_str())
         .context("log path has no file name")?;
     let (base, ext) = split_base_ext(file_name);
-    let stamp = when.format("%Y%m%d-%H%M%S").to_string();
+    let stamp = when.strftime("%Y%m%d-%H%M%S").to_string();
 
     // The existence check and subsequent `fs::rename` are called from
     // the single-threaded worker, so the check-then-rename has no
@@ -1730,10 +1736,9 @@ mod tests {
 
     #[test]
     fn archive_path_places_stamp_before_extension_and_dedupes() {
-        use chrono::TimeZone;
         let tmp = tempfile::tempdir().unwrap();
         let active = tmp.path().join("runtime-trace.jsonl");
-        let when = Utc.with_ymd_and_hms(2026, 6, 24, 3, 15, 0).unwrap();
+        let when = zeroclaw_api::time::parse_rfc3339("2026-06-24T03:15:00Z").unwrap();
 
         let a1 = archive_path(&active, when).unwrap();
         assert_eq!(

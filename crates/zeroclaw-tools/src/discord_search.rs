@@ -72,12 +72,8 @@ fn search_discord_db(
         bind_values.push(rusqlite::types::Value::Text(format!("%{escaped}%")));
     }
 
-    let since_dt = since
-        .map(chrono::DateTime::parse_from_rfc3339)
-        .transpose()?;
-    let until_dt = until
-        .map(chrono::DateTime::parse_from_rfc3339)
-        .transpose()?;
+    let since_dt = since.map(zeroclaw_api::time::parse_rfc3339).transpose()?;
+    let until_dt = until.map(zeroclaw_api::time::parse_rfc3339).transpose()?;
 
     let capped_limit = limit.min(500);
     let where_sql = if clauses.is_empty() {
@@ -106,7 +102,7 @@ fn search_discord_db(
         let content: String = row.get(0)?;
         let created_at: String = row.get(1)?;
         if since_dt.is_some() || until_dt.is_some() {
-            let Ok(ts) = chrono::DateTime::parse_from_rfc3339(&created_at) else {
+            let Ok(ts) = zeroclaw_api::time::parse_rfc3339(&created_at) else {
                 continue;
             };
             if let Some(s) = since_dt
@@ -196,7 +192,7 @@ impl Tool for DiscordSearchTool {
         }
 
         if let Some(ref s) = since
-            && chrono::DateTime::parse_from_rfc3339(s).is_err()
+            && zeroclaw_api::time::parse_rfc3339(s).is_err()
         {
             return Ok(ToolResult {
                 success: false,
@@ -207,7 +203,7 @@ impl Tool for DiscordSearchTool {
             });
         }
         if let Some(ref u) = until
-            && chrono::DateTime::parse_from_rfc3339(u).is_err()
+            && zeroclaw_api::time::parse_rfc3339(u).is_err()
         {
             return Ok(ToolResult {
                 success: false,
@@ -219,8 +215,8 @@ impl Tool for DiscordSearchTool {
         }
         if let (Some(s), Some(u)) = (since.as_deref(), until.as_deref())
             && let (Ok(s_dt), Ok(u_dt)) = (
-                chrono::DateTime::parse_from_rfc3339(s),
-                chrono::DateTime::parse_from_rfc3339(u),
+                zeroclaw_api::time::parse_rfc3339(s),
+                zeroclaw_api::time::parse_rfc3339(u),
             )
             && s_dt >= u_dt
         {

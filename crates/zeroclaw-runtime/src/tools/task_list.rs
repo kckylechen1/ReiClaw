@@ -189,13 +189,13 @@ fn parse_ops(
 
 /// A raw remind_at string → epoch seconds. Naive timestamps are refused.
 fn parse_remind_at(raw: &str) -> anyhow::Result<i64> {
-    let parsed = chrono::DateTime::parse_from_rfc3339(raw).map_err(|error| {
+    let parsed = zeroclaw_api::time::parse_rfc3339(raw).map_err(|error| {
         anyhow::Error::msg(format!(
             "remind_at must be RFC3339 WITH a UTC offset (e.g. 2026-11-07T09:00:00Z or \
              2026-11-07T17:00:00+08:00); ask the user for the timezone if unclear: {error}"
         ))
     })?;
-    Ok(parsed.timestamp())
+    Ok(zeroclaw_api::time::epoch_second(parsed))
 }
 
 fn render_list(
@@ -315,7 +315,11 @@ the task cancels it."
                 return Ok(ToolResult::err("`expected_revision` is required"));
             }
         };
-        let ops = match parse_ops(&args, &self.resolve_target, chrono::Utc::now().timestamp()) {
+        let ops = match parse_ops(
+            &args,
+            &self.resolve_target,
+            zeroclaw_api::time::epoch_second(jiff::Timestamp::now()),
+        ) {
             Ok(ops) => ops,
             Err(error) => return Ok(ToolResult::err(error.to_string())),
         };

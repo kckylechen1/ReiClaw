@@ -39,12 +39,15 @@ fn format_expiry(profile: &auth::profiles::AuthProfile) -> String {
         .and_then(|token_set| token_set.expires_at)
     {
         Some(ts) => {
-            let now = chrono::Utc::now();
+            let now = jiff::Timestamp::now();
             if ts <= now {
-                format!("expired at {}", ts.to_rfc3339())
+                format!("expired at {}", zeroclaw_api::time::format_rfc3339(ts))
             } else {
-                let mins = (ts - now).num_minutes();
-                format!("expires in {mins}m ({})", ts.to_rfc3339())
+                let mins = ts.duration_since(now).as_mins();
+                format!(
+                    "expires in {mins}m ({})",
+                    zeroclaw_api::time::format_rfc3339(ts)
+                )
             }
         }
         None => "n/a".to_string(),

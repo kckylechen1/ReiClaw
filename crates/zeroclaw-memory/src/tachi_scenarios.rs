@@ -467,7 +467,7 @@ mod tests {
         namespace: &str,
         key: &str,
     ) {
-        let now = chrono::Local::now().to_rfc3339();
+        let now = zeroclaw_api::time::format_rfc3339_zoned(&jiff::Zoned::now());
         let entry = MemoryEntry {
             id: id.into(),
             path: path.into(),

@@ -187,7 +187,12 @@ pub(crate) fn start(
             }
             if let Err(error) = tokio::task::spawn_blocking({
                 let data_dir = data_dir.clone();
-                move || reconcile_pass(&data_dir, chrono::Utc::now().timestamp())
+                move || {
+                    reconcile_pass(
+                        &data_dir,
+                        zeroclaw_api::time::epoch_second(jiff::Timestamp::now()),
+                    )
+                }
             })
             .await
             .map_err(anyhow::Error::from)

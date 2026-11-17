@@ -49,7 +49,7 @@ pub fn calculate_token_usage(
         total_tokens,
         cost_usd,
         pricing_available: true,
-        timestamp: chrono::Utc::now(),
+        timestamp: jiff::Timestamp::now(),
     }
 }
 

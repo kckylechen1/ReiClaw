@@ -308,7 +308,7 @@ impl HookHandler for WebhookAuditHook {
 
         let payload = serde_json::json!({
             "event": "tool_call",
-            "timestamp": chrono::Utc::now().to_rfc3339(),
+            "timestamp": zeroclaw_api::time::format_rfc3339(jiff::Timestamp::now()),
             "tool": tool,
             "success": result.success,
             "duration_ms": duration_ms,

@@ -60,7 +60,7 @@ fn capture_attribution(entry: &MemoryEntry) -> Result<CaptureAttribution> {
                 .is_some_and(|id| !id.trim().is_empty()),
         "companion capture attribution is incomplete"
     );
-    chrono::DateTime::parse_from_rfc3339(&capture.persisted_at)
+    zeroclaw_api::time::parse_rfc3339(&capture.persisted_at)
         .context("companion capture persisted_at is not a recognized timestamp")?;
     Ok(capture)
 }

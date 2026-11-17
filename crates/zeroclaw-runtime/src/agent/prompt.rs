@@ -4,7 +4,6 @@ use crate::security::AutonomyLevel;
 use crate::skills::Skill;
 use crate::tools::Tool;
 use anyhow::Result;
-use chrono::{Datelike, Local};
 use std::fmt::Write;
 use std::path::Path;
 use zeroclaw_config::schema::IdentityConfig;
@@ -428,7 +427,7 @@ impl PromptSection for DateTimeSection {
     }
 
     fn build(&self, _ctx: &PromptContext<'_>) -> Result<String> {
-        let now = Local::now();
+        let now = jiff::Zoned::now();
         // Force Gregorian year to avoid confusion with local calendars (e.g. Buddhist calendar).
         let (year, month, day) = (now.year(), now.month(), now.day());
 
@@ -438,7 +437,7 @@ impl PromptSection for DateTimeSection {
              Use this for all relative time calculations (e.g. \"last 7 days\").\n\n\
              Date: {year:04}-{month:02}-{day:02}\n\
              UTC offset: {}",
-            now.format("%:z")
+            now.strftime("%:z")
         ))
     }
 }

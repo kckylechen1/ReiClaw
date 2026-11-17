@@ -741,9 +741,9 @@ impl GeminiModelProvider {
         // Determine expiry in millis: prefer expiry_date over expiry (RFC 3339)
         let expiry_millis = creds.expiry_date.or_else(|| {
             creds.expiry.as_deref().and_then(|expiry| {
-                chrono::DateTime::parse_from_rfc3339(expiry)
+                zeroclaw_api::time::parse_rfc3339(expiry)
                     .ok()
-                    .map(|dt| dt.timestamp_millis())
+                    .map(zeroclaw_api::time::epoch_millisecond)
             })
         });
 

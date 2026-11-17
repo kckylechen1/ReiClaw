@@ -3,10 +3,11 @@ use crate::cron::{
     next_run_for_schedule, schedule_cron_expression, validate_delivery_config, validate_schedule,
 };
 use anyhow::{Context, Result};
-use chrono::{DateTime, Utc};
+use jiff::{SignedDuration, Timestamp};
 use rusqlite::types::{FromSqlResult, ValueRef};
 use rusqlite::{Connection, OpenFlags, params};
 use uuid::Uuid;
+use zeroclaw_api::time::format_rfc3339;
 use zeroclaw_config::schema::Config;
 
 pub(super) const MAX_CRON_OUTPUT_BYTES: usize = 16 * 1024;
@@ -69,7 +70,7 @@ pub fn add_shell_job(
     command: &str,
     delivery: Option<DeliveryConfig>,
 ) -> Result<CronJob> {
-    let now = Utc::now();
+    let now = Timestamp::now();
     validate_schedule(&schedule, now)?;
     validate_delivery_config(delivery.as_ref())?;
     let next_run = next_run_for_schedule(&schedule, now)?;
@@ -99,8 +100,8 @@ pub fn add_shell_job(
                 serde_json::to_string(&delivery)?,
                 if delete_after_run { 1 } else { 0 },
                 agent_alias,
-                now.to_rfc3339(),
-                next_run.to_rfc3339(),
+                format_rfc3339(now),
+                format_rfc3339(next_run),
             ],
         )
         .context("Failed to insert cron shell job")?;
@@ -124,7 +125,7 @@ pub fn add_agent_job(
     allowed_tools: Option<Vec<String>>,
     uses_memory: bool,
 ) -> Result<CronJob> {
-    let now = Utc::now();
+    let now = Timestamp::now();
     validate_schedule(&schedule, now)?;
     validate_delivery_config(delivery.as_ref())?;
     let next_run = next_run_for_schedule(&schedule, now)?;
@@ -156,8 +157,8 @@ pub fn add_agent_job(
                 if delete_after_run { 1 } else { 0 },
                 encode_allowed_tools(allowed_tools.as_ref())?,
                 agent_alias,
-                now.to_rfc3339(),
-                next_run.to_rfc3339(),
+                format_rfc3339(now),
+                format_rfc3339(next_run),
                 if uses_memory { 1 } else { 0 },
             ],
         )
@@ -362,7 +363,7 @@ pub fn rename_jobs_by_agent(config: &Config, from: &str, to: &str) -> Result<usi
     Ok(changed)
 }
 
-pub fn due_jobs(config: &Config, now: DateTime<Utc>) -> Result<Vec<CronJob>> {
+pub fn due_jobs(config: &Config, now: Timestamp) -> Result<Vec<CronJob>> {
     let lim = i64::try_from(config.scheduler.max_tasks.max(1))
         .context("Scheduler max_tasks overflows i64")?;
     let Some(jobs) = with_read_connection(config, |conn| {
@@ -376,7 +377,7 @@ pub fn due_jobs(config: &Config, now: DateTime<Utc>) -> Result<Vec<CronJob>> {
              LIMIT ?2",
         )?;
 
-        let rows = stmt.query_map(params![now.to_rfc3339(), lim], map_cron_job_row)?;
+        let rows = stmt.query_map(params![format_rfc3339(now), lim], map_cron_job_row)?;
 
         let mut jobs = Vec::new();
         for row in rows {
@@ -400,7 +401,7 @@ pub fn due_jobs(config: &Config, now: DateTime<Utc>) -> Result<Vec<CronJob>> {
     Ok(jobs)
 }
 
-pub fn all_overdue_jobs(config: &Config, now: DateTime<Utc>) -> Result<Vec<CronJob>> {
+pub fn all_overdue_jobs(config: &Config, now: Timestamp) -> Result<Vec<CronJob>> {
     let Some(jobs) = with_read_connection(config, |conn| {
         let mut stmt = conn.prepare(
             "SELECT id, expression, command, schedule, job_type, prompt, name, session_target, model,
@@ -411,7 +412,7 @@ pub fn all_overdue_jobs(config: &Config, now: DateTime<Utc>) -> Result<Vec<CronJ
              ORDER BY next_run ASC",
         )?;
 
-        let rows = stmt.query_map(params![now.to_rfc3339()], map_cron_job_row)?;
+        let rows = stmt.query_map(params![format_rfc3339(now)], map_cron_job_row)?;
 
         let mut jobs = Vec::new();
         for row in rows {
@@ -440,7 +441,7 @@ pub fn update_job(config: &Config, job_id: &str, patch: CronJobPatch) -> Result<
     let mut schedule_changed = false;
 
     if let Some(schedule) = patch.schedule {
-        validate_schedule(&schedule, Utc::now())?;
+        validate_schedule(&schedule, Timestamp::now())?;
         job.schedule = schedule;
         job.expression = schedule_cron_expression(&job.schedule).unwrap_or_default();
         schedule_changed = true;
@@ -488,9 +489,9 @@ pub fn update_job(config: &Config, job_id: &str, patch: CronJobPatch) -> Result<
     // would otherwise fire it at once, at the wrong time. One-shot `At`
     // jobs keep their time.
     let stale_on_resume =
-        resumed && job.next_run < Utc::now() && !matches!(job.schedule, Schedule::At { .. });
+        resumed && job.next_run < Timestamp::now() && !matches!(job.schedule, Schedule::At { .. });
     if schedule_changed || stale_on_resume {
-        job.next_run = next_run_for_schedule(&job.schedule, Utc::now())?;
+        job.next_run = next_run_for_schedule(&job.schedule, Timestamp::now())?;
     }
 
     with_initialized_connection(config, |conn| {
@@ -513,7 +514,7 @@ pub fn update_job(config: &Config, job_id: &str, patch: CronJobPatch) -> Result<
                 serde_json::to_string(&job.delivery)?,
                 if job.delete_after_run { 1 } else { 0 },
                 encode_allowed_tools(job.allowed_tools.as_ref())?,
-                job.next_run.to_rfc3339(),
+                format_rfc3339(job.next_run),
                 if job.uses_memory { 1 } else { 0 },
                 job.id,
             ],
@@ -528,7 +529,7 @@ pub fn update_job(config: &Config, job_id: &str, patch: CronJobPatch) -> Result<
 pub fn record_last_run(
     config: &Config,
     job_id: &str,
-    finished_at: DateTime<Utc>,
+    finished_at: Timestamp,
     success: bool,
     output: &str,
 ) -> Result<()> {
@@ -539,7 +540,7 @@ pub fn record_last_run(
 pub fn record_last_run_with_status(
     config: &Config,
     job_id: &str,
-    finished_at: DateTime<Utc>,
+    finished_at: Timestamp,
     status: &str,
     output: &str,
 ) -> Result<()> {
@@ -565,7 +566,7 @@ pub fn reschedule_after_run_with_status(
     status: &str,
     output: &str,
 ) -> Result<()> {
-    let now = Utc::now();
+    let now = Timestamp::now();
     let bounded_output = truncate_cron_output(output);
 
     // One-shot `At` schedules have no future occurrence — record the run
@@ -576,7 +577,7 @@ pub fn reschedule_after_run_with_status(
                 "UPDATE cron_jobs
                  SET enabled = 0, last_run = ?1, last_status = ?2, last_output = ?3
                  WHERE id = ?4",
-                params![now.to_rfc3339(), status, bounded_output, job.id],
+                params![format_rfc3339(now), status, bounded_output, job.id],
             )
             .context("Failed to disable completed one-shot cron job")?;
             Ok(())
@@ -589,8 +590,8 @@ pub fn reschedule_after_run_with_status(
                  SET next_run = ?1, last_run = ?2, last_status = ?3, last_output = ?4
                  WHERE id = ?5",
                 params![
-                    next_run.to_rfc3339(),
-                    now.to_rfc3339(),
+                    format_rfc3339(next_run),
+                    format_rfc3339(now),
                     status,
                     bounded_output,
                     job.id
@@ -602,7 +603,7 @@ pub fn reschedule_after_run_with_status(
     }
 }
 
-pub fn skip_missed_run(config: &Config, job: &CronJob, now: DateTime<Utc>) -> Result<()> {
+pub fn skip_missed_run(config: &Config, job: &CronJob, now: Timestamp) -> Result<()> {
     if matches!(job.schedule, Schedule::At { .. }) {
         // One-shot job whose scheduled moment has already passed —
         // disable it so it won't execute late.
@@ -612,7 +613,7 @@ pub fn skip_missed_run(config: &Config, job: &CronJob, now: DateTime<Utc>) -> Re
                 "UPDATE cron_jobs
                  SET enabled = 0, last_run = ?1, last_status = 'skipped', last_output = ?2
                  WHERE id = ?3",
-                params![now.to_rfc3339(), bounded_output, job.id],
+                params![format_rfc3339(now), bounded_output, job.id],
             )
             .context("Failed to disable overdue one-shot cron job on startup skip")?;
             Ok(())
@@ -630,7 +631,7 @@ pub fn skip_missed_run(config: &Config, job: &CronJob, now: DateTime<Utc>) -> Re
         with_initialized_connection(config, |conn| {
             conn.execute(
                 "UPDATE cron_jobs SET next_run = ?1 WHERE id = ?2",
-                params![next_run.to_rfc3339(), job.id],
+                params![format_rfc3339(next_run), job.id],
             )
             .context("Failed to advance next_run on startup skip")?;
             Ok(())
@@ -638,12 +639,12 @@ pub fn skip_missed_run(config: &Config, job: &CronJob, now: DateTime<Utc>) -> Re
     }
 }
 
-pub fn claim_job(config: &Config, job_id: &str, now: DateTime<Utc>) -> Result<bool> {
+pub fn claim_job(config: &Config, job_id: &str, now: Timestamp) -> Result<bool> {
     with_initialized_connection(config, |conn| {
         let claimed = conn
             .execute(
                 "UPDATE cron_jobs SET locked_at = ?1 WHERE id = ?2 AND locked_at IS NULL",
-                params![now.to_rfc3339(), job_id],
+                params![format_rfc3339(now), job_id],
             )
             .context("Failed to claim cron job for execution")?;
         Ok(claimed == 1)
@@ -672,10 +673,7 @@ pub fn clear_stale_locks(config: &Config) -> Result<usize> {
 /// are reclaimed — used by the poll loop for TTL-based recovery so a hung
 /// agent job cannot hold a `max_concurrent` slot until the next daemon
 /// restart.
-pub fn clear_stale_locks_before(
-    config: &Config,
-    older_than: Option<DateTime<Utc>>,
-) -> Result<usize> {
+pub fn clear_stale_locks_before(config: &Config, older_than: Option<Timestamp>) -> Result<usize> {
     let cleared = with_read_connection(config, |conn| match older_than {
         None => conn
             .execute(
@@ -687,7 +685,7 @@ pub fn clear_stale_locks_before(
             .execute(
                 "UPDATE cron_jobs SET locked_at = NULL \
                      WHERE locked_at IS NOT NULL AND locked_at < ?1",
-                params![cutoff.to_rfc3339()],
+                params![format_rfc3339(cutoff)],
             )
             .context("Failed to reclaim TTL-expired cron job locks"),
     })?;
@@ -702,19 +700,27 @@ pub fn clear_stale_locks_before(
 /// of `due_jobs` until process restart.
 pub fn reclaim_stale_locks(
     config: &Config,
-    now: DateTime<Utc>,
+    now: Timestamp,
     ttl: std::time::Duration,
 ) -> Result<usize> {
-    let ttl = chrono::Duration::from_std(ttl).unwrap_or_else(|_| chrono::Duration::seconds(1800));
-    let cutoff = now - ttl;
+    // Keep the previous signed-millisecond bound and 30-minute fallback;
+    // Jiff's wider duration range must not change the recovery policy.
+    let ttl = if ttl.as_nanos() > i64::MAX as u128 * 1_000_000 {
+        SignedDuration::from_secs(1800)
+    } else {
+        SignedDuration::try_from(ttl).context("Invalid cron lock TTL")?
+    };
+    let cutoff = now
+        .checked_sub(ttl)
+        .context("Cron lock TTL is out of range")?;
     clear_stale_locks_before(config, Some(cutoff))
 }
 
 pub fn record_run(
     config: &Config,
     job_id: &str,
-    started_at: DateTime<Utc>,
-    finished_at: DateTime<Utc>,
+    started_at: Timestamp,
+    finished_at: Timestamp,
     status: &str,
     output: Option<&str>,
     duration_ms: i64,
@@ -749,8 +755,8 @@ pub fn record_run(
 pub(crate) fn persist_manual_run_result(
     config: &Config,
     job: &CronJob,
-    started_at: DateTime<Utc>,
-    finished_at: DateTime<Utc>,
+    started_at: Timestamp,
+    finished_at: Timestamp,
     status: &str,
     output: Option<&str>,
     duration_ms: i64,
@@ -793,9 +799,9 @@ pub(crate) fn persist_manual_run_result(
 pub(crate) fn persist_run_result(
     config: &Config,
     job: &CronJob,
-    started_at: DateTime<Utc>,
-    finished_at: DateTime<Utc>,
-    job_state_at: DateTime<Utc>,
+    started_at: Timestamp,
+    finished_at: Timestamp,
+    job_state_at: Timestamp,
     status: &str,
     output: Option<&str>,
     duration_ms: i64,
@@ -839,7 +845,7 @@ pub(crate) fn persist_run_result(
 pub(crate) fn persist_run_completion_state(
     config: &Config,
     job: &CronJob,
-    job_state_at: DateTime<Utc>,
+    job_state_at: Timestamp,
     status: &str,
     output: Option<&str>,
     action: RunCompletionAction,
@@ -854,8 +860,8 @@ fn insert_run_and_prune(
     conn: &Connection,
     config: &Config,
     job_id: &str,
-    started_at: DateTime<Utc>,
-    finished_at: DateTime<Utc>,
+    started_at: Timestamp,
+    finished_at: Timestamp,
     status: &str,
     output: Option<&str>,
     duration_ms: i64,
@@ -867,8 +873,8 @@ fn insert_run_and_prune(
          VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8)",
         params![
             job_id,
-            started_at.to_rfc3339(),
-            finished_at.to_rfc3339(),
+            format_rfc3339(started_at),
+            format_rfc3339(finished_at),
             status,
             output,
             duration_ms,
@@ -898,7 +904,7 @@ fn insert_run_and_prune(
 fn apply_last_run_state(
     conn: &Connection,
     job_id: &str,
-    finished_at: DateTime<Utc>,
+    finished_at: Timestamp,
     status: &str,
     output: &str,
 ) -> Result<()> {
@@ -906,7 +912,7 @@ fn apply_last_run_state(
         "UPDATE cron_jobs
          SET last_run = ?1, last_status = ?2, last_output = ?3
          WHERE id = ?4",
-        params![finished_at.to_rfc3339(), status, output, job_id],
+        params![format_rfc3339(finished_at), status, output, job_id],
     )
     .context("Failed to update cron last run fields")?;
     Ok(())
@@ -972,10 +978,9 @@ pub fn list_runs(config: &Config, job_id: &str, limit: usize) -> Result<Vec<Cron
     Ok(runs)
 }
 
-fn parse_rfc3339(raw: &str) -> Result<DateTime<Utc>> {
-    let parsed = DateTime::parse_from_rfc3339(raw)
-        .with_context(|| format!("Invalid RFC3339 timestamp in cron DB: {raw}"))?;
-    Ok(parsed.with_timezone(&Utc))
+fn parse_rfc3339(raw: &str) -> Result<Timestamp> {
+    zeroclaw_api::time::parse_rfc3339(raw)
+        .with_context(|| format!("Invalid RFC3339 timestamp in cron DB: {raw}"))
 }
 
 fn sql_conversion_error(err: anyhow::Error) -> rusqlite::Error {
@@ -1111,7 +1116,7 @@ pub fn sync_declarative_jobs(
         validate_decl(id, decl)?;
     }
 
-    let now = Utc::now();
+    let now = Timestamp::now();
 
     with_initialized_connection(config, |conn| {
         // Collect IDs of all declarative jobs currently defined in config.
@@ -1198,7 +1203,7 @@ pub fn sync_declarative_jobs(
                             delivery_json,
                             i32::from(delete_after_run),
                             allowed_tools_json,
-                            next_run.to_rfc3339(),
+                            format_rfc3339(next_run),
                             i32::from(decl.uses_memory),
                             id,
                         ],
@@ -1277,8 +1282,8 @@ pub fn sync_declarative_jobs(
                         allowed_tools_json,
                         i32::from(decl.uses_memory),
                         agent_alias,
-                        now.to_rfc3339(),
-                        next_run.to_rfc3339(),
+                        format_rfc3339(now),
+                        format_rfc3339(next_run),
                     ],
                 )
                 .with_context(|| {
@@ -1341,11 +1346,9 @@ fn convert_schedule_decl(decl: &zeroclaw_config::schema::CronScheduleDecl) -> Re
             every_ms: *every_ms,
         }),
         CronScheduleDecl::At { at } => {
-            let parsed = DateTime::parse_from_rfc3339(at)
-                .with_context(|| {
-                    format!("Invalid RFC3339 timestamp in declarative cron 'at': {at}")
-                })?
-                .with_timezone(&Utc);
+            let parsed = zeroclaw_api::time::parse_rfc3339(at).with_context(|| {
+                format!("Invalid RFC3339 timestamp in declarative cron 'at': {at}")
+            })?;
             Ok(Schedule::At { at: parsed })
         }
     }
@@ -1500,7 +1503,7 @@ fn with_initialized_connection<T>(
 fn disable_unschedulable(
     conn: &Connection,
     job: &CronJob,
-    at: DateTime<Utc>,
+    at: Timestamp,
     status: &str,
     err: &anyhow::Error,
 ) -> Result<()> {
@@ -1517,7 +1520,7 @@ fn disable_unschedulable(
             "UPDATE cron_jobs
              SET enabled = 0, last_run = ?1, last_status = ?2, last_output = ?3
              WHERE id = ?4",
-            params![at.to_rfc3339(), status, note, job.id],
+            params![format_rfc3339(at), status, note, job.id],
         )
         .context("Failed to disable unschedulable cron job")?;
     if changed == 0 {
@@ -1529,7 +1532,7 @@ fn disable_unschedulable(
 fn apply_run_completion_state(
     conn: &Connection,
     job: &CronJob,
-    job_state_at: DateTime<Utc>,
+    job_state_at: Timestamp,
     status: &str,
     output: Option<&str>,
     action: RunCompletionAction,
@@ -1554,8 +1557,8 @@ fn apply_run_completion_state(
                      SET next_run = ?1, last_run = ?2, last_status = ?3, last_output = ?4
                      WHERE id = ?5",
                     params![
-                        next_run.to_rfc3339(),
-                        job_state_at.to_rfc3339(),
+                        format_rfc3339(next_run),
+                        format_rfc3339(job_state_at),
                         status,
                         bounded_output.as_deref(),
                         job.id,
@@ -1573,7 +1576,7 @@ fn apply_run_completion_state(
                      SET enabled = 0, last_run = ?1, last_status = ?2, last_output = ?3
                      WHERE id = ?4",
                     params![
-                        job_state_at.to_rfc3339(),
+                        format_rfc3339(job_state_at),
                         status,
                         bounded_output.as_deref(),
                         job.id,

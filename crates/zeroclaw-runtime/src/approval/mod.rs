@@ -11,7 +11,6 @@ pub mod store;
 
 use crate::agent::turn::redact::{scrub_credentials, scrub_credentials_value};
 use crate::security::AutonomyLevel;
-use chrono::Utc;
 use parking_lot::Mutex;
 use serde::{Deserialize, Serialize};
 use std::collections::HashSet;
@@ -284,7 +283,7 @@ impl ApprovalManager {
         // Append to audit log.
         let summary = summarize_args(args);
         let entry = ApprovalLogEntry {
-            timestamp: Utc::now().to_rfc3339(),
+            timestamp: zeroclaw_api::time::format_rfc3339(jiff::Timestamp::now()),
             tool_name: tool_name.to_string(),
             arguments_summary: summary,
             decision: decision.clone(),
@@ -401,7 +400,7 @@ impl ApprovalManager {
             args,
             approver,
             channel,
-            chrono::Duration::seconds(store::DEFAULT_GRANT_TTL_SECS),
+            jiff::SignedDuration::from_secs(store::DEFAULT_GRANT_TTL_SECS),
         ) {
             Ok(grant) => Some(grant.approval_id),
             Err(err) => {

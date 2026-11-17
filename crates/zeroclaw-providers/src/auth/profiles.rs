@@ -1,5 +1,4 @@
 use anyhow::{Context, Result};
-use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
 use std::collections::BTreeMap;
 use std::io::Write;
@@ -31,7 +30,8 @@ pub struct TokenSet {
     #[serde(default)]
     pub id_token: Option<String>,
     #[serde(default)]
-    pub expires_at: Option<DateTime<Utc>>,
+    #[serde(with = "zeroclaw_api::time::serde::optional")]
+    pub expires_at: Option<jiff::Timestamp>,
     #[serde(default)]
     pub token_type: Option<String>,
     #[serde(default)]
@@ -42,9 +42,11 @@ impl TokenSet {
     pub fn is_expiring_within(&self, skew: Duration) -> bool {
         match self.expires_at {
             Some(expires_at) => {
-                let now_plus_skew =
-                    Utc::now() + chrono::Duration::from_std(skew).unwrap_or_default();
-                expires_at <= now_plus_skew
+                // An unrepresentable refresh window conservatively requires a
+                // refresh instead of treating an expiring token as valid.
+                jiff::Timestamp::now()
+                    .checked_add(skew)
+                    .map_or(true, |now_plus_skew| expires_at <= now_plus_skew)
             }
             None => false,
         }
@@ -67,8 +69,10 @@ pub struct AuthProfile {
     pub token: Option<String>,
     #[serde(default)]
     pub metadata: BTreeMap<String, String>,
-    pub created_at: DateTime<Utc>,
-    pub updated_at: DateTime<Utc>,
+    #[serde(with = "zeroclaw_api::time::serde")]
+    pub created_at: jiff::Timestamp,
+    #[serde(with = "zeroclaw_api::time::serde")]
+    pub updated_at: jiff::Timestamp,
 }
 
 impl std::fmt::Debug for AuthProfile {
@@ -88,7 +92,7 @@ impl std::fmt::Debug for AuthProfile {
 
 impl AuthProfile {
     pub fn new_oauth(model_provider: &str, profile_name: &str, token_set: TokenSet) -> Self {
-        let now = Utc::now();
+        let now = jiff::Timestamp::now();
         let id = profile_id(model_provider, profile_name);
         Self {
             id,
@@ -106,7 +110,7 @@ impl AuthProfile {
     }
 
     pub fn new_token(model_provider: &str, profile_name: &str, token: String) -> Self {
-        let now = Utc::now();
+        let now = jiff::Timestamp::now();
         let id = profile_id(model_provider, profile_name);
         Self {
             id,
@@ -127,7 +131,8 @@ impl AuthProfile {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct AuthProfilesData {
     pub schema_version: u32,
-    pub updated_at: DateTime<Utc>,
+    #[serde(with = "zeroclaw_api::time::serde")]
+    pub updated_at: jiff::Timestamp,
     pub active_profiles: BTreeMap<String, String>,
     pub profiles: BTreeMap<String, AuthProfile>,
 }
@@ -136,7 +141,7 @@ impl Default for AuthProfilesData {
     fn default() -> Self {
         Self {
             schema_version: CURRENT_SCHEMA_VERSION,
-            updated_at: Utc::now(),
+            updated_at: jiff::Timestamp::now(),
             active_profiles: BTreeMap::new(),
             profiles: BTreeMap::new(),
         }
@@ -178,7 +183,7 @@ impl AuthProfilesStore {
         let _lock = self.acquire_lock().await?;
         let mut data = self.load_locked().await?;
 
-        profile.updated_at = Utc::now();
+        profile.updated_at = jiff::Timestamp::now();
         if let Some(existing) = data.profiles.get(&profile.id) {
             profile.created_at = existing.created_at;
         }
@@ -189,7 +194,7 @@ impl AuthProfilesStore {
         }
 
         data.profiles.insert(profile.id.clone(), profile);
-        data.updated_at = Utc::now();
+        data.updated_at = jiff::Timestamp::now();
 
         self.save_locked(&data).await
     }
@@ -205,7 +210,7 @@ impl AuthProfilesStore {
 
         data.active_profiles
             .retain(|_, active| active != profile_id);
-        data.updated_at = Utc::now();
+        data.updated_at = jiff::Timestamp::now();
         self.save_locked(&data).await?;
         Ok(true)
     }
@@ -220,7 +225,7 @@ impl AuthProfilesStore {
 
         data.active_profiles
             .insert(model_provider.to_string(), profile_id.to_string());
-        data.updated_at = Utc::now();
+        data.updated_at = jiff::Timestamp::now();
         self.save_locked(&data).await
     }
 
@@ -228,7 +233,7 @@ impl AuthProfilesStore {
         let _lock = self.acquire_lock().await?;
         let mut data = self.load_locked().await?;
         data.active_profiles.remove(model_provider);
-        data.updated_at = Utc::now();
+        data.updated_at = jiff::Timestamp::now();
         self.save_locked(&data).await
     }
 
@@ -251,9 +256,9 @@ impl AuthProfilesStore {
         })?;
 
         updater(profile)?;
-        profile.updated_at = Utc::now();
+        profile.updated_at = jiff::Timestamp::now();
         let updated_profile = profile.clone();
-        data.updated_at = Utc::now();
+        data.updated_at = jiff::Timestamp::now();
         self.save_locked(&data).await?;
         Ok(updated_profile)
     }
@@ -352,7 +357,7 @@ impl AuthProfilesStore {
     async fn save_locked(&self, data: &AuthProfilesData) -> Result<()> {
         let mut persisted = PersistedAuthProfiles {
             schema_version: CURRENT_SCHEMA_VERSION,
-            updated_at: data.updated_at.to_rfc3339(),
+            updated_at: zeroclaw_api::time::format_rfc3339(data.updated_at),
             active_profiles: data.active_profiles.clone(),
             profiles: BTreeMap::new(),
         };
@@ -364,7 +369,7 @@ impl AuthProfilesStore {
                         self.encrypt_optional(Some(&token_set.access_token))?,
                         self.encrypt_optional(token_set.refresh_token.as_deref())?,
                         self.encrypt_optional(token_set.id_token.as_deref())?,
-                        token_set.expires_at.as_ref().map(DateTime::to_rfc3339),
+                        token_set.expires_at.map(zeroclaw_api::time::format_rfc3339),
                         token_set.token_type.clone(),
                         token_set.scope.clone(),
                     ),
@@ -389,8 +394,8 @@ impl AuthProfilesStore {
                     token_type,
                     scope,
                     metadata: profile.metadata.clone(),
-                    created_at: profile.created_at.to_rfc3339(),
-                    updated_at: profile.updated_at.to_rfc3339(),
+                    created_at: zeroclaw_api::time::format_rfc3339(profile.created_at),
+                    updated_at: zeroclaw_api::time::format_rfc3339(profile.updated_at),
                 },
             );
         }
@@ -453,7 +458,7 @@ impl AuthProfilesStore {
             "{}.tmp.{}.{}",
             PROFILES_FILENAME,
             std::process::id(),
-            Utc::now().timestamp_nanos_opt().unwrap_or_default()
+            jiff::Timestamp::now().as_nanosecond()
         );
         let tmp_path = self.path.with_file_name(tmp_name);
 
@@ -632,7 +637,7 @@ fn default_schema_version() -> u32 {
 }
 
 fn default_now_rfc3339() -> String {
-    Utc::now().to_rfc3339()
+    zeroclaw_api::time::format_rfc3339(jiff::Timestamp::now())
 }
 
 fn parse_profile_kind(value: &str) -> Result<AuthProfileKind> {
@@ -650,18 +655,17 @@ fn profile_kind_to_string(kind: AuthProfileKind) -> &'static str {
     }
 }
 
-fn parse_optional_datetime(value: Option<&str>) -> Result<Option<DateTime<Utc>>> {
+fn parse_optional_datetime(value: Option<&str>) -> Result<Option<jiff::Timestamp>> {
     value.map(parse_datetime).transpose()
 }
 
-fn parse_datetime(value: &str) -> Result<DateTime<Utc>> {
-    DateTime::parse_from_rfc3339(value)
-        .map(|dt| dt.with_timezone(&Utc))
+fn parse_datetime(value: &str) -> Result<jiff::Timestamp> {
+    zeroclaw_api::time::parse_rfc3339(value)
         .with_context(|| format!("Invalid RFC3339 timestamp: {value}"))
 }
 
-fn parse_datetime_with_fallback(value: &str) -> DateTime<Utc> {
-    parse_datetime(value).unwrap_or_else(|_| Utc::now())
+fn parse_datetime_with_fallback(value: &str) -> jiff::Timestamp {
+    parse_datetime(value).unwrap_or_else(|_| jiff::Timestamp::now())
 }
 
 pub fn profile_id(model_provider: &str, profile_name: &str) -> String {
@@ -712,13 +716,14 @@ mod tests {
             access_token: "token".into(),
             refresh_token: Some("refresh".into()),
             id_token: None,
-            expires_at: Some(Utc::now() + chrono::Duration::seconds(10)),
+            expires_at: Some(jiff::Timestamp::now() + jiff::SignedDuration::from_secs(10)),
             token_type: Some("Bearer".into()),
             scope: None,
         };
 
         assert!(token_set.is_expiring_within(Duration::from_secs(15)));
         assert!(!token_set.is_expiring_within(Duration::from_secs(1)));
+        assert!(token_set.is_expiring_within(Duration::MAX));
     }
 
     #[tokio::test]
@@ -733,7 +738,7 @@ mod tests {
                 access_token: "access-123".into(),
                 refresh_token: Some("refresh-123".into()),
                 id_token: None,
-                expires_at: Some(Utc::now() + chrono::Duration::hours(1)),
+                expires_at: Some(jiff::Timestamp::now() + jiff::SignedDuration::from_hours(1)),
                 token_type: Some("Bearer".into()),
                 scope: Some("openid offline_access".into()),
             },
@@ -789,7 +794,7 @@ mod tests {
                 access_token: "access-xyz".into(),
                 refresh_token: Some("refresh-xyz".into()),
                 id_token: None,
-                expires_at: Some(Utc::now() + chrono::Duration::hours(1)),
+                expires_at: Some(jiff::Timestamp::now() + jiff::SignedDuration::from_hours(1)),
                 token_type: Some("Bearer".into()),
                 scope: None,
             },

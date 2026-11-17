@@ -2,8 +2,9 @@
 use super::*;
 use crate::cron::{self, DeliveryConfig};
 use crate::security::SecurityPolicy;
-use chrono::{Duration as ChronoDuration, Utc};
+use jiff::{SignedDuration, Timestamp};
 use tempfile::TempDir;
+use zeroclaw_api::time::format_rfc3339;
 use zeroclaw_config::schema::Config;
 
 const TEST_AGENT: &str = "test-agent";
@@ -123,8 +124,8 @@ fn test_job(command: &str) -> CronJob {
         allowed_tools: None,
         uses_memory: true,
         source: "imperative".into(),
-        created_at: Utc::now(),
-        next_run: Utc::now(),
+        created_at: Timestamp::now(),
+        next_run: Timestamp::now(),
         last_run: None,
         last_status: None,
         last_output: None,
@@ -774,7 +775,7 @@ async fn execute_and_persist_job_releases_lock_after_agent_timeout() {
     .unwrap();
 
     assert!(
-        cron::claim_job(&config, &job.id, Utc::now()).unwrap(),
+        cron::claim_job(&config, &job.id, Timestamp::now()).unwrap(),
         "job should be claimable before the run"
     );
 
@@ -796,7 +797,7 @@ async fn execute_and_persist_job_releases_lock_after_agent_timeout() {
         "unexpected output: {output}"
     );
     assert!(
-        cron::claim_job(&config, &job.id, Utc::now()).unwrap(),
+        cron::claim_job(&config, &job.id, Timestamp::now()).unwrap(),
         "job lock must be released after an agent-run timeout"
     );
 }
@@ -1025,7 +1026,7 @@ async fn queued_and_retried_agent_jobs_keep_their_admitted_task_owner() {
                 // on a later poll after the provider recreated its alias.
                 let jobs = claim_due_jobs(
                     &config,
-                    due_jobs(&config, Utc::now() + ChronoDuration::hours(1)).unwrap(),
+                    due_jobs(&config, Timestamp::now() + SignedDuration::from_hours(1)).unwrap(),
                 );
                 assert_eq!(jobs.len(), 1, "the recurring job is selected again");
                 tokio::time::timeout(
@@ -1113,8 +1114,8 @@ async fn persist_job_result_records_run_and_reschedules_shell_job() {
     let tmp = TempDir::new().unwrap();
     let config = test_config(&tmp).await;
     let job = cron::add_job(&config, "test-agent", "*/5 * * * *", "echo ok").unwrap();
-    let started = Utc::now();
-    let finished = started + ChronoDuration::milliseconds(10);
+    let started = Timestamp::now();
+    let finished = started + SignedDuration::from_millis(10);
 
     let success = persist_job_result(&config, &job, true, "ok", started, finished)
         .await
@@ -1132,8 +1133,8 @@ async fn persist_job_result_uses_one_write_connection_for_recurring_job() {
     let tmp = TempDir::new().unwrap();
     let config = test_config(&tmp).await;
     let job = cron::add_job(&config, "test-agent", "*/5 * * * *", "echo ok").unwrap();
-    let started = Utc::now();
-    let finished = started + ChronoDuration::milliseconds(10);
+    let started = Timestamp::now();
+    let finished = started + SignedDuration::from_millis(10);
 
     crate::cron::store::reset_write_connection_count_for_tests(&config);
     let success = persist_job_result(&config, &job, true, "ok", started, finished)
@@ -1153,11 +1154,11 @@ async fn persist_job_result_prunes_run_history_and_updates_last_fields() {
     let mut config = test_config(&tmp).await;
     config.scheduler.max_run_history = 2;
     let job = cron::add_job(&config, "test-agent", "*/5 * * * *", "echo ok").unwrap();
-    let base = Utc::now();
+    let base = Timestamp::now();
 
     for idx in 0..3 {
-        let started = base + ChronoDuration::seconds(idx);
-        let finished = started + ChronoDuration::milliseconds(10);
+        let started = base + SignedDuration::from_secs(idx);
+        let finished = started + SignedDuration::from_millis(10);
         let output = format!("run-{idx}");
 
         let success = persist_job_result(&config, &job, true, &output, started, finished)
@@ -1183,8 +1184,8 @@ async fn persist_job_result_rolls_back_run_history_when_job_state_update_fails()
     let config = test_config(&tmp).await;
     let job = cron::add_job(&config, "test-agent", "*/5 * * * *", "echo ok").unwrap();
     let original_next_run = job.next_run;
-    let started = Utc::now();
-    let finished = started + ChronoDuration::milliseconds(10);
+    let started = Timestamp::now();
+    let finished = started + SignedDuration::from_millis(10);
 
     let conn = rusqlite::Connection::open(config.data_dir.join("cron").join("jobs.db")).unwrap();
     conn.execute_batch(
@@ -1215,7 +1216,7 @@ async fn persist_job_result_rolls_back_run_history_when_job_state_update_fails()
 async fn persist_job_result_success_deletes_one_shot() {
     let tmp = TempDir::new().unwrap();
     let config = test_config(&tmp).await;
-    let at = Utc::now() + ChronoDuration::minutes(10);
+    let at = Timestamp::now() + SignedDuration::from_mins(10);
     let job = cron::add_agent_job(
         &config,
         TEST_AGENT,
@@ -1230,8 +1231,8 @@ async fn persist_job_result_success_deletes_one_shot() {
         true,
     )
     .unwrap();
-    let started = Utc::now();
-    let finished = started + ChronoDuration::milliseconds(10);
+    let started = Timestamp::now();
+    let finished = started + SignedDuration::from_millis(10);
 
     let success = persist_job_result(&config, &job, true, "ok", started, finished)
         .await
@@ -1245,7 +1246,7 @@ async fn persist_job_result_success_deletes_one_shot() {
 async fn persist_job_result_failure_disables_one_shot() {
     let tmp = TempDir::new().unwrap();
     let config = test_config(&tmp).await;
-    let at = Utc::now() + ChronoDuration::minutes(10);
+    let at = Timestamp::now() + SignedDuration::from_mins(10);
     let job = cron::add_agent_job(
         &config,
         TEST_AGENT,
@@ -1260,8 +1261,8 @@ async fn persist_job_result_failure_disables_one_shot() {
         true,
     )
     .unwrap();
-    let started = Utc::now();
-    let finished = started + ChronoDuration::milliseconds(10);
+    let started = Timestamp::now();
+    let finished = started + SignedDuration::from_millis(10);
 
     let success = persist_job_result(&config, &job, false, "boom", started, finished)
         .await
@@ -1276,7 +1277,7 @@ async fn persist_job_result_failure_disables_one_shot() {
 async fn persist_job_result_uses_one_write_connection_for_failed_one_shot_disable() {
     let tmp = TempDir::new().unwrap();
     let config = test_config(&tmp).await;
-    let at = Utc::now() + ChronoDuration::minutes(10);
+    let at = Timestamp::now() + SignedDuration::from_mins(10);
     let job = cron::add_agent_job(
         &config,
         "test-agent",
@@ -1291,8 +1292,8 @@ async fn persist_job_result_uses_one_write_connection_for_failed_one_shot_disabl
         true,
     )
     .unwrap();
-    let started = Utc::now();
-    let finished = started + ChronoDuration::milliseconds(10);
+    let started = Timestamp::now();
+    let finished = started + SignedDuration::from_millis(10);
 
     crate::cron::store::reset_write_connection_count_for_tests(&config);
     let success = persist_job_result(&config, &job, false, "boom", started, finished)
@@ -1313,10 +1314,10 @@ async fn persist_job_result_falls_back_to_state_update_when_history_prune_fails(
     config.scheduler.max_run_history = 1;
     let job = cron::add_job(&config, "test-agent", "*/5 * * * *", "echo ok").unwrap();
     let original_next_run = job.next_run;
-    let seed_started = Utc::now() - ChronoDuration::minutes(20);
-    let seed_finished = seed_started + ChronoDuration::milliseconds(10);
-    let started = Utc::now();
-    let finished = started + ChronoDuration::milliseconds(10);
+    let seed_started = Timestamp::now() - SignedDuration::from_mins(20);
+    let seed_finished = seed_started + SignedDuration::from_millis(10);
+    let started = Timestamp::now();
+    let finished = started + SignedDuration::from_millis(10);
 
     let conn = rusqlite::Connection::open(config.data_dir.join("cron").join("jobs.db")).unwrap();
     conn.execute(
@@ -1324,8 +1325,8 @@ async fn persist_job_result_falls_back_to_state_update_when_history_prune_fails(
          VALUES (?1, ?2, ?3, ?4, ?5, ?6)",
         rusqlite::params![
             job.id,
-            seed_started.to_rfc3339(),
-            seed_finished.to_rfc3339(),
+            format_rfc3339(seed_started),
+            format_rfc3339(seed_finished),
             "seed",
             "seed",
             10,
@@ -1362,11 +1363,11 @@ async fn persist_job_result_falls_back_to_state_update_when_history_prune_fails(
 async fn persist_job_result_falls_back_to_disable_when_auto_delete_history_insert_fails() {
     let tmp = TempDir::new().unwrap();
     let config = test_config(&tmp).await;
-    let at = Utc::now() + ChronoDuration::minutes(10);
+    let at = Timestamp::now() + SignedDuration::from_mins(10);
     let job = cron::add_once_at(&config, "test-agent", at, "echo one-shot-shell").unwrap();
     assert!(job.delete_after_run);
-    let started = Utc::now();
-    let finished = started + ChronoDuration::milliseconds(10);
+    let started = Timestamp::now();
+    let finished = started + SignedDuration::from_millis(10);
 
     let conn = rusqlite::Connection::open(config.data_dir.join("cron").join("jobs.db")).unwrap();
     conn.execute_batch(
@@ -1395,11 +1396,11 @@ async fn persist_job_result_falls_back_to_disable_when_auto_delete_history_inser
 async fn persist_job_result_success_deletes_one_shot_shell_job() {
     let tmp = TempDir::new().unwrap();
     let config = test_config(&tmp).await;
-    let at = Utc::now() + ChronoDuration::minutes(10);
+    let at = Timestamp::now() + SignedDuration::from_mins(10);
     let job = cron::add_once_at(&config, "test-agent", at, "echo one-shot-shell").unwrap();
     assert!(job.delete_after_run);
-    let started = Utc::now();
-    let finished = started + ChronoDuration::milliseconds(10);
+    let started = Timestamp::now();
+    let finished = started + SignedDuration::from_millis(10);
 
     let success = persist_job_result(&config, &job, true, "ok", started, finished)
         .await
@@ -1413,11 +1414,11 @@ async fn persist_job_result_success_deletes_one_shot_shell_job() {
 async fn persist_job_result_failure_disables_one_shot_shell_job() {
     let tmp = TempDir::new().unwrap();
     let config = test_config(&tmp).await;
-    let at = Utc::now() + ChronoDuration::minutes(10);
+    let at = Timestamp::now() + SignedDuration::from_mins(10);
     let job = cron::add_once_at(&config, "test-agent", at, "echo one-shot-shell").unwrap();
     assert!(job.delete_after_run);
-    let started = Utc::now();
-    let finished = started + ChronoDuration::milliseconds(10);
+    let started = Timestamp::now();
+    let finished = started + SignedDuration::from_millis(10);
 
     let success = persist_job_result(&config, &job, false, "boom", started, finished)
         .await
@@ -1457,8 +1458,8 @@ async fn persist_job_result_delivery_stubbed_succeeds() {
         true,
     )
     .unwrap();
-    let started = Utc::now();
-    let finished = started + ChronoDuration::milliseconds(10);
+    let started = Timestamp::now();
+    let finished = started + SignedDuration::from_millis(10);
 
     let success = persist_job_result(&config, &job, true, "ok", started, finished)
         .await
@@ -1487,8 +1488,8 @@ async fn persist_job_result_delivery_failure_best_effort_marks_degraded() {
         thread_id: None,
         best_effort: true,
     };
-    let started = Utc::now();
-    let finished = started + ChronoDuration::milliseconds(10);
+    let started = Timestamp::now();
+    let finished = started + SignedDuration::from_millis(10);
 
     let success = persist_job_result(&config, &job, true, "ok", started, finished)
         .await
@@ -1531,7 +1532,7 @@ async fn delivery_failure_classification_preserves_empty_output_evidence() {
         true,
         String::new(),
         CronDeliveryContext::Scheduled,
-        Utc::now(),
+        Timestamp::now(),
     )
     .await;
 
@@ -1544,7 +1545,7 @@ async fn delivery_failure_classification_preserves_empty_output_evidence() {
 async fn persist_job_result_at_schedule_without_delete_after_run_is_disabled() {
     let tmp = TempDir::new().unwrap();
     let config = test_config(&tmp).await;
-    let at = Utc::now() + ChronoDuration::minutes(10);
+    let at = Timestamp::now() + SignedDuration::from_mins(10);
     let job = cron::add_agent_job(
         &config,
         TEST_AGENT,
@@ -1561,8 +1562,8 @@ async fn persist_job_result_at_schedule_without_delete_after_run_is_disabled() {
     .unwrap();
     assert!(!job.delete_after_run);
 
-    let started = Utc::now();
-    let finished = started + ChronoDuration::milliseconds(10);
+    let started = Timestamp::now();
+    let finished = started + SignedDuration::from_millis(10);
     let success = persist_job_result(&config, &job, true, "ok", started, finished)
         .await
         .projected_success;
@@ -1728,7 +1729,7 @@ async fn delivery_to_a_configured_bridge_is_queued_in_its_outbox() {
     use std::sync::atomic::Ordering::SeqCst;
     let before = DELIVERED.load(SeqCst);
 
-    let started_at = Utc::now();
+    let started_at = Timestamp::now();
     let outcome = deliver_and_classify_run_result(
         &config,
         &job,
@@ -1751,7 +1752,7 @@ async fn delivery_to_a_configured_bridge_is_queued_in_its_outbox() {
     assert_eq!(queued[0].content, "digest ready");
     assert_eq!(queued[0].source_kind, "cron");
     assert_eq!(queued[0].source_id, job.id);
-    assert_eq!(queued[0].event_id, started_at.to_rfc3339());
+    assert_eq!(queued[0].event_id, format_rfc3339(started_at));
     let repeated = deliver_and_classify_run_result(
         &config,
         &job,
@@ -1787,7 +1788,7 @@ async fn cron_output_with_an_api_key_is_redacted_in_the_bridge_outbox() {
         true,
         format!("env dump: ANTHROPIC_API_KEY={key}"),
         CronDeliveryContext::Scheduled,
-        Utc::now(),
+        Timestamp::now(),
     )
     .await;
 
@@ -1847,7 +1848,7 @@ async fn catch_up_queries_all_overdue_jobs_ignoring_max_tasks() {
     }
 
     // Verify normal due_jobs is limited to max_tasks=1
-    let far_future = Utc::now() + ChronoDuration::days(1);
+    let far_future = Timestamp::now() + SignedDuration::from_hours(24);
     let due = cron::due_jobs(&config, far_future).unwrap();
     assert_eq!(due.len(), 1, "due_jobs must respect max_tasks");
 
@@ -1968,7 +1969,7 @@ async fn process_due_jobs_releases_lock_for_skipped_orphan_job() {
     // With an empty alias and an id bound to no [agents.<x>].cron_jobs list,
     // resolve_owning_agent returns None, so the job is skipped as an orphan.
     let job = cron::add_job(&config, TEST_AGENT, "* * * * *", "echo orphan").unwrap();
-    assert!(cron::claim_job(&config, &job.id, Utc::now()).unwrap());
+    assert!(cron::claim_job(&config, &job.id, Timestamp::now()).unwrap());
     let orphan = CronJob {
         agent_alias: String::new(),
         ..job.clone()
@@ -1984,7 +1985,7 @@ async fn process_due_jobs_releases_lock_for_skipped_orphan_job() {
     .await;
 
     assert!(
-        cron::claim_job(&config, &job.id, Utc::now()).unwrap(),
+        cron::claim_job(&config, &job.id, Timestamp::now()).unwrap(),
         "a skipped orphan job's in-flight lock must be released, not leaked"
     );
 }
@@ -2057,7 +2058,7 @@ async fn classify_execution_success_delivery_success() {
         true,
         "all good".to_string(),
         CronDeliveryContext::Scheduled,
-        Utc::now(),
+        Timestamp::now(),
     )
     .await;
 
@@ -2083,7 +2084,7 @@ async fn classify_execution_success_delivery_not_requested() {
         true,
         "all good".to_string(),
         CronDeliveryContext::Scheduled,
-        Utc::now(),
+        Timestamp::now(),
     )
     .await;
 
@@ -2106,7 +2107,7 @@ async fn classify_execution_success_delivery_suppressed_no_reply() {
         true,
         "NO_REPLY".to_string(),
         CronDeliveryContext::Scheduled,
-        Utc::now(),
+        Timestamp::now(),
     )
     .await;
 
@@ -2129,7 +2130,7 @@ async fn classify_execution_success_delivery_fails_best_effort() {
         true,
         "executed ok".to_string(),
         CronDeliveryContext::Scheduled,
-        Utc::now(),
+        Timestamp::now(),
     )
     .await;
 
@@ -2158,7 +2159,7 @@ async fn classify_execution_success_delivery_fails_strict() {
         true,
         "executed ok".to_string(),
         CronDeliveryContext::Scheduled,
-        Utc::now(),
+        Timestamp::now(),
     )
     .await;
 
@@ -2187,7 +2188,7 @@ async fn classify_execution_failure_and_delivery_failure_both_visible() {
         false,
         "executed with error".to_string(),
         CronDeliveryContext::Scheduled,
-        Utc::now(),
+        Timestamp::now(),
     )
     .await;
 
@@ -2233,8 +2234,8 @@ async fn persisted_run_carries_component_truth_after_delivery_failure() {
         true,
     )
     .unwrap();
-    let started = Utc::now();
-    let finished = started + ChronoDuration::milliseconds(10);
+    let started = Timestamp::now();
+    let finished = started + SignedDuration::from_millis(10);
 
     let _ = persist_job_result(&config, &job, true, "executed ok", started, finished).await;
 

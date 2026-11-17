@@ -1,5 +1,4 @@
 use super::traits::{MemoryCategory, MemoryEntry};
-use chrono::{DateTime, Utc};
 
 /// Default half-life in days for time-decay scoring.
 /// After this many days, a non-Core memory's score drops to 50%.
@@ -12,7 +11,7 @@ pub fn apply_time_decay(entries: &mut [MemoryEntry], half_life_days: f64) {
         half_life_days
     };
 
-    let now = Utc::now();
+    let now = jiff::Timestamp::now();
 
     for entry in entries.iter_mut() {
         // Core memories are evergreen — never decay
@@ -25,12 +24,12 @@ pub fn apply_time_decay(entries: &mut [MemoryEntry], half_life_days: f64) {
             None => continue,
         };
 
-        let ts = match DateTime::parse_from_rfc3339(&entry.timestamp) {
-            Ok(dt) => dt.with_timezone(&Utc),
+        let ts = match zeroclaw_api::time::parse_rfc3339(&entry.timestamp) {
+            Ok(dt) => dt,
             Err(_) => continue,
         };
 
-        let age_days = now.signed_duration_since(ts).num_seconds().max(0) as f64 / 86_400.0;
+        let age_days = now.duration_since(ts).as_secs().max(0) as f64 / 86_400.0;
 
         let decay_factor = (-age_days / half_life * std::f64::consts::LN_2).exp();
         entry.score = Some(score * decay_factor);
@@ -62,11 +61,13 @@ mod tests {
     }
 
     fn recent_rfc3339() -> String {
-        Utc::now().to_rfc3339()
+        zeroclaw_api::time::format_rfc3339(jiff::Timestamp::now())
     }
 
     fn days_ago_rfc3339(days: i64) -> String {
-        (Utc::now() - chrono::Duration::days(days)).to_rfc3339()
+        zeroclaw_api::time::format_rfc3339(
+            jiff::Timestamp::now() - jiff::SignedDuration::from_hours((days) * 24),
+        )
     }
 
     #[test]

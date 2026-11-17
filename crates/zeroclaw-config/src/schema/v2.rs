@@ -2401,7 +2401,7 @@ pub fn migrate_v2_to_v3_install_filesystem(
         });
     }
 
-    let timestamp = chrono::Utc::now().format("%Y%m%dT%H%M%S").to_string();
+    let timestamp = jiff::Timestamp::now().strftime("%Y%m%dT%H%M%S").to_string();
     let backup_dir = install_root
         .join(format!("backup-{timestamp}"))
         .join("legacy-workspace");

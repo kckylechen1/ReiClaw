@@ -312,7 +312,7 @@ mod tests {
         keywords: &[&str],
         tier: &str,
     ) {
-        let now = chrono::Local::now().to_rfc3339();
+        let now = zeroclaw_api::time::format_rfc3339_zoned(&jiff::Zoned::now());
         let entry = MemoryEntry {
             id: id.into(),
             path: path.into(),
@@ -486,7 +486,7 @@ mod tests {
         let mem = TachiMemory::new("tachi", tmp.path()).unwrap();
         {
             let mut store = mem.store_handle().lock();
-            let now = chrono::Local::now().to_rfc3339();
+            let now = zeroclaw_api::time::format_rfc3339_zoned(&jiff::Zoned::now());
             let promotable = MemoryEntry {
                 id: "promo".into(),
                 path: "/agents/default/ns/core/promo".into(),

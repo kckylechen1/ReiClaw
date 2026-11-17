@@ -1,35 +1,34 @@
 use super::traits::{Memory, MemoryCategory, MemoryEntry, is_recent_recall_query};
 use async_trait::async_trait;
-use chrono::{DateTime, FixedOffset, Local, NaiveDate};
 use std::path::{Path, PathBuf};
 use tokio::fs;
 
 fn entry_in_window(
     timestamp: &str,
-    since: Option<&DateTime<FixedOffset>>,
-    until: Option<&DateTime<FixedOffset>>,
+    since: Option<&jiff::Zoned>,
+    until: Option<&jiff::Zoned>,
 ) -> bool {
-    if let Ok(ts) = DateTime::parse_from_rfc3339(timestamp) {
+    if let Ok(ts) = zeroclaw_api::time::parse_rfc3339(timestamp) {
         if let Some(s) = since
-            && ts < *s
+            && ts < s.timestamp()
         {
             return false;
         }
         if let Some(u) = until
-            && ts > *u
+            && ts > u.timestamp()
         {
             return false;
         }
         return true;
     }
-    if let Ok(date) = NaiveDate::parse_from_str(timestamp, "%Y-%m-%d") {
+    if let Ok(date) = jiff::civil::Date::strptime("%Y-%m-%d", timestamp) {
         if let Some(s) = since
-            && date < s.date_naive()
+            && date < s.date()
         {
             return false;
         }
         if let Some(u) = until
-            && date > u.date_naive()
+            && date > u.date()
         {
             return false;
         }
@@ -61,7 +60,7 @@ impl MarkdownMemory {
     }
 
     fn daily_path(&self) -> PathBuf {
-        let date = Local::now().format("%Y-%m-%d").to_string();
+        let date = jiff::Zoned::now().strftime("%Y-%m-%d").to_string();
         self.memory_dir().join(format!("{date}.md"))
     }
 
@@ -83,7 +82,7 @@ impl MarkdownMemory {
             let header = if path == self.core_path() {
                 "# Long-Term Memory\n\n"
             } else {
-                let date = Local::now().format("%Y-%m-%d").to_string();
+                let date = jiff::Zoned::now().strftime("%Y-%m-%d").to_string();
                 &format!("# Daily Log — {date}\n\n")
             };
             format!("{header}{content}\n")
@@ -202,7 +201,7 @@ impl Memory for MarkdownMemory {
         until: Option<&str>,
     ) -> anyhow::Result<Vec<MemoryEntry>> {
         let since_dt = since
-            .map(chrono::DateTime::parse_from_rfc3339)
+            .map(zeroclaw_api::time::parse_rfc3339_zoned)
             .transpose()
             .map_err(|e| {
                 ::zeroclaw_log::record!(
@@ -217,7 +216,7 @@ impl Memory for MarkdownMemory {
                 anyhow::Error::msg(format!("invalid 'since' date (expected RFC 3339): {e}"))
             })?;
         let until_dt = until
-            .map(chrono::DateTime::parse_from_rfc3339)
+            .map(zeroclaw_api::time::parse_rfc3339_zoned)
             .transpose()
             .map_err(|e| {
                 ::zeroclaw_log::record!(
@@ -363,7 +362,21 @@ impl ::zeroclaw_api::attribution::Attributable for MarkdownMemory {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use chrono::TimeZone;
+
+    #[test]
+    fn recall_windows_keep_offset_dates_separate_from_instant_bounds() {
+        let since = zeroclaw_api::time::parse_rfc3339_zoned("2026-01-02T00:30:00+14:00").unwrap();
+        assert!(entry_in_window("2026-01-02", Some(&since), None));
+        assert!(!entry_in_window("2026-01-01", Some(&since), None));
+        assert!(!entry_in_window("2026-01-01T10:29:59Z", Some(&since), None));
+        assert!(entry_in_window("2026-01-01T10:30:00Z", Some(&since), None));
+
+        let until = zeroclaw_api::time::parse_rfc3339_zoned("2026-01-01T23:30:00-12:00").unwrap();
+        assert!(entry_in_window("2026-01-01", None, Some(&until)));
+        assert!(!entry_in_window("2026-01-02", None, Some(&until)));
+        assert!(entry_in_window("2026-01-02T11:30:00Z", None, Some(&until)));
+        assert!(!entry_in_window("2026-01-02T11:30:01Z", None, Some(&until)));
+    }
     use tempfile::TempDir;
 
     fn temp_workspace() -> (TempDir, MarkdownMemory) {
@@ -556,15 +569,15 @@ mod tests {
             .await
             .unwrap();
 
-        let today = Local::now().date_naive();
-        let yesterday = (today - chrono::Duration::days(1))
-            .and_hms_opt(23, 59, 59)
-            .unwrap();
-        let yesterday_rfc = Local.from_local_datetime(&yesterday).unwrap().to_rfc3339();
-        let past = (today - chrono::Duration::days(7))
-            .and_hms_opt(0, 0, 0)
-            .unwrap();
-        let past_rfc = Local.from_local_datetime(&past).unwrap().to_rfc3339();
+        let today = jiff::Zoned::now().date();
+        let yesterday = (today - jiff::SignedDuration::from_hours(24)).at(23, 59, 59, 0);
+        let yesterday_rfc = zeroclaw_api::time::format_rfc3339_zoned(
+            &yesterday.to_zoned(jiff::tz::TimeZone::system()).unwrap(),
+        );
+        let past = (today - jiff::SignedDuration::from_hours(7 * 24)).at(0, 0, 0, 0);
+        let past_rfc = zeroclaw_api::time::format_rfc3339_zoned(
+            &past.to_zoned(jiff::tz::TimeZone::system()).unwrap(),
+        );
 
         // until = yesterday: today's daily entry is outside the window and
         // must be dropped, but the evergreen MEMORY.md entry must survive.

@@ -18,7 +18,6 @@ pub mod writer;
 /// from anywhere outside this crate.
 #[doc(hidden)]
 pub mod __private {
-    pub use ::chrono;
     pub use ::serde_json;
     pub use ::tracing;
     pub use ::uuid;

@@ -1,9 +1,7 @@
-use std::collections::BTreeMap;
-use std::str::FromStr;
-
-use chrono::{SecondsFormat, Utc};
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
+use std::collections::BTreeMap;
+use std::str::FromStr;
 use strum_macros::{EnumString, IntoStaticStr};
 
 /// OTel severity buckets. Stored alongside `severity_number` so consumers
@@ -342,7 +340,7 @@ impl LogEvent {
     pub fn new(severity: Severity, action: &str, category: EventCategory) -> Self {
         Self {
             id: uuid::Uuid::new_v4().to_string(),
-            timestamp: Utc::now().to_rfc3339_opts(SecondsFormat::Millis, true),
+            timestamp: zeroclaw_api::time::format_rfc3339_millis(jiff::Timestamp::now()),
             severity_number: severity.number(),
             severity_text: severity.text().to_string(),
             event: EventDescriptor {

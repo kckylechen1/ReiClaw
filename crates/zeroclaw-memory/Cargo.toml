@@ -15,7 +15,7 @@ zeroclaw-spawn.workspace = true
 zeroclaw-config = { workspace = true, default-features = false }
 anyhow = "1.0"
 async-trait = "0.1"
-chrono = { version = "0.4", default-features = false, features = ["clock", "std", "serde"] }
+jiff.workspace = true
 parking_lot = "0.12"
 zeroclaw-infra.workspace = true
 regex = "1.10"
@@ -26,8 +26,8 @@ serde_json = { version = "1.0", default-features = false, features = ["std"] }
 sha2 = "0.10"
 tokio = { version = "1.50", default-features = false, features = ["fs", "io-util", "macros", "process", "sync", "time"] }
 uuid = { version = "1.22", default-features = false, features = ["v4", "std"] }
-# Scoped recent reads + streamed key candidates on the safe ZeroClaw support baseline.
-portable_kernel = { package = "portable-kernel", version = "1.9.0", git = "https://github.com/kckylechen1/Tachi.git", rev = "b8b10642372ac6910afb2e2bab5265c1d2041a9e", default-features = false, optional = true }
+# Jiff time migration on the existing SQLite 3.54.1 / portable-kernel 1.9.0 baseline.
+portable_kernel = { package = "portable-kernel", version = "1.9.0", git = "https://github.com/kckylechen1/Tachi.git", rev = "fe6ab1d215a31b72777dc7c9c314846bd37a7dcf", default-features = false, optional = true }
 tempfile = { version = "3.26", optional = true }
 
 [features]

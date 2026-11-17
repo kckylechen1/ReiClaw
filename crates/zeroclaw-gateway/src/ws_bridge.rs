@@ -324,7 +324,7 @@ async fn send_pending(
         let full = rows.len() == BATCH;
         for row in rows {
             after_seq = row.seq;
-            let now = chrono::Utc::now();
+            let now = jiff::Timestamp::now();
             // Hold the canonical config read lock through the durable claim;
             // a policy update cannot slip between evaluation and reservation.
             let claimed = {
@@ -352,7 +352,7 @@ async fn send_pending(
                         &config.data_dir,
                         outbox,
                         &row,
-                        now.timestamp(),
+                        zeroclaw_api::time::epoch_second(now),
                     )?
             };
             if !claimed {
@@ -552,7 +552,11 @@ mod tests {
         let (old, old_cancel) = sockets.claim("tg", &outbox).unwrap();
         assert!(
             outbox
-                .claim("tg", &x, chrono::Utc::now().timestamp())
+                .claim(
+                    "tg",
+                    &x,
+                    zeroclaw_api::time::epoch_second(jiff::Timestamp::now())
+                )
                 .unwrap()
         );
         outbox.mark_sent("tg", &x).unwrap();
@@ -560,7 +564,11 @@ mod tests {
         assert!(old_cancel.is_cancelled());
         assert!(
             outbox
-                .claim("tg", &y, chrono::Utc::now().timestamp())
+                .claim(
+                    "tg",
+                    &y,
+                    zeroclaw_api::time::epoch_second(jiff::Timestamp::now())
+                )
                 .unwrap()
         );
         outbox.mark_sent("tg", &y).unwrap();
@@ -588,7 +596,11 @@ mod tests {
             .unwrap();
         assert!(
             outbox
-                .claim("tg", &z, chrono::Utc::now().timestamp())
+                .claim(
+                    "tg",
+                    &z,
+                    zeroclaw_api::time::epoch_second(jiff::Timestamp::now())
+                )
                 .unwrap()
         );
         outbox.mark_sent("tg", &z).unwrap();
@@ -708,7 +720,7 @@ mod tests {
                     thread_id: None,
                 });
         }
-        let now = chrono::Utc::now().timestamp() as u64;
+        let now = zeroclaw_api::time::epoch_second(jiff::Timestamp::now()) as u64;
         zeroclaw_memory::companion::SoulProfileStore::shared(&data_dir)
             .unwrap()
             .record_reflection(
@@ -771,7 +783,7 @@ mod tests {
             &state.config,
             &data_dir,
             &state.path_prefix,
-            chrono::Utc::now().timestamp() as u64,
+            zeroclaw_api::time::epoch_second(jiff::Timestamp::now()) as u64,
             &CancellationToken::new(),
         )
         .unwrap();

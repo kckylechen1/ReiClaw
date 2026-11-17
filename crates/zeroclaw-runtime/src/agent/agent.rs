@@ -11,7 +11,6 @@ use crate::observability::{Observer, ObserverEvent};
 use crate::security::SecurityPolicy;
 use crate::tools::{self, Tool};
 use anyhow::Result;
-use chrono::{Datelike, Timelike};
 use std::collections::HashMap;
 #[cfg(test)]
 use std::path::Path;
@@ -150,7 +149,7 @@ pub struct Agent {
     user_model_section: String,
     device_bound: bool,
     #[cfg(test)]
-    turn_datetime: Option<Arc<dyn Fn() -> chrono::DateTime<chrono::Local> + Send + Sync>>,
+    turn_datetime: Option<Arc<dyn Fn() -> jiff::Zoned + Send + Sync>>,
 }
 
 /// What the Agent remembers between turns to keep the Soul projection fresh.
@@ -285,7 +284,7 @@ pub struct AgentBuilder {
     provider_switch_config: Option<ProviderSwitchConfig>,
     turn_context: Option<TurnContextState>,
     #[cfg(test)]
-    turn_datetime: Option<Arc<dyn Fn() -> chrono::DateTime<chrono::Local> + Send + Sync>>,
+    turn_datetime: Option<Arc<dyn Fn() -> jiff::Zoned + Send + Sync>>,
 }
 
 impl Default for AgentBuilder {
@@ -560,7 +559,7 @@ impl AgentBuilder {
     #[cfg(all(test, feature = "heavy-tests"))]
     fn turn_datetime<F>(mut self, provider: F) -> Self
     where
-        F: Fn() -> chrono::DateTime<chrono::Local> + Send + Sync + 'static,
+        F: Fn() -> jiff::Zoned + Send + Sync + 'static,
     {
         self.turn_datetime = Some(Arc::new(provider));
         self
@@ -803,13 +802,13 @@ impl Agent {
         crate::agent::loop_::ToolLoopCostTrackingContext::usage_only()
     }
 
-    fn current_turn_datetime(&self) -> chrono::DateTime<chrono::Local> {
+    fn current_turn_datetime(&self) -> jiff::Zoned {
         #[cfg(test)]
         if let Some(provider) = &self.turn_datetime {
             return provider();
         }
 
-        chrono::Local::now()
+        jiff::Zoned::now()
     }
 
     pub fn set_channel_name(&mut self, name: String) {
@@ -1008,7 +1007,9 @@ impl Agent {
             });
         }
 
-        let now = self.current_turn_datetime().format("%Y-%m-%d %H:%M:%S %Z");
+        let now = self
+            .current_turn_datetime()
+            .strftime("%Y-%m-%d %H:%M:%S %:z");
         let enriched = format!("[{now}] {user_message}");
 
         let user_msg = ConversationMessage::Chat(ChatMessage::user(enriched));

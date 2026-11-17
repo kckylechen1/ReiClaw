@@ -112,7 +112,7 @@ pub async fn consolidate_turn(
     // Phase 1: Write history entry to Daily category. The gated arm tags the
     // write Episodic; the default arm keeps the exact legacy store call so the
     // flags-off write path is unchanged.
-    let date = chrono::Local::now().format("%Y-%m-%d").to_string();
+    let date = jiff::Zoned::now().strftime("%Y-%m-%d").to_string();
     let history_key = format!("daily_{date}_{}", uuid::Uuid::new_v4());
     if memory_config.types.enabled {
         let history_options = StoreOptions {

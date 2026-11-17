@@ -1,7 +1,8 @@
 #[cfg(test)]
 use super::*;
-use chrono::Duration as ChronoDuration;
+use jiff::SignedDuration;
 use tempfile::TempDir;
+use zeroclaw_api::time::format_rfc3339;
 use zeroclaw_config::schema::Config;
 
 fn test_config(tmp: &TempDir) -> Config {
@@ -118,8 +119,12 @@ fn read_only_queries_on_empty_workspace_do_not_initialize_cron_db() {
     let config = test_config(&tmp);
 
     assert!(list_jobs(&config).unwrap().is_empty());
-    assert!(due_jobs(&config, Utc::now()).unwrap().is_empty());
-    assert!(all_overdue_jobs(&config, Utc::now()).unwrap().is_empty());
+    assert!(due_jobs(&config, Timestamp::now()).unwrap().is_empty());
+    assert!(
+        all_overdue_jobs(&config, Timestamp::now())
+            .unwrap()
+            .is_empty()
+    );
     assert!(list_runs(&config, "missing", 10).unwrap().is_empty());
 
     let err = get_job(&config, "missing").unwrap_err();
@@ -150,7 +155,7 @@ fn first_write_initializes_schema_and_follow_up_reads_work() {
 /// Force a job's `next_run` into the past so it is selected by `due_jobs`
 /// without waiting for its real schedule.
 fn force_due(config: &Config, job_id: &str) {
-    let past = (Utc::now() - ChronoDuration::hours(1)).to_rfc3339();
+    let past = format_rfc3339(Timestamp::now() - SignedDuration::from_hours(1));
     with_initialized_connection(config, |conn| {
         conn.execute(
             "UPDATE cron_jobs SET next_run = ?1 WHERE id = ?2",
@@ -166,7 +171,7 @@ fn claim_job_is_atomic_and_blocks_second_claim() {
     let tmp = TempDir::new().unwrap();
     let config = test_config(&tmp);
     let job = add_job(&config, "test-agent", "*/5 * * * *", "echo ok").unwrap();
-    let now = Utc::now();
+    let now = Timestamp::now();
 
     assert!(
         claim_job(&config, &job.id, now).unwrap(),
@@ -192,7 +197,7 @@ fn due_jobs_skips_claimed_jobs() {
     let config = test_config(&tmp);
     let job = add_job(&config, "test-agent", "*/5 * * * *", "echo ok").unwrap();
     force_due(&config, &job.id);
-    let now = Utc::now();
+    let now = Timestamp::now();
 
     assert_eq!(
         due_jobs(&config, now).unwrap().len(),
@@ -226,7 +231,7 @@ fn clear_stale_locks_releases_in_flight_locks() {
     let config = test_config(&tmp);
     let job = add_job(&config, "test-agent", "*/5 * * * *", "echo ok").unwrap();
     force_due(&config, &job.id);
-    let now = Utc::now();
+    let now = Timestamp::now();
 
     assert!(claim_job(&config, &job.id, now).unwrap());
     assert!(due_jobs(&config, now).unwrap().is_empty());
@@ -272,9 +277,9 @@ fn reclaim_stale_locks_only_clears_locks_older_than_ttl() {
     force_due(&config, &fresh.id);
     force_due(&config, &stale.id);
 
-    let now = Utc::now();
+    let now = Timestamp::now();
     // The stale lock was taken an hour ago, the fresh one just now.
-    let stale_locked_at = now - chrono::Duration::seconds(3600);
+    let stale_locked_at = now - SignedDuration::from_secs(3600);
     assert!(claim_job(&config, &stale.id, stale_locked_at).unwrap());
     assert!(claim_job(&config, &fresh.id, now).unwrap());
     // Both are locked → neither is due.
@@ -303,9 +308,9 @@ fn reclaim_stale_locks_makes_expired_lease_runnable_again() {
     let job = add_job(&config, "test-agent", "*/5 * * * *", "echo ok").unwrap();
     force_due(&config, &job.id);
 
-    let now = Utc::now();
+    let now = Timestamp::now();
     // Simulate a run that claimed the lock 2 hours ago and then hung.
-    let hung_locked_at = now - chrono::Duration::seconds(2 * 3600);
+    let hung_locked_at = now - SignedDuration::from_secs(2 * 3600);
     assert!(claim_job(&config, &job.id, hung_locked_at).unwrap());
     assert!(due_jobs(&config, now).unwrap().is_empty());
 
@@ -381,8 +386,8 @@ fn read_existing_old_schema_db_migrates_before_querying_new_columns() {
             "*/5 * * * *",
             "echo legacy",
             Option::<String>::None,
-            Utc::now().to_rfc3339(),
-            (Utc::now() + ChronoDuration::minutes(5)).to_rfc3339(),
+            format_rfc3339(Timestamp::now()),
+            format_rfc3339(Timestamp::now() + SignedDuration::from_mins(5)),
         ],
     )
     .unwrap();
@@ -428,7 +433,7 @@ fn add_shell_job_marks_at_schedule_for_auto_delete() {
         "default",
         None,
         Schedule::At {
-            at: Utc::now() + ChronoDuration::minutes(10),
+            at: Timestamp::now() + SignedDuration::from_mins(10),
         },
         "echo once",
         None,
@@ -623,11 +628,11 @@ fn due_jobs_filters_by_timestamp_and_enabled() {
 
     let job = add_job(&config, "test-agent", "* * * * *", "echo due").unwrap();
 
-    let before_next_run = job.next_run - ChronoDuration::milliseconds(1);
+    let before_next_run = job.next_run - SignedDuration::from_millis(1);
     let due_now = due_jobs(&config, before_next_run).unwrap();
     assert!(due_now.is_empty(), "new job should not be due immediately");
 
-    let far_future = Utc::now() + ChronoDuration::days(365);
+    let far_future = Timestamp::now() + SignedDuration::from_hours(24 * 365);
     let due_future = due_jobs(&config, far_future).unwrap();
     assert_eq!(due_future.len(), 1, "job should be due in far future");
 
@@ -654,7 +659,7 @@ fn due_jobs_respects_scheduler_max_tasks_limit() {
     let _ = add_job(&config, "test-agent", "* * * * *", "echo due-2").unwrap();
     let _ = add_job(&config, "test-agent", "* * * * *", "echo due-3").unwrap();
 
-    let far_future = Utc::now() + ChronoDuration::days(365);
+    let far_future = Timestamp::now() + SignedDuration::from_hours(24 * 365);
     let due = due_jobs(&config, far_future).unwrap();
     assert_eq!(due.len(), 2);
 }
@@ -669,7 +674,7 @@ fn all_overdue_jobs_ignores_max_tasks_limit() {
     let _ = add_job(&config, "test-agent", "* * * * *", "echo ov-2").unwrap();
     let _ = add_job(&config, "test-agent", "* * * * *", "echo ov-3").unwrap();
 
-    let far_future = Utc::now() + ChronoDuration::days(365);
+    let far_future = Timestamp::now() + SignedDuration::from_hours(24 * 365);
     // due_jobs respects the limit
     let due = due_jobs(&config, far_future).unwrap();
     assert_eq!(due.len(), 2);
@@ -694,7 +699,7 @@ fn all_overdue_jobs_excludes_disabled_jobs() {
     )
     .unwrap();
 
-    let far_future = Utc::now() + ChronoDuration::days(365);
+    let far_future = Timestamp::now() + SignedDuration::from_hours(24 * 365);
     let overdue = all_overdue_jobs(&config, far_future).unwrap();
     assert!(overdue.is_empty());
 }
@@ -825,7 +830,7 @@ fn reschedule_after_run_persists_last_status_and_last_run() {
 fn job_type_from_sql_reads_valid_value() {
     let tmp = TempDir::new().unwrap();
     let config = test_config(&tmp);
-    let now = Utc::now();
+    let now = Timestamp::now();
 
     with_initialized_connection(&config, |conn| {
         conn.execute(
@@ -837,8 +842,8 @@ fn job_type_from_sql_reads_valid_value() {
                 "echo ok",
                 Option::<String>::None,
                 "agent",
-                now.to_rfc3339(),
-                (now + ChronoDuration::minutes(5)).to_rfc3339(),
+                format_rfc3339(now),
+                format_rfc3339(now + SignedDuration::from_mins(5)),
             ],
         )?;
         Ok(())
@@ -853,7 +858,7 @@ fn job_type_from_sql_reads_valid_value() {
 fn job_type_from_sql_rejects_invalid_value() {
     let tmp = TempDir::new().unwrap();
     let config = test_config(&tmp);
-    let now = Utc::now();
+    let now = Timestamp::now();
 
     with_initialized_connection(&config, |conn| {
         conn.execute(
@@ -865,8 +870,8 @@ fn job_type_from_sql_rejects_invalid_value() {
                 "echo ok",
                 Option::<String>::None,
                 "unknown",
-                now.to_rfc3339(),
-                (now + ChronoDuration::minutes(5)).to_rfc3339(),
+                format_rfc3339(now),
+                format_rfc3339(now + SignedDuration::from_mins(5)),
             ],
         )?;
         Ok(())
@@ -889,8 +894,8 @@ fn migration_falls_back_to_legacy_expression() {
                 "legacy-id",
                 "*/5 * * * *",
                 "echo legacy",
-                Utc::now().to_rfc3339(),
-                (Utc::now() + ChronoDuration::minutes(5)).to_rfc3339(),
+                format_rfc3339(Timestamp::now()),
+                format_rfc3339(Timestamp::now() + SignedDuration::from_mins(5)),
             ],
         )?;
         conn.execute(
@@ -911,11 +916,11 @@ fn record_and_prune_runs() {
     let mut config = test_config(&tmp);
     config.scheduler.max_run_history = 2;
     let job = add_job(&config, "test-agent", "*/5 * * * *", "echo ok").unwrap();
-    let base = Utc::now();
+    let base = Timestamp::now();
 
     for idx in 0..3 {
-        let start = base + ChronoDuration::seconds(idx);
-        let end = start + ChronoDuration::milliseconds(100);
+        let start = base + SignedDuration::from_secs(idx);
+        let end = start + SignedDuration::from_millis(100);
         record_run(&config, &job.id, start, end, "ok", Some("done"), 100).unwrap();
     }
 
@@ -928,12 +933,12 @@ fn remove_job_cascades_run_history() {
     let tmp = TempDir::new().unwrap();
     let config = test_config(&tmp);
     let job = add_job(&config, "test-agent", "*/5 * * * *", "echo ok").unwrap();
-    let start = Utc::now();
+    let start = Timestamp::now();
     record_run(
         &config,
         &job.id,
         start,
-        start + ChronoDuration::milliseconds(5),
+        start + SignedDuration::from_millis(5),
         "ok",
         Some("ok"),
         5,
@@ -955,8 +960,8 @@ fn record_run_truncates_large_output() {
     record_run(
         &config,
         &job.id,
-        Utc::now(),
-        Utc::now(),
+        Timestamp::now(),
+        Timestamp::now(),
         "ok",
         Some(&output),
         1,
@@ -973,7 +978,7 @@ fn record_run_truncates_large_output() {
 fn reschedule_after_run_disables_at_schedule_job() {
     let tmp = TempDir::new().unwrap();
     let config = test_config(&tmp);
-    let at = Utc::now() + ChronoDuration::minutes(10);
+    let at = Timestamp::now() + SignedDuration::from_mins(10);
     let job = add_shell_job(
         &config,
         "test-agent",
@@ -998,7 +1003,7 @@ fn reschedule_after_run_disables_at_schedule_job() {
 fn reschedule_after_run_disables_at_schedule_job_on_failure() {
     let tmp = TempDir::new().unwrap();
     let config = test_config(&tmp);
-    let at = Utc::now() + ChronoDuration::minutes(10);
+    let at = Timestamp::now() + SignedDuration::from_mins(10);
     let job = add_shell_job(
         &config,
         "test-agent",
@@ -1332,11 +1337,11 @@ fn skip_missed_run_advances_recurring_job_next_run() {
     let job = add_job(&config, "test-agent", "* * * * *", "echo test").unwrap();
 
     // Force next_run into the past so the job appears overdue.
-    let past = Utc::now() - ChronoDuration::hours(1);
+    let past = Timestamp::now() - SignedDuration::from_hours(1);
     with_initialized_connection(&config, |conn| {
         conn.execute(
             "UPDATE cron_jobs SET next_run = ?1 WHERE id = ?2",
-            params![past.to_rfc3339(), job.id],
+            params![format_rfc3339(past), job.id],
         )
         .unwrap();
         Ok(())
@@ -1345,18 +1350,20 @@ fn skip_missed_run_advances_recurring_job_next_run() {
 
     // Verify it is overdue now.
     assert!(
-        !all_overdue_jobs(&config, Utc::now()).unwrap().is_empty(),
+        !all_overdue_jobs(&config, Timestamp::now())
+            .unwrap()
+            .is_empty(),
         "job with past next_run must appear in overdue"
     );
 
     // Skip the missed run.
     let reloaded = get_job(&config, &job.id).unwrap();
-    skip_missed_run(&config, &reloaded, Utc::now()).unwrap();
+    skip_missed_run(&config, &reloaded, Timestamp::now()).unwrap();
 
     // The job's next_run should now be in the future.
     let updated = get_job(&config, &job.id).unwrap();
     assert!(
-        updated.next_run > Utc::now(),
+        updated.next_run > Timestamp::now(),
         "skip_missed_run must advance next_run to the future"
     );
     assert!(updated.enabled, "recurring job must stay enabled");
@@ -1367,19 +1374,21 @@ fn skip_missed_run_disables_overdue_oneshot_job() {
     let tmp = TempDir::new().unwrap();
     let config = test_config(&tmp);
 
-    let run_at = Utc::now() - ChronoDuration::hours(2);
+    let run_at = Timestamp::now() - SignedDuration::from_hours(2);
     let schedule = Schedule::At { at: run_at };
     let job = add_job_with_schedule(&config, "test-agent", &schedule, "echo once").unwrap();
 
     // The add_job_with_schedule should have set next_run = run_at,
     // so the job is overdue now.
     assert!(
-        !all_overdue_jobs(&config, Utc::now()).unwrap().is_empty(),
+        !all_overdue_jobs(&config, Timestamp::now())
+            .unwrap()
+            .is_empty(),
         "one-shot job with past at-time must be overdue"
     );
 
     let reloaded = get_job(&config, &job.id).unwrap();
-    skip_missed_run(&config, &reloaded, Utc::now()).unwrap();
+    skip_missed_run(&config, &reloaded, Timestamp::now()).unwrap();
 
     let updated = get_job(&config, &job.id).unwrap();
     assert!(
@@ -1399,7 +1408,7 @@ fn add_job_with_schedule(
     schedule: &Schedule,
     command: &str,
 ) -> Result<CronJob> {
-    let now = Utc::now();
+    let now = Timestamp::now();
     let job = CronJob {
         id: format!("test-job-{}", Uuid::new_v4()),
         expression: String::new(),
@@ -1453,13 +1462,13 @@ fn add_job_with_schedule(
                 delivery_json,
                 if job.delete_after_run { 1 } else { 0 },
                 allowed_tools_json,
-                job.next_run.to_rfc3339(),
-                job.last_run.map(|t| t.to_rfc3339()),
+                format_rfc3339(job.next_run),
+                job.last_run.map(format_rfc3339),
                 job.last_status,
                 job.last_output,
                 if job.uses_memory { 1 } else { 0 },
                 job.source,
-                job.created_at.to_rfc3339(),
+                format_rfc3339(job.created_at),
                 job.agent_alias,
             ],
         )
@@ -1551,9 +1560,7 @@ fn a_recurring_job_with_no_future_occurrence_is_disabled_not_refired() {
     .unwrap();
 
     // The run on its only date finishes; there is no later occurrence.
-    let ran_at = DateTime::parse_from_rfc3339("2030-01-01T09:00:05Z")
-        .unwrap()
-        .with_timezone(&Utc);
+    let ran_at = parse_rfc3339("2030-01-01T09:00:05Z").unwrap();
     persist_run_result(
         &config,
         &job,
@@ -1599,7 +1606,7 @@ fn resuming_a_paused_recurring_job_does_not_fire_a_stale_run() {
     let resumed = crate::cron::resume_job(&config, &job.id).unwrap();
     assert!(resumed.enabled);
     assert!(
-        resumed.next_run > Utc::now(),
+        resumed.next_run > Timestamp::now(),
         "a resumed job must wait for its next occurrence, not run at once"
     );
 }

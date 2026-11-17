@@ -4,7 +4,6 @@ use super::cron_common::{
 use crate::cron::{self, DeliveryConfig, JobType, Schedule, SessionTarget};
 use crate::security::SecurityPolicy;
 use async_trait::async_trait;
-use chrono::{Duration as ChronoDuration, Utc};
 use serde_json::{Value, json};
 use std::sync::Arc;
 use zeroclaw_api::tool::{Tool, ToolOutput, ToolResult};
@@ -136,9 +135,9 @@ impl CronAddScheduleArg {
             Self::AfterSeconds(after_seconds) => {
                 let after_seconds = i64::try_from(after_seconds)
                     .map_err(|_| "Invalid schedule: after_seconds is too large")?;
-                let delay = ChronoDuration::seconds(after_seconds);
-                let at = Utc::now().checked_add_signed(delay).ok_or_else(|| {
-                    "Invalid schedule: after_seconds overflowed DateTime arithmetic".to_string()
+                let delay = jiff::SignedDuration::from_secs(after_seconds);
+                let at = jiff::Timestamp::now().checked_add(delay).map_err(|_| {
+                    "Invalid schedule: after_seconds overflowed timestamp arithmetic".to_string()
                 })?;
                 Ok(Schedule::At { at })
             }
@@ -914,7 +913,7 @@ mod tests {
         let cfg = test_config(&tmp).await;
         let tool = CronAddTool::new(cfg.clone(), test_security(&cfg), TEST_AGENT);
 
-        let before = chrono::Utc::now();
+        let before = jiff::Timestamp::now();
         let result = tool
             .execute(json!({
                 "schedule": { "kind": "after", "after_seconds": 60 },
@@ -923,15 +922,15 @@ mod tests {
             }))
             .await
             .unwrap();
-        let after = chrono::Utc::now();
+        let after = jiff::Timestamp::now();
 
         assert!(result.success, "{:?}", result.error);
         let jobs = cron::list_jobs(&cfg).unwrap();
         assert_eq!(jobs.len(), 1);
         match jobs[0].schedule {
             Schedule::At { at } => {
-                assert!(at >= before + chrono::Duration::seconds(60));
-                assert!(at <= after + chrono::Duration::seconds(60));
+                assert!(at >= before + jiff::SignedDuration::from_secs(60));
+                assert!(at <= after + jiff::SignedDuration::from_secs(60));
                 assert_eq!(jobs[0].next_run, at);
             }
             ref other => {
@@ -953,7 +952,7 @@ mod tests {
         let cfg = test_config(&tmp).await;
         let tool = CronAddTool::new(cfg.clone(), test_security(&cfg), TEST_AGENT);
 
-        let before = chrono::Utc::now();
+        let before = jiff::Timestamp::now();
         let result = tool
             .execute(json!({
                 "schedule": r#"{"kind":"after","after_seconds":60}"#,
@@ -962,14 +961,14 @@ mod tests {
             }))
             .await
             .unwrap();
-        let after = chrono::Utc::now();
+        let after = jiff::Timestamp::now();
 
         assert!(result.success, "{:?}", result.error);
         let jobs = cron::list_jobs(&cfg).unwrap();
         match jobs[0].schedule {
             Schedule::At { at } => {
-                assert!(at >= before + chrono::Duration::seconds(60));
-                assert!(at <= after + chrono::Duration::seconds(60));
+                assert!(at >= before + jiff::SignedDuration::from_secs(60));
+                assert!(at <= after + jiff::SignedDuration::from_secs(60));
             }
             ref other => panic!("after input should persist as an at schedule, got {other:?}"),
         }

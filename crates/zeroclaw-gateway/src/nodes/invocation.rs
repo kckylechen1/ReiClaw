@@ -131,7 +131,8 @@ impl NodeRegistry {
                 };
                 let state = &mut socket.invocation;
                 let valid = !self.stopped.load(Ordering::SeqCst)
-                    && chrono::DateTime::parse_from_rfc3339(deadline).is_ok_and(|d| d > Utc::now())
+                    && zeroclaw_api::time::parse_rfc3339(deadline)
+                        .is_ok_and(|d| d > jiff::Timestamp::now())
                     && state.pending.get(call_id).is_some_and(|p| {
                         p.revision == state.revision && state.caps.contains(&p.cap)
                     });
@@ -231,7 +232,7 @@ impl NodeRegistry {
         };
         let call_id = Uuid::new_v4().to_string();
         let (tx, rx) = oneshot::channel();
-        let deadline = Utc::now() + chrono::Duration::seconds(2);
+        let deadline = jiff::Timestamp::now() + jiff::SignedDuration::from_secs(2);
         let admitted = store
             .with_active(device, &fingerprint, || {
                 let mut live = self.live.write();
@@ -257,7 +258,7 @@ impl NodeRegistry {
                     cap_revision: revision,
                     args_digest: args_digest(&args),
                     args,
-                    deadline: deadline.to_rfc3339(),
+                    deadline: zeroclaw_api::time::format_rfc3339(deadline),
                     grant_proof: None,
                 };
                 // Linearization order: pending first, then queue, under the same lock.

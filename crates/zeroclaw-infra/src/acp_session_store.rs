@@ -3,7 +3,6 @@
 //! transcript, token, plan or event writers.
 
 use anyhow::{Context, Result};
-use chrono::{DateTime, Utc};
 use parking_lot::Mutex;
 use rusqlite::{Connection, OptionalExtension, params};
 use std::path::Path;
@@ -19,8 +18,8 @@ pub struct AcpSessionData {
     pub agent_alias: String,
     pub workspace_dir: String,
     pub token_count: u64,
-    pub created_at: DateTime<Utc>,
-    pub last_activity: DateTime<Utc>,
+    pub created_at: jiff::Timestamp,
+    pub last_activity: jiff::Timestamp,
     pub messages: Vec<ConversationMessage>,
 }
 
@@ -37,8 +36,8 @@ pub struct AcpSessionSummary {
     pub agent_alias: String,
     pub workspace_dir: String,
     pub token_count: u64,
-    pub created_at: DateTime<Utc>,
-    pub last_activity: DateTime<Utc>,
+    pub created_at: jiff::Timestamp,
+    pub last_activity: jiff::Timestamp,
     pub message_count: usize,
 }
 
@@ -672,8 +671,8 @@ impl AcpSessionStore {
     }
 }
 
-fn parse_ts(s: &str, field: &'static str, session_uuid: &str) -> DateTime<Utc> {
-    s.parse::<DateTime<Utc>>().unwrap_or_else(|e| {
+fn parse_ts(s: &str, field: &'static str, session_uuid: &str) -> jiff::Timestamp {
+    zeroclaw_api::time::parse_stored_timestamp(s).unwrap_or_else(|e| {
         ::zeroclaw_log::record!(
             WARN,
             ::zeroclaw_log::Event::new(module_path!(), ::zeroclaw_log::Action::Note).with_attrs(
@@ -685,7 +684,7 @@ fn parse_ts(s: &str, field: &'static str, session_uuid: &str) -> DateTime<Utc> {
             ),
             "Failed to parse session timestamp"
         );
-        Utc::now()
+        jiff::Timestamp::now()
     })
 }
 
@@ -754,6 +753,31 @@ mod tests {
         assert_eq!(data.workspace_dir, "/home/user/project");
         assert_eq!(data.token_count, 0);
         assert!(data.messages.is_empty());
+    }
+
+    #[test]
+    fn restored_session_keeps_timestamps_from_existing_relaxed_formats() {
+        let (_tmp, store) = open_store();
+        store
+            .conn
+            .lock()
+            .execute_batch(
+                "INSERT INTO acp_sessions
+               (session_uuid, agent_alias, workspace_dir, created_at, last_activity)
+             VALUES ('stored-time', 'personal_code', '/tmp/project',
+                     '2026-01-02 03:04:05 UTC', '2026-01-02 08:34:06+0530');",
+            )
+            .unwrap();
+
+        let data = store.load_session("stored-time").unwrap().unwrap();
+        assert_eq!(
+            data.created_at,
+            zeroclaw_api::time::parse_rfc3339("2026-01-02T03:04:05Z").unwrap()
+        );
+        assert_eq!(
+            data.last_activity,
+            zeroclaw_api::time::parse_rfc3339("2026-01-02T03:04:06Z").unwrap()
+        );
     }
 
     #[test]

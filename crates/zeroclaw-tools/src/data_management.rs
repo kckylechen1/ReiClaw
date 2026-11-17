@@ -20,6 +20,17 @@ impl DataManagementTool {
         }
     }
 
+    fn retention_cutoff(&self) -> anyhow::Result<jiff::Timestamp> {
+        let seconds = self
+            .retention_days
+            .checked_mul(86_400)
+            .and_then(|seconds| i64::try_from(seconds).ok())
+            .ok_or_else(|| {
+                anyhow::Error::msg("retention period exceeds the supported time range")
+            })?;
+        Ok(jiff::Timestamp::now().checked_sub(jiff::SignedDuration::from_secs(seconds))?)
+    }
+
     /// The workspace-root chain anchor for read-only walks. A missing
     /// workspace yields `None` (nothing to count); a symlinked one is
     /// refused so foreign data cannot be adopted into counts or stats.
@@ -45,9 +56,10 @@ impl DataManagementTool {
     /// (`/api/agents/{alias}/data-retention`); the model-visible `Tool`
     /// entry point and the operator API must stay behaviour-identical.
     pub async fn cmd_retention_status(&self) -> anyhow::Result<ToolResult> {
-        let cutoff = chrono::Utc::now()
-            - chrono::Duration::days(i64::try_from(self.retention_days).unwrap_or(i64::MAX));
-        let cutoff_ts = cutoff.timestamp().try_into().unwrap_or(0u64);
+        let cutoff = self.retention_cutoff()?;
+        let cutoff_ts = zeroclaw_api::time::epoch_second(cutoff)
+            .try_into()
+            .unwrap_or(0u64);
         let (count, skipped) = match self.read_anchor().await? {
             Some(chain) => count_files_older_than(&self.workspace_dir, cutoff_ts, &chain).await?,
             None => (0, 0),
@@ -57,7 +69,7 @@ impl DataManagementTool {
             success: true,
             output: json!({
                 "retention_days": self.retention_days,
-                "cutoff": cutoff.to_rfc3339(),
+                "cutoff": zeroclaw_api::time::format_rfc3339(cutoff),
                 "affected_files": count,
                 "symlinks_skipped": skipped,
             })
@@ -76,9 +88,10 @@ impl DataManagementTool {
     /// Shared with the gateway operator surface, which must keep the
     /// destructive guard intact.
     pub async fn cmd_purge(&self, dry_run: bool) -> anyhow::Result<ToolResult> {
-        let cutoff = chrono::Utc::now()
-            - chrono::Duration::days(i64::try_from(self.retention_days).unwrap_or(i64::MAX));
-        let cutoff_ts: u64 = cutoff.timestamp().try_into().unwrap_or(0);
+        let cutoff = self.retention_cutoff()?;
+        let cutoff_ts: u64 = zeroclaw_api::time::epoch_second(cutoff)
+            .try_into()
+            .unwrap_or(0);
         let outcome = purge_old_files(&self.workspace_dir, cutoff_ts, dry_run).await?;
 
         let failures: Vec<serde_json::Value> = outcome
@@ -555,6 +568,27 @@ mod tests {
 
     fn make_tool(tmp: &TempDir) -> DataManagementTool {
         DataManagementTool::new(tmp.path().to_path_buf(), 90)
+    }
+
+    #[tokio::test]
+    async fn unrepresentable_retention_refuses_purge_without_touching_files() {
+        let tmp = TempDir::new().unwrap();
+        let retained = tmp.path().join("retained.txt");
+        fs::write(&retained, b"retained data").await.unwrap();
+        for days in [u64::MAX, 10_000_000] {
+            let tool = DataManagementTool::new(tmp.path().to_path_buf(), days);
+            assert!(
+                tool.execute(json!({"command": "retention_status"}))
+                    .await
+                    .is_err()
+            );
+            assert!(
+                tool.execute(json!({"command": "purge", "dry_run": false}))
+                    .await
+                    .is_err()
+            );
+            assert_eq!(fs::read(&retained).await.unwrap(), b"retained data");
+        }
     }
 
     #[tokio::test]

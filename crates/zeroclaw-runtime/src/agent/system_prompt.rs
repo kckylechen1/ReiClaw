@@ -495,12 +495,12 @@ pub fn build_system_prompt_with_persona(
     }
 
     // ── 6. Date ─────────────────────────────────────────────────
-    let now = chrono::Local::now();
+    let now = jiff::Zoned::now();
     let _ = writeln!(
         prompt,
         "## Current Date\n\n{} ({})\n",
-        now.format("%Y-%m-%d"),
-        now.format("%:z")
+        now.strftime("%Y-%m-%d"),
+        now.strftime("%:z")
     );
 
     // ── 7. Runtime ──────────────────────────────────────────────

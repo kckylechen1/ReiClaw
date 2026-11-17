@@ -1,5 +1,4 @@
 use anyhow::Result;
-use chrono::{DateTime, Utc};
 use std::io::Write;
 use std::path::Path;
 use zeroclaw_config::schema::{Config, UNCONFIGURED_CONTEXT_WINDOW_FALLBACK};
@@ -1581,10 +1580,8 @@ fn check_daemon_state(config: &Config, items: &mut Vec<DiagItem>) {
         .and_then(serde_json::Value::as_str)
         .unwrap_or("");
 
-    if let Ok(ts) = DateTime::parse_from_rfc3339(updated_at) {
-        let age = Utc::now()
-            .signed_duration_since(ts.with_timezone(&Utc))
-            .num_seconds();
+    if let Ok(ts) = zeroclaw_api::time::parse_rfc3339(updated_at) {
+        let age = jiff::Timestamp::now().duration_since(ts).as_secs();
         if age <= DAEMON_STALE_SECONDS {
             items.push(DiagItem::ok(cat, format!("heartbeat fresh ({age}s ago)")));
         } else {
@@ -1616,7 +1613,7 @@ fn check_daemon_state(config: &Config, items: &mut Vec<DiagItem>) {
                 .and_then(serde_json::Value::as_str)
                 .and_then(parse_rfc3339)
                 .map_or(i64::MAX, |dt| {
-                    Utc::now().signed_duration_since(dt).num_seconds()
+                    jiff::Timestamp::now().duration_since(dt).as_secs()
                 });
 
             if scheduler_ok && scheduler_age <= SCHEDULER_STALE_SECONDS {
@@ -1651,7 +1648,7 @@ fn check_daemon_state(config: &Config, items: &mut Vec<DiagItem>) {
                 .and_then(serde_json::Value::as_str)
                 .and_then(parse_rfc3339)
                 .map_or(i64::MAX, |dt| {
-                    Utc::now().signed_duration_since(dt).num_seconds()
+                    jiff::Timestamp::now().duration_since(dt).as_secs()
                 });
 
             if status_ok && age <= CHANNEL_STALE_SECONDS {
@@ -1788,10 +1785,8 @@ fn truncate_for_display(input: &str, max_chars: usize) -> String {
 
 // ── Helpers ──────────────────────────────────────────────────────
 
-fn parse_rfc3339(raw: &str) -> Option<DateTime<Utc>> {
-    DateTime::parse_from_rfc3339(raw)
-        .ok()
-        .map(|dt| dt.with_timezone(&Utc))
+fn parse_rfc3339(raw: &str) -> Option<jiff::Timestamp> {
+    zeroclaw_api::time::parse_rfc3339(raw).ok()
 }
 
 #[cfg(test)]

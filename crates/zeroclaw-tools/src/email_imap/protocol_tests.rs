@@ -12,11 +12,97 @@ use async_imap::error::Error;
 use async_imap::extensions::idle::IdleResponse;
 use async_imap::imap_proto::{MailboxDatum, Response, Status};
 use async_imap::{Authenticator, Client};
+use futures_util::TryStreamExt;
 use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader, DuplexStream};
 
 use super::{PeekPart, uid_fetch_peek, uid_search};
 
 type Step = (&'static str, String);
+
+#[tokio::test]
+async fn fetch_internal_dates_preserve_offsets_and_reject_unrepresentable_values() {
+    with_peer(
+        vec![
+            login(),
+            (
+                "EXAMINE \"INBOX\"",
+                "* 16 EXISTS\r\n{tag} OK [READ-ONLY] EXAMINE completed\r\n".into(),
+            ),
+            (
+                "UID FETCH 7:22 INTERNALDATE",
+                concat!(
+                    "* 1 FETCH (UID 7 INTERNALDATE \"07-Feb-2026 05:06:07 +0530\")\r\n",
+                    "* 2 FETCH (UID 8 INTERNALDATE \" 7-Feb-2026 05:06:07 -0330\")\r\n",
+                    "* 3 FETCH (UID 9 INTERNALDATE \"29-Feb-2024 05:06:07 +0545\")\r\n",
+                    "* 4 FETCH (UID 10 INTERNALDATE \"29-Feb-2025 05:06:07 +0000\")\r\n",
+                    "* 5 FETCH (UID 11 FLAGS ())\r\n",
+                    "* 6 FETCH (UID 12 INTERNALDATE \"07-Feb-2026 05:06:07 +2400\")\r\n",
+                    "* 7 FETCH (UID 13 INTERNALDATE \"31-Dec-2016 23:59:60 +0000\")\r\n",
+                    "* 8 FETCH (UID 14 INTERNALDATE \"07-Feb-2026 05:06:07 +05:30\")\r\n",
+                    "* 9 FETCH (UID 15 INTERNALDATE \"07-Feb-2026 05:06:07 +05 30\")\r\n",
+                    "* 10 FETCH (UID 16 INTERNALDATE \"07-Feb-2026 05:06:07 +053015\")\r\n",
+                    "* 11 FETCH (UID 17 INTERNALDATE \"07-Feb-2026 05:06:07 +05:30:15\")\r\n",
+                    "* 12 FETCH (UID 18 INTERNALDATE \"31-Dec-2016 23:59: 60 +0000\")\r\n",
+                    "* 13 FETCH (UID 19 INTERNALDATE \"31-Dec-2016 23:59: 59 +0000\")\r\n",
+                    "* 14 FETCH (UID 20 INTERNALDATE \"07-Feb-2026 05:06:07 −03: :30\")\r\n",
+                    "* 15 FETCH (UID 21 INTERNALDATE \"07-Feb-2026 05:06:07 +0560\")\r\n",
+                    "* 16 FETCH (UID 22 INTERNALDATE \"07-Feb-2026 05:06:07 +05\")\r\n",
+                    "{tag} OK FETCH completed\r\n",
+                )
+                .into(),
+            ),
+            logout(),
+        ],
+        |client| async move {
+            let mut session = client
+                .login("reader@example.test", "fixture-password")
+                .await
+                .unwrap();
+            session.examine("INBOX").await.unwrap();
+            let fetched: Vec<_> = session
+                .uid_fetch("7:22", "INTERNALDATE")
+                .await
+                .unwrap()
+                .try_collect()
+                .await
+                .unwrap();
+            assert_eq!(fetched.len(), 16);
+            for (item, (uid, offset, instant)) in fetched.iter().zip([
+                (7, "+0530", "2026-02-06T23:36:07Z"),
+                (8, "-0330", "2026-02-07T08:36:07Z"),
+                (9, "+0545", "2024-02-28T23:21:07Z"),
+            ]) {
+                assert_eq!(item.uid, Some(uid));
+                let parsed = item.internal_date().expect("valid IMAP date");
+                assert_eq!(parsed.strftime("%z").to_string(), offset);
+                assert_eq!(parsed.timestamp().to_string(), instant);
+            }
+            for (item, uid) in fetched[3..7].iter().zip(10..=13) {
+                assert_eq!(item.uid, Some(uid));
+                assert!(item.internal_date().is_none(), "invalid date for UID {uid}");
+            }
+            for (index, uid, offset, instant) in [
+                (7, 14, "+0530", "2026-02-06T23:36:07Z"),
+                (8, 15, "+0530", "2026-02-06T23:36:07Z"),
+                (12, 19, "+0000", "2016-12-31T23:59:59Z"),
+                (13, 20, "-0330", "2026-02-07T08:36:07Z"),
+            ] {
+                let item = &fetched[index];
+                assert_eq!(item.uid, Some(uid));
+                let parsed = item.internal_date().expect("valid legacy IMAP date syntax");
+                assert_eq!(parsed.strftime("%z").to_string(), offset);
+                assert_eq!(parsed.timestamp().to_string(), instant);
+            }
+            for (index, uid) in [(9, 16), (10, 17), (11, 18), (14, 21), (15, 22)] {
+                let item = &fetched[index];
+                assert_eq!(item.uid, Some(uid));
+                assert!(item.internal_date().is_none(), "invalid date for UID {uid}");
+            }
+            session.logout().await.unwrap();
+        },
+    )
+    .await;
+}
 
 fn login() -> Step {
     (

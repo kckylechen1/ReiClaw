@@ -164,7 +164,7 @@ impl zeroclaw::memory::Memory for StaticRecallMemory {
                 key: k.clone(),
                 content: v.clone(),
                 category: zeroclaw::memory::MemoryCategory::Core,
-                timestamp: chrono::Utc::now().to_rfc3339(),
+                timestamp: zeroclaw_api::time::format_rfc3339(jiff::Timestamp::now()),
                 session_id: None,
                 score: None,
                 namespace: "default".into(),

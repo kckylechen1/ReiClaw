@@ -1,7 +1,7 @@
 pub use zeroclaw_runtime::cron::*;
 
 use crate::config::Config;
-use anyhow::{Result, bail};
+use anyhow::{Context, Result, bail};
 use zeroclaw_runtime::i18n::{get_required_cli_string, get_required_cli_string_with_args};
 
 /// Bail with a clear error if the named agent isn't configured.
@@ -19,9 +19,8 @@ fn require_configured_agent(config: &Config, agent_alias: &str) -> Result<()> {
     Ok(())
 }
 
-fn parse_explicit_rfc3339_utc(raw: &str) -> Result<chrono::DateTime<chrono::Utc>> {
-    chrono::DateTime::parse_from_rfc3339(raw)
-        .map(|timestamp| timestamp.with_timezone(&chrono::Utc))
+fn parse_explicit_rfc3339_utc(raw: &str) -> Result<jiff::Timestamp> {
+    zeroclaw_api::time::parse_rfc3339(raw)
         .map_err(|err| {
             ::zeroclaw_log::record!(
                 WARN,
@@ -60,13 +59,13 @@ pub fn handle_command(command: crate::CronCommands, config: &Config) -> Result<(
             for job in jobs {
                 let last_run = job
                     .last_run
-                    .map_or_else(|| "never".into(), |d| d.to_rfc3339());
+                    .map_or_else(|| "never".into(), zeroclaw_api::time::format_rfc3339);
                 let last_status = job.last_status.unwrap_or_else(|| "n/a".into());
                 println!(
                     "- {} | {:?} | next={} | last={} ({})",
                     job.id,
                     job.schedule,
-                    job.next_run.to_rfc3339(),
+                    zeroclaw_api::time::format_rfc3339(job.next_run),
                     last_run,
                     last_status,
                 );
@@ -135,7 +134,7 @@ pub fn handle_command(command: crate::CronCommands, config: &Config) -> Result<(
                     "{}",
                     get_required_cli_string_with_args(
                         "cli-cron-next",
-                        &[("v", &job.next_run.to_rfc3339())]
+                        &[("v", &zeroclaw_api::time::format_rfc3339(job.next_run))]
                     )
                 );
                 println!(
@@ -162,7 +161,7 @@ pub fn handle_command(command: crate::CronCommands, config: &Config) -> Result<(
                     "{}",
                     get_required_cli_string_with_args(
                         "cli-cron-next2",
-                        &[("v", &job.next_run.to_rfc3339())]
+                        &[("v", &zeroclaw_api::time::format_rfc3339(job.next_run))]
                     )
                 );
                 println!(
@@ -212,7 +211,7 @@ pub fn handle_command(command: crate::CronCommands, config: &Config) -> Result<(
                     "{}",
                     get_required_cli_string_with_args(
                         "cli-cron-at",
-                        &[("v", &job.next_run.to_rfc3339())]
+                        &[("v", &zeroclaw_api::time::format_rfc3339(job.next_run))]
                     )
                 );
                 println!(
@@ -235,7 +234,7 @@ pub fn handle_command(command: crate::CronCommands, config: &Config) -> Result<(
                     "{}",
                     get_required_cli_string_with_args(
                         "cli-cron-at2",
-                        &[("v", &job.next_run.to_rfc3339())]
+                        &[("v", &zeroclaw_api::time::format_rfc3339(job.next_run))]
                     )
                 );
                 println!(
@@ -291,7 +290,7 @@ pub fn handle_command(command: crate::CronCommands, config: &Config) -> Result<(
                     "{}",
                     get_required_cli_string_with_args(
                         "cli-cron-next3",
-                        &[("v", &job.next_run.to_rfc3339())]
+                        &[("v", &zeroclaw_api::time::format_rfc3339(job.next_run))]
                     )
                 );
                 println!(
@@ -324,7 +323,7 @@ pub fn handle_command(command: crate::CronCommands, config: &Config) -> Result<(
                     "{}",
                     get_required_cli_string_with_args(
                         "cli-cron-next3",
-                        &[("v", &job.next_run.to_rfc3339())]
+                        &[("v", &zeroclaw_api::time::format_rfc3339(job.next_run))]
                     )
                 );
                 println!(
@@ -345,7 +344,9 @@ pub fn handle_command(command: crate::CronCommands, config: &Config) -> Result<(
             require_configured_agent(config, &agent_alias)?;
             if prompt {
                 let duration = parse_delay(&delay)?;
-                let at = chrono::Utc::now() + duration;
+                let at = jiff::Timestamp::now()
+                    .checked_add(duration)
+                    .context("Cron delay exceeds the supported timestamp range")?;
                 let schedule = Schedule::At { at };
                 let job = add_agent_job(
                     config,
@@ -375,7 +376,7 @@ pub fn handle_command(command: crate::CronCommands, config: &Config) -> Result<(
                     "{}",
                     get_required_cli_string_with_args(
                         "cli-cron-at",
-                        &[("v", &job.next_run.to_rfc3339())]
+                        &[("v", &zeroclaw_api::time::format_rfc3339(job.next_run))]
                     )
                 );
                 println!(
@@ -398,7 +399,7 @@ pub fn handle_command(command: crate::CronCommands, config: &Config) -> Result<(
                     "{}",
                     get_required_cli_string_with_args(
                         "cli-cron-at2",
-                        &[("v", &job.next_run.to_rfc3339())]
+                        &[("v", &zeroclaw_api::time::format_rfc3339(job.next_run))]
                     )
                 );
                 println!(
@@ -492,7 +493,7 @@ pub fn handle_command(command: crate::CronCommands, config: &Config) -> Result<(
                 "{}",
                 get_required_cli_string_with_args(
                     "cli-cron-next2",
-                    &[("v", &job.next_run.to_rfc3339())]
+                    &[("v", &zeroclaw_api::time::format_rfc3339(job.next_run))]
                 )
             );
             println!(
@@ -589,5 +590,26 @@ mod tests {
         );
         assert!(message.contains("2026-05-18T09:00:00Z"));
         assert!(message.contains("2026-05-18T09:00:00-04:00"));
+    }
+
+    #[test]
+    fn cli_once_prompt_rejects_unrepresentable_delay_without_creating_a_job() {
+        let tmp = TempDir::new().unwrap();
+        let config = test_config(&tmp);
+        let error = handle_command(
+            crate::CronCommands::Once {
+                delay: "3000000d".into(),
+                agent_alias: "test-agent".into(),
+                prompt: true,
+                allowed_tools: vec![],
+                uses_memory: None,
+                command: "send a reminder".into(),
+            },
+            &config,
+        )
+        .expect_err("a valid duration outside the timestamp range must be rejected");
+
+        assert!(error.to_string().contains("supported timestamp range"));
+        assert!(list_jobs(&config).unwrap().is_empty());
     }
 }

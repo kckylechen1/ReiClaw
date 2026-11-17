@@ -19,7 +19,6 @@ use std::path::Path;
 use std::sync::{Arc, Mutex};
 
 use anyhow::{Context, Result};
-use chrono::{DateTime, Duration, Utc};
 use rusqlite::{Connection, OptionalExtension, params};
 use sha2::{Digest, Sha256};
 
@@ -142,9 +141,9 @@ pub struct Grant {
     pub run_id: String,
     pub tool_name: String,
     pub args_hash: String,
-    pub granted_at: DateTime<Utc>,
-    pub expires_at: DateTime<Utc>,
-    pub consumed_at: Option<DateTime<Utc>>,
+    pub granted_at: jiff::Timestamp,
+    pub expires_at: jiff::Timestamp,
+    pub consumed_at: Option<jiff::Timestamp>,
     pub approver: String,
     pub channel: String,
 }
@@ -213,9 +212,9 @@ impl ApprovalStore {
         args: &serde_json::Value,
         approver: &str,
         channel: &str,
-        ttl: Duration,
+        ttl: jiff::SignedDuration,
     ) -> Result<Grant> {
-        let now = Utc::now();
+        let now = jiff::Timestamp::now();
         let grant = Grant {
             approval_id: uuid::Uuid::new_v4().to_string(),
             boot_id: self.boot_id.clone(),
@@ -223,7 +222,7 @@ impl ApprovalStore {
             tool_name: tool_name.to_string(),
             args_hash: args_hash(args),
             granted_at: now,
-            expires_at: now + ttl,
+            expires_at: now.checked_add(ttl)?,
             consumed_at: None,
             approver: approver.to_string(),
             channel: channel.to_string(),
@@ -240,8 +239,8 @@ impl ApprovalStore {
                 grant.run_id,
                 grant.tool_name,
                 grant.args_hash,
-                grant.granted_at.to_rfc3339(),
-                grant.expires_at.to_rfc3339(),
+                zeroclaw_api::time::format_rfc3339(grant.granted_at),
+                zeroclaw_api::time::format_rfc3339(grant.expires_at),
                 grant.approver,
                 grant.channel,
             ],
@@ -262,7 +261,7 @@ impl ApprovalStore {
         args: &serde_json::Value,
     ) -> Result<std::result::Result<String, RedeemFailure>> {
         let hash = args_hash(args);
-        let now = Utc::now();
+        let now = jiff::Timestamp::now();
         let conn = self.lock();
 
         let approval_id: Option<String> = conn
@@ -278,7 +277,13 @@ impl ApprovalStore {
                          ORDER BY granted_at
                          LIMIT 1)
               RETURNING approval_id",
-                params![now.to_rfc3339(), self.boot_id, run_id, tool_name, hash],
+                params![
+                    zeroclaw_api::time::format_rfc3339(now),
+                    self.boot_id,
+                    run_id,
+                    tool_name,
+                    hash
+                ],
                 |row| row.get(0),
             )
             .optional()?;
@@ -310,7 +315,13 @@ impl ApprovalStore {
                     AND tool_name = ?3 AND args_hash = ?4
                     AND expires_at <= ?5
                   LIMIT 1",
-                params![self.boot_id, run_id, tool_name, hash, now.to_rfc3339()],
+                params![
+                    self.boot_id,
+                    run_id,
+                    tool_name,
+                    hash,
+                    zeroclaw_api::time::format_rfc3339(now)
+                ],
                 |row| row.get(0),
             )
             .optional()?;
@@ -341,7 +352,7 @@ impl ApprovalStore {
                   args_summary, decision, approver, channel)
              VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10)",
             params![
-                Utc::now().to_rfc3339(),
+                zeroclaw_api::time::format_rfc3339(jiff::Timestamp::now()),
                 self.boot_id,
                 run_id,
                 agent,
@@ -387,8 +398,30 @@ mod tests {
     use super::*;
     use serde_json::json;
 
-    fn ttl() -> Duration {
-        Duration::seconds(DEFAULT_GRANT_TTL_SECS)
+    fn ttl() -> jiff::SignedDuration {
+        jiff::SignedDuration::from_secs(DEFAULT_GRANT_TTL_SECS)
+    }
+
+    #[test]
+    fn unrepresentable_expiry_does_not_create_a_redeemable_grant() {
+        let store = ApprovalStore::open_in_memory("boot-1").unwrap();
+        let args = json!({"symbol": "600519"});
+        assert!(
+            store
+                .grant(
+                    "run-1",
+                    "portfolio_buy",
+                    &args,
+                    "owner",
+                    "wechat",
+                    jiff::SignedDuration::MAX
+                )
+                .is_err()
+        );
+        assert_eq!(
+            store.redeem("run-1", "portfolio_buy", &args).unwrap(),
+            Err(RedeemFailure::NoGrant)
+        );
     }
 
     #[test]
@@ -475,7 +508,7 @@ mod tests {
                 &args,
                 "owner",
                 "wechat",
-                Duration::seconds(-1),
+                jiff::SignedDuration::from_secs(-1),
             )
             .unwrap();
 
