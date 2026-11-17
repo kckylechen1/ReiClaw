@@ -389,10 +389,13 @@ async fn retired_voice_frames_reject_without_claiming_legacy_or_negotiated_turns
             assert_eq!(reply["code"], code, "{reply}");
         }
         assert!(fixture.seen.lock().is_empty());
+        // socket(OWNER_TOKEN) lands in the owner namespace ("gw_owner-session")
+        // whenever any device bridge exists — the fixture configures one, so the
+        // owner conversation is registered under that key, not the device's.
         let conversations = fixture
             .state
             .ws_conversations
-            .session_conversations("gw_device-session");
+            .session_conversations("gw_owner-session");
         assert_eq!(conversations.len(), 1);
         let conversation = &conversations[0];
         assert!(!conversation.is_running());
@@ -405,7 +408,7 @@ async fn retired_voice_frames_reject_without_claiming_legacy_or_negotiated_turns
                 .session_backend
                 .as_ref()
                 .unwrap()
-                .load_with_timestamps("gw_device-session")
+                .load_with_timestamps("gw_owner-session")
                 .is_empty()
         );
 
