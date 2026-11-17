@@ -649,32 +649,6 @@ pub fn model_provider_runtime_options_from_model_provider_entry(
     config: &zeroclaw_config::schema::Config,
     entry: Option<&zeroclaw_config::schema::ModelProviderConfig>,
 ) -> ModelProviderRuntimeOptions {
-    // Resolve merge_system_into_user from the active model model_provider profile
-    // by matching api_url — providers.models retains all profiles. We keep
-    // this lookup based on URL match rather than identity because the entry
-    // we were given may itself originate from any of those profiles.
-    let merge_system_into_user = entry
-        .and_then(|e| e.uri.as_deref())
-        .map(str::trim)
-        .filter(|u| !u.is_empty())
-        .and_then(|active_uri| {
-            config
-                .providers
-                .models
-                .iter_entries()
-                .map(|(_, _, base)| base)
-                .find(|p| {
-                    p.uri
-                        .as_deref()
-                        .map(str::trim)
-                        .filter(|u: &&str| !u.is_empty())
-                        .map(|u: &str| u.trim_end_matches('/'))
-                        == Some(active_uri.trim_end_matches('/'))
-                })
-        })
-        .map(|p| p.merge_system_into_user)
-        .unwrap_or(false);
-
     let tls_ca_cert_path = entry.and_then(|e| e.tls_ca_cert_path.clone());
 
     ModelProviderRuntimeOptions {
@@ -696,7 +670,7 @@ pub fn model_provider_runtime_options_from_model_provider_entry(
         extra_headers: entry.map(|e| e.extra_headers.clone()).unwrap_or_default(),
         api_path: None,
         provider_max_tokens: entry.and_then(|e| e.max_tokens),
-        merge_system_into_user,
+        merge_system_into_user: entry.is_some_and(|e| e.merge_system_into_user),
         provider_extra: entry.and_then(|e| e.provider_extra.clone()),
         replay_assistant_reasoning: entry.and_then(|e| e.replay_assistant_reasoning),
         native_tools: entry.and_then(|e| e.native_tools),
