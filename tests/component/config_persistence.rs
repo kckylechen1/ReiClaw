@@ -34,8 +34,8 @@ fn config_toml_roundtrip_preserves_provider() {
     );
 
     let toml_str = toml::to_string(&config).expect("config should serialize to TOML");
-    let parsed = zeroclaw::config::migration::migrate_to_current(&toml_str)
-        .expect("TOML should round-trip through migration");
+    let parsed = zeroclaw::config::current::parse_current(&toml_str)
+        .expect("TOML should round-trip through current parsing");
 
     assert!(
         parsed
@@ -94,7 +94,7 @@ fn config_toml_roundtrip_preserves_agent_config() {
 fn config_file_with_missing_optional_fields_uses_defaults() {
     // Simulate a minimal config TOML that omits optional sections
     let minimal_toml = r#"
-default_temperature = 0.7
+schema_version = 3
 "#;
     let parsed: Config = toml::from_str(minimal_toml).expect("minimal TOML should parse");
 
@@ -109,9 +109,9 @@ default_temperature = 0.7
 
 #[test]
 fn config_file_with_custom_agent_section() {
-    // V3 lifts the old global `[agent]` settings into `[agents.<alias>]`.
+    // Current settings belong to an explicit `[agents.<alias>]` entry.
     let toml_with_agent = r#"
-default_temperature = 0.7
+schema_version = 3
 
 [agents.default]
 risk_profile = "tight"

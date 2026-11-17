@@ -409,7 +409,7 @@ pub struct AppState {
 
     /// Serializes the read-mutate-save-swap critical section of every HTTP
     /// handler that mutates `config` (per-property PUT/DELETE/PATCH, map-key
-    /// create/delete/rename, channel bind, config migrate, section select,
+    /// create/delete/rename, channel bind, section select,
     /// quickstart apply, cron settings patch, pairing-token persistence). A
     /// tokio mutex, not `parking_lot`, because the guard must survive the
     /// `.await` on config-save I/O. Mirrors
@@ -1507,7 +1507,6 @@ pub async fn run_gateway(
             post(api_sections::handle_section_select),
         )
         .route("/api/config/init", post(api_config::handle_init))
-        .route("/api/config/migrate", post(api_config::handle_migrate))
         .route(
             "/api/channels/bind",
             post(api_config::handle_api_channel_bind),

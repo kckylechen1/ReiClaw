@@ -1,4 +1,4 @@
-//! `zeroclaw config` — inspect, mutate, migrate, and document configuration.
+//! `zeroclaw config` — inspect, mutate, validate, and document configuration.
 
 use anyhow::{Context, Result};
 use dialoguer::Select;
@@ -395,7 +395,7 @@ pub async fn handle(config_command: crate::ConfigCommands, config: &mut Config) 
             comment,
             json,
         } => {
-            crate::config::migration::ensure_disk_at_current_version(&config.config_path)?;
+            crate::config::current::ensure_disk_at_current_version(&config.config_path)?;
             let known_paths: Vec<String> =
                 config.prop_fields().into_iter().map(|f| f.name).collect();
             let mut path = zeroclaw_config::helpers::resolve_field_path(&known_paths, &path);
@@ -552,7 +552,7 @@ pub async fn handle(config_command: crate::ConfigCommands, config: &mut Config) 
             Ok(())
         }
         crate::ConfigCommands::Init { section, json } => {
-            crate::config::migration::ensure_disk_at_current_version(&config.config_path)?;
+            crate::config::current::ensure_disk_at_current_version(&config.config_path)?;
             let mut initialized: Vec<String> = config
                 .init_defaults(section.as_deref())
                 .into_iter()
@@ -602,75 +602,25 @@ pub async fn handle(config_command: crate::ConfigCommands, config: &mut Config) 
             }
             Ok(())
         }
-        crate::ConfigCommands::Migrate { json } => {
-            match crate::config::migration::migrate_file_in_place(&config.config_path)? {
-                Some(report) => {
-                    let to = report.to_version;
-                    if json {
-                        let envelope = serde_json::json!({
-                            "migrated": true,
-                            "backup_path": report.backup_path.display().to_string(),
-                            "schema_version": to,
-                        });
-                        println!("{}", serde_json::to_string_pretty(&envelope)?);
-                    } else {
-                        println!(
-                            "{}",
-                            ta(
-                                "cli-config-backed-up",
-                                &[("path", &report.backup_path.display().to_string())],
-                                "Backed up to"
-                            )
-                        );
-                        println!(
-                            "Migrated {} to schema version {to}.",
-                            config.config_path.display()
-                        );
-                    }
-                }
-                None => {
-                    let strict_error =
-                        std::fs::read_to_string(&config.config_path)
-                            .ok()
-                            .and_then(|raw| {
-                                crate::config::migration::migrate_to_current(&raw)
-                                    .err()
-                                    .map(|e| format!("{e:#}"))
-                            });
-                    if json {
-                        let envelope = serde_json::json!({
-                            "migrated": false,
-                            "schema_version": crate::config::migration::CURRENT_SCHEMA_VERSION,
-                            "valid": strict_error.is_none(),
-                            "error": strict_error,
-                        });
-                        println!("{}", serde_json::to_string_pretty(&envelope)?);
-                        if strict_error.is_some() {
-                            std::process::exit(1);
-                        }
-                    } else {
-                        println!(
-                            "{}",
-                            t(
-                                "cli-config-schema-current",
-                                "Config already at current schema version."
-                            )
-                        );
-                        if let Some(error) = strict_error {
-                            anyhow::bail!(
-                                "config at {} does not deserialize strictly; the resilient \
-                                 loader is substituting defaults for the failing section. \
-                                 Parse error: {error}",
-                                config.config_path.display()
-                            );
-                        }
-                    }
-                }
+        crate::ConfigCommands::Validate { json } => {
+            let raw = std::fs::read_to_string(&config.config_path)
+                .context("Failed to read config for validation")?;
+            let validation =
+                crate::config::current::parse_current(&raw).and_then(|current| current.validate());
+            if json {
+                let envelope = serde_json::json!({
+                    "valid": validation.is_ok(),
+                    "schema_version": crate::config::current::CURRENT_SCHEMA_VERSION,
+                    "error": validation.as_ref().err().map(|err| format!("{err:#}")),
+                });
+                println!("{}", serde_json::to_string_pretty(&envelope)?);
+            } else if validation.is_ok() {
+                println!("{}", t("cli-config-valid", "Config is valid."));
             }
-            Ok(())
+            validation
         }
         crate::ConfigCommands::Patch { input, json } => {
-            crate::config::migration::ensure_disk_at_current_version(&config.config_path)?;
+            crate::config::current::ensure_disk_at_current_version(&config.config_path)?;
             let body = match input.as_deref() {
                 None | Some("-") => {
                     use std::io::Read;
@@ -1024,17 +974,16 @@ pub async fn handle(config_command: crate::ConfigCommands, config: &mut Config) 
             }
             Ok(())
         }
-        crate::ConfigCommands::Generate { version, encrypt } => {
-            let target = version.unwrap_or(crate::config::migration::CURRENT_SCHEMA_VERSION);
+        crate::ConfigCommands::Generate { encrypt } => {
             let zeroclaw_dir = config
                 .config_path
                 .parent()
                 .map(std::path::Path::to_path_buf);
-            let opts = crate::config::migration::GenerateOptions {
+            let opts = crate::config::generate::GenerateOptions {
                 encrypt_secrets: encrypt,
                 secret_store_dir: zeroclaw_dir.as_deref(),
             };
-            let toml_out = crate::config::migration::generate(target, &opts)?;
+            let toml_out = crate::config::generate::generate(&opts)?;
             print!("{toml_out}");
             Ok(())
         }

@@ -21,7 +21,7 @@ pub async fn apply_comments(
         Ok(table) => table,
         Err(_) => return Ok(()),
     };
-    crate::migration::reject_retired_sop_config(&table)
+    crate::current::reject_retired_sop_config(&table)
         .map_err(|error| std::io::Error::new(std::io::ErrorKind::InvalidData, error))?;
     for (path, comment) in annotations {
         decorate_key(doc.as_table_mut(), path, comment);
@@ -101,7 +101,7 @@ mod tests {
             assert_eq!(error.kind(), std::io::ErrorKind::InvalidData);
             assert_eq!(
                 error.to_string(),
-                crate::migration::RETIRED_SOP_CONFIG_MESSAGE
+                crate::current::RETIRED_SOP_CONFIG_MESSAGE
             );
             assert_eq!(tokio::fs::read(&path).await.unwrap(), raw.as_bytes());
         }

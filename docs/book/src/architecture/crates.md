@@ -26,7 +26,7 @@ TOML schema and its validation. Handles:
 - Autonomy level enum (`ReadOnly` / `Supervised` / `Full`)
 - Encrypted secrets store (local key file)
 - Workspace resolution (env vars, Homebrew paths, XDG, container detection)
-- Schema versioning and migration
+- Current-schema admission and normalization
 - Shared locale discovery and Fluent formatting through the optional `i18n` feature; runtime re-exports this implementation, and the ACP bridge uses it directly
 - Stateless encoding/comparison for persisted token hashes (`tokens`); runtime owns the pairing guard and its live state
 

@@ -29,10 +29,31 @@ ownership and smaller review/conflict surfaces, not an unmeasured build speedup.
    state, validation, saving, then loading. Inventory any remaining configuration
    resolution and permission-policy methods instead of calling them declarations.
    Split declarations by domain only after the affected config surface and its
-   overlapping changes are stable. Preserve the frozen `schema::v1` and
-   `schema::v2` migration lenses. This is not a project-wide upstream freeze.
+   overlapping changes are stable. Current configuration is V3-only under the
+   owner-approved retirement below. This is not a project-wide upstream freeze.
 
 ## Upstream relationship
+
+### Current-only configuration (#382 / #647)
+
+The owner retired V1/V2 configuration support. `zeroclaw-config::current`
+accepts explicit V3 input; missing, invalid, older and future versions fail
+before migration, salvage defaults or persistence can reinterpret them. The
+V1/V2 lenses, conversion chain, filesystem upgrade, versioned generator,
+`config migrate` command and gateway migration endpoint are removed. Native V3
+generation, read-only `config validate`, section recovery with security
+exposure gates, current retirement guards, secret handling and TOML save
+semantics remain. The retained V3 shared-skills layout helper belongs to
+`install`; TOML synchronization belongs to `toml_document`.
+
+Upstream comparison commit
+`cda933e6b9937deacbcc0d4d2cd7f1ae5bb4500e` still supports a V4 migration chain.
+That behavior is deliberately skipped: this fork's equivalent is its V3
+parser, generator and persistence boundary, and the owner no longer requires
+historical input conversion. The development templates adapt upstream's native
+provider shape, including the Ollama endpoint in `uri` instead of a credential
+field, while preserving this fork's policy and runtime settings. This choice
+does not freeze deliberate upstream ports or retire metadata consumers.
 
 ### Desktop backend continuity
 
@@ -87,7 +108,7 @@ See [runtime internals](../agents/internals.md#repeated-tool-failure-recovery).
 | `knowledge` graph tool + `knowledge.db` + `[knowledge]` / `[knowledge_bundles]` config | present | retired; relationship memory belongs to the Tachi memory kernel (`memory-tachi`), not a second local graph. Leftover sections warn via `RETIRED_CONFIG_SURFACES` tombstones |
 | GitHub Copilot provider family (`copilot.rs`, `CopilotModelProviderConfig`) | present | retired (#673 pattern); `copilot` / `github-copilot` sit in `RETIRED_MODEL_PROVIDER_NAMES`, so old configs fail closed with an explicit migration error instead of silently dropping the OAuth token |
 | Browser tools (`browser.rs`+`browser/tests.rs`, `text_browser.rs`, `browser_open.rs`, `[browser]`+`[text_browser]` config) | present | retired; web interaction stays on `web_fetch`/`web_search_tool`/`http_request`, heavy automation goes to external harnesses via Tachi. `[browser]`/`[text_browser]` warn via `RETIRED_CONFIG_SURFACES` tombstones; names in `RETIRED_OPERATOR_TOOL_NAMES`; screenshot tool retained |
-| OpenRouter chat provider family (`openrouter.rs`, `OpenRouterModelProviderConfig`) | present | retired; reached via a `custom` (OpenAI-compatible) slot at `https://openrouter.ai/api/v1` instead. `openrouter` is in `RETIRED_MODEL_PROVIDER_NAMES` (fail-closed). **Retained on purpose**: `openrouter_catalog.rs` + `openrouter_vendor_prefix` (public-catalog model discovery & pricing for compatible families), the `[memory]` embedder `"openrouter"` arm (embeddings axis), and OpenRouter-as-compatible-gateway prose. Stock V1/V2 configs with no provider default now migrate to `openai` instead of `openrouter` |
+| OpenRouter chat provider family (`openrouter.rs`, `OpenRouterModelProviderConfig`) | present | retired; reached via a `custom` (OpenAI-compatible) slot at `https://openrouter.ai/api/v1` instead. `openrouter` is in `RETIRED_MODEL_PROVIDER_NAMES` (fail-closed). **Retained on purpose**: `openrouter_catalog.rs` + `openrouter_vendor_prefix` (public-catalog model discovery & pricing for compatible families), the `[memory]` embedder `"openrouter"` arm (embeddings axis), and OpenRouter-as-compatible-gateway prose. V1/V2 configuration input is no longer supported |
 
 ### Known gaps
 

@@ -1,15 +1,9 @@
-workspace_dir = "/zeroclaw-data/workspace"
-config_path = "/zeroclaw-data/.zeroclaw/config.toml"
 # Tool surface for this install. This template only reaches brand-new
 # installs; an existing config without the key keeps the full surface.
 # Set "full" (alias "legacy") explicitly to opt back into the complete
 # built-in tool registry — a transitional compatibility profile.
 composition = "minimal"
-# This is the Ollama Base URL, not a secret key
-api_key = "http://host.docker.internal:11434"
-default_provider = "ollama"
-default_model = "llama3.2"
-default_temperature = 0.7
+schema_version = 3
 
 [gateway]
 port = 42617
@@ -26,6 +20,21 @@ daily_limit_usd = 10.0
 monthly_limit_usd = 100.0
 warn_at_percent = 80
 allow_override = false
+
+[agents.default]
+model_provider = "ollama.default"
+risk_profile = "default"
+runtime_profile = "default"
+
+[providers.models.ollama.default]
+# Ollama runs on the host; this is an endpoint, not a credential.
+uri = "http://host.docker.internal:11434"
+model = "llama3.2"
+temperature = 0.7
+
+[risk_profiles.default]
+
+[runtime_profiles.default]
 
 # Per-model pricing (USD per 1M tokens)
 # Uncomment and customize to override default pricing

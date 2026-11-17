@@ -477,9 +477,12 @@ async fn persist_and_swap(
     };
 
     if let Err(e) = new_config.save_dirty().await {
-        // SOP refusal happens before any write. Restoring an older snapshot
+        // Input refusal happens before any write. Restoring an older snapshot
         // could overwrite the external edit that caused that refusal.
-        if !e.is::<zeroclaw_config::migration::RetiredSopConfigError>() {
+        if !e.is::<zeroclaw_config::current::RetiredSopConfigError>()
+            && !e.is::<zeroclaw_config::current::UnsupportedSchemaError>()
+            && !e.is::<zeroclaw_config::providers::RetiredModelProviderError>()
+        {
             if let Some(prev) = snapshot {
                 let _ = tokio::fs::write(&config_path, prev).await;
             } else if config_path.exists() {
@@ -642,7 +645,7 @@ pub async fn compute_drift(in_memory: &zeroclaw_config::schema::Config) -> Vec<D
 
     // Re-parse the on-disk form into a fresh Config for value-by-value comparison.
     let on_disk: zeroclaw_config::schema::Config =
-        match toml::from_str::<zeroclaw_config::schema::Config>(&raw) {
+        match zeroclaw_config::current::parse_current(&raw) {
             Ok(mut cfg) => {
                 cfg.config_path = path.clone();
                 cfg
@@ -2422,210 +2425,6 @@ pub async fn handle_init(
     axum::Json(InitResponse { initialized }).into_response()
 }
 
-#[derive(Debug, Serialize)]
-#[cfg_attr(feature = "schema-export", derive(schemars::JsonSchema))]
-pub struct MigrateResponse {
-    pub migrated: bool,
-    /// Backup path written when migration ran; absent when the config was
-    /// already at the current schema version.
-    #[serde(skip_serializing_if = "Option::is_none")]
-    pub backup_path: Option<String>,
-    pub schema_version: u32,
-}
-
-pub async fn handle_migrate(State(state): State<AppState>, headers: HeaderMap) -> Response {
-    if let Err(e) = require_auth(&state, &headers) {
-        return e.into_response();
-    }
-
-    // Held through the final swap below so two concurrent migrate calls
-    // can't interleave their read-migrate-swap sections.
-    let _cfg_guard = Arc::clone(&state.config_write_lock).lock_owned().await;
-    let config_path = state.config.read().config_path.clone();
-
-    let raw = match tokio::fs::read_to_string(&config_path).await {
-        Ok(s) => s,
-        Err(e) => {
-            return error_response(ConfigApiError::new(
-                ConfigApiCode::InternalError,
-                format!("failed to read config file: {e}"),
-            ));
-        }
-    };
-
-    let migrated = match zeroclaw_config::migration::migrate_file(&raw) {
-        Ok(out) => out,
-        Err(e) => {
-            return error_response(ConfigApiError::new(
-                ConfigApiCode::ValidationFailed,
-                format!("migration failed: {e}"),
-            ));
-        }
-    };
-
-    match migrated {
-        Some(new_content) => {
-            // Parse before writing, then retain the active operator authority.
-            // Schema migration is not an operator-credential edit: raw disk
-            // values omit env overlays and may still contain encrypted secrets.
-            let mut new_cfg: zeroclaw_config::schema::Config = match toml::from_str(&new_content) {
-                Ok(c) => c,
-                Err(e) => {
-                    return error_response(ConfigApiError::new(
-                        ConfigApiCode::ReloadFailed,
-                        format!("re-parse after migration failed: {e}"),
-                    ));
-                }
-            };
-            {
-                let current = state.config.read();
-                new_cfg.gateway.operator = current.gateway.operator.clone();
-                // Keep only this policy's source metadata so later saves do not
-                // persist env-injected hashes or discard external references.
-                let operator_path = |path: &str| path.starts_with("gateway.operator.");
-                new_cfg.env_overridden_paths.extend(
-                    current
-                        .env_overridden_paths
-                        .iter()
-                        .filter(|path| operator_path(path)),
-                );
-                new_cfg.pre_override_snapshots.extend(
-                    current
-                        .pre_override_snapshots
-                        .iter()
-                        .filter(|(path, _)| operator_path(path)),
-                );
-                new_cfg.onepassword_reference_snapshots.extend(
-                    current
-                        .onepassword_reference_snapshots
-                        .iter()
-                        .filter(|(path, _)| operator_path(path)),
-                );
-            }
-            let backup_path = config_path.with_extension("toml.bak");
-            let parent = match config_path.parent() {
-                Some(p) => p.to_path_buf(),
-                None => {
-                    return error_response(ConfigApiError::new(
-                        ConfigApiCode::InternalError,
-                        format!(
-                            "config path has no parent: {}",
-                            config_path.display().to_string()
-                        ),
-                    ));
-                }
-            };
-            let file_name = match config_path.file_name().and_then(|n| n.to_str()) {
-                Some(n) => n.to_string(),
-                None => {
-                    return error_response(ConfigApiError::new(
-                        ConfigApiCode::InternalError,
-                        format!(
-                            "config path has no file name: {}",
-                            config_path.display().to_string()
-                        ),
-                    ));
-                }
-            };
-            let temp_path = parent.join(format!(".{file_name}.tmp-{}", uuid::Uuid::new_v4()));
-
-            // 1. Write migrated content to temp + fsync.
-            match tokio::fs::OpenOptions::new()
-                .create_new(true)
-                .write(true)
-                .open(&temp_path)
-                .await
-            {
-                Ok(mut temp) => {
-                    use tokio::io::AsyncWriteExt;
-                    if let Err(e) = temp.write_all(new_content.as_bytes()).await {
-                        let _ = tokio::fs::remove_file(&temp_path).await;
-                        return error_response(ConfigApiError::new(
-                            ConfigApiCode::InternalError,
-                            format!("failed to write migrated config to temp: {e}"),
-                        ));
-                    }
-                    if let Err(e) = temp.sync_all().await {
-                        let _ = tokio::fs::remove_file(&temp_path).await;
-                        return error_response(ConfigApiError::new(
-                            ConfigApiCode::InternalError,
-                            format!("failed to fsync migrated config temp: {e}"),
-                        ));
-                    }
-                }
-                Err(e) => {
-                    return error_response(ConfigApiError::new(
-                        ConfigApiCode::InternalError,
-                        format!("failed to create temp config file: {e}"),
-                    ));
-                }
-            }
-
-            // 2. Backup BEFORE replacing the original.
-            if let Err(e) = tokio::fs::copy(&config_path, &backup_path).await {
-                let _ = tokio::fs::remove_file(&temp_path).await;
-                return error_response(ConfigApiError::new(
-                    ConfigApiCode::InternalError,
-                    format!("failed to write backup: {e}"),
-                ));
-            }
-
-            // 3. Atomic rename. On failure, restore from backup.
-            if let Err(e) = tokio::fs::rename(&temp_path, &config_path).await {
-                let _ = tokio::fs::remove_file(&temp_path).await;
-                if backup_path.exists() {
-                    let _ = tokio::fs::copy(&backup_path, &config_path).await;
-                }
-                return error_response(ConfigApiError::new(
-                    ConfigApiCode::InternalError,
-                    format!("failed to atomically replace config: {e}"),
-                ));
-            }
-
-            // 4. Fsync the parent directory so the rename is durable.
-            #[cfg(unix)]
-            if let Ok(dir) = tokio::fs::File::open(&parent).await {
-                let _ = dir.sync_all().await;
-            }
-
-            // Retired-section tombstones for whatever the migrated content
-            // still carries: same structured warning + detection-time log as
-            // the other live config load paths, attached so later
-            // collect_warnings() consumers (/api/config/prop and PATCH
-            // responses — GET /api/config serializes `Config`, whose
-            // warnings field is serde-skip) surface them.
-            new_cfg.retired_surface_warnings =
-                zeroclaw_config::validation_warnings::retired_section_tombstones(&new_content)
-                    .into_iter()
-                    .chain(
-                        zeroclaw_config::validation_warnings::retired_field_tombstones(
-                            &new_content,
-                        ),
-                    )
-                    .collect();
-            // serde skips the path fields, so restore the concrete path and
-            // record save provenance: this handler just wrote `config_path`,
-            // and the shared value's later full saves must keep save rights.
-            new_cfg.config_path = config_path.clone();
-            new_cfg.loaded_from = Some(config_path.clone());
-            *state.config.write() = new_cfg;
-
-            axum::Json(MigrateResponse {
-                migrated: true,
-                backup_path: Some(backup_path.display().to_string()),
-                schema_version: zeroclaw_config::migration::CURRENT_SCHEMA_VERSION,
-            })
-            .into_response()
-        }
-        None => axum::Json(MigrateResponse {
-            migrated: false,
-            backup_path: None,
-            schema_version: zeroclaw_config::migration::CURRENT_SCHEMA_VERSION,
-        })
-        .into_response(),
-    }
-}
-
 pub async fn handle_options_config(headers: HeaderMap) -> Response {
     // CORS preflight short-circuit
     if headers.contains_key("access-control-request-method") {
@@ -2924,15 +2723,15 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn schema_migration_preserves_effective_operator_credentials() {
+    async fn stale_disk_refusal_preserves_effective_operator_credentials() {
         for configured in [true, false] {
             let tmp = tempfile::tempdir().unwrap();
             let mut config = temp_config(&tmp);
             std::fs::write(&config.config_path, "schema_version = 2\n").unwrap();
             let path = "gateway.operator.token_hashes";
             if configured {
-                // Equivalent to the supported env overlay after startup migrated
-                // the older disk schema in memory. Do not mutate process env.
+                // Preserve the supported env overlay if an older file replaces
+                // the current disk config after startup. Do not mutate process env.
                 config.gateway.operator.token_hashes =
                     vec![PairingGuard::token_hash("env-operator")];
                 config.env_overridden_paths.insert(path.into());
@@ -2949,10 +2748,20 @@ mod tests {
             let mut paired = HeaderMap::new();
             paired.insert("authorization", "Bearer paired-fixture".parse().unwrap());
             let before = crate::operator_auth::require_operator(&state, &paired);
-            let response = handle_migrate(State(state.clone()), paired.clone()).await;
-            let (status, body) = response_json(response).await;
-            assert_eq!(status, StatusCode::OK);
-            assert_eq!(body["migrated"], true);
+            let guard = Arc::clone(&state.config_write_lock).lock_owned().await;
+            let mut changed = state.config.read().clone();
+            changed.locale = Some("zh-CN".into());
+            changed.mark_dirty("locale");
+            let error = persist_and_swap(&state, changed, &guard, None)
+                .await
+                .unwrap_err();
+            let (status, body) = response_json(error).await;
+            assert_eq!(status, StatusCode::INTERNAL_SERVER_ERROR);
+            assert_eq!(body["code"], "reload_failed");
+            assert_eq!(
+                std::fs::read_to_string(&state.config.read().config_path).unwrap(),
+                "schema_version = 2\n"
+            );
             assert_eq!(state.config.read().gateway.operator, expected);
             assert_eq!(
                 crate::operator_auth::require_operator(&state, &paired),
@@ -3242,61 +3051,119 @@ mod tests {
     // live `~/.zeroclaw/config.toml`.
 
     #[tokio::test]
-    async fn prop_put_preserves_retired_sop_file_without_rollback() {
+    async fn prop_put_preserves_prewrite_refusals_without_rollback() {
         let tmp = tempfile::tempdir().unwrap();
         let mut config = temp_config(&tmp);
         config.gateway.port = 42617;
         config.save().await.unwrap();
         let config_path = config.config_path.clone();
         let persisted = std::fs::read_to_string(&config_path).unwrap();
-        let external = format!("{persisted}\n[sop.approval]\nroute = \"private-legacy-route\"\n");
-        std::fs::write(&config_path, &external).unwrap();
-        // Writing the same snapshot would preserve bytes but change mtime.
-        // A fixed old timestamp detects that write without sleeping or hooks.
-        let old_modified = std::time::UNIX_EPOCH + Duration::from_secs(946_684_800);
-        std::fs::File::options()
-            .write(true)
-            .open(&config_path)
-            .unwrap()
-            .set_times(std::fs::FileTimes::new().set_modified(old_modified))
-            .unwrap();
-        let modified_before = std::fs::metadata(&config_path).unwrap().modified().unwrap();
-        assert_eq!(modified_before, old_modified);
-        let state = test_state(config);
+        for (external, expected_message) in [
+            (
+                format!("{persisted}\n[sop.approval]\nroute = \"private-legacy-route\"\n"),
+                "[sop] is retired",
+            ),
+            (
+                format!(
+                    "{persisted}\n[providers.models.openrouter.private_alias]\napi_key = \"private-retired-credential\"\n"
+                ),
+                "is retired",
+            ),
+            (
+                "schema_version = 2\n".into(),
+                "schema_version 2 is unsupported",
+            ),
+            (
+                "schema_version = 4\n".into(),
+                "schema_version 4 is unsupported",
+            ),
+        ] {
+            std::fs::write(&config_path, &external).unwrap();
+            // Writing the same snapshot would preserve bytes but change mtime.
+            // A fixed old timestamp detects that write without sleeping or hooks.
+            let old_modified = std::time::UNIX_EPOCH + Duration::from_secs(946_684_800);
+            std::fs::File::options()
+                .write(true)
+                .open(&config_path)
+                .unwrap()
+                .set_times(std::fs::FileTimes::new().set_modified(old_modified))
+                .unwrap();
+            let modified_before = std::fs::metadata(&config_path).unwrap().modified().unwrap();
+            assert_eq!(modified_before, old_modified);
+            let state = test_state(config.clone());
 
-        let (status, json) = response_json(
-            handle_prop_put(
-                ConnectInfo("127.0.0.1:12345".parse().unwrap()),
-                State(state.clone()),
-                HeaderMap::new(),
-                axum::Json(PropPutBody {
-                    path: "gateway.port".into(),
-                    value: serde_json::json!(42618),
-                    comment: None,
-                }),
+            let (status, json) = response_json(
+                handle_prop_put(
+                    ConnectInfo("127.0.0.1:12345".parse().unwrap()),
+                    State(state.clone()),
+                    HeaderMap::new(),
+                    axum::Json(PropPutBody {
+                        path: "gateway.port".into(),
+                        value: serde_json::json!(42618),
+                        comment: None,
+                    }),
+                )
+                .await,
             )
-            .await,
-        )
-        .await;
+            .await;
 
-        assert_eq!(status, StatusCode::INTERNAL_SERVER_ERROR);
-        assert_eq!(json["code"], "reload_failed");
-        let message = json["message"].as_str().unwrap();
-        assert!(message.contains("[sop] is retired"));
-        assert!(!message.contains("private-legacy-route"));
-        assert_eq!(std::fs::read(&config_path).unwrap(), external.as_bytes());
-        assert_eq!(
-            std::fs::metadata(&config_path).unwrap().modified().unwrap(),
-            modified_before,
-            "a pre-write refusal must not rewrite the rollback snapshot"
-        );
-        assert_eq!(state.config.read().gateway.port, 42617);
-        assert!(state.config.read().dirty_paths.is_empty());
-        assert!(
-            !state
-                .pending_reload
-                .load(std::sync::atomic::Ordering::Relaxed)
-        );
+            assert_eq!(status, StatusCode::INTERNAL_SERVER_ERROR);
+            assert_eq!(json["code"], "reload_failed");
+            let message = json["message"].as_str().unwrap();
+            assert!(message.contains(expected_message));
+            assert!(!message.contains("private-legacy-route"));
+            assert!(!message.contains("private-retired-credential"));
+            assert!(!message.contains("private_alias"));
+            assert_eq!(std::fs::read(&config_path).unwrap(), external.as_bytes());
+            assert_eq!(
+                std::fs::metadata(&config_path).unwrap().modified().unwrap(),
+                modified_before,
+                "a pre-write refusal must not rewrite the rollback snapshot"
+            );
+            assert_eq!(state.config.read().gateway.port, 42617);
+            assert!(state.config.read().dirty_paths.is_empty());
+            assert!(
+                !state
+                    .pending_reload
+                    .load(std::sync::atomic::Ordering::Relaxed)
+            );
+        }
+    }
+
+    #[tokio::test]
+    async fn prop_put_cannot_change_supported_schema_version() {
+        let tmp = tempfile::tempdir().unwrap();
+        let config = temp_config(&tmp);
+        config.save().await.unwrap();
+        let path = config.config_path.clone();
+        let before = std::fs::read(&path).unwrap();
+        let state = test_state(config);
+        for version in [0, 1, 2, 4] {
+            let (status, json) = response_json(
+                handle_prop_put(
+                    ConnectInfo("127.0.0.1:12345".parse().unwrap()),
+                    State(state.clone()),
+                    HeaderMap::new(),
+                    axum::Json(PropPutBody {
+                        path: "schema_version".into(),
+                        value: serde_json::json!(version),
+                        comment: None,
+                    }),
+                )
+                .await,
+            )
+            .await;
+            assert_eq!(status, StatusCode::BAD_REQUEST);
+            assert_eq!(json["code"], "validation_failed");
+            assert_eq!(state.config.read().schema_version, 3);
+            assert_eq!(std::fs::read(&path).unwrap(), before);
+            assert!(state.config.read().dirty_paths.is_empty());
+            assert!(
+                !state
+                    .pending_reload
+                    .load(std::sync::atomic::Ordering::Relaxed)
+            );
+        }
     }
 
     #[tokio::test]

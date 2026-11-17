@@ -1119,9 +1119,9 @@ enum ConfigCommands {
         #[arg(long)]
         json: bool,
     },
-    /// Migrate the on-disk config to the current schema version (preserves comments)
-    Migrate {
-        /// Emit a structured JSON envelope ({migrated, backup_path?, schema_version, valid?, error?}) instead of plain text.
+    /// Validate the current on-disk configuration without modifying it
+    Validate {
+        /// Emit a structured JSON envelope ({valid, schema_version, error}) instead of plain text.
         #[arg(long)]
         json: bool,
     },
@@ -1135,12 +1135,10 @@ enum ConfigCommands {
         #[arg(long)]
         json: bool,
     },
+    /// Generate an example of the supported current configuration
     Generate {
-        /// Target schema version (e.g. 1, 2, 3). Defaults to current.
-        version: Option<u32>,
         /// Encrypt secret-bearing string values in the output (api_key,
-        /// bot_token, access_token, password, refresh_token, etc.). Works
-        /// at every schema version via a key-name-based walker. Uses the
+        /// bot_token, access_token, password, refresh_token, etc.). Uses the
         /// resolved config-dir's `.secret_key` (creates one if missing).
         #[arg(long)]
         encrypt: bool,
@@ -1866,7 +1864,7 @@ async fn async_main(command: clap::Command) -> Result<()> {
                 ],
                 "warning: config section is malformed and was reset to defaults \
                  for this run. Values in that section are NOT in effect. Run \
-                 `zeroclaw config migrate` to see the parse error, then repair \
+                 `zeroclaw config validate` to see the parse error, then repair \
                  the file."
             )
         );
@@ -3150,7 +3148,7 @@ fn gate_security_posture(
              they were reset to defaults, so the running posture may be weaker \
              than intended. Refusing to serve with a degraded security posture. \
              Repair these sections in {} and restart — run `zeroclaw config \
-             migrate` to see the precise error. To boot anyway (e.g. to reach \
+             validate` to see the precise error. To boot anyway (e.g. to reach \
              the gateway config editor and repair from there), re-run with \
              `--allow-degraded-security`.",
             config.config_path.display()
@@ -3396,7 +3394,7 @@ fn available_gateway_restart_hint_port(host: &str, port: u16) -> Option<u16> {
 /// Persist `model` as the default for the first configured provider.
 #[cfg(feature = "agent-runtime")]
 async fn handle_models_set(config: &mut Config, model: &str) -> Result<()> {
-    crate::config::migration::ensure_disk_at_current_version(&config.config_path)?;
+    crate::config::current::ensure_disk_at_current_version(&config.config_path)?;
     let (type_key, alias) = {
         let entry = config
             .providers

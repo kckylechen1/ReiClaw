@@ -908,7 +908,7 @@ pub fn run_traces(
 
 /// Surface config sections the resilient loader dropped at load time
 /// (`Config::degraded_sections` / `Config::degraded_security`, populated by
-/// `migrate_to_current_salvaged` in `zeroclaw-config`) so `doctor` names the
+/// `parse_current_salvaged` in `zeroclaw-config`) so `doctor` names the
 /// actual malformed section instead of downstream checks reporting confusing
 /// secondary symptoms (e.g. "no channels configured").
 fn check_degraded_sections(config: &Config, items: &mut Vec<DiagItem>) {

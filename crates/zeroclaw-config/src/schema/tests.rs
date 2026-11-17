@@ -391,10 +391,7 @@ fn retired_sop_config_rejects_direct_deserialization() {
         let error = toml::from_str::<Config>(raw).unwrap_err();
         // The parser's Display may add source context; the rejection itself
         // must remain fixed and never interpolate submitted values.
-        assert_eq!(
-            error.message(),
-            crate::migration::RETIRED_SOP_CONFIG_MESSAGE
-        );
+        assert_eq!(error.message(), crate::current::RETIRED_SOP_CONFIG_MESSAGE);
     }
     for value in [
         serde_json::json!({}),
@@ -406,7 +403,7 @@ fn retired_sop_config_rejects_direct_deserialization() {
         let error = serde_json::from_value::<Config>(serde_json::json!({"sop": value}))
             .unwrap_err()
             .to_string();
-        assert_eq!(error, crate::migration::RETIRED_SOP_CONFIG_MESSAGE);
+        assert_eq!(error, crate::current::RETIRED_SOP_CONFIG_MESSAGE);
     }
     assert!(toml::from_str::<Config>("").unwrap().sop.is_empty());
     assert!(serde_json::from_str::<Config>("{}").unwrap().sop.is_empty());
@@ -691,12 +688,8 @@ fn parse_test_config(raw: &str) -> Config {
         merged.push(']');
     }
     merged.push('\n');
-    // Schema-deserialization helper: parses TOML directly into Config
-    // WITHOUT running migration transforms. Tests that need migration
-    // behavior should use `migrate_to_current` directly. This helper
-    // exists so V2-shaped inputs (e.g. flat `[autonomy]` blocks) can
-    // be exercised against the typed deserializer without losing
-    // sections that V2→V3 strips.
+    // Partial schema probes bypass the whole-file version boundary and
+    // explicitly seed the default policy entry used by these field tests.
     let mut config: Config = toml::from_str(&merged).unwrap();
     config
         .risk_profiles
@@ -1833,7 +1826,7 @@ async fn config_toml_roundtrip() {
         degraded_sections: Vec::new(),
         retired_surface_warnings: Vec::new(),
         loaded_from: None,
-        schema_version: crate::migration::CURRENT_SCHEMA_VERSION,
+        schema_version: crate::current::CURRENT_SCHEMA_VERSION,
         providers: {
             let mut p = crate::providers::Providers::default();
             p.models.openai.insert(
@@ -2040,14 +2033,12 @@ default_temperature = 0.7
         parsed.observability.log_persistence,
         LogPersistence::Rolling
     );
-    // Migration synthesizes risk_profiles.default from the legacy
-    // [autonomy] block; assert against the named entry rather than a
-    // global "active" profile (no such concept exists).
+    // The field-test helper seeds a named default risk profile.
     assert_eq!(
         parsed
             .risk_profiles
             .get("default")
-            .expect("migration synthesized risk_profiles.default")
+            .expect("helper seeded risk_profiles.default")
             .level,
         AutonomyLevel::Supervised
     );
@@ -2086,20 +2077,18 @@ default_temperature = 0.7
     );
 }
 
-/// `[autonomy]` migrates onto `[risk_profiles.default]` via the V2→V3
-/// migration. The fields must round-trip without being silently dropped.
+/// Current policy and runtime limits must parse without losing user settings.
 #[test]
-async fn v2_autonomy_section_migrates_onto_risk_profiles_default() {
+async fn current_risk_and_runtime_profiles_preserve_explicit_settings() {
     let raw = r#"
-schema_version = 2
-default_temperature = 0.7
-
-[autonomy]
+schema_version = 3
+[risk_profiles.default]
 level = "full"
-max_actions_per_hour = 99
 auto_approve = ["file_read", "memory_recall", "http_request"]
+[runtime_profiles.default]
+max_actions_per_hour = 99
 "#;
-    let parsed = crate::migration::migrate_to_current(raw).unwrap();
+    let parsed = crate::current::parse_current(raw).unwrap();
     let profile = parsed
         .risk_profiles
         .get("default")
@@ -2215,13 +2204,12 @@ auto_approve = ["glob_search", "file_read"]
 
 #[test]
 async fn provider_timeout_secs_parses_from_toml() {
-    // V1 top-level `provider_timeout_secs` is folded into the
-    // synthesized model_provider entry's `timeout_secs`.
     let raw = r#"
-default_temperature = 0.7
-provider_timeout_secs = 300
+schema_version = 3
+[providers.models.openai.default]
+timeout_secs = 300
 "#;
-    let parsed = crate::migration::migrate_to_current(raw).expect("migration succeeds");
+    let parsed = crate::current::parse_current(raw).expect("current config parses");
     assert_eq!(
         parsed
             .providers
@@ -2235,21 +2223,18 @@ provider_timeout_secs = 300
 
 #[test]
 async fn extra_headers_parses_from_toml() {
-    // V1 top-level `[extra_headers]` is folded into the synthesized
-    // default model_provider entry's `extra_headers` map.
     let raw = r#"
-default_temperature = 0.7
-
-[extra_headers]
+schema_version = 3
+[providers.models.openai.default.extra_headers]
 User-Agent = "MyApp/1.0"
 X-Title = "zeroclaw"
 "#;
-    let parsed = crate::migration::migrate_to_current(raw).expect("migration succeeds");
+    let parsed = crate::current::parse_current(raw).expect("current config parses");
     let headers = &parsed
         .providers
         .models
         .find("openai", "default")
-        .expect("synthesized openai.default model_provider")
+        .expect("current openai.default model_provider")
         .extra_headers;
     assert_eq!(headers.len(), 2);
     assert_eq!(headers.get("User-Agent").unwrap(), "MyApp/1.0");
@@ -2669,7 +2654,7 @@ async fn config_save_and_load_tmpdir() {
         degraded_sections: Vec::new(),
         retired_surface_warnings: Vec::new(),
         loaded_from: None,
-        schema_version: crate::migration::CURRENT_SCHEMA_VERSION,
+        schema_version: crate::current::CURRENT_SCHEMA_VERSION,
         providers,
         model_routes: Vec::new(),
         embedding_routes: Vec::new(),
@@ -2745,7 +2730,7 @@ async fn config_save_and_load_tmpdir() {
     assert!(config_path.exists());
 
     let contents = tokio::fs::read_to_string(&config_path).await.unwrap();
-    let loaded = crate::migration::migrate_to_current(&contents).unwrap();
+    let loaded = crate::current::parse_current(&contents).unwrap();
     let entry = &loaded
         .providers
         .models
@@ -2894,7 +2879,7 @@ async fn config_save_encrypts_nested_credentials() {
             "saved TOML must not contain plaintext credential `{plaintext}`"
         );
     }
-    let stored: Config = crate::migration::migrate_to_current(&contents).unwrap();
+    let stored: Config = crate::current::parse_current(&contents).unwrap();
     let store = crate::secrets::SecretStore::new(&dir, true);
 
     let root_encrypted = stored
@@ -3102,25 +3087,27 @@ async fn telegram_config_defaults_stream_off() {
 // The legacy `allowed_users` field is no longer carried on channel
 // configs (V3 moved inbound peer authorization into
 // `Config::peer_groups`); V2 TOMLs with `allowed_users` are folded
-// by `migrate_to_current` into `[peer_groups.<type>_<alias>]`. See
+// by `parse_current` into `[peer_groups.<type>_<alias>]`. See
 // `discord_v2_allowed_users_fold_into_peer_groups` below.
 
 #[test]
 async fn discord_v2_allowed_users_fold_into_peer_groups() {
     let raw = r#"
-schema_version = 2
-
-[channels.discord]
+schema_version = 3
+[channels.discord.default]
 enabled = true
 bot_token = "tok"
-guild_id = "123"
-allowed_users = ["111", "222"]
+guild_ids = ["123"]
+[peer_groups.discord_default]
+channel = "discord"
+agents = ["owner"]
+external_peers = ["111", "222"]
 "#;
-    let parsed = crate::migration::migrate_to_current(raw).expect("migration succeeds");
+    let parsed = crate::current::parse_current(raw).expect("current config parses");
     let group = parsed
         .peer_groups
         .get("discord_default")
-        .expect("V2 discord.allowed_users must fold into peer_groups.discord_default");
+        .expect("current Discord allowlist must remain in its peer group");
     assert_eq!(group.channel, "discord");
     let usernames: Vec<&str> = group.external_peers.iter().map(|p| p.as_str()).collect();
     assert_eq!(usernames, vec!["111", "222"]);
@@ -3483,34 +3470,25 @@ async fn env_override_lock() -> MutexGuard<'static, ()> {
 }
 
 #[test]
-async fn v1_known_provider_migrates_with_globals_folded_onto_typed_slot() {
-    // Top-level `model_provider` + `model` + `default_temperature` flow
-    // onto the migrated typed-slot entry. Vendor-canonical names like
-    // `openai` map straight to their typed slot; `wire_api` and
-    // `requires_openai_auth` survive the move.
-    //
-    // (Unknown V1 names like `sub2api` are intentionally silent-dropped
-    // by the V2→V3 migration — see the `Unknown/passthrough` arm of
-    // `normalize_provider_type` in schema/v2.rs.)
+async fn current_provider_preserves_credentials_and_transport_settings() {
     let raw = r#"
-default_temperature = 0.7
-model_provider = "openai"
+schema_version = 3
+[providers.models.openai.default]
+temperature = 0.7
 model = "gpt-5.3-codex"
-
-[model_providers.openai]
 api_key = "sk-test"
 uri = "https://api.openai.com/v1"
 wire_api = "responses"
 requires_openai_auth = true
 "#;
 
-    let parsed = crate::migration::migrate_to_current(raw).expect("migration succeeds");
+    let parsed = crate::current::parse_current(raw).expect("current config parses");
     assert!(
         parsed
             .providers
             .models
             .contains_model_provider_type("openai"),
-        "vendor-canonical V1 provider should land in its typed slot",
+        "current provider must remain in its typed slot",
     );
     let profile = parsed
         .providers
@@ -4070,7 +4048,7 @@ async fn load_or_init_workspace_override_uses_workspace_root_for_config() {
     // V3 fresh init: `config.data_dir` lives at `<install>/data/`
     // (the shared databases root); the install root holds
     // `config.toml`. No synthesized `agents/default/workspace/` is
-    // created at boot — `default` is migration-only, and per-agent
+    // created at boot; per-agent
     // workspaces are created lazily at agent-loop entry.
     assert_eq!(config.data_dir, workspace_dir.join("data"));
     assert_eq!(config.config_path, workspace_dir.join("config.toml"));
@@ -4108,7 +4086,7 @@ async fn load_or_init_invalid_composition_hard_errors() {
     fs::create_dir_all(&existing_dir).await.unwrap();
     fs::write(
         &existing_path,
-        "composition = \"everything\"\ndefault_temperature = 0.7\n",
+        "schema_version = 3\ncomposition = \"everything\"\n",
     )
     .await
     .unwrap();
@@ -4152,42 +4130,21 @@ async fn load_or_init_warns_about_retired_feishu_and_lark_settings() {
 
     for (version, channels, retired, setting, remedy) in [
         (
-            "",
-            "channels_config",
-            "feishu",
-            "[channels_config.feishu]\nenabled = true\n",
-            "Remove the section.",
-        ),
-        (
-            "",
-            "channels_config",
-            "lark",
-            "[channels_config.lark]\nuse_feishu = true\n",
-            "Remove the section.",
-        ),
-        (
-            "",
-            "channels_config",
-            "feishu",
-            "[channels_config]\nfeishu = false\n",
-            "Remove the key.",
-        ),
-        (
-            "schema_version = 2\n",
+            "schema_version = 3\n",
             "channels",
             "feishu",
-            "[channels.feishu]\nenabled = true\n",
+            "[channels.feishu.default]\nenabled = true\n",
             "Remove the section.",
         ),
         (
-            "schema_version = 2\n",
+            "schema_version = 3\n",
             "channels",
             "lark",
-            "[channels.lark]\nreceive_mode = 'webhook'\n",
+            "[channels.lark.default]\nuse_feishu = true\n",
             "Remove the section.",
         ),
         (
-            "schema_version = 2\n",
+            "schema_version = 3\n",
             "channels",
             "feishu",
             "[channels]\nfeishu = false\n",
@@ -4195,7 +4152,7 @@ async fn load_or_init_warns_about_retired_feishu_and_lark_settings() {
         ),
     ] {
         let retired_path = format!("{channels}.{retired}");
-        let contents = format!("{version}{setting}\n[{channels}.webhook]\nport = 8080\n");
+        let contents = format!("{version}{setting}\n[{channels}.webhook.default]\nport = 8080\n");
         fs::write(&config_path, contents).await.unwrap();
 
         let config = Box::pin(Config::load_or_init()).await.unwrap();
@@ -4212,7 +4169,7 @@ async fn load_or_init_warns_about_retired_feishu_and_lark_settings() {
     }
 }
 
-// Real file loading must diagnose the pre-migration path, while preserving
+// Real file loading must diagnose the current retired path, while preserving
 // adjacent live credentials, guild/channel restrictions and peer allowlists.
 async fn assert_retired_channel_settings_load_with_warning(settings: &[(&str, &str)]) {
     let _env_guard = env_override_lock().await;
@@ -4220,69 +4177,56 @@ async fn assert_retired_channel_settings_load_with_warning(settings: &[(&str, &s
     let _config_guard = EnvValueGuard::set("ZEROCLAW_CONFIG_DIR", dir.path());
     let config_path = dir.path().join("config.toml");
     const RETIRED_SECRET: &str = "synthetic-retired-credential";
-    for version in 1..=3 {
-        let (stamp, root, alias) = match version {
-            1 => ("", "channels_config", ""),
-            2 => ("schema_version = 2\n", "channels", ""),
-            _ => ("schema_version = 3\n", "channels", ".default"),
-        };
-        for (kind, fields) in settings {
-            let retired_path = format!("{root}.{kind}");
-            let allowlist = if version < 3 {
-                "allowed_users = ['retained-peer']\n"
-            } else {
-                ""
-            };
-            let peer_group = if version == 3 {
-                "[agents.default]\nchannels = ['discord.default']\n\n[peer_groups.discord_default]\nchannel = 'discord'\nagents = ['default']\nexternal_peers = ['retained-peer']\nignore = []\n"
-            } else {
-                ""
-            };
-            let contents = format!(
-                "{stamp}[{retired_path}{alias}]\nenabled = false\n{fields}\nallowed_users = ['retired-peer']\n\n\
-                 [{root}.discord{alias}]\nenabled = true\nbot_token = 'synthetic-live-token'\n\
-                 guild_ids = ['retained-guild']\nchannel_ids = ['retained-channel']\n\
-                 mention_only = true\nlisten_to_bots = false\n{allowlist}\n\
-                 [{root}.email{alias}]\nenabled = false\nimap_host = 'imap.example.test'\n\
-                 smtp_host = 'smtp.example.test'\nusername = 'synthetic@example.test'\n\
-                 password = 'synthetic-live-password'\nfrom_address = 'synthetic@example.test'\n\n\
-                 {peer_group}"
-            );
-            fs::write(&config_path, contents).await.unwrap();
-            let config = Box::pin(Config::load_or_init()).await.unwrap();
-            let discord = &config.channels.discord["default"];
-            assert_eq!(discord.bot_token, "synthetic-live-token");
-            assert_eq!(discord.guild_ids, ["retained-guild"]);
-            assert_eq!(discord.channel_ids, ["retained-channel"]);
-            assert!(discord.mention_only);
-            assert!(!discord.listen_to_bots);
-            let email = &config.channels.email["default"];
-            assert_eq!(email.password, "synthetic-live-password");
-            assert_eq!(email.username, "synthetic@example.test");
-            let group = &config.peer_groups["discord_default"];
-            assert_eq!(group.channel.to_string(), "discord");
-            assert_eq!(
-                group
-                    .external_peers
-                    .iter()
-                    .map(ToString::to_string)
-                    .collect::<Vec<_>>(),
-                ["retained-peer"]
-            );
-            assert!(group.ignore.is_empty());
-            assert!(!group.admin_for_agent_scope);
-            assert!(!config.peer_groups.contains_key(&format!("{kind}_default")));
-            let warnings = config.collect_warnings();
-            let retired: Vec<_> = warnings.iter().filter(|w| w.path == retired_path).collect();
-            assert_eq!(
-                retired.len(),
-                1,
-                "V{version} {retired_path} must warn exactly once"
-            );
-            assert_eq!(retired[0].code, "retired_channel_transport_removed");
-            assert!(retired[0].message.contains("Remove the section."));
-            assert!(warnings.iter().all(|w| !w.message.contains(RETIRED_SECRET)));
-        }
+    let version = 3;
+    let (stamp, root, alias) = ("schema_version = 3\n", "channels", ".default");
+    for (kind, fields) in settings {
+        let retired_path = format!("{root}.{kind}");
+        let allowlist = "";
+        let peer_group = "[agents.default]\nchannels = ['discord.default']\n\n[peer_groups.discord_default]\nchannel = 'discord'\nagents = ['default']\nexternal_peers = ['retained-peer']\nignore = []\n";
+        let contents = format!(
+            "{stamp}[{retired_path}{alias}]\nenabled = false\n{fields}\nallowed_users = ['retired-peer']\n\n\
+             [{root}.discord{alias}]\nenabled = true\nbot_token = 'synthetic-live-token'\n\
+             guild_ids = ['retained-guild']\nchannel_ids = ['retained-channel']\n\
+             mention_only = true\nlisten_to_bots = false\n{allowlist}\n\
+             [{root}.email{alias}]\nenabled = false\nimap_host = 'imap.example.test'\n\
+             smtp_host = 'smtp.example.test'\nusername = 'synthetic@example.test'\n\
+             password = 'synthetic-live-password'\nfrom_address = 'synthetic@example.test'\n\n\
+             {peer_group}"
+        );
+        fs::write(&config_path, contents).await.unwrap();
+        let config = Box::pin(Config::load_or_init()).await.unwrap();
+        let discord = &config.channels.discord["default"];
+        assert_eq!(discord.bot_token, "synthetic-live-token");
+        assert_eq!(discord.guild_ids, ["retained-guild"]);
+        assert_eq!(discord.channel_ids, ["retained-channel"]);
+        assert!(discord.mention_only);
+        assert!(!discord.listen_to_bots);
+        let email = &config.channels.email["default"];
+        assert_eq!(email.password, "synthetic-live-password");
+        assert_eq!(email.username, "synthetic@example.test");
+        let group = &config.peer_groups["discord_default"];
+        assert_eq!(group.channel.to_string(), "discord");
+        assert_eq!(
+            group
+                .external_peers
+                .iter()
+                .map(ToString::to_string)
+                .collect::<Vec<_>>(),
+            ["retained-peer"]
+        );
+        assert!(group.ignore.is_empty());
+        assert!(!group.admin_for_agent_scope);
+        assert!(!config.peer_groups.contains_key(&format!("{kind}_default")));
+        let warnings = config.collect_warnings();
+        let retired: Vec<_> = warnings.iter().filter(|w| w.path == retired_path).collect();
+        assert_eq!(
+            retired.len(),
+            1,
+            "V{version} {retired_path} must warn exactly once"
+        );
+        assert_eq!(retired[0].code, "retired_channel_transport_removed");
+        assert!(retired[0].message.contains("Remove the section."));
+        assert!(warnings.iter().all(|w| !w.message.contains(RETIRED_SECRET)));
     }
 }
 
@@ -4330,14 +4274,10 @@ async fn load_or_init_warns_about_retired_whatsapp_security_settings() {
     let _config_guard = EnvValueGuard::set("ZEROCLAW_CONFIG_DIR", dir.path());
     let config_path = dir.path().join("config.toml");
 
-    for (version, channels, alias) in [
-        ("", "channels_config", ""),
-        ("schema_version = 2\n", "channels", ""),
-        ("schema_version = 3\n", "channels", ".personal"),
-    ] {
-        let retired_path = format!("{channels}.whatsapp");
-        let contents = format!(
-            r#"{version}[{retired_path}{alias}]
+    let (version, channels, alias) = ("schema_version = 3\n", "channels", ".personal");
+    let retired_path = format!("{channels}.whatsapp");
+    let contents = format!(
+        r#"{version}[{retired_path}{alias}]
 enabled = true
 session_path = "/tmp/retired-whatsapp.db"
 access_token = "retired-token"
@@ -4358,61 +4298,60 @@ transcribe_non_ptt_audio = true
 enabled = true
 port = 8080
 "#
-        );
-        fs::write(&config_path, contents).await.unwrap();
+    );
+    fs::write(&config_path, contents).await.unwrap();
 
-        let config = Box::pin(Config::load_or_init()).await.unwrap();
-        let webhook_alias = if alias.is_empty() {
-            "default"
-        } else {
-            "personal"
-        };
-        assert_eq!(config.channels.webhook[webhook_alias].port, 8080);
-        assert_eq!(config.transcription.max_duration_secs, 90);
+    let config = Box::pin(Config::load_or_init()).await.unwrap();
+    let webhook_alias = if alias.is_empty() {
+        "default"
+    } else {
+        "personal"
+    };
+    assert_eq!(config.channels.webhook[webhook_alias].port, 8080);
+    assert_eq!(config.transcription.max_duration_secs, 90);
+    assert!(
+        config.peer_groups.is_empty(),
+        "retired restrictions must not authorize another transport"
+    );
+    assert!(
+        config.degraded_sections.is_empty(),
+        "{:?}",
+        config.degraded_sections
+    );
+    assert!(!config.channels.is_known_channel("whatsapp"));
+    assert!(
+        !toml::to_string(&config)
+            .unwrap()
+            .contains("[channels.whatsapp")
+    );
+    let warnings = config.collect_warnings();
+    assert!(warnings.iter().any(|warning| {
+        warning.path == "transcription.transcribe_non_ptt_audio"
+            && warning.code == "whatsapp_audio_option_removed"
+    }));
+    let retired: Vec<_> = warnings
+        .iter()
+        .filter(|warning| warning.path == retired_path)
+        .collect();
+    assert_eq!(retired.len(), 1, "{warnings:?}");
+    let warning = retired[0];
+    assert_eq!(warning.code, "retired_channel_transport_removed");
+    assert!(warning.message.contains(&retired_path));
+    assert!(warning.message.contains("no runtime consumer"));
+    assert!(warning.message.contains("Remove the section."));
+    for sensitive in [
+        "/tmp/retired-whatsapp.db",
+        "retired-token",
+        "retired-secret",
+        "retired-verify",
+        "+15555550102",
+        "group-id",
+    ] {
         assert!(
-            config.peer_groups.is_empty(),
-            "retired restrictions must not authorize another transport"
+            warnings
+                .iter()
+                .all(|warning| !warning.message.contains(sensitive))
         );
-        assert!(
-            config.degraded_sections.is_empty(),
-            "{:?}",
-            config.degraded_sections
-        );
-        assert!(!config.channels.is_known_channel("whatsapp"));
-        assert!(
-            !toml::to_string(&config)
-                .unwrap()
-                .contains("[channels.whatsapp")
-        );
-        let warnings = config.collect_warnings();
-        assert!(warnings.iter().any(|warning| {
-            warning.path == "transcription.transcribe_non_ptt_audio"
-                && warning.code == "whatsapp_audio_option_removed"
-        }));
-        let retired: Vec<_> = warnings
-            .iter()
-            .filter(|warning| warning.path == retired_path)
-            .collect();
-        assert_eq!(retired.len(), 1, "{warnings:?}");
-        let warning = retired[0];
-        assert_eq!(warning.code, "retired_channel_transport_removed");
-        assert!(warning.message.contains(&retired_path));
-        assert!(warning.message.contains("no runtime consumer"));
-        assert!(warning.message.contains("Remove the section."));
-        for sensitive in [
-            "/tmp/retired-whatsapp.db",
-            "retired-token",
-            "retired-secret",
-            "retired-verify",
-            "+15555550102",
-            "group-id",
-        ] {
-            assert!(
-                warnings
-                    .iter()
-                    .all(|warning| !warning.message.contains(sensitive))
-            );
-        }
     }
 }
 
@@ -4476,7 +4415,7 @@ async fn load_or_init_retired_pairing_dashboard_section_parses_with_tombstone_wa
     fs::create_dir_all(&existing_dir).await.unwrap();
     fs::write(
         &existing_path,
-        "default_temperature = 0.7\n\n[gateway.pairing_dashboard]\ncode_length = 8\ncode_ttl_secs = 3600\nmax_pending_codes = 3\nmax_failed_attempts = 5\nlockout_secs = 300\n",
+        "schema_version = 3\n\n[gateway.pairing_dashboard]\ncode_length = 8\ncode_ttl_secs = 3600\nmax_pending_codes = 3\nmax_failed_attempts = 5\nlockout_secs = 300\n",
     )
     .await
     .unwrap();
@@ -4490,11 +4429,11 @@ async fn load_or_init_retired_pairing_dashboard_section_parses_with_tombstone_wa
         .await
         .expect("retired section must keep parsing (tombstone, not error)");
 
-    // Strict migration path tolerates the section too (serde ignores
+    // Strict parsing tolerates the section too (serde ignores
     // unknown nested sections) — the file section is not a load error
     // on any path.
     let contents = fs::read_to_string(&existing_path).await.unwrap();
-    crate::migration::migrate_to_current(&contents)
+    crate::current::parse_current(&contents)
         .expect("strict parse must also tolerate the retired section");
 
     let warnings = config.collect_warnings();
@@ -4560,8 +4499,10 @@ async fn load_or_init_fresh_install_pins_minimal_composition_and_keeps_existing_
     fs::create_dir_all(&existing_dir).await.unwrap();
     fs::write(
         &existing_path,
-        r#"default_temperature = 0.7
-default_model = "persisted-profile"
+        r#"schema_version = 3
+[providers.models.openai.default]
+temperature = 0.7
+model = "persisted-profile"
 "#,
     )
     .await
@@ -4644,8 +4585,10 @@ async fn load_or_init_workspace_override_keeps_existing_legacy_config() {
     fs::create_dir_all(&legacy_config_dir).await.unwrap();
     fs::write(
         &legacy_config_path,
-        r#"default_temperature = 0.7
-default_model = "legacy-model"
+        r#"schema_version = 3
+[providers.models.openai.default]
+temperature = 0.7
+model = "legacy-model"
 "#,
     )
     .await
@@ -4744,8 +4687,10 @@ async fn load_or_init_logs_existing_config_as_initialized() {
     fs::create_dir_all(&workspace_dir).await.unwrap();
     fs::write(
         &config_path,
-        r#"default_temperature = 0.7
-default_model = "persisted-profile"
+        r#"schema_version = 3
+[providers.models.openai.default]
+temperature = 0.7
+model = "persisted-profile"
 "#,
     )
     .await
@@ -5238,7 +5183,7 @@ async fn save_refuses_unproven_overwrite_of_existing_config() {
 async fn force_save_overwrites_without_provenance() {
     let tmp = tempfile::TempDir::new().unwrap();
     let config_path = tmp.path().join("config.toml");
-    tokio::fs::write(&config_path, "old = true\n")
+    tokio::fs::write(&config_path, "schema_version = 3\nold = true\n")
         .await
         .unwrap();
 
@@ -5379,23 +5324,14 @@ async fn save_restricts_existing_world_readable_config_to_owner_only() {
 }
 
 #[test]
-async fn save_dirty_stamps_current_schema_version_on_stale_label() {
-    // Regression for. An incremental save writes current-schema-shaped
-    // sections, but `schema_version` is never a dirty path. Without an
-    // explicit stamp, a file first written by an older binary keeps its
-    // stale `schema_version` label while gaining a current-schema body — a
-    // state that crashes older binaries with `missing field ...`.
+async fn save_dirty_retains_current_schema_version_and_explicit_values() {
     let tmp = tempfile::TempDir::new().unwrap();
     let config_path = tmp.path().join("config.toml");
-
-    // Seed an on-disk file labeled with a stale schema version so the
-    // incremental path (not the new-file fallback to full `save`) runs.
     std::fs::write(
         &config_path,
-        "schema_version = 2\n\n[observability]\nbackend = \"none\"\n",
+        "schema_version = 3\n[observability]\nbackend = \"none\"\n",
     )
     .unwrap();
-
     let mut config = Config {
         config_path: config_path.clone(),
         ..Default::default()
@@ -5403,39 +5339,19 @@ async fn save_dirty_stamps_current_schema_version_on_stale_label() {
     config.observability.backend = ObservabilityBackend::Prometheus;
     config.mark_dirty("observability.backend");
     config.save_dirty().await.unwrap();
-
     let written = std::fs::read_to_string(&config_path).unwrap();
-    assert!(
-        written.contains(&format!(
-            "schema_version = {}",
-            crate::migration::CURRENT_SCHEMA_VERSION
-        )),
-        "save_dirty must stamp the current schema_version; got:\n{written}"
+    let reloaded = crate::current::parse_current(&written).unwrap();
+    assert_eq!(
+        reloaded.schema_version,
+        crate::current::CURRENT_SCHEMA_VERSION
     );
-    assert!(
-        !written.contains("schema_version = 2"),
-        "stale schema_version label must be overwritten; got:\n{written}"
+    assert_eq!(
+        reloaded.observability.backend,
+        ObservabilityBackend::Prometheus
     );
-    // The dirty value still lands, and the stamp sits at the top of the file.
-    assert!(
-        written.contains("backend = \"prometheus\""),
-        "dirty value must still be written; got:\n{written}"
-    );
-    assert!(
-        written.trim_start().starts_with("schema_version ="),
-        "schema_version should remain the first key; got:\n{written}"
-    );
+    assert!(written.trim_start().starts_with("schema_version ="));
 }
 
-/// Regression for the per-field `[[mcp.servers]]` editor: after
-/// `d06ed25` shipped the natural-key arm, in-memory edits succeed
-/// (the TUI / dashboard show the new value) but `save_dirty` is
-/// silently a no-op because `apply_dirty_path` walks the serialized
-/// TOML as if every segment is a `Table` — `mcp.servers` is an
-/// array of tables, so `lookup_path_in_table` returns `None` at the
-/// natural-key segment, the path is misclassified as
-/// `should_delete`, and `delete_path_in_doc` bails when it hits the
-/// array too. Net effect: the on-disk file keeps its stale value.
 #[test]
 async fn save_dirty_persists_mcp_server_field_via_natural_key() {
     let tmp = tempfile::TempDir::new().unwrap();
@@ -5451,7 +5367,7 @@ async fn save_dirty_persists_mcp_server_field_via_natural_key() {
          name = \"fs\"\n\
          transport = \"stdio\"\n\
          command = \"/usr/bin/mcp-fs\"\n",
-        crate::migration::CURRENT_SCHEMA_VERSION
+        crate::current::CURRENT_SCHEMA_VERSION
     );
     std::fs::write(&config_path, &seed).unwrap();
 
@@ -5519,7 +5435,7 @@ async fn save_dirty_persists_dotted_map_key_field() {
         "schema_version = {}\n\n\
          [cost.rates.providers.models.openai.\"gpt-4.1\"]\n\
          input_per_mtok = 1.0\n",
-        crate::migration::CURRENT_SCHEMA_VERSION
+        crate::current::CURRENT_SCHEMA_VERSION
     );
     std::fs::write(&config_path, &seed).unwrap();
 
@@ -5595,7 +5511,7 @@ async fn save_dirty_persists_dot_free_map_key_field() {
         "schema_version = {}\n\n\
          [cost.rates.providers.models.openai.gpt-4o]\n\
          input_per_mtok = 1.0\n",
-        crate::migration::CURRENT_SCHEMA_VERSION
+        crate::current::CURRENT_SCHEMA_VERSION
     );
     std::fs::write(&config_path, &seed).unwrap();
 
@@ -5640,7 +5556,7 @@ async fn save_dirty_removes_dotted_map_key_entry() {
         "schema_version = {}\n\n\
          [cost.rates.providers.models.openai.\"gpt-4.1\"]\n\
          input_per_mtok = 1.0\n",
-        crate::migration::CURRENT_SCHEMA_VERSION
+        crate::current::CURRENT_SCHEMA_VERSION
     );
     std::fs::write(&config_path, &seed).unwrap();
 
@@ -5689,7 +5605,7 @@ async fn save_dirty_resolves_map_key_from_inline_table_on_disk() {
         "schema_version = {}\n\n\
          [cost.rates.providers.models]\n\
          openai = {{ \"gpt-4.1\" = {{ input_per_mtok = 1.0 }} }}\n",
-        crate::migration::CURRENT_SCHEMA_VERSION
+        crate::current::CURRENT_SCHEMA_VERSION
     );
     std::fs::write(&config_path, &seed).unwrap();
 
@@ -5749,7 +5665,7 @@ async fn save_dirty_persists_write_into_inline_table_on_disk() {
         "schema_version = {}\n\n\
          [cost.rates.providers.models]\n\
          openai = {{ \"gpt-4.1\" = {{ input_per_mtok = 1.0 }} }}\n",
-        crate::migration::CURRENT_SCHEMA_VERSION
+        crate::current::CURRENT_SCHEMA_VERSION
     );
     std::fs::write(&config_path, &seed).unwrap();
 
@@ -5814,7 +5730,7 @@ async fn save_dirty_errors_on_unresolvable_map_key_path() {
         "schema_version = {}\n\n\
          [observability]\n\
          backend = \"none\"\n",
-        crate::migration::CURRENT_SCHEMA_VERSION
+        crate::current::CURRENT_SCHEMA_VERSION
     );
     std::fs::write(&config_path, &seed).unwrap();
 
@@ -5860,7 +5776,7 @@ async fn save_dirty_writes_new_mcp_server_added_via_create_map_key() {
          name = \"fs\"\n\
          transport = \"stdio\"\n\
          command = \"/usr/bin/mcp-fs\"\n",
-        crate::migration::CURRENT_SCHEMA_VERSION
+        crate::current::CURRENT_SCHEMA_VERSION
     );
     std::fs::write(&config_path, &seed).unwrap();
 
@@ -5944,7 +5860,7 @@ async fn save_dirty_persists_mcp_server_rename_via_natural_key() {
          name = \"fs\"\n\
          transport = \"stdio\"\n\
          command = \"/usr/bin/mcp-fs\"\n",
-        crate::migration::CURRENT_SCHEMA_VERSION
+        crate::current::CURRENT_SCHEMA_VERSION
     );
     std::fs::write(&config_path, &seed).unwrap();
 
@@ -6013,7 +5929,7 @@ async fn save_dirty_removes_mcp_server_deleted_via_natural_key() {
          name = \"github\"\n\
          transport = \"http\"\n\
          url = \"https://mcp.example/\"\n",
-        crate::migration::CURRENT_SCHEMA_VERSION
+        crate::current::CURRENT_SCHEMA_VERSION
     );
     std::fs::write(&config_path, &seed).unwrap();
 
@@ -6073,7 +5989,7 @@ async fn save_dirty_drops_array_header_when_last_mcp_server_removed() {
          name = \"fs\"\n\
          transport = \"stdio\"\n\
          command = \"/usr/bin/mcp-fs\"\n",
-        crate::migration::CURRENT_SCHEMA_VERSION
+        crate::current::CURRENT_SCHEMA_VERSION
     );
     std::fs::write(&config_path, &seed).unwrap();
 
@@ -6195,7 +6111,7 @@ async fn save_dirty_persists_mcp_server_kebab_inner_field_via_natural_key() {
          name = \"fs\"\n\
          transport = \"stdio\"\n\
          command = \"/usr/bin/mcp-fs\"\n",
-        crate::migration::CURRENT_SCHEMA_VERSION
+        crate::current::CURRENT_SCHEMA_VERSION
     );
     std::fs::write(&config_path, &seed).unwrap();
 
@@ -6266,7 +6182,7 @@ async fn save_dirty_unset_per_field_drops_field_from_mcp_server_entry() {
          transport = \"stdio\"\n\
          command = \"/usr/bin/mcp-fs\"\n\
          tool_timeout_secs = 45\n",
-        crate::migration::CURRENT_SCHEMA_VERSION
+        crate::current::CURRENT_SCHEMA_VERSION
     );
     std::fs::write(&config_path, &seed).unwrap();
 
@@ -6343,7 +6259,7 @@ async fn save_dirty_refuses_to_clobber_wrong_kind_mcp_servers_node() {
         "schema_version = {}\n\n\
          [mcp]\n\
          servers = \"hand-edited-scalar\"\n",
-        crate::migration::CURRENT_SCHEMA_VERSION
+        crate::current::CURRENT_SCHEMA_VERSION
     );
     std::fs::write(&config_path, &seed).unwrap();
 
@@ -7556,7 +7472,7 @@ async fn config_set_secret_unknown_fails() {
 async fn config_set_http_request_secret_map_key_is_masked_and_encrypted() {
     let dir = TempDir::new().unwrap();
     let config_path = dir.path().join("config.toml");
-    tokio::fs::write(&config_path, "schema_version = 1\n")
+    tokio::fs::write(&config_path, "schema_version = 3\n")
         .await
         .unwrap();
     let mut config = Config {
@@ -7604,7 +7520,7 @@ async fn config_set_http_request_secret_map_key_is_masked_and_encrypted() {
         "auth secret must not be written in plaintext: {contents}"
     );
 
-    let stored = crate::migration::migrate_to_current(&contents).unwrap();
+    let stored = crate::current::parse_current(&contents).unwrap();
     let encrypted = stored.http_request.secrets.get("api_token").unwrap();
     assert!(crate::secrets::SecretStore::is_encrypted(encrypted));
     let store = crate::secrets::SecretStore::new(dir.path(), true);
@@ -7996,7 +7912,7 @@ async fn apply_env_overrides_rejects_schema_version() {
     // Untouched on rejection.
     assert_eq!(
         config.schema_version,
-        crate::migration::CURRENT_SCHEMA_VERSION
+        crate::current::CURRENT_SCHEMA_VERSION
     );
 }
 
@@ -8132,7 +8048,7 @@ async fn typed_custom_slot_round_trips_uri_through_save_and_load() {
         "saved TOML must not contain the plaintext custom provider API key",
     );
 
-    let mut loaded: Config = crate::migration::migrate_to_current(&raw_toml).unwrap();
+    let mut loaded: Config = crate::current::parse_current(&raw_toml).unwrap();
     loaded.config_path = config.config_path.clone();
     loaded.data_dir = config.data_dir.clone();
     let store = crate::secrets::SecretStore::new(dir.path(), loaded.secrets.encrypt);
@@ -8191,7 +8107,7 @@ async fn env_override_save_cycle_preserves_on_disk_secret() {
     let raw = tokio::fs::read_to_string(&config.config_path)
         .await
         .unwrap();
-    let mut reloaded: Config = crate::migration::migrate_to_current(&raw).unwrap();
+    let mut reloaded: Config = crate::current::parse_current(&raw).unwrap();
     reloaded.config_path = config.config_path.clone();
     reloaded.data_dir = config.data_dir.clone();
     // Parsed from the on-disk file, like load_or_init's existing-file
@@ -8242,7 +8158,7 @@ async fn env_override_save_cycle_preserves_on_disk_secret() {
         "display mask must never be persisted as a secret value: {raw_after}",
     );
 
-    let mut after: Config = crate::migration::migrate_to_current(&raw_after).unwrap();
+    let mut after: Config = crate::current::parse_current(&raw_after).unwrap();
     after.config_path = reloaded.config_path.clone();
     after.data_dir = reloaded.data_dir.clone();
     let store2 = crate::secrets::SecretStore::new(dir.path(), after.secrets.encrypt);
@@ -11181,7 +11097,7 @@ async fn map_key_create_survives_incremental_save() {
     // the new-file fallback to full save().
     std::fs::write(
         &config_path,
-        "schema_version = 9\n\n[observability]\nbackend = \"none\"\n",
+        "schema_version = 3\n\n[observability]\nbackend = \"none\"\n",
     )
     .unwrap();
 
@@ -11241,7 +11157,7 @@ async fn telegram_alias_create_survives_incremental_save() {
     // the new-file fallback to full save().
     std::fs::write(
         &config_path,
-        "schema_version = 9\n\n[observability]\nbackend = \"none\"\n",
+        "schema_version = 3\n\n[observability]\nbackend = \"none\"\n",
     )
     .unwrap();
 
@@ -11276,7 +11192,7 @@ async fn discord_alias_create_survives_incremental_save() {
     // the new-file fallback to full save().
     std::fs::write(
         &config_path,
-        "schema_version = 9\n\n[observability]\nbackend = \"none\"\n",
+        "schema_version = 3\n\n[observability]\nbackend = \"none\"\n",
     )
     .unwrap();
 
@@ -13557,31 +13473,6 @@ async fn collect_warnings_flags_context_compression_enabled_on_runtime_profile()
     );
 }
 
-// The legacy pre-V3 `[agent.context_compression]` top-level table is
-// folded into `[runtime_profiles.default]` by the V1/V2→V3 migration
-// (see `schema/v2.rs`), so it must surface the same diagnostic once
-// migrated — this is the historical form of the surface commonly
-// called "agent-level" configuration.
-#[::core::prelude::v1::test]
-fn collect_warnings_flags_context_compression_enabled_via_legacy_agent_table() {
-    let raw = r#"
-        default_temperature = 0.7
-
-        [agent.context_compression]
-        enabled = true
-    "#;
-    let parsed = crate::migration::migrate_to_current(raw).expect("migration succeeds");
-    let warnings = parsed.collect_warnings();
-    let w = warnings
-        .iter()
-        .find(|w| w.code == "context_compression_unsupported")
-        .expect("expected context_compression_unsupported warning after migration");
-    assert_eq!(
-        w.path,
-        "runtime_profiles.default.context_compression.enabled"
-    );
-}
-
 // A default config (no explicit `context_compression.enabled`) must stay
 // silent — the flag now defaults to `false`, matching the runtime, which
 // does not consult it at all.
@@ -14962,7 +14853,7 @@ async fn load_or_init_rejects_retired_sop_without_rewriting_file() {
     let _home = EnvValueGuard::set("HOME", home.path());
     let _config_dir = EnvValueGuard::set("ZEROCLAW_CONFIG_DIR", &config_dir);
     let _workspace = EnvValueGuard::remove("ZEROCLAW_WORKSPACE");
-    for version in 1..=crate::migration::CURRENT_SCHEMA_VERSION {
+    for version in 1..=crate::current::CURRENT_SCHEMA_VERSION {
         let raw = format!(
             "schema_version = {version}\n[sop.approval.policies.private_policy]\n\
              required_group = \"private-group\"\nrequest_route = \"channel:private-route\"\n"
@@ -14972,7 +14863,7 @@ async fn load_or_init_rejects_retired_sop_without_rewriting_file() {
             .await
             .unwrap_err()
             .to_string();
-        assert_eq!(error, crate::migration::RETIRED_SOP_CONFIG_MESSAGE);
+        assert_eq!(error, crate::current::RETIRED_SOP_CONFIG_MESSAGE);
         assert_eq!(fs::read_to_string(&config_path).await.unwrap(), raw);
         assert!(!config_path.with_extension("toml.backup").exists());
         assert!(!config_dir.join(".secret_key").exists());
@@ -15026,12 +14917,12 @@ async fn saves_reject_sop_added_after_load_without_mutating_disk_or_tracking() {
         };
         let error = result.expect_err("retired SOP must stop every write");
         assert!(
-            error.is::<crate::migration::RetiredSopConfigError>(),
+            error.is::<crate::current::RetiredSopConfigError>(),
             "{mode}: {error}"
         );
         assert_eq!(
             error.to_string(),
-            crate::migration::RETIRED_SOP_CONFIG_MESSAGE,
+            crate::current::RETIRED_SOP_CONFIG_MESSAGE,
             "{mode}"
         );
         assert_eq!(
@@ -15111,5 +15002,47 @@ async fn full_saves_fail_closed_when_existing_config_cannot_be_read() {
         assert!(!dir.path().join(".secret_key").exists());
         assert!(!dir.path().join("config.toml.bak").exists());
         assert_eq!(std::fs::read_dir(dir.path()).unwrap().count(), 1);
+    }
+}
+
+#[test]
+#[allow(clippy::large_futures)]
+async fn load_or_init_refuses_unsupported_versions_before_filesystem_changes() {
+    let _env_guard = env_override_lock().await;
+    let home = TempDir::new().unwrap();
+    let config_dir = home.path().join("profile");
+    fs::create_dir_all(&config_dir).await.unwrap();
+    let config_path = config_dir.join("config.toml");
+    let _home = EnvValueGuard::set("HOME", home.path());
+    let _config_dir = EnvValueGuard::set("ZEROCLAW_CONFIG_DIR", &config_dir);
+    let _workspace = EnvValueGuard::remove("ZEROCLAW_WORKSPACE");
+    let legacy_identity = config_dir.join("workspace/SOUL.md");
+    fs::create_dir_all(legacy_identity.parent().unwrap())
+        .await
+        .unwrap();
+    fs::write(&legacy_identity, "owner identity").await.unwrap();
+    let skill = config_dir.join("agents/default/workspace/skills/example/SKILL.md");
+    fs::create_dir_all(skill.parent().unwrap()).await.unwrap();
+    fs::write(&skill, "owner skill").await.unwrap();
+    for raw in [
+        "",
+        "schema_version = 1\n",
+        "schema_version = 2\n",
+        "schema_version = 4\n",
+        "schema_version = 4294967299\n",
+    ] {
+        fs::write(&config_path, raw).await.unwrap();
+        let error = Box::pin(Config::load_or_init()).await.unwrap_err();
+        assert!(error.is::<crate::current::UnsupportedSchemaError>());
+        assert_eq!(fs::read_to_string(&config_path).await.unwrap(), raw);
+        assert_eq!(
+            fs::read_to_string(&legacy_identity).await.unwrap(),
+            "owner identity"
+        );
+        assert_eq!(fs::read_to_string(&skill).await.unwrap(), "owner skill");
+        assert!(!config_dir.join("shared").exists());
+        assert!(!config_dir.join("data").exists());
+        assert!(!config_dir.join(".secret_key").exists());
+        assert_eq!(std::fs::read_dir(&config_dir).unwrap().count(), 3);
     }
 }

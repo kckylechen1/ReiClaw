@@ -20,16 +20,9 @@ use zeroclaw_api::runtime_status::RuntimeConfigKind;
 /// application of proxy state. Returns `None` when the install or its
 /// config file cannot be read (including a fresh install with no file
 /// yet), or when the on-disk schema version is not the current one: a
-/// legacy V1/V2 config is auto-migrated in memory by the full loader and
-/// the disk file is deliberately left untouched, so a raw pre-read of a
-/// legacy file is not authoritative — boot application for such an
-/// install starts once the migration is locked into the file
-/// (`zeroclaw config migrate` or any config save). Before this
-/// mechanism existed nothing applied persisted proxy state at boot, so
-/// never-migrated legacy installs are no worse than they were; a
-/// future/unknown version is rejected by the full loader and must not
-/// be applied speculatively either. Proxy fields are never
-/// secret-annotated, so plain parsing is sufficient.
+/// missing, older or future version is rejected by the full loader and must
+/// not change process-wide proxy state. Proxy fields are never secret-annotated,
+/// so plain parsing is sufficient.
 ///
 /// This is a raw file read by design: `ZEROCLAW_PROXY_*` env-var
 /// overrides are NOT reflected here. The runtime global is refreshed
@@ -43,9 +36,7 @@ pub async fn read_persisted_proxy_for_boot() -> Option<ProxyConfig> {
             .ok()?;
     let raw = std::fs::read_to_string(zeroclaw_dir.join("config.toml")).ok()?;
     let value: toml::Value = toml::from_str(&raw).ok()?;
-    if crate::migration::detect_version(&value).ok()
-        != Some(crate::migration::CURRENT_SCHEMA_VERSION)
-    {
+    if crate::current::detect_version(&value).ok() != Some(crate::current::CURRENT_SCHEMA_VERSION) {
         return None;
     }
     let proxy_table = value.get("proxy")?.clone();
@@ -128,10 +119,8 @@ pub fn resolve_config_dir_for_data(data_dir: &Path) -> (PathBuf, PathBuf) {
             return (legacy_dir, data_config_dir);
         }
 
-        // Accept either the new "data" suffix or the legacy "workspace"
-        // suffix; the V2->V3 filesystem migration renames the on-disk
-        // dir but operator-set env-var paths from before the rename
-        // still resolve correctly.
+        // Retain both supported environment path spellings. This only
+        // resolves locations; it does not convert configuration or move data.
         if data_dir.file_name().is_some_and(|name| {
             name == std::ffi::OsStr::new("data") || name == std::ffi::OsStr::new("workspace")
         }) {
@@ -481,7 +470,6 @@ impl Config {
     /// Remaining keys are probed: the key is deserialized in isolation and
     /// the result compared to the default — a changed output means serde
     /// consumed it (covers `Option<T>` fields and `#[serde(alias)]` names).
-    /// V1 legacy keys (consumed by migration) are also accepted.
     pub fn unknown_keys(raw_toml: &str) -> Vec<String> {
         let raw: toml::Table = match raw_toml.parse() {
             Ok(t) => t,
@@ -497,9 +485,6 @@ impl Config {
         raw.keys()
             .filter(|key| {
                 if defaults.contains_key(key.as_str()) {
-                    return false;
-                }
-                if crate::migration::V1_LEGACY_KEYS.contains(&key.as_str()) {
                     return false;
                 }
                 let mut t = toml::Table::new();
@@ -628,38 +613,23 @@ impl Config {
     pub async fn load_or_init() -> Result<Self> {
         let (default_zeroclaw_dir, default_workspace_dir) = default_config_and_data_dirs()?;
 
-        // Resolve env overrides FIRST so the migration runs against
-        // the install root the operator actually uses. Running the
-        // migration against `default_zeroclaw_dir` would silently skip
-        // any install reached via `ZEROCLAW_CONFIG_DIR` or
-        // `ZEROCLAW_WORKSPACE`.
+        // Resolve the operator's install root before inspecting its config.
         let (zeroclaw_dir, _legacy_workspace_dir, resolution_source) =
             resolve_runtime_config_dirs(&default_zeroclaw_dir, &default_workspace_dir).await?;
-
-        // One-time, V<3 → V3 ONLY move of `<install>/workspace/` into
-        // `<install>/agents/default/workspace/`. The "default" alias is
-        // the migration bridge — it must NEVER appear on a fresh install
-        // or on a V3 install that already declared its own aliases.
-        //
-        // Gate strictly on the on-disk config's `schema_version`:
-        // - missing config.toml → fresh install, skip.
-        // - schema_version >= 3 → already V3, skip.
-        // - schema_version 1 or 2 → upgrade in progress, run.
-        // Anything else (parse failure, weird value) is treated as
-        // "don't touch the filesystem"; the TOML migrator will surface
-        // the real error.
-        let config_toml_path = zeroclaw_dir.join("config.toml");
-        let needs_fs_migration = config_toml_path.is_file()
-            && matches!(
-                std::fs::read_to_string(&config_toml_path)
-                    .ok()
-                    .and_then(|raw| toml::from_str::<toml::Value>(&raw).ok())
-                    .and_then(|v| crate::migration::detect_version(&v).ok()),
-                Some(v) if v < crate::migration::CURRENT_SCHEMA_VERSION
-            );
-        if needs_fs_migration
-            && let Err(e) = crate::schema::v2::migrate_v2_to_v3_install_filesystem(&zeroclaw_dir)
+        let config_path = zeroclaw_dir.join("config.toml");
+        let persisted_contents = match fs::read_to_string(&config_path).await {
+            Ok(contents) => Some(contents),
+            Err(err) if err.kind() == std::io::ErrorKind::NotFound => None,
+            Err(err) => return Err(err).context("Failed to read config file"),
+        };
+        // An unsupported generation is a hard refusal before any install-layout
+        // changes. Malformed TOML retains the explicitly degraded repair path.
+        if let Some(contents) = persisted_contents.as_deref()
+            && let Ok(raw) = toml::from_str::<toml::Value>(contents)
         {
+            crate::current::require_current_schema(&raw)?;
+        }
+        if let Err(err) = crate::install::relocate_default_agent_skills_to_shared(&zeroclaw_dir) {
             ::zeroclaw_log::record!(
                 WARN,
                 ::zeroclaw_log::Event::new(
@@ -669,42 +639,18 @@ impl Config {
                 .with_outcome(::zeroclaw_log::EventOutcome::Unknown)
                 .with_attrs(::serde_json::json!({
                     "install": zeroclaw_dir.display().to_string(),
-                    "error": format!("{}", e),
-                })),
-                "[system] filesystem migration failed; continuing with legacy layout"
-            );
-        } else if !needs_fs_migration
-            && let Err(e) =
-                crate::schema::v2::relocate_default_agent_skills_to_shared(&zeroclaw_dir)
-        {
-            ::zeroclaw_log::record!(
-                WARN,
-                ::zeroclaw_log::Event::new(
-                    crate::schema::CONFIG_SCHEMA_LOG_TARGET,
-                    ::zeroclaw_log::Action::Note
-                )
-                .with_outcome(::zeroclaw_log::EventOutcome::Unknown)
-                .with_attrs(::serde_json::json!({
-                    "install": zeroclaw_dir.display().to_string(),
-                    "error": format!("{}", e),
+                    "error": format!("{err}"),
                 })),
                 "[system] skills relocation to shared workspace failed; continuing"
             );
         }
-
-        let config_path = zeroclaw_dir.join("config.toml");
 
         // The install dir is the only directory `load_or_init` creates
         // unconditionally. Per-agent workspaces (`agents/<alias>/workspace/`)
         // are seeded lazily at agent-loop entry by
         // `Agent::from_config_with_session_cwd_and_mcp`, which runs
         // `ensure_bootstrap_files` for the agent it is starting. There
-        // is no fresh-install "default" agent and therefore no
-        // `agents/default/workspace/` synthesized at boot; the only
-        // legitimate origin for that directory is the V1/V2→V3
-        // legacy-workspace migration above, which fires only when a
-        // pre-multi-agent install's `<install>/workspace/` is present
-        // and needs to be moved into the new layout.
+        // is no implicit "default" agent or synthesized workspace at boot.
         //
         // `config.data_dir` resolves to `<install>/data/` — the shared
         // instance data directory holding databases (memory, sessions,
@@ -738,7 +684,7 @@ impl Config {
             .await
             .with_context(|| config_dir_creation_error(&zeroclaw_dir))?;
 
-        if config_path.exists() {
+        if let Some(contents) = persisted_contents {
             // Warn if config file is world-readable (may contain API keys)
             #[cfg(unix)]
             {
@@ -764,37 +710,9 @@ impl Config {
                 }
             }
 
-            let contents = fs::read_to_string(&config_path)
-                .await
-                .context("Failed to read config file")?;
-
-            // Deserialize the config with the standard TOML parser.
-            //
-            // Previously this used `serde_ignored::deserialize` for both
-            // deserialization and unknown-key detection. However,
-            // `serde_ignored` silently drops field values inside nested
-            // structs that carry `#[serde(default)]` (e.g. the entire
-            // `[autonomy]` table), causing user-supplied values to be
-            // replaced by defaults.
-            //
-            // We now deserialize with `toml::from_str` (which is correct)
-            // and run `serde_ignored` separately just for diagnostics.
-            //
-            // `migrate_to_current` parses the TOML, detects the schema
-            // version, runs the typed V1→V2→V3 chain via `V1Config::migrate`
-            // / `V2Config::migrate`, and deserializes the result into the
-            // current `Config` shape.
-            //
-            // Detect the on-disk version up-front so we can emit one WARN
-            // line when the daemon auto-migrates an older config in memory:
-            // the disk file is left untouched and the user is advised to lock
-            // the migration in with `zeroclaw config migrate`. The parsed raw
-            // root also feeds the composition gate below, so parse once here.
+            // Parse with TOML directly: serde_ignored can erase nested values
+            // carrying #[serde(default)]. The raw root also feeds validation.
             let raw_root = toml::from_str::<toml::Value>(&contents).ok();
-            let stale_version = raw_root
-                .as_ref()
-                .and_then(|v| crate::migration::detect_version(v).ok())
-                .filter(|n| *n != crate::migration::CURRENT_SCHEMA_VERSION);
 
             // Retired-section tombstone: serde silently drops the unknown
             // nested section (no `deny_unknown_fields`), so deployments
@@ -849,44 +767,18 @@ impl Config {
                 );
             }
 
-            // Daemon load must never hard-fail on a malformed config — the
-            // operator needs the process up to repair it. The resilient path
+            // Malformed current-schema sections retain a repair path. The resilient path
             // degrades (dropping invalid blocks to defaults); security-critical
             // drops are recorded on `degraded_security` for exposure gating.
-            // Strict validation lives in `zeroclaw config migrate`.
-            if let Some(raw) = raw_root.as_ref() {
-                if let Some(table) = raw.as_table() {
-                    crate::migration::reject_retired_sop_config(table)?;
-                }
-                crate::providers::reject_retired_model_provider_config(raw)?;
-            }
-            let salvage = crate::migration::migrate_to_current_salvaged(&contents);
+            // Unsupported versions always fail; strict validation lives in
+            // `zeroclaw config validate`.
+            let salvage = crate::current::parse_current_salvaged(&contents)?;
             let mut config: Config = salvage.config;
             config.degraded_security = salvage.dropped_security;
             config.degraded_sections = salvage.dropped;
-            if let Some(from_version) = stale_version {
-                ::zeroclaw_log::record!(
-                    WARN,
-                    ::zeroclaw_log::Event::new(
-                        crate::schema::CONFIG_SCHEMA_LOG_TARGET,
-                        ::zeroclaw_log::Action::Note
-                    )
-                    .with_outcome(::zeroclaw_log::EventOutcome::Unknown),
-                    &format!(
-                        "Config at {} is schema_version {from_version}; auto-migrated to {} in memory. \
-                     Run `zeroclaw config migrate` to commit the migration to disk. \
-                     V0.8.0 also replaced the env-var override grammar; see \
-                     https://github.com/zeroclaw-labs/zeroclaw/blob/master/docs/book/src/reference/env-vars.md \
-                     for the migration recipes.",
-                        config_path.display().to_string(),
-                        crate::migration::CURRENT_SCHEMA_VERSION
-                    )
-                );
-            }
-
             // Ensure the built-in default auto_approve entries are always
             // present on a `risk_profiles.default` entry that already
-            // exists (typically post-V1/V2→V3 migration). When a user
+            // exists. When a user
             // specifies `auto_approve` in their TOML (e.g. to add a
             // custom tool), serde replaces the default list instead of
             // merging — this re-adds the framework defaults so safe
@@ -899,10 +791,7 @@ impl Config {
             //
             // Skipped when the loaded config has no `risk_profiles.default`
             // entry: we will not synthesize a `default` alias here.
-            // `default` is a migration artifact (V1/V2→V3
-            // single-instance bridge); a config that arrives without it
-            // is a legitimate multi-aliased shape and must not have one
-            // injected at load time.
+            // A config without that alias is a legitimate current shape.
             if let Some(default_profile) = config.risk_profiles.get_mut("default") {
                 default_profile.ensure_default_auto_approve();
             }

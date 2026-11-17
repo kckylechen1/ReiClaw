@@ -3,8 +3,8 @@
 //! traits, property helpers) is pulled through here so `crate::config::*`
 //! continues to resolve for callers that predate the crate split.
 
-pub use zeroclaw_config::migration;
 pub use zeroclaw_config::providers;
+pub use zeroclaw_config::{current, generate};
 pub use zeroclaw_http::{
     apply_channel_proxy_to_builder, apply_persisted_proxy_on_boot, apply_runtime_proxy_to_builder,
     build_channel_proxy_client, build_channel_proxy_client_with_timeouts,

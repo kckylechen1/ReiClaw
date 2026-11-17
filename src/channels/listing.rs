@@ -280,11 +280,15 @@ mod tests {
 
     #[test]
     fn channel_compile_specs_cover_schema_channel_types() {
-        // The frozen migration lens keeps historical kinds. Only retained
-        // transports must still have a compile spec; ADR-023 retired duplex.
-        let live_types: Vec<_> = zeroclaw_config::schema::v2::V3_CHANNEL_TYPES
-            .iter()
-            .filter(|kind| !zeroclaw_config::schema::is_retired_transport(kind))
+        let live_types: Vec<_> = zeroclaw_config::schema::Config::map_key_sections()
+            .into_iter()
+            .filter_map(|section| {
+                section
+                    .path
+                    .strip_prefix("channels.")
+                    .filter(|kind| !kind.contains('.'))
+                    .map(str::to_string)
+            })
             .collect();
         assert!(!live_types.is_empty(), "retained channel sample is empty");
         for channel_type in live_types {
@@ -293,7 +297,7 @@ mod tests {
                 CHANNEL_COMPILE_SPECS.iter().any(|spec| spec
                     .type_keys
                     .iter()
-                    .any(|key| *key == *channel_type || *key == kebab)),
+                    .any(|key| *key == channel_type || *key == kebab)),
                 "schema channel type `{channel_type}` is missing from CHANNEL_COMPILE_SPECS"
             );
         }

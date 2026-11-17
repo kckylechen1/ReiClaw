@@ -34,10 +34,6 @@ const SCAN_ROOTS: &[&str] = &["bridges"];
 /// therefore allowed to declare these fields. Anything outside these
 /// paths is treated as a potential cache.
 const ALLOWED_PATHS: &[&str] = &[
-    // The migration walker is allowed to read V2 field names by name —
-    // those are inbound TOML keys, not struct fields. It deals in raw
-    // toml::Value, not typed channel structs.
-    "schema/v2.rs",
     // Peer-group external_peers/agents lists are the canonical SOT.
     "multi_agent.rs",
     // The shared allow-list helper takes the list as a parameter, not as

@@ -1472,7 +1472,7 @@ async fn gate_security_posture_fails_closed_unless_allowed() {
     // Whole-config loss (sentinel marker) is degraded too: same fail-closed
     // behavior so a defaulted security posture cannot serve silently.
     let mut whole = Config::default();
-    whole.degraded_security = vec![crate::config::migration::WHOLE_CONFIG_SENTINEL.to_string()];
+    whole.degraded_security = vec![crate::config::current::WHOLE_CONFIG_SENTINEL.to_string()];
     assert!(
         gate_security_posture(&whole, false).is_err(),
         "whole-config loss must fail closed when not explicitly allowed"
@@ -1491,7 +1491,7 @@ async fn models_set_persists_model_and_preserves_slash_bearing_ids() {
         &config_path,
         format!(
             "schema_version = {}\n\n[providers.models.anthropic.default]\nmodel = \"claude-opus-4-7\"\n",
-            crate::config::migration::CURRENT_SCHEMA_VERSION,
+            crate::config::current::CURRENT_SCHEMA_VERSION,
         ),
     )
     .unwrap();
@@ -1499,7 +1499,7 @@ async fn models_set_persists_model_and_preserves_slash_bearing_ids() {
     let mut config = Config {
         config_path: config_path.clone(),
         data_dir: tmp.path().join("workspace"),
-        schema_version: crate::config::migration::CURRENT_SCHEMA_VERSION,
+        schema_version: crate::config::current::CURRENT_SCHEMA_VERSION,
         ..Config::default()
     };
     config.providers.models.anthropic.insert(
@@ -1548,7 +1548,7 @@ async fn models_set_persists_model_and_preserves_slash_bearing_ids() {
     let mut empty_config = Config {
         config_path: tmp.path().join("empty.toml"),
         data_dir: tmp.path().join("empty_workspace"),
-        schema_version: crate::config::migration::CURRENT_SCHEMA_VERSION,
+        schema_version: crate::config::current::CURRENT_SCHEMA_VERSION,
         ..Config::default()
     };
     let err = dispatch_models_command(
@@ -1730,5 +1730,29 @@ async fn paircode_owner_cli_sends_token_for_show_mint_and_rotation() {
             .unwrap();
         assert!(matches!(result, PaircodeResult::Code { code, .. } if code == "123456"));
         server.await.unwrap();
+    }
+}
+
+#[test]
+fn config_cli_exposes_current_validation_and_generation_only() {
+    assert!(matches!(
+        Cli::try_parse_from(["zeroclaw", "config", "validate", "--json"])
+            .unwrap()
+            .command,
+        Commands::Config {
+            config_command: ConfigCommands::Validate { json: true }
+        }
+    ));
+    assert!(matches!(
+        Cli::try_parse_from(["zeroclaw", "config", "generate", "--encrypt"])
+            .unwrap()
+            .command,
+        Commands::Config {
+            config_command: ConfigCommands::Generate { encrypt: true }
+        }
+    ));
+    assert!(Cli::try_parse_from(["zeroclaw", "config", "migrate"]).is_err());
+    for version in ["1", "2", "3", "4"] {
+        assert!(Cli::try_parse_from(["zeroclaw", "config", "generate", version]).is_err());
     }
 }

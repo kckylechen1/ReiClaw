@@ -647,7 +647,7 @@ fn config_patch_add_does_not_materialize_resource_keyed_rate_alias() {
 #[test]
 fn config_patch_replace_on_dotted_resource_id_does_not_plant_phantom_sibling() {
     let config_dir = tempfile::tempdir().expect("temp config dir");
-    let version = zeroclaw_config::migration::CURRENT_SCHEMA_VERSION;
+    let version = zeroclaw_config::current::CURRENT_SCHEMA_VERSION;
     std::fs::write(
         config_dir.path().join("config.toml"),
         format!(
@@ -762,4 +762,64 @@ fn config_init_channel_alias_survives_config_reload() {
         }),
         "the initialized channel alias must remain addressable after Config reload",
     );
+}
+
+#[test]
+fn config_set_rejects_unsupported_schema_versions_without_rewriting_disk() {
+    let config_dir = tempfile::tempdir().unwrap();
+    let path = config_dir.path().join("config.toml");
+    let raw = "schema_version = 3\n[gateway]\nport = 42618\n";
+    std::fs::write(&path, raw).unwrap();
+    for version in ["0", "1", "2", "4"] {
+        let output = Command::new(env!("CARGO_BIN_EXE_zeroclaw"))
+            .env("ZEROCLAW_CONFIG_DIR", config_dir.path())
+            .env("RUST_LOG", "off")
+            .args([
+                "config",
+                "set",
+                "schema_version",
+                version,
+                "--no-interactive",
+                "--json",
+            ])
+            .output()
+            .unwrap();
+        assert!(!output.status.success());
+        assert!(String::from_utf8_lossy(&output.stderr).contains("schema_version"));
+        assert_eq!(std::fs::read_to_string(&path).unwrap(), raw);
+    }
+}
+
+#[test]
+fn config_validate_is_read_only_and_reports_malformed_current_sections() {
+    let config_dir = tempfile::tempdir().unwrap();
+    let path = config_dir.path().join("config.toml");
+    for (raw, valid) in [
+        ("schema_version = 3\n[gateway]\nport = 42618\n", true),
+        (
+            "schema_version = 3\n[heartbeat]\nenabled = 'invalid'\n",
+            false,
+        ),
+    ] {
+        std::fs::write(&path, raw).unwrap();
+        let output = Command::new(env!("CARGO_BIN_EXE_zeroclaw"))
+            .env("ZEROCLAW_CONFIG_DIR", config_dir.path())
+            .env("RUST_LOG", "off")
+            .args(["config", "validate", "--json"])
+            .output()
+            .unwrap();
+        assert_eq!(
+            output.status.success(),
+            valid,
+            "{}",
+            String::from_utf8_lossy(&output.stderr)
+        );
+        let envelope: serde_json::Value = serde_json::from_slice(&output.stdout).unwrap();
+        assert_eq!(envelope["valid"], valid);
+        assert_eq!(envelope["schema_version"], 3);
+        if !valid {
+            assert!(envelope["error"].as_str().unwrap().contains("heartbeat"));
+        }
+        assert_eq!(std::fs::read_to_string(&path).unwrap(), raw);
+    }
 }
