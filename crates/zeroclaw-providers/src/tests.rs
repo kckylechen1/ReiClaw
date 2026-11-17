@@ -1398,6 +1398,151 @@ fn ollama_uses_resolved_url_from_runtime_options() {
 
 // ── Per-alias provider_runtime_options resolution ──
 
+#[test]
+fn alias_and_agent_keep_system_merge_without_explicit_uri() {
+    use zeroclaw_config::schema::{
+        AliasedAgentConfig, Config, LlamacppModelProviderConfig, ModelProviderConfig,
+    };
+
+    let mut config = Config::default();
+    config.providers.models.llamacpp.insert(
+        "local".into(),
+        LlamacppModelProviderConfig {
+            base: ModelProviderConfig {
+                merge_system_into_user: true,
+                ..Default::default()
+            },
+        },
+    );
+    config.agents.insert(
+        "local_agent".into(),
+        AliasedAgentConfig {
+            model_provider: "llamacpp.local".into(),
+            ..Default::default()
+        },
+    );
+
+    for options in [
+        provider_runtime_options_for_alias(&config, "llamacpp", "local"),
+        provider_runtime_options_for_agent(&config, "local_agent"),
+    ] {
+        assert!(options.merge_system_into_user);
+        assert!(options.provider_api_url.is_none());
+    }
+    assert!(!provider_runtime_options_for_agent(&config, "missing").merge_system_into_user);
+}
+
+#[tokio::test]
+async fn aliases_sharing_uri_keep_distinct_system_message_modes() {
+    use axum::{Json, Router, extract::State, routing::post};
+    use serde_json::{Value, json};
+    use std::sync::{Arc, Mutex};
+    use zeroclaw_config::schema::{
+        AliasedAgentConfig, Config, LlamacppModelProviderConfig, ModelProviderConfig,
+    };
+
+    type Capture = Arc<Mutex<Option<Value>>>;
+    async fn capture_chat_request(
+        State(capture): State<Capture>,
+        Json(body): Json<Value>,
+    ) -> Json<Value> {
+        *capture.lock().expect("capture lock poisoned") = Some(body["messages"].clone());
+        Json(json!({"choices": [{"message": {"content": "ok"}}]}))
+    }
+
+    let capture: Capture = Arc::new(Mutex::new(None));
+    let listener = tokio::net::TcpListener::bind("127.0.0.1:0")
+        .await
+        .expect("bind test server");
+    let addr = listener.local_addr().expect("test server addr");
+    let app = Router::new()
+        .route("/v1/chat/completions", post(capture_chat_request))
+        .with_state(capture.clone());
+    let server = ::zeroclaw_spawn::spawn!(async move {
+        axum::serve(listener, app).await.expect("serve test server");
+    });
+
+    let mut config = Config::default();
+    for (alias, merge) in [("plain", false), ("merged", true)] {
+        config.providers.models.llamacpp.insert(
+            alias.into(),
+            LlamacppModelProviderConfig {
+                base: ModelProviderConfig {
+                    uri: Some(format!("http://{addr}/v1")),
+                    model: Some("test-model".into()),
+                    merge_system_into_user: merge,
+                    ..Default::default()
+                },
+            },
+        );
+        config.agents.insert(
+            alias.into(),
+            AliasedAgentConfig {
+                model_provider: format!("llamacpp.{alias}").into(),
+                ..Default::default()
+            },
+        );
+    }
+
+    // Exercise both alias-reference construction and the agent's routed factory.
+    // Checking both aliases makes a URI-based first-match lookup fail regardless
+    // of the order in which the aliases are stored.
+    for (alias, merge) in [("plain", false), ("merged", true)] {
+        let provider_ref = format!("llamacpp.{alias}");
+        let options = provider_runtime_options_for_agent(&config, alias);
+        assert_eq!(options.merge_system_into_user, merge);
+        let direct = create_model_provider_from_ref(&config, &provider_ref)
+            .expect("alias provider should build");
+        assert!(direct.capabilities().native_tool_calling);
+        let routed = create_routed_model_provider_with_options(
+            &config,
+            &provider_ref,
+            None,
+            None,
+            &config.reliability,
+            &[],
+            "test-model",
+            &options,
+        )
+        .expect("agent provider should build");
+
+        for provider in [direct, routed] {
+            let messages = [
+                ChatMessage::system("system text"),
+                ChatMessage::user("user text"),
+            ];
+            let response = provider
+                .chat(
+                    ChatRequest {
+                        messages: &messages,
+                        tools: None,
+                        thinking: None,
+                    },
+                    "test-model",
+                    None,
+                )
+                .await
+                .expect("chat should succeed");
+            assert_eq!(response.text.as_deref(), Some("ok"));
+            let sent = capture
+                .lock()
+                .expect("capture lock poisoned")
+                .take()
+                .expect("captured request");
+            let expected = if merge {
+                json!([{"role": "user", "content": "system text\n\nuser text"}])
+            } else {
+                json!([
+                    {"role": "system", "content": "system text"},
+                    {"role": "user", "content": "user text"}
+                ])
+            };
+            assert_eq!(sent, expected, "system message mode for {provider_ref}");
+        }
+    }
+    server.abort();
+}
+
 /// Build a `Config` with two `anthropic` aliases at different base_urls
 /// so the test can prove `provider_runtime_options_for_agent` selects
 /// the alias-specific entry via explicit `<type>.<alias>` resolution.
