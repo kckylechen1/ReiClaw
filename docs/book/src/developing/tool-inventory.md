@@ -55,7 +55,7 @@ boundaries because they add platform, dependency, network, or UI surface area.
 
 | Tool(s) | Boundary | Classification |
 |---|---|---|
-| `browser`, `browser_open`, `text_browser` | Config-gated and runtime-dependent. | Keep first-party, but continue tightening feature/config gates because browser automation is a large trusted surface. |
+| `browser`, `browser_open`, `text_browser` | Removed from the model surface; implementations deleted. | Retired: heavy browser automation belongs to external harnesses via Tachi; web interaction stays on `web_fetch` / `web_search_tool` / `http_request`. Names reserved in `RETIRED_OPERATOR_TOOL_NAMES`; `[browser]` / `[text_browser]` sections warn via retired-surface tombstones. |
 | `http_request`, `web_fetch`, `web_search_tool` | Config-gated network access. | Keep first-party while SSRF, allowlist, provider routing, and receipt behavior remain ZeroClaw-owned. Revisit only after MCP/plugin replacements can express the same network policy. |
 | SOP tools (`sop_list`, `sop_execute`, `sop_advance`, `sop_approve`, `sop_status`, `sop_workshop`) | Removed with the SOP run side. | Retired: no agent-facing SOP run tools remain; runs are Tachi-side ProcedureRuns through the procedure_v1 seam. |
 | WASM plugin tools | Removed with the WASM plugin host. | Retired: extensions go through MCP servers. |

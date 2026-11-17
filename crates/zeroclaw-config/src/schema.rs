@@ -299,12 +299,6 @@ pub struct Config {
     #[group = "Storage"]
     pub secrets: SecretsConfig,
 
-    /// Browser automation configuration (`[browser]`).
-    #[serde(default)]
-    #[nested]
-    #[group = "Tools"]
-    pub browser: BrowserConfig,
-
     /// HTTP request tool configuration (`[http_request]`).
     #[serde(default)]
     #[nested]
@@ -334,12 +328,6 @@ pub struct Config {
     #[nested]
     #[group = "Tools"]
     pub link_enricher: LinkEnricherConfig,
-
-    /// Text browser tool configuration (`[text_browser]`).
-    #[serde(default)]
-    #[nested]
-    #[group = "Tools"]
-    pub text_browser: TextBrowserConfig,
 
     /// Web search tool configuration (`[web_search]`).
     #[serde(default)]
@@ -1079,35 +1067,6 @@ impl FamilyEndpoint for QwenModelProviderConfig {
     fn endpoint_uri(&self) -> Option<&'static str> {
         Some(self.endpoint.uri())
     }
-}
-
-// ── OpenRouter ──
-
-#[derive(
-    Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default, zeroclaw_macros::ConfigEnum,
-)]
-#[cfg_attr(feature = "schema-export", derive(schemars::JsonSchema))]
-#[serde(rename_all = "snake_case")]
-pub enum OpenRouterEndpoint {
-    #[default]
-    Default,
-}
-
-impl ModelEndpoint for OpenRouterEndpoint {
-    fn uri(&self) -> &'static str {
-        match self {
-            Self::Default => "https://openrouter.ai/api/v1",
-        }
-    }
-}
-
-#[derive(Debug, Clone, Default, Serialize, Deserialize, Configurable)]
-#[cfg_attr(feature = "schema-export", derive(schemars::JsonSchema))]
-#[prefix = "providers.models.openrouter"]
-pub struct OpenRouterModelProviderConfig {
-    #[nested]
-    #[serde(flatten)]
-    pub base: ModelProviderConfig,
 }
 
 // ── Ollama (local-default endpoint) ──
@@ -2925,7 +2884,6 @@ impl_default_family_endpoint! {
     OpenAIModelProviderConfig,
     AnthropicModelProviderConfig,
     AtomicChatModelProviderConfig,
-    OpenRouterModelProviderConfig,
     OllamaModelProviderConfig,
     TogetherModelProviderConfig,
     FireworksModelProviderConfig,
@@ -6596,129 +6554,6 @@ impl Default for SecretsConfig {
     }
 }
 
-// ── Browser (friendly-service browsing only) ───────────────────
-
-/// Computer-use sidecar configuration (`[browser.computer_use]` section).
-///
-/// Delegates OS-level mouse, keyboard, and screenshot actions to a local sidecar.
-#[derive(Debug, Clone, Serialize, Deserialize, Configurable)]
-#[cfg_attr(feature = "schema-export", derive(schemars::JsonSchema))]
-#[prefix = "browser.computer_use"]
-pub struct BrowserComputerUseConfig {
-    /// Sidecar endpoint for computer-use actions (OS-level mouse/keyboard/screenshot)
-    #[serde(default = "default_browser_computer_use_endpoint")]
-    pub endpoint: String,
-    /// Optional bearer token for computer-use sidecar
-    #[serde(default)]
-    #[secret]
-    #[credential_class = "encrypted_secret"]
-    #[cfg_attr(feature = "schema-export", schemars(extend("x-secret" = true)))]
-    pub api_key: Option<String>,
-    /// Per-action request timeout in milliseconds
-    #[serde(default = "default_browser_computer_use_timeout_ms")]
-    pub timeout_ms: u64,
-    /// Allow remote/public endpoint for computer-use sidecar (default: false)
-    #[serde(default)]
-    pub allow_remote_endpoint: bool,
-    /// Optional window title/process allowlist forwarded to sidecar policy
-    #[serde(default)]
-    pub window_allowlist: Vec<String>,
-    /// Optional X-axis boundary for coordinate-based actions
-    #[serde(default)]
-    pub max_coordinate_x: Option<i64>,
-    /// Optional Y-axis boundary for coordinate-based actions
-    #[serde(default)]
-    pub max_coordinate_y: Option<i64>,
-}
-
-fn default_browser_computer_use_endpoint() -> String {
-    "http://127.0.0.1:8787/v1/actions".into()
-}
-
-fn default_browser_computer_use_timeout_ms() -> u64 {
-    15_000
-}
-
-impl Default for BrowserComputerUseConfig {
-    fn default() -> Self {
-        Self {
-            endpoint: default_browser_computer_use_endpoint(),
-            api_key: None,
-            timeout_ms: default_browser_computer_use_timeout_ms(),
-            allow_remote_endpoint: false,
-            window_allowlist: Vec::new(),
-            max_coordinate_x: None,
-            max_coordinate_y: None,
-        }
-    }
-}
-
-/// Browser automation configuration (`[browser]` section).
-///
-/// Controls the `browser_open` tool and browser automation backends.
-#[derive(Debug, Clone, Serialize, Deserialize, Configurable)]
-#[cfg_attr(feature = "schema-export", derive(schemars::JsonSchema))]
-#[prefix = "browser"]
-#[integration(
-    category = "ToolsAutomation",
-    display_name = "Browser",
-    description = "Chrome/Chromium control",
-    status_field = "enabled"
-)]
-pub struct BrowserConfig {
-    /// Enable `browser_open` tool (opens URLs in the system browser without scraping)
-    #[serde(default = "default_true")]
-    pub enabled: bool,
-    /// Allowed domains for `browser_open` (exact or subdomain match)
-    #[serde(default = "default_browser_allowed_domains")]
-    pub allowed_domains: Vec<String>,
-    /// Browser session name (for agent-browser automation)
-    #[serde(default)]
-    pub session_name: Option<String>,
-    /// Browser automation backend: "agent_browser" | "computer_use" | "auto"
-    #[serde(default = "default_browser_backend")]
-    pub backend: String,
-    /// Show browser window for agent_browser backend. When unset, inherits AGENT_BROWSER_HEADED.
-    #[serde(default)]
-    pub headed: Option<bool>,
-    /// Computer-use sidecar configuration
-    #[serde(default)]
-    #[nested]
-    pub computer_use: BrowserComputerUseConfig,
-    /// Private/internal hosts allowed to bypass SSRF protection.
-    /// Exact and subdomain matches are supported; `["*"]` permits **all** private/local
-    /// hosts (RFC 1918, loopback, link-local, `.local`). Default: empty (deny).
-    /// Listed hosts also bypass `allowed_domains`. Both the `browser` tool and
-    /// `browser_open` accept `http://` for listed hosts — internal services
-    /// frequently lack a public TLS cert.
-    /// Warning: `["*"]` also reaches link-local addresses, including the cloud metadata
-    /// endpoint (`169.254.169.254`) — list specific hosts unless you accept that exposure.
-    #[serde(default)]
-    pub allowed_private_hosts: Vec<String>,
-}
-
-fn default_browser_allowed_domains() -> Vec<String> {
-    vec!["*".into()]
-}
-
-fn default_browser_backend() -> String {
-    "agent_browser".into()
-}
-
-impl Default for BrowserConfig {
-    fn default() -> Self {
-        Self {
-            enabled: true,
-            allowed_domains: vec!["*".into()],
-            session_name: None,
-            backend: default_browser_backend(),
-            headed: None,
-            computer_use: BrowserComputerUseConfig::default(),
-            allowed_private_hosts: vec![],
-        }
-    }
-}
-
 /// Optional destination binding for one named HTTP authorization secret.
 #[derive(Debug, Clone, Default, Serialize, Deserialize, Configurable)]
 #[cfg_attr(feature = "schema-export", derive(schemars::JsonSchema))]
@@ -6966,49 +6801,6 @@ impl Default for LinkEnricherConfig {
             enabled: false,
             max_links: default_link_enricher_max_links(),
             timeout_secs: default_link_enricher_timeout_secs(),
-        }
-    }
-}
-
-// ── Text browser ─────────────────────────────────────────────────
-
-/// Text browser tool configuration (`[text_browser]` section).
-///
-/// Uses text-based browsers (lynx, links, w3m) to render web pages as plain
-/// text. Designed for headless/SSH environments without graphical browsers.
-#[derive(Debug, Clone, Serialize, Deserialize, Configurable)]
-#[cfg_attr(feature = "schema-export", derive(schemars::JsonSchema))]
-#[prefix = "text_browser"]
-pub struct TextBrowserConfig {
-    /// Enable `text_browser` tool
-    #[serde(default)]
-    pub enabled: bool,
-    /// Preferred text browser ("lynx", "links", or "w3m"). If unset, auto-detects.
-    #[serde(default)]
-    pub preferred_browser: Option<String>,
-    /// Request timeout in seconds (default: 30)
-    #[serde(default = "default_text_browser_timeout_secs")]
-    pub timeout_secs: u64,
-    /// Private/internal hosts allowed to bypass SSRF protection.
-    /// Exact and subdomain matches are supported; `["*"]` permits **all** private/local
-    /// hosts (RFC 1918, loopback, link-local, `.local`). Default: empty (deny).
-    /// Warning: `["*"]` also reaches link-local addresses, including the cloud metadata
-    /// endpoint (`169.254.169.254`) — list specific hosts unless you accept that exposure.
-    #[serde(default)]
-    pub allowed_private_hosts: Vec<String>,
-}
-
-fn default_text_browser_timeout_secs() -> u64 {
-    30
-}
-
-impl Default for TextBrowserConfig {
-    fn default() -> Self {
-        Self {
-            enabled: false,
-            preferred_browser: None,
-            timeout_secs: default_text_browser_timeout_secs(),
-            allowed_private_hosts: vec![],
         }
     }
 }
@@ -8583,8 +8375,6 @@ pub fn default_auto_approve() -> Vec<String> {
         "content_search".into(),
         "image_info".into(),
         "tool_search".into(),
-        "browser".into(),
-        "browser_open".into(),
     ]
 }
 
@@ -9204,8 +8994,8 @@ impl Default for SchedulerConfig {
 /// ```toml
 /// [[model_routes]]
 /// hint = "reasoning"
-/// model_provider = "openrouter.default"
-/// model = "anthropic/claude-opus-4-20250514"
+/// model_provider = "openai.default"
+/// model = "gpt-5.2"
 ///
 /// [[model_routes]]
 /// hint = "fast"
@@ -10819,8 +10609,6 @@ pub(crate) fn default_otp_gated_actions() -> Vec<String> {
     vec![
         "shell".to_string(),
         "file_write".to_string(),
-        "browser_open".to_string(),
-        "browser".to_string(),
         "memory_forget".to_string(),
     ]
 }
@@ -11202,13 +10990,11 @@ impl Default for Config {
             tunnel: TunnelConfig::default(),
             gateway: GatewayConfig::default(),
             secrets: SecretsConfig::default(),
-            browser: BrowserConfig::default(),
             http_request: HttpRequestConfig::default(),
             multimodal: MultimodalConfig::default(),
             media_pipeline: MediaPipelineConfig::default(),
             web_fetch: WebFetchConfig::default(),
             link_enricher: LinkEnricherConfig::default(),
-            text_browser: TextBrowserConfig::default(),
             web_search: WebSearchConfig::default(),
             proxy: ProxyConfig::default(),
             cost: CostConfig::default(),
@@ -11360,21 +11146,18 @@ impl Config {
     /// row in this method. The integrations registry consumes the result
     /// without per-vendor branches.
     pub fn integration_descriptors(&self) -> Vec<crate::config::IntegrationDescriptor> {
-        // BrowserConfig carries an `#[integration(...)]` annotation on V3,
-        // so the macro emits `integration_descriptor()` on it. Cron has been flattened
+        // so the macro emits `integration_descriptor()` on it (BrowserConfig
+        // was the exemplar; it retired with the browser tools). Cron has been flattened
         // to `HashMap<String, CronJobDecl>` with no enable toggle, so
         // it gets a hand-crafted descriptor whose `active` reflects
         // whether any job is configured. Display copy lives next to
         // the field so the registry never branches on a category name.
-        vec![
-            self.browser.integration_descriptor(),
-            crate::config::IntegrationDescriptor {
-                display_name: "Cron",
-                description: "Scheduled tasks",
-                category: "ToolsAutomation",
-                active: !self.cron.is_empty(),
-            },
-        ]
+        vec![crate::config::IntegrationDescriptor {
+            display_name: "Cron",
+            description: "Scheduled tasks",
+            category: "ToolsAutomation",
+            active: !self.cron.is_empty(),
+        }]
     }
 
     /// Returns `true` if `path` was populated by a `ZEROCLAW_*` env-var

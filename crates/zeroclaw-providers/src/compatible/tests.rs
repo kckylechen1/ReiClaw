@@ -389,7 +389,7 @@ fn sse_response(body: &'static str) -> reqwest::Response {
 }
 
 async fn collect_stream_events(body: &'static str) -> Vec<StreamResult<StreamEvent>> {
-    let mut stream = sse_bytes_to_events(sse_response(body), false);
+    let mut stream = sse_bytes_to_events_for_contract(sse_response(body), false, false);
     let mut events = Vec::new();
     while let Ok(Some(ev)) =
         tokio::time::timeout(std::time::Duration::from_secs(2), stream.next()).await
@@ -458,7 +458,7 @@ async fn done_sentinel_finishes_event_stream_without_eof() {
         "data: {\"choices\":[{\"delta\":{\"content\":\"hi\"}}]}\n\ndata: [DONE]\n\n",
     )
     .await;
-    let mut stream = sse_bytes_to_events(response, false);
+    let mut stream = sse_bytes_to_events_for_contract(response, false, false);
     let mut saw_final = false;
 
     tokio::time::timeout(std::time::Duration::from_secs(2), async {

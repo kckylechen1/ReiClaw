@@ -485,12 +485,12 @@ mod tests {
     async fn walker_accepts_alias_with_underscore() {
         let _guard = super::env_test_lock().await;
         let _v1 = EnvVarGuard::set(
-            "ZEROCLAW_providers__models__openrouter__prod_v2__api_key",
-            "sk-or-fixture",
+            "ZEROCLAW_providers__models__anthropic__prod_v2__api_key",
+            "sk-ant-fixture",
         );
         let _v2 = EnvVarGuard::set(
-            "ZEROCLAW_providers__models__openrouter__prod_v2__model",
-            "anthropic/claude-sonnet-4-6",
+            "ZEROCLAW_providers__models__anthropic__prod_v2__model",
+            "claude-sonnet-4-6",
         );
 
         let mut config = Config::default();
@@ -499,24 +499,21 @@ mod tests {
         assert!(
             applied
                 .paths
-                .contains("providers.models.openrouter.prod_v2.api_key"),
+                .contains("providers.models.anthropic.prod_v2.api_key"),
         );
         assert!(
             applied
                 .paths
-                .contains("providers.models.openrouter.prod_v2.model"),
+                .contains("providers.models.anthropic.prod_v2.model"),
         );
         let entry = config
             .providers
             .models
-            .openrouter
+            .anthropic
             .get("prod_v2")
             .expect("alias created");
-        assert_eq!(entry.base.api_key.as_deref(), Some("sk-or-fixture"));
-        assert_eq!(
-            entry.base.model.as_deref(),
-            Some("anthropic/claude-sonnet-4-6"),
-        );
+        assert_eq!(entry.base.api_key.as_deref(), Some("sk-ant-fixture"));
+        assert_eq!(entry.base.model.as_deref(), Some("claude-sonnet-4-6"),);
     }
 
     #[tokio::test]

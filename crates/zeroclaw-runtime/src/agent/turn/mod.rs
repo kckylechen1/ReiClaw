@@ -735,7 +735,7 @@ async fn run_tool_call_loop_turn(
         enforce_tool_loop_budget()?;
 
         // Unified path via ModelProvider::chat so provider-specific native tool logic
-        // (OpenAI/Anthropic/OpenRouter/compatible adapters) is honored.
+        // (OpenAI/Anthropic/compatible adapters) is honored.
         let request_tools = if use_native_tools {
             Some(tool_specs.as_slice())
         } else {

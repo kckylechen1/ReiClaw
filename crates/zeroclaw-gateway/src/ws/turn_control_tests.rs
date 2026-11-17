@@ -627,6 +627,7 @@ async fn s2_wire_control_authority_and_live_revoke_preserve_s1() {
 #[tokio::test]
 async fn s2_wire_negotiation_does_not_change_legacy_subscriber_contract() {
     let fixture = DeviceFixture::new(&["chat"]).await;
+    owner_bridge(&fixture, &["chat", "cancel"]);
     let mut controlled = fixture.socket(DEVICE_TOKEN).await;
     let mut legacy = fixture.socket(OWNER_TOKEN).await;
     let epoch = negotiate(&mut controlled).await;
@@ -1162,8 +1163,9 @@ async fn s2_wire_http_session_delete_erases_replay_without_reexecution() {
 }
 
 #[tokio::test]
-async fn s2_wire_negotiated_device_cannot_approve_owner_can_complete_same_prompt() {
+async fn s2_wire_ungranted_bridge_cannot_approve_owner_can_complete_same_prompt() {
     let fixture = DeviceFixture::new(&["chat", "answer", "cancel"]).await;
+    owner_bridge(&fixture, &["chat", "cancel"]);
     let mut device = fixture.socket(DEVICE_TOKEN).await;
     let mut owner = fixture.socket(OWNER_TOKEN).await;
     let epoch = negotiate(&mut device).await;
@@ -1200,6 +1202,7 @@ async fn s2_wire_negotiated_device_cannot_approve_owner_can_complete_same_prompt
 #[tokio::test]
 async fn s2_wire_delete_active_turn_suppresses_late_events_and_allows_fresh_request() {
     let fixture = DeviceFixture::new(&["chat"]).await;
+    owner_bridge(&fixture, &["chat", "cancel"]);
     let mut active = fixture.socket(DEVICE_TOKEN).await;
     let mut second = fixture.socket(DEVICE_TOKEN).await;
     let mut legacy = fixture.socket(OWNER_TOKEN).await;
@@ -1343,6 +1346,7 @@ fn s2_attachment_scope(token: &str) -> crate::api_attachments::Scope {
 #[tokio::test]
 async fn s2_wire_attachments_reuse_scoped_handles_with_legacy_denials() {
     let fixture = DeviceFixture::new(&["chat"]).await;
+    owner_bridge(&fixture, &["chat", "cancel"]);
 
     // ── Owner (pairing) socket: the attachment-capable path ────────────────
     let mut owner = fixture.socket(OWNER_TOKEN).await;
@@ -1533,8 +1537,12 @@ async fn s2_wire_events_land_in_structured_log_without_content() {
     // install the capture layer (idempotent across parallel tests) before
     // subscribing the broadcast, or every event drops into the no-op default.
     zeroclaw_log::try_install_capture_subscriber();
-    let mut rx = zeroclaw_log::subscribe_or_install();
+    // Other tests install tiny broadcast rings. Own this capture fixture under
+    // the plumbing locks so their retained sender cannot drop our early events.
+    let (log_tx, mut rx) = tokio::sync::broadcast::channel(65_536);
+    zeroclaw_log::set_broadcast_hook(log_tx);
     let fixture = DeviceFixture::new(&["chat", "cancel"]).await;
+    owner_bridge(&fixture, &["chat", "cancel"]);
     let mut owner = fixture.socket(OWNER_TOKEN).await;
     let epoch = negotiate(&mut owner).await;
 
@@ -1787,6 +1795,7 @@ async fn s2_wire_events_land_in_structured_log_without_content() {
 #[tokio::test]
 async fn offline_approval_reconnect_keeps_request_and_requires_operator() {
     let fixture = DeviceFixture::new(&["chat", "answer", "cancel"]).await;
+    owner_bridge(&fixture, &["chat", "cancel"]);
     let mut owner = fixture.socket(OWNER_TOKEN).await;
     let id = uuid::Uuid::new_v4().to_string();
     owner
@@ -1845,6 +1854,7 @@ async fn offline_approval_reconnect_keeps_request_and_requires_operator() {
 #[tokio::test]
 async fn approval_created_offline_waits_for_reconnect_instead_of_becoming_unreachable() {
     let fixture = DeviceFixture::new(&["chat"]).await;
+    owner_bridge(&fixture, &["chat", "cancel"]);
     let mut owner = fixture.socket(OWNER_TOKEN).await;
     let id = uuid::Uuid::new_v4().to_string();
     owner
@@ -1880,6 +1890,7 @@ async fn approval_created_offline_waits_for_reconnect_instead_of_becoming_unreac
 #[tokio::test]
 async fn production_gateway_shutdown_retires_idle_and_handshake_sockets() {
     let fixture = DeviceFixture::new(&["chat"]).await;
+    owner_bridge(&fixture, &["chat", "cancel"]);
     let mut config = fixture.state.config.read().clone();
     config.gateway.paired_tokens = vec![zeroclaw_config::tokens::hash_token(OWNER_TOKEN)];
     let data_dir = config.data_dir.clone();

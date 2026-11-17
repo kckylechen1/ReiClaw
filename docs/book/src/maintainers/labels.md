@@ -244,7 +244,6 @@ to one provider.
 | `provider:compatible` | `compatible.rs` |
 | `provider:gemini` | `gemini.rs` |
 | `provider:openai` | `openai.rs`, `openai_codex.rs` |
-| `provider:openrouter` | `openrouter.rs` |
 | `provider:reliable` | `reliable.rs` |
 | `provider:router` | `router.rs` |
 
@@ -256,7 +255,7 @@ Tools are grouped by logical function rather than one label per file.
 
 | Label | Matches |
 |---|---|
-| `tool:browser` | `browser.rs`, `browser_open.rs`, `text_browser.rs`, `screenshot.rs` |
+| `tool:browser` | `screenshot.rs` |
 | `tool:composio` | `composio.rs` |
 | `tool:cron` | `src/tools/cron_add.rs`, `src/tools/cron_list.rs`, `src/tools/cron_remove.rs`, `src/tools/cron_run.rs`, `src/tools/cron_runs.rs`, `src/tools/cron_update.rs`, `crates/zeroclaw-runtime/src/tools/cron_add.rs`, `crates/zeroclaw-runtime/src/tools/cron_common.rs`, `crates/zeroclaw-runtime/src/tools/cron_list.rs`, `crates/zeroclaw-runtime/src/tools/cron_remove.rs`, `crates/zeroclaw-runtime/src/tools/cron_run.rs`, `crates/zeroclaw-runtime/src/tools/cron_runs.rs`, `crates/zeroclaw-runtime/src/tools/cron_update.rs` |
 | `tool:delegate` | retired: `tools/delegate.rs` was deleted with its wall; label kept for historical issue labeling |

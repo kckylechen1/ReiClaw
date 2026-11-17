@@ -672,7 +672,7 @@ pub async fn run_gateway(
         .iter_entries()
         .next()
         .map(|(f, a, e)| (f.to_string(), a.to_string(), Some(e)))
-        .unwrap_or_else(|| ("openrouter".to_string(), "default".to_string(), None));
+        .unwrap_or_else(|| ("openai".to_string(), "default".to_string(), None));
     let fallback = boot_entry;
     let model_provider_name = boot_family.as_str();
     let (model_provider, boot_provider_failed): (Arc<dyn ModelProvider>, bool) =
@@ -833,7 +833,6 @@ pub async fn run_gateway(
                 agent_alias,
                 Arc::clone(&runtime),
                 Arc::clone(&mem),
-                &config.browser,
                 &config.http_request,
                 &config.web_fetch,
                 &config.data_dir,
@@ -939,7 +938,6 @@ pub async fn run_gateway(
             &alias,
             Arc::clone(&runtime),
             Arc::clone(&mem),
-            &config.browser,
             &config.http_request,
             &config.web_fetch,
             &config.data_dir,

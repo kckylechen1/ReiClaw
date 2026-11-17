@@ -101,6 +101,7 @@ pub struct ApprovalManager {
     /// When `true`, tools that would require interactive approval are
     /// auto-denied instead. Used for channel-driven (non-CLI) runs.
     non_interactive: bool,
+    deny_prompts: bool,
     /// When `true`, shell calls in non-interactive mode still enter the outer
     /// approval flow because a real client approval channel exists.
     non_interactive_shell_requires_approval: bool,
@@ -124,6 +125,7 @@ impl ApprovalManager {
             always_ask: risk_profile.always_ask.iter().cloned().collect(),
             autonomy_level: risk_profile.level,
             non_interactive: false,
+            deny_prompts: false,
             non_interactive_shell_requires_approval: false,
             session_allowlist: Mutex::new(HashSet::new()),
             audit_log: Mutex::new(Vec::new()),
@@ -137,6 +139,7 @@ impl ApprovalManager {
             always_ask: risk_profile.always_ask.iter().cloned().collect(),
             autonomy_level: risk_profile.level,
             non_interactive: true,
+            deny_prompts: false,
             non_interactive_shell_requires_approval: false,
             session_allowlist: Mutex::new(HashSet::new()),
             audit_log: Mutex::new(Vec::new()),
@@ -150,6 +153,7 @@ impl ApprovalManager {
             always_ask: risk_profile.always_ask.iter().cloned().collect(),
             autonomy_level: risk_profile.level,
             non_interactive: true,
+            deny_prompts: false,
             non_interactive_shell_requires_approval: true,
             session_allowlist: Mutex::new(HashSet::new()),
             audit_log: Mutex::new(Vec::new()),
@@ -175,11 +179,22 @@ impl ApprovalManager {
             always_ask: risk_profile.always_ask.iter().cloned().collect(),
             autonomy_level: risk_profile.level,
             non_interactive: self.non_interactive,
+            deny_prompts: self.deny_prompts,
             non_interactive_shell_requires_approval: self.non_interactive_shell_requires_approval,
             session_allowlist: Mutex::new(HashSet::new()),
             audit_log: Mutex::new(Vec::new()),
             store: self.store.clone(),
         }
+    }
+
+    /// Credential confinement: prompts never reach a channel or an interactive wait.
+    pub fn with_prompt_denial(mut self, deny: bool) -> Self {
+        self.deny_prompts = deny;
+        self
+    }
+
+    pub(crate) fn denies_prompts(&self) -> bool {
+        self.deny_prompts
     }
 
     /// Returns `true` when this manager operates in non-interactive mode
@@ -528,6 +543,7 @@ mod approval_precedence_tests {
             always_ask: always_ask.iter().map(|tool| (*tool).to_string()).collect(),
             autonomy_level,
             non_interactive: false,
+            deny_prompts: false,
             non_interactive_shell_requires_approval: false,
             session_allowlist: Mutex::new(HashSet::new()),
             audit_log: Mutex::new(Vec::new()),
@@ -647,6 +663,7 @@ mod approval_precedence_tests {
             always_ask: always_ask.iter().map(|tool| (*tool).to_string()).collect(),
             autonomy_level,
             non_interactive: true,
+            deny_prompts: false,
             // Exactly what `for_non_interactive` builds.
             non_interactive_shell_requires_approval: false,
             session_allowlist: Mutex::new(HashSet::new()),

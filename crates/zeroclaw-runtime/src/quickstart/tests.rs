@@ -520,7 +520,7 @@ fn validate_only_accepts_every_builtin_risk_preset() {
 
 #[test]
 fn field_shape_returns_model_provider_rows_for_canonical_types() {
-    for kind in ["anthropic", "openai", "ollama", "openrouter", "groq"] {
+    for kind in ["anthropic", "openai", "ollama", "groq"] {
         let rows = super::field_shape(super::FieldSection::ModelProvider, kind);
         let keys: Vec<&str> = rows.iter().map(|r| r.key.as_str()).collect();
         assert!(

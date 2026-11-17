@@ -178,7 +178,6 @@ pub enum ModelProviderKind {
     GoogleAi,
     Mistral,
     Groq,
-    OpenRouter,
     Glm,
     Kilo,
     Router,

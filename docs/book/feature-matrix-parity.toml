@@ -104,10 +104,6 @@ hermes = "none"
 openclaw = "none"
 hermes = "none"
 
-[providers.openrouter]
-openclaw = "supported"
-hermes = "supported"
-
 [providers.ollama]
 openclaw = "supported"
 hermes = "supported"

@@ -94,22 +94,11 @@ pub fn show_integration_info(config: &Config, name: &str) -> Result<()> {
             println!("    3. Enable MESSAGE CONTENT intent");
             println!("    4. Run: zeroclaw config set channels.discord.default.bot-token <token>");
         }
-        "OpenRouter" => {
-            println!("  Setup:");
-            println!("    1. Get API key at https://openrouter.ai/keys");
-            println!("    2. Run: zeroclaw quickstart --model-provider openrouter --api-key <key>");
-            println!("    Access 200+ models with one key.");
-        }
         "Ollama" => {
             println!("  Setup:");
             println!("    1. Install: brew install ollama");
             println!("    2. Pull a model: ollama pull llama3");
             println!("    3. Set model_provider to 'ollama' in config.toml");
-        }
-        "Browser" => {
-            println!("  Built-in:");
-            println!("    ZeroClaw can control Chrome/Chromium for web tasks.");
-            println!("    Uses headless browser automation.");
         }
         "Cron" => {
             println!("  Built-in:");

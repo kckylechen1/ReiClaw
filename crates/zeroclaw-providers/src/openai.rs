@@ -1021,7 +1021,7 @@ impl OpenAiResponsesBuilder {
     /// config cannot silently disable the safety timeout — same guard
     /// applied by [`OpenAiBuilder::timeout_secs`],
     /// [`crate::compatible::OpenAiCompatibleBuilder::timeout_secs`], and
-    /// [`crate::openrouter::OpenRouterBuilder::timeout_secs`].
+    /// [`crate::gemini::GeminiBuilder::timeout_secs`].
     pub fn timeout_secs(mut self, secs: u64) -> Self {
         if secs > 0 {
             self.timeout_secs = Some(secs);

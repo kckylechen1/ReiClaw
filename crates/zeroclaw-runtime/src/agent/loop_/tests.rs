@@ -11331,7 +11331,6 @@ async fn process_message_seam_narrows_safe_defaults_outside_allowed_tools() {
         &risk,
         "test",
         mem,
-        &config.browser,
         &config.http_request,
         &config.web_fetch,
         &security.workspace_dir,

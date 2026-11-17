@@ -1836,9 +1836,9 @@ async fn config_toml_roundtrip() {
         schema_version: crate::migration::CURRENT_SCHEMA_VERSION,
         providers: {
             let mut p = crate::providers::Providers::default();
-            p.models.openrouter.insert(
+            p.models.openai.insert(
                 "default".to_string(),
-                OpenRouterModelProviderConfig {
+                OpenAIModelProviderConfig {
                     base: ModelProviderConfig {
                         api_key: Some("sk-test-key".into()),
                         model: Some("gpt-4o".into()),
@@ -1945,13 +1945,11 @@ async fn config_toml_roundtrip() {
         tunnel: TunnelConfig::default(),
         gateway: GatewayConfig::default(),
         secrets: SecretsConfig::default(),
-        browser: BrowserConfig::default(),
         http_request: HttpRequestConfig::default(),
         multimodal: MultimodalConfig::default(),
         media_pipeline: MediaPipelineConfig::default(),
         web_fetch: WebFetchConfig::default(),
         link_enricher: LinkEnricherConfig::default(),
-        text_browser: TextBrowserConfig::default(),
         web_search: WebSearchConfig::default(),
         proxy: ProxyConfig::default(),
         pacing: PacingConfig::default(),
@@ -2228,7 +2226,7 @@ provider_timeout_secs = 300
         parsed
             .providers
             .models
-            .find("openrouter", "default")
+            .find("openai", "default")
             .and_then(|e| e.timeout_secs)
             .unwrap_or(120),
         300
@@ -2250,8 +2248,8 @@ X-Title = "zeroclaw"
     let headers = &parsed
         .providers
         .models
-        .find("openrouter", "default")
-        .expect("synthesized openrouter.default model_provider")
+        .find("openai", "default")
+        .expect("synthesized openai.default model_provider")
         .extra_headers;
     assert_eq!(headers.len(), 2);
     assert_eq!(headers.get("User-Agent").unwrap(), "MyApp/1.0");
@@ -2652,9 +2650,9 @@ async fn config_save_and_load_tmpdir() {
 
     let config_path = dir.join("config.toml");
     let mut providers = crate::providers::Providers::default();
-    providers.models.openrouter.insert(
+    providers.models.openai.insert(
         "default".to_string(),
-        OpenRouterModelProviderConfig {
+        OpenAIModelProviderConfig {
             base: ModelProviderConfig {
                 api_key: Some("sk-roundtrip".into()),
                 model: Some("test-model".into()),
@@ -2698,13 +2696,11 @@ async fn config_save_and_load_tmpdir() {
         tunnel: TunnelConfig::default(),
         gateway: GatewayConfig::default(),
         secrets: SecretsConfig::default(),
-        browser: BrowserConfig::default(),
         http_request: HttpRequestConfig::default(),
         multimodal: MultimodalConfig::default(),
         media_pipeline: MediaPipelineConfig::default(),
         web_fetch: WebFetchConfig::default(),
         link_enricher: LinkEnricherConfig::default(),
-        text_browser: TextBrowserConfig::default(),
         web_search: WebSearchConfig::default(),
         proxy: ProxyConfig::default(),
         pacing: PacingConfig::default(),
@@ -2753,7 +2749,7 @@ async fn config_save_and_load_tmpdir() {
     let entry = &loaded
         .providers
         .models
-        .find("openrouter", "default")
+        .find("openai", "default")
         .expect("entry exists");
     assert!(
         entry
@@ -2801,7 +2797,7 @@ async fn config_save_encrypts_nested_credentials() {
         },
     );
     // ModelProvider fields are now resolved directly — no cache needed.
-    config.browser.computer_use.api_key = Some("browser-credential".into());
+    config.link_enricher.enabled = true;
     config.web_search.brave_api_key = Some("brave-credential".into());
     config.web_search.tavily_api_key = Some("tavily-credential".into());
     config.reliability.api_keys = vec![
@@ -2827,9 +2823,9 @@ async fn config_save_encrypts_nested_credentials() {
         },
     );
 
-    config.providers.models.openrouter.insert(
+    config.providers.models.openai.insert(
         "worker".into(),
-        crate::schema::OpenRouterModelProviderConfig {
+        crate::schema::OpenAIModelProviderConfig {
             base: ModelProviderConfig {
                 api_key: Some("agent-credential".into()),
                 model: Some("model-test".into()),
@@ -2840,7 +2836,7 @@ async fn config_save_encrypts_nested_credentials() {
     config.agents.insert(
         "worker".into(),
         AliasedAgentConfig {
-            model_provider: "openrouter.worker".into(),
+            model_provider: "openai.worker".into(),
             ..Default::default()
         },
     );
@@ -2881,7 +2877,6 @@ async fn config_save_encrypts_nested_credentials() {
     for plaintext in [
         "root-credential",
         "Bearer provider-header-credential",
-        "browser-credential",
         "brave-credential",
         "tavily-credential",
         "rotation-credential-a",
@@ -2923,13 +2918,6 @@ async fn config_save_encrypts_nested_credentials() {
         "Bearer provider-header-credential"
     );
 
-    let browser_encrypted = stored.browser.computer_use.api_key.as_deref().unwrap();
-    assert!(crate::secrets::SecretStore::is_encrypted(browser_encrypted));
-    assert_eq!(
-        store.decrypt(browser_encrypted).unwrap(),
-        "browser-credential"
-    );
-
     let web_search_encrypted = stored.web_search.brave_api_key.as_deref().unwrap();
     assert!(crate::secrets::SecretStore::is_encrypted(
         web_search_encrypted
@@ -2946,11 +2934,7 @@ async fn config_save_encrypts_nested_credentials() {
         "tavily-credential"
     );
 
-    let worker_provider = stored
-        .providers
-        .models
-        .find("openrouter", "worker")
-        .unwrap();
+    let worker_provider = stored.providers.models.find("openai", "worker").unwrap();
     let worker_encrypted = worker_provider.api_key.as_deref().unwrap();
     assert!(crate::secrets::SecretStore::is_encrypted(worker_encrypted));
     assert_eq!(store.decrypt(worker_encrypted).unwrap(), "agent-credential");
@@ -3056,9 +3040,9 @@ async fn config_save_atomic_cleanup() {
         config_path: config_path.clone(),
         ..Default::default()
     };
-    config.providers.models.openrouter.insert(
+    config.providers.models.openai.insert(
         "default".to_string(),
-        OpenRouterModelProviderConfig {
+        OpenAIModelProviderConfig {
             base: ModelProviderConfig {
                 model: Some("model-a".into()),
                 ..Default::default()
@@ -3075,7 +3059,7 @@ async fn config_save_atomic_cleanup() {
     config
         .providers
         .models
-        .ensure("openrouter", "default")
+        .ensure("openai", "default")
         .unwrap()
         .model = Some("model-b".into());
     config.save().await.unwrap();
@@ -3491,47 +3475,6 @@ default_temperature = 0.7
     );
 }
 
-#[test]
-async fn browser_config_default_enabled() {
-    let b = BrowserConfig::default();
-    assert!(b.enabled);
-    assert_eq!(b.allowed_domains, vec!["*".to_string()]);
-    assert_eq!(b.backend, "agent_browser");
-    assert_eq!(b.headed, None);
-    assert_eq!(b.computer_use.endpoint, "http://127.0.0.1:8787/v1/actions");
-    assert_eq!(b.computer_use.timeout_ms, 15_000);
-    assert!(!b.computer_use.allow_remote_endpoint);
-    assert!(b.computer_use.window_allowlist.is_empty());
-    assert!(b.computer_use.max_coordinate_x.is_none());
-    assert!(b.computer_use.max_coordinate_y.is_none());
-}
-
-#[test]
-async fn browser_config_parses_headed_true() {
-    let parsed: BrowserConfig = toml::from_str(
-        r#"
-backend = "agent_browser"
-headed = true
-"#,
-    )
-    .unwrap();
-
-    assert_eq!(parsed.backend, "agent_browser");
-    assert_eq!(parsed.headed, Some(true));
-}
-
-#[test]
-async fn browser_config_backward_compat_missing_section() {
-    let minimal = r#"
-workspace_dir = "/tmp/ws"
-config_path = "/tmp/config.toml"
-default_temperature = 0.7
-"#;
-    let parsed = parse_test_config(minimal);
-    assert!(parsed.browser.enabled);
-    assert_eq!(parsed.browser.allowed_domains, vec!["*".to_string()]);
-}
-
 async fn env_override_lock() -> MutexGuard<'static, ()> {
     // Delegate to the crate-shared lock so env-mutating tests in this
     // module serialize against `env_overrides::tests` too. Without
@@ -3641,7 +3584,7 @@ async fn provider_models_round_trips_through_load_apply_serialize() {
     let toml_in = r#"
 schema_version = 3
 
-[providers.models.openrouter.default]
+[providers.models.openai.default]
 uri = "https://example.invalid/v1"
 model = "primary-model"
 "#;
@@ -3652,7 +3595,7 @@ model = "primary-model"
         config
             .providers
             .models
-            .find("openrouter", "default")
+            .find("openai", "default")
             .and_then(|e| e.model.as_deref()),
         Some("primary-model"),
     );
@@ -3700,9 +3643,9 @@ async fn resolve_default_model_picks_first_available() {
     );
 
     // Add a model_provider with a model — resolve_default_model finds it.
-    config.providers.models.openrouter.insert(
+    config.providers.models.openai.insert(
         "default".to_string(),
-        OpenRouterModelProviderConfig {
+        OpenAIModelProviderConfig {
             base: ModelProviderConfig {
                 model: Some("primary-model".to_string()),
                 ..Default::default()
@@ -3896,7 +3839,7 @@ async fn deserialize_rejects_unknown_model_provider_wire_api() {
     let toml = r#"
 schema_version = 3
 
-[providers.models.openrouter.default]
+[providers.models.openai.default]
 uri = "https://api.tonsof.blue/v1"
 wire_api = "ws"
 "#;
@@ -4726,7 +4669,7 @@ default_model = "legacy-model"
         config
             .providers
             .models
-            .find("openrouter", "default")
+            .find("openai", "default")
             .and_then(|e| e.model.as_deref()),
         Some("legacy-model")
     );
@@ -4831,7 +4774,7 @@ default_model = "persisted-profile"
         config
             .providers
             .models
-            .find("openrouter", "default")
+            .find("openai", "default")
             .and_then(|e| e.model.as_deref()),
         Some("persisted-profile")
     );
@@ -5150,9 +5093,9 @@ runtime_profile = "default"
 #[test]
 async fn validate_rejects_out_of_range_temperature() {
     let mut config = Config::default();
-    config.providers.models.openrouter.insert(
+    config.providers.models.openai.insert(
         "default".to_string(),
-        OpenRouterModelProviderConfig {
+        OpenAIModelProviderConfig {
             base: ModelProviderConfig {
                 api_key: Some("sk-test".into()),
                 temperature: Some(99.0),
@@ -5170,9 +5113,9 @@ async fn validate_rejects_out_of_range_temperature() {
 #[test]
 async fn validate_rejects_negative_temperature() {
     let mut config = Config::default();
-    config.providers.models.openrouter.insert(
+    config.providers.models.openai.insert(
         "default".to_string(),
-        OpenRouterModelProviderConfig {
+        OpenAIModelProviderConfig {
             base: ModelProviderConfig {
                 api_key: Some("sk-test".into()),
                 temperature: Some(-0.5),
@@ -5190,9 +5133,9 @@ async fn validate_rejects_negative_temperature() {
 #[test]
 async fn validate_accepts_valid_temperature() {
     let mut config = Config::default();
-    config.providers.models.openrouter.insert(
+    config.providers.models.openai.insert(
         "default".to_string(),
-        OpenRouterModelProviderConfig {
+        OpenAIModelProviderConfig {
             base: ModelProviderConfig {
                 temperature: Some(0.7),
                 ..Default::default()
@@ -5419,7 +5362,7 @@ async fn save_restricts_existing_world_readable_config_to_owner_only() {
         "test setup requires world-readable config"
     );
 
-    if let Some(entry) = config.providers.models.ensure("openrouter", "default") {
+    if let Some(entry) = config.providers.models.ensure("openai", "default") {
         entry.temperature = Some(0.6);
     }
     config.save().await.unwrap();
@@ -6541,7 +6484,7 @@ async fn config_validate_rejects_zero_transcription_max_audio_bytes() {
 #[test]
 async fn config_without_transcription_uses_defaults() {
     let toml_str = r#"
-        default_model_provider = "openrouter"
+        default_model_provider = "openai"
         default_model = "test-model"
         default_temperature = 0.7
     "#;
@@ -6554,7 +6497,7 @@ async fn config_without_transcription_uses_defaults() {
 async fn security_defaults_are_backward_compatible() {
     let parsed = parse_test_config(
         r#"
-default_model_provider = "openrouter"
+default_model_provider = "openai"
 default_model = "anthropic/claude-sonnet-4.6"
 default_temperature = 0.7
 "#,
@@ -6573,7 +6516,7 @@ default_temperature = 0.7
 async fn security_toml_parses_otp_and_estop_sections() {
     let parsed = parse_test_config(
         r#"
-default_model_provider = "openrouter"
+default_model_provider = "openai"
 default_model = "anthropic/claude-sonnet-4.6"
 default_temperature = 0.7
 
@@ -6582,7 +6525,7 @@ enabled = true
 method = "totp"
 token_ttl_secs = 30
 cache_valid_secs = 120
-gated_actions = ["shell", "browser_open"]
+gated_actions = ["shell", "file_edit"]
 gated_domains = ["*.chase.com", "accounts.google.com"]
 gated_domain_categories = ["banking"]
 
@@ -6604,7 +6547,7 @@ require_otp_to_resume = true
 async fn security_toml_parses_leak_detection_section() {
     let parsed = parse_test_config(
         r#"
-default_model_provider = "openrouter"
+default_model_provider = "openai"
 default_model = "anthropic/claude-sonnet-4.6"
 default_temperature = 0.7
 
@@ -8084,23 +8027,23 @@ async fn prop_is_env_overridden_reflects_env_overridden_paths() {
 #[test]
 async fn prop_is_secret_routes_through_hashmap_keyed_paths() {
     // Regression: the macro's HashMap<String, T> arm previously passed the
-    // full materialised path (e.g. `model_providers.openrouter.api-key`)
+    // full materialised path (e.g. `providers.models.openai.api-key`)
     // straight to the inner type's `prop_is_secret`, which then matched on
     // its own configurable_prefix and returned false. Result: the CLI's
     // `config set --json` and the gateway's PropResponse both took the
     // non-secret branch and emitted `{value}` instead of `{populated}` for
     // any secret on a map-keyed nested type.
     assert!(Config::prop_is_secret(
-        "providers.models.openrouter.default.api_key"
+        "providers.models.openai.default.api_key"
     ));
     assert!(Config::prop_is_secret(
         "providers.models.anthropic.default.api_key"
     ));
     assert!(!Config::prop_is_secret(
-        "providers.models.openrouter.default.endpoint"
+        "providers.models.openai.default.endpoint"
     ));
     assert!(!Config::prop_is_secret(
-        "providers.models.openrouter.default.context-window"
+        "providers.models.openai.default.context-window"
     ));
 }
 
@@ -11757,9 +11700,9 @@ async fn hashmap_nested_encrypt_decrypt_traverses_values() {
     let store = crate::secrets::SecretStore::new(dir.path(), true);
 
     let mut config = Config::default();
-    config.providers.models.openrouter.insert(
+    config.providers.models.openai.insert(
         "test".into(),
-        crate::schema::OpenRouterModelProviderConfig {
+        crate::schema::OpenAIModelProviderConfig {
             base: ModelProviderConfig {
                 api_key: Some("secret-key".into()),
                 ..Default::default()
@@ -11771,7 +11714,7 @@ async fn hashmap_nested_encrypt_decrypt_traverses_values() {
     let encrypted_key = config
         .providers
         .models
-        .find("openrouter", "test")
+        .find("openai", "test")
         .expect("entry exists")
         .api_key
         .as_ref()
@@ -11783,7 +11726,7 @@ async fn hashmap_nested_encrypt_decrypt_traverses_values() {
         config
             .providers
             .models
-            .find("openrouter", "test")
+            .find("openai", "test")
             .expect("entry exists")
             .api_key
             .as_deref(),

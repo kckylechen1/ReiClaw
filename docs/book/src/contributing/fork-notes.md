@@ -86,6 +86,8 @@ See [runtime internals](../agents/internals.md#repeated-tool-failure-recovery).
 | Builtin `calculator` / `weather` tools (`crates/zeroclaw-tools/src/{calculator,weather_tool}.rs`) | present | retired; implementations deleted, names reserved in `RETIRED_OPERATOR_TOOL_NAMES`. Weather, if ever needed again, is an HTTP skill / MCP wrapper, not a builtin |
 | `knowledge` graph tool + `knowledge.db` + `[knowledge]` / `[knowledge_bundles]` config | present | retired; relationship memory belongs to the Tachi memory kernel (`memory-tachi`), not a second local graph. Leftover sections warn via `RETIRED_CONFIG_SURFACES` tombstones |
 | GitHub Copilot provider family (`copilot.rs`, `CopilotModelProviderConfig`) | present | retired (#673 pattern); `copilot` / `github-copilot` sit in `RETIRED_MODEL_PROVIDER_NAMES`, so old configs fail closed with an explicit migration error instead of silently dropping the OAuth token |
+| Browser tools (`browser.rs`+`browser/tests.rs`, `text_browser.rs`, `browser_open.rs`, `[browser]`+`[text_browser]` config) | present | retired; web interaction stays on `web_fetch`/`web_search_tool`/`http_request`, heavy automation goes to external harnesses via Tachi. `[browser]`/`[text_browser]` warn via `RETIRED_CONFIG_SURFACES` tombstones; names in `RETIRED_OPERATOR_TOOL_NAMES`; screenshot tool retained |
+| OpenRouter chat provider family (`openrouter.rs`, `OpenRouterModelProviderConfig`) | present | retired; reached via a `custom` (OpenAI-compatible) slot at `https://openrouter.ai/api/v1` instead. `openrouter` is in `RETIRED_MODEL_PROVIDER_NAMES` (fail-closed). **Retained on purpose**: `openrouter_catalog.rs` + `openrouter_vendor_prefix` (public-catalog model discovery & pricing for compatible families), the `[memory]` embedder `"openrouter"` arm (embeddings axis), and OpenRouter-as-compatible-gateway prose. Stock V1/V2 configs with no provider default now migrate to `openai` instead of `openrouter` |
 
 ### Known gaps
 
@@ -239,6 +241,10 @@ owner; the existing session backend and Conversation remain the history and
 turn owners. See [restricted device bridges](../gateway/api.md#restricted-device-bridges)
 for bindings, per-operation grants, revocation and downgrade discipline.
 Chat authority never grants owner approval or Operator learning provenance.
+ADR-023 Amendment 1 additionally binds chat policy to `device.risk_profile`,
+reserves each device namespace, omits private prompt/memory context, denies
+approval prompts, and caps tool rounds at three independently of surface.
+The optional profile field is required for chat, including voice admission.
 
 Upstream `zeroclaw-labs/zeroclaw` was inspected at
 `5d4b18d335780af8bf15979b2f45e541f91c5eb9`, against fork baseline

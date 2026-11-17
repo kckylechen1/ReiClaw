@@ -138,21 +138,30 @@ async fn three_surfaces_render_same_turn_without_changing_soul_or_shared_history
     {
         let mut config = chat.state.config.write();
         config.data_dir = data_dir;
+        config.risk_profiles.insert("public".into(), zeroclaw_config::schema::RiskProfileConfig {
+            allowed_tools: Some(vec![]), auto_approve: vec![], always_ask: vec![], ..Default::default()
+        });
         config.gateway.bridges.insert("voice-device".into(), zeroclaw_config::schema::GatewayBridgeConfig {
             token_hash: zeroclaw_config::tokens::hash_token("synthetic-surface-device"),
             sessions: vec!["shared".into()], session_prefix: None, owner: None,
             device: Some(zeroclaw_config::schema::GatewayDeviceBridgeConfig {
+                        risk_profile: Some("public".into()),
                 agent: "web".into(), operations: vec!["chat".into()],
             }),
         });
         config.agents.insert("web".into(), zeroclaw_config::schema::AliasedAgentConfig { enabled: true, ..Default::default() });
         config.providers.models.openai.insert("default".into(), zeroclaw_config::schema::OpenAIModelProviderConfig { base: zeroclaw_config::schema::ModelProviderConfig { model: Some("test-model".into()), ..Default::default() } });
     }
-    let retained = chat.attach_key("gw_shared\u{1f}web").await;
+    let credential_key = {
+        let config = chat.state.config.read();
+        let binding = device::Binding::new("voice-device".into(), config.gateway.bridges["voice-device"].clone(), &config);
+        zeroclaw_config::tokens::hash_token(&format!("{}:{:?}", binding.initial.token_hash, binding.profile))
+    };
+    let retained = chat.attach_key(&crate::ws_conversation::device_conversation_key("gw_shared", "web", &credential_key)).await;
     chat.gate.add_permits(3);
     let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
     let address = listener.local_addr().unwrap();
-    let options = ConnectOptions { gateway: format!("ws://{}", listener.local_addr().unwrap()), agent: "web".into(), session_id: Some("shared".into()), token: Some("synthetic-surface-owner".into()) };
+    let options = ConnectOptions { gateway: format!("ws://{}", listener.local_addr().unwrap()), agent: "web".into(), session_id: Some("shared".into()), token: Some("synthetic-surface-device".into()) };
     let app = axum::Router::new().route("/ws/chat", axum::routing::get(handle_ws_chat)).with_state(chat.state.clone());
     let exchange = async {
         let mut web = Client::connect_with_surface(&options, "web").await.unwrap();

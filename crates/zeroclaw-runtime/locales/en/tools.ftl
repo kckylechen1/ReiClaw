@@ -5,12 +5,6 @@
 #
 # Literal { and } in values must be escaped as {"{"}  and  {"}"} respectively.
 
-
-tool-browser = Web/browser automation with pluggable backends (agent-browser, rust-native, computer_use). Supports DOM actions plus optional OS-level actions (mouse_move, mouse_click, mouse_drag, key_type, key_press, screen_capture) through a computer-use sidecar. Use 'snapshot' to map interactive elements to refs (@e1, @e2). Enforces browser.allowed_domains for open actions.
-
-
-tool-browser-open = Open an approved HTTPS URL in the system browser. Security constraints: allowlist-only domains, no local/private hosts, no scraping.
-
 tool-content-search = Search file contents by regex pattern within the workspace. Supports ripgrep (rg) with grep or internal fallback. Output modes: 'content' (matching lines with context), 'files_with_matches' (file paths only), 'count' (match counts per file). Example: pattern='fn main', include='*.rs', output_mode='content'.
 
 tool-cron-add = Create a scheduled cron job (shell or agent) with cron/at/every schedules. Use job_type='agent' with a prompt to run the AI agent on schedule. To deliver output to a channel (Telegram, or a configured gateway bridge), set delivery={"{"}"mode":"announce","channel":"discord","to":"<channel_id_or_chat_id>"{"}"}. This is the preferred tool for sending scheduled/delayed messages to users via live channel surfaces.
@@ -24,8 +18,6 @@ tool-cron-run = Force-run a cron job immediately and record run history
 tool-cron-runs = List recent run history for a cron job
 
 tool-cron-update = Patch an existing cron job (schedule, command, prompt, enabled, delivery, model, etc.)
-
-
 
 tool-file-edit = Edit a file by replacing an exact string match with new content
 
@@ -76,34 +68,11 @@ tool-memory-recall = Search long-term memory for relevant facts, preferences, or
 
 tool-memory-store = Store a fact, preference, or note in long-term memory. Use category 'core' for permanent facts, 'daily' for session notes, 'conversation' for chat context, or a custom category name.
 
-
-
-
 tool-schedule = Manage scheduled shell-only tasks. Actions: create/add/once/list/get/cancel/remove/pause/resume. WARNING: This tool creates shell jobs whose output is only logged, NOT delivered to any channel. To send a scheduled message to Telegram or a gateway bridge, use the cron_add tool with job_type='agent' and a delivery config like {"{"}"mode":"announce","channel":"discord","to":"<channel_id>"{"}"}.
 
 tool-screenshot = Capture a screenshot of the current screen. Returns the file path and base64-encoded PNG data.
-tool-browser-screenshot-error-path-not-allowed = Screenshot path '{ $path }' is not in the workspace allowlist
-tool-browser-screenshot-error-parent-not-exist = Screenshot path '{ $path }' parent directory '{ $parent }' does not exist
-tool-browser-screenshot-error-path-outside-workspace = Screenshot path '{ $path }' resolves to '{ $canonical }' which is outside the workspace
-tool-browser-screenshot-error-missing-filename = Screenshot path '{ $path }' is missing a filename component
-tool-browser-screenshot-error-runtime-config-target = Cannot write screenshot to runtime config path '{ $target }'
-tool-browser-screenshot-error-symlink-target = Cannot write screenshot to symlink target '{ $target }'
-tool-browser-screenshot-error-path-not-utf8 = Screenshot path '{ $path }' resolves to a non-UTF-8 pathname; refusing to write through a lossy conversion
-tool-browser-screenshot-error-computeruse-non-string-path = Screenshot 'path' parameter must be a string, got { $path }
-tool-browser-screenshot-error-non-string-path = Screenshot 'path' must be a string or absent
-tool-browser-screenshot-error-args-not-object = Screenshot arguments must be a JSON object
-tool-browser-screenshot-error-sidecar-no-png-data = computer-use sidecar did not return PNG data
-tool-browser-screenshot-error-sidecar-empty-png = computer-use sidecar returned an empty screenshot payload
-tool-browser-screenshot-error-sidecar-not-png = computer-use sidecar returned a non-PNG screenshot payload
-tool-browser-screenshot-error-sidecar-non-json-success = computer-use sidecar returned a non-JSON success response for a path-bearing screenshot; the requested file was not written
-
 
 tool-shell = Execute a shell command in the workspace directory
-
-
-
-
-
 
 tool-tool-search = Fetch full schema definitions for deferred MCP tools so they can be called. Use "select:name1,name2" for exact match or keywords to search.
 
@@ -167,8 +136,6 @@ tool-web-fetch-firecrawl-error-status = Firecrawl API error: HTTP { $status } - 
 tool-web-fetch-firecrawl-error-read = Failed to read bounded Firecrawl response: { $err }
 tool-web-fetch-firecrawl-error-size = Firecrawl response exceeds the JSON body limit of { $limit } bytes
 tool-web-fetch-pinned-description = Fetch a web page and return its content as clean plain text. HTML pages are converted to readable text; JSON and plain text are returned as-is. Only GET requests; follows same-host redirects using the validated destination addresses and blocks cross-host redirects. Falls back to Firecrawl for JS-heavy/bot-blocked sites if enabled, except after redirect policy rejection. Subject to configured domain and private-host policy.
-tool-text-browser-pinned-description = Select a text-based browser (lynx, links, or w3m) using an explicit request, configured preference, or auto-detection. Execution is currently refused because these external backends cannot pin validated destination addresses. Use web_fetch for pinned retrieval and plain-text rendering.
-tool-text-browser-error-unpinned = External text browser backend { $backend } cannot pin validated destination addresses: independent DNS resolution leaves a validation-to-connection mismatch window. Execution is refused. Use the address-pinned web_fetch tool instead.
 
 tool-http-request-error-secret-host = auth_secret '{ $name }' is not allowed for destination host '{ $host }'
 

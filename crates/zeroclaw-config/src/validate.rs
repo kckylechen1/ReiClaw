@@ -21,13 +21,11 @@ pub(crate) const SUPPORTED_PROXY_SERVICE_KEYS: &[&str] = &[
     "model_provider.glm",
     "model_provider.ollama",
     "model_provider.openai",
-    "model_provider.openrouter",
     "channel.dingtalk",
     "channel.discord",
     "channel.qq",
     "channel.telegram",
     "channel.wechat",
-    "tool.browser",
     "tool.http_request",
     "tool.web_search",
     "memory.embeddings",
@@ -1392,6 +1390,26 @@ impl Config {
                     &format!("gateway.bridges.{name}.device"),
                     "device bridge requires a configured agent and explicit chat, answer, cancel or tachi_start/tachi_status/tachi_result/tachi_cancel operations"
                 );
+            }
+            if let Some(device) = &bridge.device {
+                if (device.risk_profile.is_some()
+                    || device.operations.iter().any(|op| op == "chat"))
+                    && let Err(reason) = device.validated_profile(self)
+                {
+                    validation_bail!(
+                        InvalidFormat,
+                        format!("gateway.bridges.{name}.device.risk_profile"),
+                        "gateway.bridges.{name}.device.risk_profile: {reason}"
+                    );
+                }
+                for (other_name, other) in &self.gateway.bridges {
+                    if other_name != name && crate::bridge_access::namespaces_overlap(bridge, other)
+                    {
+                        anyhow::bail!(
+                            "device bridge {name} session namespace overlaps bridge {other_name}"
+                        );
+                    }
+                }
             }
             if bridge.device.is_some() && bridge.owner.is_some() {
                 anyhow::bail!("gateway.bridges.{name}: device and owner are mutually exclusive");

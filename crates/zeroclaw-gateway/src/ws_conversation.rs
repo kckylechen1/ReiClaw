@@ -25,6 +25,22 @@ use tokio_util::sync::CancellationToken;
 use zeroclaw_api::channel::ChannelApprovalResponse;
 use zeroclaw_infra::session_backend::RequestReceipt;
 
+/// Device policy is part of the attachment key, but not the session or alias.
+/// Put it before the ordinary key so the final separator still names the agent.
+/// Production session keys always start with `gw_`, so this prefix cannot be
+/// confused with an owner session, even if its raw ID contains separators.
+pub(crate) fn device_conversation_key(session: &str, alias: &str, credential: &str) -> String {
+    format!("device\u{1f}{credential}\u{1f}{session}\u{1f}{alias}")
+}
+
+pub(crate) fn conversation_identity(key: &str) -> Option<(&str, &str)> {
+    let logical = match key.strip_prefix("device\u{1f}") {
+        Some(scoped) => scoped.split_once('\u{1f}')?.1,
+        None => key,
+    };
+    logical.rsplit_once('\u{1f}')
+}
+
 /// A serialized JSON frame and its in-process history revision. The revision
 /// never enters the wire format; it invalidates unread frames after deletion.
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -581,10 +597,7 @@ impl<A> ConversationHub<A> {
         self.slots
             .lock()
             .iter()
-            .filter(|(key, _)| {
-                key.rsplit_once('\u{1f}')
-                    .is_some_and(|(key, _)| key == session)
-            })
+            .filter(|(key, _)| conversation_identity(key).is_some_and(|(key, _)| key == session))
             .filter_map(|(_, slot)| slot.get().cloned())
             .collect()
     }
@@ -1282,6 +1295,30 @@ mod tests {
             RequestReceipt::Duplicate {
                 state: "done".into()
             }
+        );
+    }
+
+    #[tokio::test]
+    async fn device_policy_keys_keep_alias_and_session_identity_for_retirement() {
+        let hub = Arc::new(ConversationHub::<()>::default());
+        let first = device_conversation_key("gw_device-session", "edge", "policy-one");
+        let second = device_conversation_key("gw_device-session", "edge", "policy-two");
+        assert_ne!(first, second, "policy snapshots must not share an agent");
+        let (_first, _) = attach(&hub, &first).await;
+        let (_second, _) = attach(&hub, &second).await;
+        let (_owner, _) = attach(&hub, "gw_owner-session\u{1f}edge").await;
+        for key in [&first, &second] {
+            assert_eq!(key.rsplit_once('\u{1f}').unwrap().1, "edge");
+            assert_eq!(
+                conversation_identity(key),
+                Some(("gw_device-session", "edge"))
+            );
+        }
+        assert_eq!(hub.session_conversations("gw_device-session").len(), 2);
+        assert_eq!(hub.session_conversations("gw_owner-session").len(), 1);
+        assert_eq!(
+            conversation_identity("gw_device\u{1f}raw\u{1f}edge"),
+            Some(("gw_device\u{1f}raw", "edge"))
         );
     }
 

@@ -4358,16 +4358,16 @@ mod tests {
     #[test]
     fn json_pointer_to_dotted_handles_pointer_form() {
         assert_eq!(
-            json_pointer_to_dotted("/providers/models/openrouter/api-key"),
-            "providers.models.openrouter.api-key"
+            json_pointer_to_dotted("/providers/models/anthropic/api-key"),
+            "providers.models.anthropic.api-key"
         );
     }
 
     #[test]
     fn json_pointer_to_dotted_passes_dotted_through() {
         assert_eq!(
-            json_pointer_to_dotted("providers.models.openrouter.api-key"),
-            "providers.models.openrouter.api-key"
+            json_pointer_to_dotted("providers.models.anthropic.api-key"),
+            "providers.models.anthropic.api-key"
         );
         assert_eq!(
             json_pointer_to_dotted("scheduler.max_concurrent"),
@@ -4808,10 +4808,21 @@ mod tests {
         };
         cfg.save().await.expect("initial save");
 
-        cfg.browser.computer_use.api_key = Some("injected-via-env".into());
-        cfg.env_overridden_paths = zeroclaw_config::schema::EnvOverriddenPaths::from_set(
-            std::collections::HashSet::from(["browser.computer_use.api_key".to_string()]),
+        cfg.providers.models.anthropic.insert(
+            "default".to_string(),
+            zeroclaw_config::schema::AnthropicModelProviderConfig::default(),
         );
+        cfg.providers
+            .models
+            .anthropic
+            .get_mut("default")
+            .unwrap()
+            .base
+            .api_key = Some("injected-via-env".into());
+        cfg.env_overridden_paths =
+            zeroclaw_config::schema::EnvOverriddenPaths::from_set(std::collections::HashSet::from(
+                ["providers.models.anthropic.default.api_key".to_string()],
+            ));
 
         let drift = compute_drift(&cfg).await;
         assert!(
