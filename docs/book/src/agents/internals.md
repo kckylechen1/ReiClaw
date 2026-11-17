@@ -7,6 +7,19 @@ attributes logs. For configuring and running agents, start at
 [Config](../reference/config.md); for live setup steps, see
 [Multi-agent setup](../contributing/multi-agent-setup.md).
 
+## Turn input preparation
+
+`Agent::turn` and streamed Agent turns share user-message preparation and the
+initial vision-route, dispatcher, and system-prompt setup. Both send and retain
+the same `[{date} {time} {timezone}] {message}` user-message format. The ordinary
+entry point used by evaluation therefore sees the same initial input as production
+streaming for an equivalent agent, history, and clock.
+
+Steering uses the same message preparation but stays local to its round until
+hooks run and the round is replayed into conversation history. Streaming events,
+cancellation, partial-output commits, and response-cache handling remain owned
+by their entry points.
+
 ## Repeated tool failure recovery
 
 Configured `Agent::turn` and streamed Agent turns read root `[pacing]` at the
