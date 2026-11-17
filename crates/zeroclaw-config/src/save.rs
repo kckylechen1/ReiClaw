@@ -567,24 +567,7 @@ impl Config {
         let restorable_snapshots = self.pruned_snapshots_for_restore(&scope_prefixes, false);
         let dirty_enc_keys = self.dirty_encoded_prop_keys(&dirty_prop_paths);
 
-        // Restore non-dirty env-overridden paths to their pre-override snapshots
-        // before encryption, so values supplied via `ZEROCLAW_*` env vars never
-        // reach disk while explicit dirty edits still persist their new value.
-        if !self.pre_override_snapshots.is_empty() {
-            let non_dirty_snapshots: std::collections::HashMap<String, String> = self
-                .pre_override_snapshots
-                .iter()
-                .filter(|(path, _)| {
-                    !self.is_env_path_dirty(path, &dirty_prop_paths, &dirty_enc_keys)
-                })
-                .collect();
-            if !non_dirty_snapshots.is_empty() {
-                crate::env_overrides::mask_env_overrides_for_save(
-                    &mut config_to_save,
-                    &non_dirty_snapshots,
-                )?;
-            }
-        }
+        self.mask_non_dirty_env_overrides(&mut config_to_save, &dirty_prop_paths, &dirty_enc_keys)?;
         let mut after_mask_refs = std::collections::HashMap::new();
         config_to_save.collect_external_secret_refs(None, &mut after_mask_refs)?;
         let mut skip_encoded_dirty: std::collections::HashSet<String> = dirty_prop_paths
@@ -596,14 +579,11 @@ impl Config {
                 skip_encoded_dirty.insert(enc_k.clone());
             }
         }
-        restore_onepassword_references_for_save(
+        let structural_refs = restore_secret_references_for_save(
             &mut config_to_save,
             &restorable_snapshots,
             &skip_encoded_dirty,
         )?;
-
-        let mut structural_refs = std::collections::HashMap::new();
-        config_to_save.collect_external_secret_refs(None, &mut structural_refs)?;
 
         if validate_dirty_refs {
             // `save(&self)` / `force_save(&self)` takes a shared receiver, so it
@@ -637,23 +617,14 @@ impl Config {
             }
         }
 
-        // Encrypt all #[secret]-annotated fields via Configurable derive
-        config_to_save.encrypt_secrets(&store)?;
+        let (mut new_table, default_table) = serialize_for_save(&mut config_to_save, &store)?;
 
-        // Serialize, then prune fields whose values match
+        // Prune fields whose values match
         // `Config::default()` so the on-disk config carries only the
         // operator's actual choices (no hundreds of lines of struct
         // defaults the operator never touched). The schema's
         // `#[serde(default = "...")]` annotations re-supply the
         // defaults on load, so the pruned file round-trips identically.
-        let mut new_table: toml::Table = toml::Value::try_from(&config_to_save)
-            .context("Failed to serialize config to TOML value")?
-            .try_into()
-            .context("Serialized config is not a TOML table")?;
-        let default_table: toml::Table = toml::Value::try_from(Config::default())
-            .ok()
-            .and_then(|v| v.try_into().ok())
-            .unwrap_or_default();
         prune_default_values(&mut new_table, &default_table);
         let new_toml = ensure_blank_line_before_sections(
             &toml::to_string_pretty(&new_table).context("Failed to serialize pruned config")?,
@@ -698,6 +669,28 @@ impl Config {
         // fallback can record provenance without re-resolving (the
         // resolver re-reads the environment for parentless paths).
         Ok((config_path, structural_refs))
+    }
+
+    /// Restore only non-dirty env overrides on a separate save/validation
+    /// candidate. Entry points own admission and publication; this helper never
+    /// changes the live config or its tracking metadata.
+    fn mask_non_dirty_env_overrides(
+        &self,
+        candidate: &mut Config,
+        dirty_prop_paths: &std::collections::HashSet<String>,
+        dirty_enc_keys: &std::collections::HashSet<String>,
+    ) -> Result<()> {
+        if !self.pre_override_snapshots.is_empty() {
+            let non_dirty_snapshots: std::collections::HashMap<String, String> = self
+                .pre_override_snapshots
+                .iter()
+                .filter(|(path, _)| !self.is_env_path_dirty(path, dirty_prop_paths, dirty_enc_keys))
+                .collect();
+            if !non_dirty_snapshots.is_empty() {
+                crate::env_overrides::mask_env_overrides_for_save(candidate, &non_dirty_snapshots)?;
+            }
+        }
+        Ok(())
     }
 
     fn dirty_encoded_prop_keys(
@@ -1242,21 +1235,7 @@ impl Config {
     ) -> Result<(Self, std::collections::HashSet<String>, Vec<String>)> {
         let mut masked_self = self.clone();
         let dirty_enc_keys = self.dirty_encoded_prop_keys(dirty_prop_paths);
-        if !self.pre_override_snapshots.is_empty() {
-            let non_dirty_snapshots: std::collections::HashMap<String, String> = self
-                .pre_override_snapshots
-                .iter()
-                .filter(|(path, _)| {
-                    !self.is_env_path_dirty(path, dirty_prop_paths, &dirty_enc_keys)
-                })
-                .collect();
-            if !non_dirty_snapshots.is_empty() {
-                crate::env_overrides::mask_env_overrides_for_save(
-                    &mut masked_self,
-                    &non_dirty_snapshots,
-                )?;
-            }
-        }
+        self.mask_non_dirty_env_overrides(&mut masked_self, dirty_prop_paths, &dirty_enc_keys)?;
 
         let mut live_refs = std::collections::HashMap::new();
         masked_self.collect_external_secret_refs(None, &mut live_refs)?;
@@ -1408,38 +1387,13 @@ impl Config {
         let store = crate::secrets::SecretStore::new(zeroclaw_dir, self.secrets.encrypt);
         let dirty_enc_keys = self.dirty_encoded_prop_keys(&dirty_prop_paths);
 
-        if !self.pre_override_snapshots.is_empty() {
-            let non_dirty_snapshots: std::collections::HashMap<String, String> = self
-                .pre_override_snapshots
-                .iter()
-                .filter(|(path, _)| {
-                    !self.is_env_path_dirty(path, &dirty_prop_paths, &dirty_enc_keys)
-                })
-                .collect();
-            if !non_dirty_snapshots.is_empty() {
-                crate::env_overrides::mask_env_overrides_for_save(
-                    &mut config_to_save,
-                    &non_dirty_snapshots,
-                )?;
-            }
-        }
-        restore_onepassword_references_for_save(
+        self.mask_non_dirty_env_overrides(&mut config_to_save, &dirty_prop_paths, &dirty_enc_keys)?;
+        let structural_refs = restore_secret_references_for_save(
             &mut config_to_save,
             &restorable_snapshots,
             &skip_restore_enc_keys,
         )?;
-        let mut structural_refs = std::collections::HashMap::new();
-        config_to_save.collect_external_secret_refs(None, &mut structural_refs)?;
-        config_to_save.encrypt_secrets(&store)?;
-
-        let full_table: toml::Table = toml::Value::try_from(&config_to_save)
-            .context("Failed to serialize config to TOML value")?
-            .try_into()
-            .context("Serialized config is not a TOML table")?;
-        let default_table: toml::Table = toml::Value::try_from(Config::default())
-            .ok()
-            .and_then(|v| v.try_into().ok())
-            .unwrap_or_default();
+        let (full_table, default_table) = serialize_for_save(&mut config_to_save, &store)?;
 
         for (section_path, entry_key) in &whole_entries {
             apply_dirty_whole_entry(
@@ -1460,14 +1414,9 @@ impl Config {
             )?;
         }
 
-        // Stamp the current schema version. An incremental save writes
-        // current-schema-shaped sections (e.g. the dashboard saving a single
-        // `agents.<name>.model_provider`) but `schema_version` is never a
-        // dirty path, so without this it keeps whatever an older binary first
-        // wrote on disk. The resulting body-newer-than-label file then crashes
-        // older binaries with an opaque `missing field ...` serde error.
-        // `insert` updates the existing key in place (preserving its
-        // position at the top of the file) or appends it when absent.
+        // Keep the supported version explicit even when no bookkeeping path
+        // was dirty. Admission already rejected other disk generations above;
+        // updating this key preserves its position in the existing document.
         doc.as_table_mut().insert(
             "schema_version",
             toml_edit::value(i64::from(crate::current::CURRENT_SCHEMA_VERSION)),
@@ -1615,15 +1564,37 @@ fn snapshot_key_covered_by_prefixes(key: &str, prefixes: &[String]) -> bool {
     })
 }
 
-fn restore_onepassword_references_for_save(
+/// Restore retained external references, then capture the exact references that
+/// the caller is about to persist. Each save path chooses its own dirty skips.
+fn restore_secret_references_for_save(
     config_to_save: &mut Config,
     snapshots: &std::collections::HashMap<String, String>,
     skip_encoded_dirty: &std::collections::HashSet<String>,
-) -> Result<()> {
-    if snapshots.is_empty() {
-        return Ok(());
+) -> Result<std::collections::HashMap<String, String>> {
+    if !snapshots.is_empty() {
+        config_to_save.restore_external_secret_refs(None, snapshots, skip_encoded_dirty)?;
     }
-    config_to_save.restore_external_secret_refs(None, snapshots, skip_encoded_dirty)
+    let mut structural_refs = std::collections::HashMap::new();
+    config_to_save.collect_external_secret_refs(None, &mut structural_refs)?;
+    Ok(structural_refs)
+}
+
+/// Shared serialization after admission, env masking and reference validation.
+/// Full saves prune/sync these tables; incremental saves patch only dirty paths.
+fn serialize_for_save(
+    config_to_save: &mut Config,
+    store: &crate::secrets::SecretStore,
+) -> Result<(toml::Table, toml::Table)> {
+    config_to_save.encrypt_secrets(store)?;
+    let actual = toml::Value::try_from(&*config_to_save)
+        .context("Failed to serialize config to TOML value")?
+        .try_into()
+        .context("Serialized config is not a TOML table")?;
+    let defaults = toml::Value::try_from(Config::default())
+        .ok()
+        .and_then(|v| v.try_into().ok())
+        .unwrap_or_default();
+    Ok((actual, defaults))
 }
 
 /// Atomic write shared by `save()` and `save_dirty()`.
