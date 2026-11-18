@@ -2,12 +2,12 @@
 
 Full rustdoc for every public type in the workspace, auto-generated from the `///` comments on each type, function, and module. Use this when you need to know the exact shape of a struct, the methods on a trait, or what a function returns: anything the generated reference exposes better than prose can.
 
-**[Open the rustdoc →](/api/zeroclaw/index.html)**
+**[Open the rustdoc →](/api/reiclaw/index.html)**
 
 ## How to navigate it
 
 - The sidebar on the left lists every crate in the workspace
-- Click `zeroclaw-api` first; that's where the public traits (`Provider`, `Channel`, `Tool`) live
+- Click `reiclaw-api` first; that's where the public traits (`Provider`, `Channel`, `Tool`) live
 - Use `cmd/ctrl+F` in the rustdoc page to search within a crate
 - Click on any trait to see implementors across the workspace
 
@@ -15,17 +15,17 @@ Full rustdoc for every public type in the workspace, auto-generated from the `//
 
 | Crate | What it exposes |
 |---|---|
-| [`zeroclaw`](/api/zeroclaw/index.html) | Top-level umbrella with re-exports |
-| [`zeroclaw-api`](/api/zeroclaw_api/index.html) | Public traits: `Provider`, `Channel`, `Tool`, `StreamEvent` |
-| [`zeroclaw-config`](/api/zeroclaw_config/index.html) | Config schema, autonomy types, secrets |
-| [`zeroclaw-runtime`](/api/zeroclaw_runtime/index.html) | Agent loop, security, SOP, onboarding |
-| [`zeroclaw-providers`](/api/zeroclaw_providers/index.html) | Every LLM-provider implementation |
-| [`zeroclaw-provider-dispatch`](/api/zeroclaw_provider_dispatch/index.html) | Attributed model calls through the provider interface, without concrete providers |
-| [`zeroclaw-gateway-client`](/api/zeroclaw_gateway_client/index.html) | WebSocket client SDK for channel bridges and chat clients |
-| [`zeroclaw-gateway`](/api/zeroclaw_gateway/index.html) | HTTP/WebSocket gateway |
-| [`zeroclaw-tools`](/api/zeroclaw_tools/index.html) | Agent-callable tools |
-| [`zeroclaw-memory`](/api/zeroclaw_memory/index.html) | Conversation memory, embeddings |
-| [`zeroclaw-infra`](/api/zeroclaw_infra/index.html) | Tracing, metrics |
+| [`reiclaw`](/api/reiclaw/index.html) | Top-level umbrella with re-exports |
+| [`reiclaw-api`](/api/reiclaw_api/index.html) | Public traits: `Provider`, `Channel`, `Tool`, `StreamEvent` |
+| [`reiclaw-config`](/api/reiclaw_config/index.html) | Config schema, autonomy types, secrets |
+| [`reiclaw-runtime`](/api/reiclaw_runtime/index.html) | Agent loop, security, SOP, onboarding |
+| [`reiclaw-providers`](/api/reiclaw_providers/index.html) | Every LLM-provider implementation |
+| [`reiclaw-provider-dispatch`](/api/reiclaw_provider_dispatch/index.html) | Attributed model calls through the provider interface, without concrete providers |
+| [`reiclaw-gateway-client`](/api/reiclaw_gateway_client/index.html) | WebSocket client SDK for channel bridges and chat clients |
+| [`reiclaw-gateway`](/api/reiclaw_gateway/index.html) | HTTP/WebSocket gateway |
+| [`reiclaw-tools`](/api/reiclaw_tools/index.html) | Agent-callable tools |
+| [`reiclaw-memory`](/api/reiclaw_memory/index.html) | Conversation memory, embeddings |
+| [`reiclaw-infra`](/api/reiclaw_infra/index.html) | Tracing, metrics |
 
 See [Architecture → Crates](./architecture/crates.md) for a plain-English description of how the crates fit together.
 

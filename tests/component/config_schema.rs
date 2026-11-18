@@ -2,8 +2,8 @@
 //! Validates: config defaults, current-schema boundaries, invalid input rejection,
 //! and gateway/security/agent config boundary conditions.
 
-use zeroclaw::config::current;
-use zeroclaw::config::{Config, GatewayConfig, RiskProfileConfig, SecurityConfig};
+use reiclaw::config::current;
+use reiclaw::config::{Config, GatewayConfig, RiskProfileConfig, SecurityConfig};
 
 fn parse(toml_str: &str) -> Config {
     current::parse_current(toml_str).expect("current configuration parses")
@@ -226,7 +226,7 @@ fn runtime_profile_max_actions_per_hour_round_trips_through_toml() {
     let mut config = Config::default();
     config.runtime_profiles.insert(
         "clamps".into(),
-        zeroclaw_config::schema::RuntimeProfileConfig {
+        reiclaw_config::schema::RuntimeProfileConfig {
             max_actions_per_hour: 50,
             ..Default::default()
         },

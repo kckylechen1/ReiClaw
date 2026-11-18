@@ -1,0 +1,921 @@
+//! Opt-in non-Telegram turn transport. Conversation owns execution; this bounded
+//! process-local journal owns only correlation and replay. Losing it never grants
+//! permission to repeat an effect. Existing session receipts remain authoritative.
+use super::*;
+use parking_lot::Mutex;
+use serde_json::{Value, json};
+use sha2::{Digest, Sha256};
+use std::collections::HashMap;
+
+const VERSION: u64 = 1;
+const MAX_REQUESTS: usize = 256;
+const MAX_CONTENT: usize = 64 * 1024;
+const MAX_REPLAY_BYTES: usize = 64 * 1024;
+const MAX_EVENTS: usize = 128;
+pub(super) const WRITE_TIMEOUT: Duration = Duration::from_secs(5);
+
+pub(crate) struct Store {
+    epoch: String,
+    entries: Mutex<HashMap<String, Entry>>,
+}
+
+struct Entry {
+    redacted: bool,
+    conversation: String,
+    subject: String,
+    request: String,
+    /// Present only for an explicit steer receipt. It shares this bounded
+    /// process-epoch journal but never owns execution or replay events.
+    parent_request: Option<String>,
+    turn: String,
+    content: String,
+    attachments: Vec<String>,
+    sequence: u64,
+    events: Vec<Value>,
+    bytes: usize,
+    gap: bool,
+    terminal: Option<Value>,
+}
+
+impl Default for Store {
+    fn default() -> Self {
+        Self {
+            epoch: uuid::Uuid::new_v4().to_string(),
+            entries: Mutex::new(HashMap::new()),
+        }
+    }
+}
+
+fn error(code: &str) -> Value {
+    json!({"type":"turn_error", "version":VERSION, "code":code})
+}
+
+/// Brain-monitor wire events (#564): every S2 admission lands in the
+/// structured log with identities and SIZES ONLY — message content and
+/// attachment bytes are never logged. This is the S5 switch timeline's
+/// authoritative feed (viewed via `/api/logs`, category `session`).
+fn log_admission(
+    scope: &WsTurnScope,
+    alias: &str,
+    request: &str,
+    status: &str,
+    content_bytes: usize,
+    attachments: usize,
+    turn: Option<&str>,
+) {
+    ::reiclaw_log::record!(
+        INFO,
+        ::reiclaw_log::Event::new(module_path!(), ::reiclaw_log::Action::Inbound)
+            .with_category(::reiclaw_log::EventCategory::Session)
+            .with_outcome(if matches!(status, "accepted" | "duplicate") {
+                ::reiclaw_log::EventOutcome::Success
+            } else {
+                ::reiclaw_log::EventOutcome::Failure
+            })
+            .with_attrs(::serde_json::json!({
+                "session_id": scope.session_id,
+                "agent": alias,
+                "request_id": request,
+                "status": status,
+                "content_bytes": content_bytes,
+                "attachments": attachments,
+                "turn_id": turn,
+            })),
+        "S2 turn admission"
+    );
+}
+
+fn log_refusal(scope: &WsTurnScope, alias: &str, request: &str, code: &str, attachments: usize) {
+    ::reiclaw_log::record!(
+        INFO,
+        ::reiclaw_log::Event::new(module_path!(), ::reiclaw_log::Action::Reject)
+            .with_category(::reiclaw_log::EventCategory::Session)
+            .with_outcome(::reiclaw_log::EventOutcome::Failure)
+            .with_attrs(::serde_json::json!({
+                "session_id": scope.session_id,
+                "agent": alias,
+                "request_id": request,
+                "code": code,
+                "attachments": attachments,
+            })),
+        "S2 turn admission refused"
+    );
+}
+
+/// Terminal lifecycle event for BOTH paths (#564). `conversation` is the
+/// gateway conversation key (`gw_<session>\x1f<agent>`); the logged
+/// `session_id` strips the transport prefix so admission, cancel and
+/// terminal events for one turn carry the SAME identity. Outcome mapping:
+/// `done` succeeds; `aborted`/`error` fail (matching the legacy cancel
+/// logging); anything else is unknown — never a silent success.
+fn log_terminal(conversation: &str, request: Option<&str>, turn: &str, outcome: &str) {
+    let (session_key, agent) =
+        crate::ws_conversation::conversation_identity(conversation).unwrap_or((conversation, ""));
+    let session_id = session_key
+        .strip_prefix(super::GW_SESSION_PREFIX)
+        .unwrap_or(session_key);
+    ::reiclaw_log::record!(
+        INFO,
+        ::reiclaw_log::Event::new(module_path!(), ::reiclaw_log::Action::Complete)
+            .with_category(::reiclaw_log::EventCategory::Session)
+            .with_outcome(match outcome {
+                "done" => ::reiclaw_log::EventOutcome::Success,
+                "aborted" | "error" => ::reiclaw_log::EventOutcome::Failure,
+                _ => ::reiclaw_log::EventOutcome::Unknown,
+            })
+            .with_attrs(::serde_json::json!({
+                "session_id": session_id,
+                "agent": agent,
+                "request_id": request,
+                "turn_id": turn,
+                "outcome": outcome,
+            })),
+        "turn terminal"
+    );
+}
+
+/// Length-delimited receipt key minting; also exercised directly by the
+/// cross-session monitor test (a caller can compute their own key).
+pub(super) fn key(conversation: &str, subject: &str, epoch: &str, request: &str) -> String {
+    // Length-delimited identity cannot collide with another principal or with
+    // the legacy caller-chosen request namespace by accidental concatenation.
+    let mut hash = Sha256::new();
+    for part in [conversation, subject, epoch, request] {
+        hash.update((part.len() as u64).to_be_bytes());
+        hash.update(part.as_bytes());
+    }
+    format!("tc1:{}", hex::encode(hash.finalize()))
+}
+
+fn ack(store: &Store, request: &str, turn: Option<&str>, status: &str) -> Value {
+    json!({"type":"turn_ack", "version":VERSION, "epoch":store.epoch,
+        "request_id":request, "turn_id":turn, "status":status})
+}
+
+fn steer_ack(store: &Store, request: &str, parent: &str, turn: &str, status: &str) -> Value {
+    json!({"type":"turn_steer_ack", "version":VERSION, "epoch":store.epoch,
+        "request_id":request, "parent_request_id":parent, "turn_id":turn, "status":status})
+}
+
+/// Unknown operations are parsed/refused before taking any admission action.
+/// A negotiated socket cannot fall through to legacy message/cancel semantics.
+pub(super) fn handle(
+    state: &AppState,
+    conversation: &Arc<Conversation<WsSession>>,
+    scope: &WsTurnScope,
+    negotiated: &mut bool,
+    steering_negotiated: &mut bool,
+    text: &str,
+) -> (Option<Value>, Option<TurnClaim>) {
+    let parsed = match serde_json::from_str::<Value>(text) {
+        Ok(value) => value,
+        Err(_) => return (Some(error("INVALID_JSON")), None),
+    };
+    if parsed["type"] != "turn_control" {
+        // Owner question/approval capabilities and read-only /btw side queries
+        // retain their established gate without entering the turn journal.
+        // Reject any `source` or `attachments` envelope on this legacy path so a
+        // negotiated socket can never fall through to `intake::receive`.
+        if (matches!(
+            parsed["type"].as_str(),
+            Some("answer" | "approval_response" | "btw")
+        ) || (parsed["type"].as_str() == Some("message")
+            && parsed["content"]
+                .as_str()
+                .is_some_and(|c| super::parse_btw_command(c).is_some())))
+            && parsed.get("source").is_none()
+            && parsed.get("attachments").is_none()
+        {
+            return handle_client_text(state, conversation, scope, text);
+        }
+        return (Some(error("UNKNOWN_OPERATION")), None);
+    }
+    if parsed["version"].as_u64() != Some(VERSION) {
+        return (Some(error("UNSUPPORTED_VERSION")), None);
+    }
+    let operation = parsed["op"].as_str().unwrap_or("");
+    if !matches!(
+        operation,
+        "negotiate" | "message" | "resume" | "cancel" | "steer"
+    ) {
+        return (Some(error("UNKNOWN_OPERATION")), None);
+    }
+    // Errors past this point name the operation so a client can tell an
+    // admission failure (its turn will never start) from a failed control.
+    let error_op = |code: &str| -> Value {
+        let mut reply =
+            json!({"type":"turn_error", "version":VERSION, "op":operation, "code":code});
+        if operation == "steer" {
+            reply["request_id"] = parsed["request_id"].clone();
+            reply["parent_request_id"] = parsed["parent_request_id"].clone();
+            reply["turn_id"] = parsed["turn_id"].clone();
+            reply["epoch"] = parsed["epoch"].clone();
+        }
+        reply
+    };
+    let alias = conversation
+        .key()
+        .rsplit_once('\u{1f}')
+        .map_or("", |(_, alias)| alias);
+    // Bridge-operation parity: the legacy classifier routes attachment-bearing
+    // messages to "unsupported", so a restricted bridge cannot carry them.
+    // Negotiate/resume are transport bookkeeping and stay "chat". The
+    // classifier reads the legacy frame shape, so project this op's payload
+    // into that view — a turn_control envelope itself would classify as
+    // "unsupported" wholesale.
+    let permission = match operation {
+        "cancel" => "cancel",
+        "message" | "steer" => device::frame_operation(&json!({
+            "type": "message",
+            "attachments": parsed.get("attachments"),
+        })),
+        _ => "chat",
+    };
+    if !device::permitted(state, scope, alias, permission)
+        || !question_answer_authorized(state, scope)
+    {
+        return (Some(device::refusal("BRIDGE_OPERATION_DENIED")), None);
+    }
+    let Some(subject) = scope.auth_subject.as_deref() else {
+        return (Some(error_op("AUTHENTICATION_REQUIRED")), None);
+    };
+    let store = &state.ws_conversations.turn_control;
+    if operation == "negotiate" {
+        *negotiated = true;
+        *steering_negotiated = parsed["capabilities"]
+            .as_array()
+            .is_some_and(|capabilities| {
+                capabilities.iter().any(|capability| capability == "steer")
+            });
+        ::reiclaw_log::record!(
+            DEBUG,
+            ::reiclaw_log::Event::new(module_path!(), ::reiclaw_log::Action::Connect)
+                .with_category(::reiclaw_log::EventCategory::Session)
+                .with_outcome(::reiclaw_log::EventOutcome::Success)
+                .with_attrs(::serde_json::json!({
+                    "session_id": scope.session_id,
+                    "agent": alias,
+                    "epoch": store.epoch,
+                    "surface": scope.surface,
+                })),
+            "S2 turn-control negotiated"
+        );
+        return (
+            Some(
+                json!({"type":"turn_ready", "version":VERSION, "epoch":store.epoch,
+            "limits":{"requests_per_epoch":MAX_REQUESTS,"content_bytes":MAX_CONTENT,
+                "replay_bytes":MAX_REPLAY_BYTES,"replay_events":MAX_EVENTS,
+                "write_timeout_ms":WRITE_TIMEOUT.as_millis()},
+            "recovery":"process_epoch", "busy":"reject",
+            "capabilities": if *steering_negotiated { vec!["steer"] } else { Vec::<&str>::new() }}),
+            ),
+            None,
+        );
+    }
+    if !*negotiated {
+        return (Some(error_op("NEGOTIATION_REQUIRED")), None);
+    }
+    if operation == "steer" && !*steering_negotiated {
+        return (Some(error_op("STEERING_NOT_NEGOTIATED")), None);
+    }
+    if parsed["epoch"].as_str() != Some(store.epoch.as_str()) {
+        return (Some(error_op("EPOCH_MISMATCH")), None);
+    }
+    let Some(request) = parsed["request_id"]
+        .as_str()
+        .filter(|id| id.len() == 36 && uuid::Uuid::parse_str(id).is_ok())
+    else {
+        return (Some(error_op("INVALID_REQUEST_ID")), None);
+    };
+    let receipt_key = key(conversation.key(), subject, &store.epoch, request);
+    let steer_target = if operation == "steer" {
+        let valid_id = |field: &str| {
+            parsed[field]
+                .as_str()
+                .filter(|id| id.len() == 36 && uuid::Uuid::parse_str(id).is_ok())
+        };
+        let Some(parent) = valid_id("parent_request_id") else {
+            return (Some(error_op("INVALID_PARENT_REQUEST_ID")), None);
+        };
+        let Some(turn) = valid_id("turn_id") else {
+            return (Some(error_op("INVALID_TURN_ID")), None);
+        };
+        Some((parent, turn))
+    } else {
+        None
+    };
+    let mut entries = store.entries.lock();
+    if operation == "resume" {
+        let Some(after) = parsed["after_seq"].as_u64() else {
+            return (Some(error_op("INVALID_SEQUENCE")), None);
+        };
+        ::reiclaw_log::record!(
+            DEBUG,
+            ::reiclaw_log::Event::new(module_path!(), ::reiclaw_log::Action::Query)
+                .with_category(::reiclaw_log::EventCategory::Session)
+                .with_outcome(::reiclaw_log::EventOutcome::Success)
+                .with_attrs(::serde_json::json!({
+                    "session_id": scope.session_id,
+                    "agent": alias,
+                    "request_id": request,
+                    "after_seq": after,
+                })),
+            "S2 turn replay requested"
+        );
+        return (
+            Some(match entries.get(&receipt_key) {
+                None => ack(store, request, None, "unknown"),
+                Some(entry) if entry.redacted || entry.parent_request.is_some() => {
+                    ack(store, request, None, "unknown")
+                }
+                Some(entry) if after > entry.sequence => error_op("INVALID_SEQUENCE"),
+                Some(entry) => {
+                    let mut events: Vec<_> = entry
+                        .events
+                        .iter()
+                        .filter(|event| event["seq"].as_u64().is_some_and(|seq| seq > after))
+                        .cloned()
+                        .collect();
+                    if let Some(terminal) = &entry.terminal
+                        && terminal["seq"].as_u64().is_some_and(|seq| seq > after)
+                    {
+                        events.push(terminal.clone());
+                    }
+                    json!({"type":"turn_replay", "version":VERSION, "epoch":store.epoch,
+                    "request_id":request, "turn_id":entry.turn, "events":events,
+                    "gap":entry.gap, "terminal":entry.terminal.is_some(), "last_seq":entry.sequence})
+                }
+            }),
+            None,
+        );
+    }
+    if operation == "cancel" {
+        let Some(target) = parsed["turn_id"]
+            .as_str()
+            .filter(|id| uuid::Uuid::parse_str(id).is_ok())
+        else {
+            return (Some(error_op("INVALID_TURN_ID")), None);
+        };
+        let status = match entries.get(&receipt_key) {
+            None => "unknown",
+            Some(entry) if entry.redacted || entry.parent_request.is_some() => "unknown",
+            Some(entry) if entry.turn != target => "stale",
+            Some(_) => conversation.cancel_turn(target),
+        };
+        ::reiclaw_log::record!(
+            INFO,
+            ::reiclaw_log::Event::new(module_path!(), ::reiclaw_log::Action::Cancel)
+                .with_category(::reiclaw_log::EventCategory::Session)
+                .with_outcome(::reiclaw_log::EventOutcome::Success)
+                .with_attrs(::serde_json::json!({
+                    "session_id": scope.session_id,
+                    "agent": alias,
+                    "request_id": request,
+                    "turn_id": target,
+                    "status": status,
+                })),
+            "S2 turn cancellation"
+        );
+        return (
+            Some(
+                json!({"type":"turn_cancel_ack", "version":VERSION,"epoch":store.epoch,
+            "request_id":request,"turn_id":target,"status":status}),
+            ),
+            None,
+        );
+    }
+    let Some(content) = parsed["content"]
+        .as_str()
+        .filter(|s| s.len() <= MAX_CONTENT)
+    else {
+        log_refusal(scope, alias, request, "INVALID_CONTENT", 0);
+        return (Some(error_op("INVALID_CONTENT")), None);
+    };
+    // `attachments` is the sole admitted extra field: the same #491 scoped
+    // handles, shape, limits and authorization as the legacy path — it grants
+    // no new source or identity authority.
+    let attachments = match parsed.get("attachments") {
+        None | Some(serde_json::Value::Null) => Vec::new(),
+        Some(serde_json::Value::Array(ids))
+            if ids.len() <= crate::api_attachments::MAX_MESSAGE_ITEMS =>
+        {
+            let Some(ids) = ids
+                .iter()
+                .map(|value| {
+                    value
+                        .as_str()
+                        .filter(|id| id.len() == 36 && uuid::Uuid::parse_str(id).is_ok())
+                        .map(str::to_owned)
+                })
+                .collect::<Option<Vec<_>>>()
+            else {
+                log_refusal(scope, alias, request, "INVALID_ATTACHMENTS", 0);
+                return (Some(error_op("INVALID_ATTACHMENTS")), None);
+            };
+            let unique: std::collections::HashSet<_> = ids.iter().collect();
+            if unique.len() != ids.len() {
+                log_refusal(scope, alias, request, "INVALID_ATTACHMENTS", ids.len());
+                return (Some(error_op("INVALID_ATTACHMENTS")), None);
+            }
+            ids
+        }
+        Some(_) => {
+            log_refusal(scope, alias, request, "INVALID_ATTACHMENTS", 0);
+            return (Some(error_op("INVALID_ATTACHMENTS")), None);
+        }
+    };
+    if (content.is_empty() || (operation == "steer" && content.trim().is_empty()))
+        && attachments.is_empty()
+    {
+        log_refusal(scope, alias, request, "INVALID_CONTENT", 0);
+        return (Some(error_op("INVALID_CONTENT")), None);
+    }
+    // Unsupported input fields must not silently acquire source/attachment authority.
+    if parsed.as_object().is_none_or(|fields| {
+        fields.keys().any(|field| {
+            !(matches!(
+                field.as_str(),
+                "type" | "version" | "op" | "epoch" | "request_id" | "content" | "attachments"
+            ) || operation == "steer"
+                && matches!(field.as_str(), "parent_request_id" | "turn_id"))
+        })
+    }) {
+        log_refusal(scope, alias, request, "UNSUPPORTED_FIELD", 0);
+        return (Some(error_op("UNSUPPORTED_FIELD")), None);
+    }
+    if operation == "message"
+        && let Some(question) = super::parse_btw_command(content)
+    {
+        if !attachments.is_empty() {
+            log_refusal(
+                scope,
+                alias,
+                request,
+                "INVALID_ATTACHMENTS",
+                attachments.len(),
+            );
+            return (Some(error_op("INVALID_ATTACHMENTS")), None);
+        }
+        if question.is_empty()
+            || question.len() > reiclaw_runtime::agent::side_query::MAX_SIDE_QUERY_QUESTION_BYTES
+        {
+            log_refusal(scope, alias, request, "INVALID_CONTENT", question.len());
+            return (Some(error_op("INVALID_CONTENT")), None);
+        }
+        drop(entries);
+        let Some(side_query) = conversation.side_query.clone() else {
+            return (Some(error_op("BTW_UNAVAILABLE")), None);
+        };
+        let Some(permit) = side_query.try_acquire_slot() else {
+            return (Some(error_op("BTW_BUSY")), None);
+        };
+        let active_turn = conversation.active_turn_id();
+        let _task = super::spawn_ws_btw_query(
+            state,
+            conversation,
+            side_query,
+            permit,
+            question.to_string(),
+            Some(request.to_string()),
+        );
+        return (
+            Some(ack(store, request, active_turn.as_deref(), "btw")),
+            None,
+        );
+    }
+    if let Some(entry) = entries.get(&receipt_key) {
+        if let Some((parent, target)) = steer_target {
+            let status = if entry.redacted {
+                "unknown"
+            } else if entry.parent_request.as_deref() == Some(parent)
+                && entry.turn == target
+                && entry.content == content
+                && entry.attachments == attachments
+            {
+                "duplicate"
+            } else {
+                "conflict"
+            };
+            return (
+                Some(steer_ack(store, request, parent, target, status)),
+                None,
+            );
+        }
+        if entry.redacted {
+            log_admission(
+                scope,
+                alias,
+                request,
+                "unknown",
+                content.len(),
+                attachments.len(),
+                None,
+            );
+            return (Some(ack(store, request, None, "unknown")), None);
+        }
+        let status = if entry.parent_request.is_none()
+            && entry.content == content
+            && entry.attachments == attachments
+        {
+            "duplicate"
+        } else {
+            "conflict"
+        };
+        log_admission(
+            scope,
+            alias,
+            request,
+            status,
+            content.len(),
+            attachments.len(),
+            Some(&entry.turn),
+        );
+        return (Some(ack(store, request, Some(&entry.turn), status)), None);
+    }
+    // No eviction: forgetting accepted identities would permit an old request
+    // to run again once a session backend's finite receipt window expires.
+    if entries.len() >= MAX_REQUESTS {
+        log_refusal(scope, alias, request, "REQUEST_CAPACITY", 0);
+        return (Some(error_op("REQUEST_CAPACITY")), None);
+    }
+    if let Some((parent, target)) = steer_target {
+        let parent_key = key(conversation.key(), subject, &store.epoch, parent);
+        let status = match entries.get(&parent_key) {
+            None => Some("unknown"),
+            Some(entry) if entry.redacted || entry.parent_request.is_some() => Some("unknown"),
+            Some(entry) if entry.turn != target => Some("stale"),
+            Some(entry) if entry.terminal.is_some() => Some("terminal"),
+            Some(_) => None,
+        };
+        if let Some(status) = status {
+            return (
+                Some(steer_ack(store, request, parent, target, status)),
+                None,
+            );
+        }
+    }
+    // Resolve #491 scoped handles exactly as the legacy message path does:
+    // the attachments store owns materialization; authorization is consulted
+    // before and after resolution because a revoke can race the encode.
+    // Nothing here runs when materialization refuses, so a refused request
+    // never occupies the journal.
+    let mut input = content.to_string();
+    if !attachments.is_empty() {
+        if alias.is_empty() {
+            log_refusal(
+                scope,
+                alias,
+                request,
+                "ATTACHMENT_UNAVAILABLE",
+                attachments.len(),
+            );
+            return (Some(error_op("ATTACHMENT_UNAVAILABLE")), None);
+        }
+        let payload_scope = crate::api_attachments::Scope {
+            subject: subject.to_string(),
+            session: scope.session_id.clone(),
+            agent: alias.to_string(),
+        };
+        if !crate::api_attachments::scope_authorized(state, &payload_scope) {
+            log_refusal(
+                scope,
+                alias,
+                request,
+                "UNAUTHORIZED_ATTACHMENTS",
+                attachments.len(),
+            );
+            return (Some(error_op("UNAUTHORIZED_ATTACHMENTS")), None);
+        }
+        input = match state.ws_conversations.attachments.materialize(
+            &payload_scope,
+            &attachments,
+            content,
+        ) {
+            Ok(materialized) => materialized,
+            Err(_) => {
+                log_refusal(
+                    scope,
+                    alias,
+                    request,
+                    "ATTACHMENT_UNAVAILABLE",
+                    attachments.len(),
+                );
+                return (Some(error_op("ATTACHMENT_UNAVAILABLE")), None);
+            }
+        };
+        if !crate::api_attachments::scope_authorized(state, &payload_scope) {
+            log_refusal(
+                scope,
+                alias,
+                request,
+                "UNAUTHORIZED_ATTACHMENTS",
+                attachments.len(),
+            );
+            return (Some(error_op("UNAUTHORIZED_ATTACHMENTS")), None);
+        }
+    }
+    if let Some((parent, target)) = steer_target {
+        // Materialization can take time: recheck live authorization before
+        // handing input to the existing bounded Conversation queue.
+        if !device::permitted(state, scope, alias, permission)
+            || !question_answer_authorized(state, scope)
+        {
+            return (Some(error_op("BRIDGE_OPERATION_DENIED")), None);
+        }
+        let status = conversation.steer_turn(target, input);
+        if status == "accepted" {
+            entries.insert(
+                receipt_key,
+                Entry {
+                    redacted: false,
+                    conversation: conversation.key().to_string(),
+                    subject: subject.to_string(),
+                    request: request.to_string(),
+                    parent_request: Some(parent.to_string()),
+                    turn: target.to_string(),
+                    content: content.to_string(),
+                    attachments: attachments.clone(),
+                    sequence: 0,
+                    events: Vec::new(),
+                    bytes: 0,
+                    gap: false,
+                    terminal: None,
+                },
+            );
+        }
+        log_admission(
+            scope,
+            alias,
+            request,
+            status,
+            content.len(),
+            attachments.len(),
+            Some(target),
+        );
+        // Accepted means buffered for this turn, never "applied". Cancellation,
+        // budget exhaustion or terminal settlement can win before consumption.
+        return (
+            Some(steer_ack(store, request, parent, target, status)),
+            None,
+        );
+    }
+    let Some(mut claim) = conversation.start_if_idle(input) else {
+        log_admission(
+            scope,
+            alias,
+            request,
+            "busy",
+            content.len(),
+            attachments.len(),
+            None,
+        );
+        return (Some(ack(store, request, None, "busy")), None);
+    };
+    // Holding the journal lock serializes reserve/record/map versus other
+    // extension admissions. The Conversation lock itself is not held here.
+    match accept_request(state, conversation, &scope.session_key, &receipt_key) {
+        Ok((RequestReceipt::Recorded, _)) => {}
+        Ok((RequestReceipt::Duplicate { .. }, _)) => {
+            conversation.finish_turn(claim.generation);
+            log_admission(
+                scope,
+                alias,
+                request,
+                "unknown",
+                content.len(),
+                attachments.len(),
+                None,
+            );
+            return (Some(ack(store, request, None, "unknown")), None);
+        }
+        Err(_) => {
+            conversation.finish_turn(claim.generation);
+            log_admission(
+                scope,
+                alias,
+                request,
+                "refused",
+                content.len(),
+                attachments.len(),
+                None,
+            );
+            return (Some(error_op("REQUEST_NOT_RECORDED")), None);
+        }
+    }
+    let turn = claim.turn_id.clone();
+    log_admission(
+        scope,
+        alias,
+        request,
+        "accepted",
+        content.len(),
+        attachments.len(),
+        Some(&turn),
+    );
+    entries.insert(
+        receipt_key.clone(),
+        Entry {
+            redacted: false,
+            conversation: conversation.key().to_string(),
+            subject: subject.to_string(),
+            request: request.to_string(),
+            parent_request: None,
+            turn: turn.clone(),
+            content: content.to_string(),
+            attachments: attachments.clone(),
+            sequence: 0,
+            events: Vec::new(),
+            bytes: 0,
+            gap: false,
+            terminal: None,
+        },
+    );
+    claim.original_input = Some(content.to_string());
+    claim.request_id = Some(receipt_key);
+    claim.surface = scope.surface;
+    (
+        Some(ack(store, request, Some(&turn), "accepted")),
+        Some(claim),
+    )
+}
+
+impl Store {
+    /// True when the journal holds an entry that plausibly belongs to THIS
+    /// turn's admission: a live entry with a matching turn, or a redacted
+    /// tombstone (whose turn was erased). Global key membership alone would
+    /// misclassify a caller-chosen legacy id that DELIBERATELY equals another
+    /// session's receipt key — the key's hash inputs are all known to the
+    /// caller, so no collision search is needed — hence the turn match. A
+    /// redacted tombstone conservatively suppresses (its id is internal).
+    pub(crate) fn owns_request_for_turn(&self, request: &str, turn: &str) -> bool {
+        self.entries
+            .lock()
+            .get(request)
+            .is_some_and(|entry| entry.redacted || entry.turn == turn)
+    }
+
+    /// Session deletion removes transport-held content too. Keep only the
+    /// opaque receipt key as a tombstone: deleting a receipt must not let the
+    /// same accepted request execute again. Admission and this hook share the
+    /// journal lock; neither a late publisher nor conversation recreation can
+    /// restore a tombstone's content.
+    pub(crate) fn redact_session(&self, session_key: &str) {
+        let mut entries = self.entries.lock();
+        for entry in entries.values_mut().filter(|entry| {
+            crate::ws_conversation::conversation_identity(&entry.conversation)
+                .is_some_and(|(key, _)| key == session_key)
+        }) {
+            *entry = Entry {
+                redacted: true,
+                conversation: String::new(),
+                subject: String::new(),
+                request: String::new(),
+                parent_request: None,
+                turn: String::new(),
+                content: String::new(),
+                attachments: Vec::new(),
+                sequence: 0,
+                events: Vec::new(),
+                bytes: 0,
+                gap: true,
+                terminal: None,
+            };
+        }
+    }
+
+    /// A registry entry, not the currently active turn, owns correlation. The
+    /// normal turn releases its active slot before emitting its final response.
+    fn event(&self, request: &str, turn: &str, payload: &Value, terminal: bool) -> Option<Value> {
+        let mut entries = self.entries.lock();
+        let entry = entries
+            .get_mut(request)
+            .filter(|entry| !entry.redacted && entry.turn == turn && entry.terminal.is_none())?;
+        entry.sequence += 1;
+        let mut event = json!({"type":"turn_event", "version":VERSION, "epoch":self.epoch,
+            "request_id":entry.request,"turn_id":turn,"seq":entry.sequence,
+            "event":payload,"terminal":terminal});
+        // Do not expose the internal receipt identity in the projected
+        // payload. Match EXACTLY this entry's receipt key: provider-sourced
+        // tool-call ids pass through verbatim (they are client-facing
+        // correlation), and a prefix test would strip a legitimate id that
+        // happens to start with the journal namespace.
+        if let Some(fields) = event["event"].as_object_mut()
+            && fields.get("id").and_then(Value::as_str) == Some(request)
+        {
+            fields.remove("id");
+        }
+        if terminal {
+            event["stream_complete"] = (!entry.gap).into();
+            entry.terminal = Some(event.clone());
+            // Brain-monitor terminal (#564), S2 journal path: log the CLIENT's
+            // request id (entry.request), not the internal receipt key.
+            log_terminal(
+                &entry.conversation,
+                Some(&entry.request),
+                turn,
+                payload["outcome"].as_str().unwrap_or("unknown"),
+            );
+        } else {
+            let bytes = event.to_string().len();
+            if bytes > MAX_REPLAY_BYTES {
+                entry.gap = true;
+                event["event"] = json!({"type":"turn_gap","code":"OUTPUT_TOO_LARGE"});
+            } else if !entry.gap
+                && entry.bytes + bytes <= MAX_REPLAY_BYTES
+                && entry.events.len() < MAX_EVENTS
+            {
+                entry.bytes += bytes;
+                entry.events.push(event.clone());
+            } else {
+                entry.gap = true;
+            }
+        }
+        Some(event)
+    }
+
+    pub(super) fn visible(&self, conversation: &str, subject: Option<&str>, frame: &Value) -> bool {
+        let Some(subject) = subject else {
+            return false;
+        };
+        self.entries.lock().values().any(|entry| {
+            !entry.redacted
+                && entry.conversation == conversation
+                && entry.subject == subject
+                && frame["turn_id"].as_str() == Some(entry.turn.as_str())
+        })
+    }
+}
+
+/// Publish both unchanged legacy output and the separate negotiated projection.
+pub(super) fn publish(
+    state: &AppState,
+    conversation: &Conversation<WsSession>,
+    request: Option<&str>,
+    turn: &str,
+    payload: &Value,
+) {
+    conversation.publish(payload);
+    if let Some(request) = request
+        && let Some(event) = state
+            .ws_conversations
+            .turn_control
+            .event(request, turn, payload, false)
+    {
+        conversation.publish_control(&event);
+    }
+}
+
+pub(super) fn finish(
+    state: &AppState,
+    conversation: &Conversation<WsSession>,
+    request: Option<&str>,
+    turn: &str,
+    outcome: &str,
+) {
+    let journaled = if let Some(request) = request
+        && let Some(event) = state.ws_conversations.turn_control.event(
+            request,
+            turn,
+            &json!({"type":"turn_terminal","outcome":outcome}),
+            true,
+        ) {
+        conversation.publish_control(&event);
+        true
+    } else {
+        false
+    };
+    if !journaled {
+        // Legacy turns carry no S2 journal entry (and legacy callers may send
+        // no id at all) — event() could not record them, so the terminal
+        // lifecycle log happens here (#564). Identities only, never content.
+        // A journal-REJECTED S2 request (redacted session) also lands here,
+        // but its stored identity is the internal receipt key, not a
+        // client-chosen id — journal ownership scoped to THIS turn decides
+        // which ids may surface in the timeline (see owns_request_for_turn).
+        let client_request = request.filter(|id| {
+            !state
+                .ws_conversations
+                .turn_control
+                .owns_request_for_turn(id, turn)
+        });
+        log_terminal(conversation.key(), client_request, turn, outcome);
+    }
+}
+
+pub(super) fn gap() -> Value {
+    json!({"type":"turn_gap","version":VERSION,"code":"STREAM_GAP","recover":"resume"})
+}
+
+pub(super) async fn send(
+    sender: &mut futures_util::stream::SplitSink<WebSocket, Message>,
+    message: Message,
+    negotiated: bool,
+) -> bool {
+    if negotiated {
+        tokio::time::timeout(WRITE_TIMEOUT, sender.send(message))
+            .await
+            .is_ok_and(|result| result.is_ok())
+    } else {
+        sender.send(message).await.is_ok()
+    }
+}

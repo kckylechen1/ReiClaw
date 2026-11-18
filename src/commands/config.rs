@@ -2,7 +2,7 @@
 
 use anyhow::{Context, Result};
 use dialoguer::Select;
-use zeroclaw_config::api_error::{ConfigApiCode, ConfigApiError};
+use reiclaw_config::api_error::{ConfigApiCode, ConfigApiError};
 
 use crate::config::Config;
 use crate::gateway_helpers::{t, ta};
@@ -16,7 +16,7 @@ async fn apply_comment_inline(
     path: &str,
     comment: &str,
 ) -> Result<()> {
-    zeroclaw_config::comment_writer::apply_comments(
+    reiclaw_config::comment_writer::apply_comments(
         config_path,
         &[(path.to_string(), comment.to_string())],
     )
@@ -27,7 +27,7 @@ async fn apply_comment_inline(
 pub(crate) fn config_patch_prop_kind(
     config: &Config,
     path: &str,
-) -> Option<zeroclaw_api::config_metadata::PropKind> {
+) -> Option<reiclaw_api::config_metadata::PropKind> {
     config
         .prop_schema()
         .into_iter()
@@ -43,13 +43,13 @@ pub(crate) fn json_value_to_setprop_string(
     json: bool,
 ) -> Result<String> {
     let kind = config_patch_prop_kind(config, path);
-    match zeroclaw_config::typed_value::coerce_for_set_prop(value, kind) {
+    match reiclaw_config::typed_value::coerce_for_set_prop(value, kind) {
         Ok(value_str) => Ok(value_str),
         Err(err) => {
-            ::zeroclaw_log::record!(
+            ::reiclaw_log::record!(
                 WARN,
-                ::zeroclaw_log::Event::new(module_path!(), ::zeroclaw_log::Action::Reject)
-                    .with_outcome(::zeroclaw_log::EventOutcome::Failure)
+                ::reiclaw_log::Event::new(module_path!(), ::reiclaw_log::Action::Reject)
+                    .with_outcome(::reiclaw_log::EventOutcome::Failure)
                     .with_attrs(::serde_json::json!({"path": path, "error": err.message.clone()})),
                 "config patch coercion rejected JSON value"
             );
@@ -116,7 +116,7 @@ fn model_path_provider_type(path: &str) -> Option<&'static str> {
         return None;
     }
     let family = parts[2];
-    zeroclaw_providers::list_model_providers()
+    reiclaw_providers::list_model_providers()
         .iter()
         .find(|p| p.name == family)
         .map(|p| p.name)
@@ -147,7 +147,7 @@ fn alias_target_for_path<'a>(
 ) -> Option<(&'static str, &'a str)> {
     Config::map_key_sections()
         .into_iter()
-        .filter(|section| section.kind == zeroclaw_config::traits::MapKeyKind::Map)
+        .filter(|section| section.kind == reiclaw_config::traits::MapKeyKind::Map)
         .filter(|section| !section.resource_key)
         .filter_map(|section| split(section.path, path).map(|key| (section.path, key)))
         .max_by_key(|(section_path, _)| section_path.len())
@@ -164,7 +164,7 @@ pub(crate) fn init_map_alias(config: &mut Config, section_arg: &str) -> Result<O
     else {
         return Ok(None);
     };
-    match zeroclaw_config::alias_refs::create_map_key_checked(config, section_path, alias) {
+    match reiclaw_config::alias_refs::create_map_key_checked(config, section_path, alias) {
         Ok(true) => Ok(Some(format!("{section_path}.{alias}"))),
         Ok(false) => Ok(None),
         Err(e) => Err(anyhow::Error::msg(e.to_string())),
@@ -216,9 +216,9 @@ pub(crate) fn ensure_map_key_for_prop_path(config: &mut Config, prop_path: &str)
     // agents.default.enabled ...` auto-create the reserved runtime-fallback
     // agent alias, which the rename guard then refuses to ever rename.
     let created =
-        match zeroclaw_config::alias_refs::create_map_key_checked(config, section_path, key) {
+        match reiclaw_config::alias_refs::create_map_key_checked(config, section_path, key) {
             Ok(created) => created,
-            Err(zeroclaw_config::alias_refs::CreateError::Reserved(_)) => return Ok(false),
+            Err(reiclaw_config::alias_refs::CreateError::Reserved(_)) => return Ok(false),
             Err(e) => return Err(anyhow::Error::msg(e.to_string())),
         };
     if created {
@@ -318,7 +318,7 @@ pub async fn handle(config_command: crate::ConfigCommands, config: &mut Config) 
         }
         crate::ConfigCommands::Get { path, json } => {
             let known_paths = config.prop_paths();
-            let path = zeroclaw_config::helpers::resolve_field_path(&known_paths, &path);
+            let path = reiclaw_config::helpers::resolve_field_path(&known_paths, &path);
             if Config::prop_is_secret(&path) {
                 let entries = config.prop_fields();
                 let populated = entries
@@ -373,7 +373,7 @@ pub async fn handle(config_command: crate::ConfigCommands, config: &mut Config) 
                         // the CLI's --json envelope matches the HTTP shape.
                         // Same single-source-of-truth helper the gateway
                         // uses; never hardcode a code at the call site.
-                        let api_err = zeroclaw_config::api_error::ConfigApiError::from_validation(
+                        let api_err = reiclaw_config::api_error::ConfigApiError::from_validation(
                             anyhow::Error::msg(e.to_string()),
                         )
                         .with_path(&path);
@@ -396,17 +396,17 @@ pub async fn handle(config_command: crate::ConfigCommands, config: &mut Config) 
         } => {
             crate::config::current::ensure_disk_at_current_version(&config.config_path)?;
             let known_paths = config.prop_paths();
-            let mut path = zeroclaw_config::helpers::resolve_field_path(&known_paths, &path);
+            let mut path = reiclaw_config::helpers::resolve_field_path(&known_paths, &path);
             if ensure_map_key_for_prop_path(config, &path)? {
                 let known_paths = config.prop_paths();
-                path = zeroclaw_config::helpers::resolve_field_path(&known_paths, &path);
+                path = reiclaw_config::helpers::resolve_field_path(&known_paths, &path);
             }
             if no_interactive {
                 let val = value.ok_or_else(|| {
-                    ::zeroclaw_log::record!(
+                    ::reiclaw_log::record!(
                         WARN,
-                        ::zeroclaw_log::Event::new(module_path!(), ::zeroclaw_log::Action::Reject)
-                            .with_outcome(::zeroclaw_log::EventOutcome::Failure)
+                        ::reiclaw_log::Event::new(module_path!(), ::reiclaw_log::Action::Reject)
+                            .with_outcome(::reiclaw_log::EventOutcome::Failure)
                             .with_attrs(::serde_json::json!({"path": path})),
                         "config set --no-interactive refused: positional value missing"
                     );
@@ -439,7 +439,7 @@ pub async fn handle(config_command: crate::ConfigCommands, config: &mut Config) 
                     .map(|alias| format!("{provider_type}.{alias}"));
                 let catalog_selector = provider_ref.as_deref().unwrap_or(provider_type);
                 let (models, _pricing, live) =
-                    zeroclaw_runtime::quickstart::model_catalog_with_config(
+                    reiclaw_runtime::quickstart::model_catalog_with_config(
                         Some(config),
                         catalog_selector,
                     )
@@ -488,7 +488,7 @@ pub async fn handle(config_command: crate::ConfigCommands, config: &mut Config) 
                     config.set_prop_persistent(&path, &variants[selected])?;
                 } else if field_info
                     .as_ref()
-                    .is_some_and(|f| f.kind == zeroclaw_api::config_metadata::PropKind::StringArray)
+                    .is_some_and(|f| f.kind == reiclaw_api::config_metadata::PropKind::StringArray)
                 {
                     let current_items: Vec<String> = field_info
                         .as_ref()
@@ -752,13 +752,13 @@ pub async fn handle(config_command: crate::ConfigCommands, config: &mut Config) 
                         let value = match op.get("value") {
                             Some(value) => value,
                             None => {
-                                ::zeroclaw_log::record!(
+                                ::reiclaw_log::record!(
                                     WARN,
-                                    ::zeroclaw_log::Event::new(
+                                    ::reiclaw_log::Event::new(
                                         module_path!(),
-                                        ::zeroclaw_log::Action::Reject
+                                        ::reiclaw_log::Action::Reject
                                     )
-                                    .with_outcome(::zeroclaw_log::EventOutcome::Failure)
+                                    .with_outcome(::reiclaw_log::EventOutcome::Failure)
                                     .with_attrs(
                                         ::serde_json::json!({
                                             "op": op_name,
@@ -866,7 +866,7 @@ pub async fn handle(config_command: crate::ConfigCommands, config: &mut Config) 
                                 config_patch_fail_json_or_human(json, api_err, human)?
                             }
                         };
-                        let want_str = match zeroclaw_config::typed_value::coerce_for_set_prop(
+                        let want_str = match reiclaw_config::typed_value::coerce_for_set_prop(
                             want,
                             config_patch_prop_kind(config, &path),
                         ) {

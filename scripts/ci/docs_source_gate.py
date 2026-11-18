@@ -37,10 +37,10 @@ GENERATED_DOC_TARGETS = {
 GENERATED_SITE_TARGETS = {
     f"/api/{crate}/index.html": "xtask/src/cmd/mdbook/refs.rs::build_api"
     for crate in (
-        "zeroclaw", "zeroclaw_api", "zeroclaw_config", "zeroclaw_runtime",
-        "zeroclaw_providers", "zeroclaw_provider_dispatch",
-        "zeroclaw_gateway_client", "zeroclaw_gateway",
-        "zeroclaw_tools", "zeroclaw_memory", "zeroclaw_infra",
+        "reiclaw", "reiclaw_api", "reiclaw_config", "reiclaw_runtime",
+        "reiclaw_providers", "reiclaw_provider_dispatch",
+        "reiclaw_gateway_client", "reiclaw_gateway",
+        "reiclaw_tools", "reiclaw_memory", "reiclaw_infra",
     )
 }
 INCLUDE_RE = re.compile(r"(?<!\\)\{\{\s*#(include|rustdoc_include|playground)\s+([^}]+)\}\}")

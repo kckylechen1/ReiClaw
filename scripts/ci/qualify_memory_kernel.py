@@ -18,7 +18,7 @@ import subprocess
 import tempfile
 import tomllib
 
-MANIFEST = Path("crates/zeroclaw-memory/Cargo.toml")
+MANIFEST = Path("crates/reiclaw-memory/Cargo.toml")
 KERNEL_REPOSITORY = "https://github.com/kckylechen1/Tachi.git"
 PIN_RE = re.compile(r"^[0-9a-f]{40}$")
 
@@ -109,7 +109,7 @@ def qualify(repo: Path, revision: str, output: Path) -> int:
             raise RuntimeError("candidate metadata resolution failed")
         receipt["graph"] = check_graph(json.loads(metadata_file.read_text()), revision)
         commands = [
-            ("portable-tests.log", ["cargo", "test", "--locked", "-p", "zeroclaw-memory", "--features", "tachi"]),
+            ("portable-tests.log", ["cargo", "test", "--locked", "-p", "reiclaw-memory", "--features", "tachi"]),
             ("consumer-check.log", ["cargo", "check", "--locked", "--workspace", "--all-targets", "--features", "memory-tachi"]),
         ]
         for filename, args in commands:

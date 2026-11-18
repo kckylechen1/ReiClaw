@@ -8,7 +8,7 @@ scratch="$(mktemp -d)"
 real_rm="$(command -v rm)"
 trap '"$real_rm" -rf "$scratch"' EXIT
 real_git="$(command -v git)"
-fork_url="https://github.com/kckylechen1/zeroclaw.git"
+fork_url="https://github.com/kckylechen1/ReiClaw.git"
 prefix="$scratch/install-prefix"
 mkdir -p "$scratch/bin" "$scratch/outside"
 export ZEROCLAW_SMOKE_LOG="$scratch/mutations.log"
@@ -175,7 +175,11 @@ run_installer refusal "$scratch/outside" "$scratch/not-a-checkout" --dry-run
 contains 'not a verified checkout'
 no_mutations
 
-for origin in 'https://github.com/kckylechen1/zeroclaw' \
+for origin in 'https://github.com/kckylechen1/ReiClaw' \
+  'git@github.com:kckylechen1/ReiClaw.git' \
+  'ssh://git@github.com/kckylechen1/ReiClaw.git' \
+  'https://github.com/kckylechen1/zeroclaw' \
+  'https://github.com/kckylechen1/zeroclaw.git' \
   'git@github.com:kckylechen1/zeroclaw.git' \
   'ssh://git@github.com/kckylechen1/zeroclaw.git'; do
   "$real_git" -C "$scratch/fork" remote set-url origin "$origin"

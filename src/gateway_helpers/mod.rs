@@ -17,7 +17,7 @@ use crate::config::Config;
 pub(crate) fn t(key: &str, fallback: &str) -> String {
     #[cfg(feature = "agent-runtime")]
     {
-        zeroclaw_runtime::i18n::get_required_cli_string(key)
+        reiclaw_runtime::i18n::get_required_cli_string(key)
     }
     #[cfg(not(feature = "agent-runtime"))]
     {
@@ -30,7 +30,7 @@ pub(crate) fn t(key: &str, fallback: &str) -> String {
 pub(crate) fn ta(key: &str, args: &[(&str, &str)], fallback: &str) -> String {
     #[cfg(feature = "agent-runtime")]
     {
-        zeroclaw_runtime::i18n::get_required_cli_string_with_args(key, args)
+        reiclaw_runtime::i18n::get_required_cli_string_with_args(key, args)
     }
     #[cfg(not(feature = "agent-runtime"))]
     {
@@ -52,16 +52,16 @@ pub fn resolve_gateway_addr(
 /// Log gateway startup message.
 pub fn log_gateway_start(host: &str, port: u16) {
     if port == 0 {
-        ::zeroclaw_log::record!(
+        ::reiclaw_log::record!(
             INFO,
-            ::zeroclaw_log::Event::new(module_path!(), ::zeroclaw_log::Action::Note)
+            ::reiclaw_log::Event::new(module_path!(), ::reiclaw_log::Action::Note)
                 .with_attrs(::serde_json::json!({"host": host})),
             "🚀 Starting ZeroClaw Gateway on (random port)"
         );
     } else {
-        ::zeroclaw_log::record!(
+        ::reiclaw_log::record!(
             INFO,
-            ::zeroclaw_log::Event::new(module_path!(), ::zeroclaw_log::Action::Note)
+            ::reiclaw_log::Event::new(module_path!(), ::reiclaw_log::Action::Note)
                 .with_attrs(::serde_json::json!({"host": host, "port": port})),
             "🚀 Starting ZeroClaw Gateway on"
         );
@@ -83,10 +83,10 @@ pub async fn shutdown_gateway(host: &str, port: u16, path_prefix: Option<&str>) 
         Ok(response) if response.status().is_success() => Ok(()),
         Ok(response) => {
             let status = response.status();
-            ::zeroclaw_log::record!(
+            ::reiclaw_log::record!(
                 WARN,
-                ::zeroclaw_log::Event::new(module_path!(), ::zeroclaw_log::Action::Fail)
-                    .with_outcome(::zeroclaw_log::EventOutcome::Failure)
+                ::reiclaw_log::Event::new(module_path!(), ::reiclaw_log::Action::Fail)
+                    .with_outcome(::reiclaw_log::EventOutcome::Failure)
                     .with_attrs(::serde_json::json!({"endpoint": url, "status": status.as_u16()})),
                 "gateway admin shutdown returned non-success status"
             );
@@ -95,10 +95,10 @@ pub async fn shutdown_gateway(host: &str, port: u16, path_prefix: Option<&str>) 
             )))
         }
         Err(e) => {
-            ::zeroclaw_log::record!(
+            ::reiclaw_log::record!(
                 WARN,
-                ::zeroclaw_log::Event::new(module_path!(), ::zeroclaw_log::Action::Fail)
-                    .with_outcome(::zeroclaw_log::EventOutcome::Failure)
+                ::reiclaw_log::Event::new(module_path!(), ::reiclaw_log::Action::Fail)
+                    .with_outcome(::reiclaw_log::EventOutcome::Failure)
                     .with_attrs(::serde_json::json!({"endpoint": url, "error": format!("{}", e)})),
                 "gateway admin shutdown: connect failed"
             );
@@ -176,7 +176,7 @@ pub async fn fetch_paircode(
     };
     let ip = host.parse::<std::net::IpAddr>().ok().filter(|ip| ip.is_loopback())
         .ok_or_else(|| {
-            ::zeroclaw_log::record!(WARN, ::zeroclaw_log::Event::new(module_path!(), ::zeroclaw_log::Action::Fail), "pairing-code request rejected: non-loopback destination");
+            ::reiclaw_log::record!(WARN, ::reiclaw_log::Event::new(module_path!(), ::reiclaw_log::Action::Fail), "pairing-code request rejected: non-loopback destination");
             anyhow::Error::msg(t("cli-paircode-local-only", "Pairing-code requests must target loopback. Run this on the gateway host with --host 127.0.0.1."))
         })?;
     let address = std::net::SocketAddr::new(ip, port);
@@ -192,11 +192,11 @@ pub async fn fetch_paircode(
         url.query_pairs_mut().append_pair("rotate", &rotate);
     }
     let admin_token =
-        zeroclaw_runtime::security::pairing::read_gateway_admin_token(data_dir).ok_or_else(|| {
-            ::zeroclaw_log::record!(WARN, ::zeroclaw_log::Event::new(module_path!(), ::zeroclaw_log::Action::Fail), "pairing-code request rejected: owner token unavailable");
+        reiclaw_runtime::security::pairing::read_gateway_admin_token(data_dir).ok_or_else(|| {
+            ::reiclaw_log::record!(WARN, ::reiclaw_log::Event::new(module_path!(), ::reiclaw_log::Action::Fail), "pairing-code request rejected: owner token unavailable");
             anyhow::Error::msg(ta(
                 "cli-paircode-admin-token-missing",
-                &[("path", &zeroclaw_runtime::security::pairing::gateway_admin_token_path(data_dir).display().to_string())],
+                &[("path", &reiclaw_runtime::security::pairing::gateway_admin_token_path(data_dir).display().to_string())],
                 "No gateway admin token. Run this on the gateway host, as the user running it, while the gateway is running."
             ))
         })?;
@@ -211,7 +211,7 @@ pub async fn fetch_paircode(
     };
     let response = request
         .header(
-            zeroclaw_runtime::security::pairing::GATEWAY_ADMIN_TOKEN_HEADER,
+            reiclaw_runtime::security::pairing::GATEWAY_ADMIN_TOKEN_HEADER,
             &admin_token,
         )
         .timeout(std::time::Duration::from_secs(5))
@@ -219,10 +219,10 @@ pub async fn fetch_paircode(
         .await;
 
     let response = response.map_err(|e| {
-        ::zeroclaw_log::record!(
+        ::reiclaw_log::record!(
             WARN,
-            ::zeroclaw_log::Event::new(module_path!(), ::zeroclaw_log::Action::Fail)
-                .with_outcome(::zeroclaw_log::EventOutcome::Failure)
+            ::reiclaw_log::Event::new(module_path!(), ::reiclaw_log::Action::Fail)
+                .with_outcome(::reiclaw_log::EventOutcome::Failure)
                 .with_attrs(::serde_json::json!({"error": format!("{}", e)})),
             "gateway paircode fetch: connect failed"
         );
@@ -231,10 +231,10 @@ pub async fn fetch_paircode(
 
     let status = response.status();
     let json: serde_json::Value = response.json().await.map_err(|e| {
-        ::zeroclaw_log::record!(
+        ::reiclaw_log::record!(
             WARN,
-            ::zeroclaw_log::Event::new(module_path!(), ::zeroclaw_log::Action::Fail)
-                .with_outcome(::zeroclaw_log::EventOutcome::Failure)
+            ::reiclaw_log::Event::new(module_path!(), ::reiclaw_log::Action::Fail)
+                .with_outcome(::reiclaw_log::EventOutcome::Failure)
                 .with_attrs(
                     ::serde_json::json!({"error": format!("{}", e), "status": status.as_u16()})
                 ),
@@ -256,10 +256,10 @@ pub async fn fetch_paircode(
 
     if json.get("success").and_then(|v| v.as_bool()) != Some(true) {
         if !status.is_success() {
-            ::zeroclaw_log::record!(
+            ::reiclaw_log::record!(
                 WARN,
-                ::zeroclaw_log::Event::new(module_path!(), ::zeroclaw_log::Action::Fail)
-                    .with_outcome(::zeroclaw_log::EventOutcome::Failure)
+                ::reiclaw_log::Event::new(module_path!(), ::reiclaw_log::Action::Fail)
+                    .with_outcome(::reiclaw_log::EventOutcome::Failure)
                     .with_attrs(::serde_json::json!({"status": status.as_u16()})),
                 "gateway paircode fetch returned non-success status"
             );

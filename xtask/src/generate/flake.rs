@@ -33,7 +33,7 @@ pub fn render_zone(root: &Path) -> anyhow::Result<String> {
     // override with `.override { features = [ ... ]; }`.
     let lines = [
         "        # Default feature set: canonical lean Dist.".to_string(),
-        "        # Override with `packages.zeroclaw.override { features = [ ... ]; }`.".to_string(),
+        "        # Override with `packages.reiclaw.override { features = [ ... ]; }`.".to_string(),
         format!("        zeroclawDefaultFeatures = [ {feature_list} ];"),
         "        rootFeatureGraph = (builtins.fromTOML (builtins.readFile ./Cargo.toml)).features;"
             .to_string(),
@@ -74,6 +74,7 @@ pub fn render_zone(root: &Path) -> anyhow::Result<String> {
         "              doCheck = false;".to_string(),
         "              buildInputs = [ pkgs.stdenv.cc.cc ];".to_string(),
         "              postInstall = ''".to_string(),
+        "                test -x \"$out/bin/rei\"".to_string(),
         "                test -x \"$out/bin/zeroclaw\"".to_string(),
         "              '' + pkgs.lib.optionalString withAcpBridge ''".to_string(),
         "                test -x \"$out/bin/zeroclaw-acp-bridge\"".to_string(),

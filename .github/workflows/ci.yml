@@ -184,7 +184,7 @@ jobs:
           duration_seconds=$SECONDS
           set -e
 
-          workspace_path_compiles="$(grep -E -c 'Compiling.*\([^)]*zeroclaw' "$cargo_log" || true)"
+          workspace_path_compiles="$(grep -E -c 'Compiling.*\([^)]*(reiclaw|zeroclaw)' "$cargo_log" || true)"
           total_compiles="$(grep -c 'Compiling' "$cargo_log" || true)"
           downloaded_crates="$(grep -c 'Downloaded' "$cargo_log" || true)"
           cache_hit="${RUST_CACHE_HIT:-unknown}"
@@ -255,7 +255,7 @@ jobs:
               ;;
           esac
 
-          if grep -Eq '^(crates/zeroclaw-tools/|\.github/workflows/(ci|cross-platform-clippy)\.yml$)' "$changed_files"; then
+          if grep -Eq '^(crates/reiclaw-tools/|\.github/workflows/(ci|cross-platform-clippy)\.yml$)' "$changed_files"; then
             echo "run=true" >> "$GITHUB_OUTPUT"
           else
             echo "run=false" >> "$GITHUB_OUTPUT"
@@ -289,7 +289,7 @@ jobs:
           cargo_log="${RUNNER_TEMP}/cargo-clippy-windows-tools.log"
           SECONDS=0
           cargo clippy \
-            -p zeroclaw-tools \
+            -p reiclaw-tools \
             --all-targets \
             --all-features \
             --target x86_64-pc-windows-msvc \
@@ -299,7 +299,7 @@ jobs:
           duration_seconds=$SECONDS
           set -e
 
-          workspace_path_compiles="$(grep -E -c 'Compiling.*\([^)]*zeroclaw' "$cargo_log" || true)"
+          workspace_path_compiles="$(grep -E -c 'Compiling.*\([^)]*(reiclaw|zeroclaw)' "$cargo_log" || true)"
           total_compiles="$(grep -c 'Compiling' "$cargo_log" || true)"
           downloaded_crates="$(grep -c 'Downloaded' "$cargo_log" || true)"
           cache_hit="${RUST_CACHE_HIT:-unknown}"
@@ -372,7 +372,7 @@ jobs:
         shell: pwsh
         run: |
           $ErrorActionPreference = 'Stop'
-          $cratePath = Resolve-Path -LiteralPath (Join-Path $env:GITHUB_WORKSPACE 'crates\zeroclaw-runtime')
+          $cratePath = Resolve-Path -LiteralPath (Join-Path $env:GITHUB_WORKSPACE 'crates\reiclaw-runtime')
           $guardPath = Join-Path $cratePath.Path 'tests\no_durable_task_store.rs'
           $guardBinary = Join-Path $env:RUNNER_TEMP 'no_durable_task_store.exe'
           $env:CARGO_MANIFEST_DIR = $cratePath.Path
@@ -410,7 +410,7 @@ jobs:
           duration_seconds=$SECONDS
           set -e
 
-          workspace_path_compiles="$(grep -E -c 'Compiling.*\([^)]*zeroclaw' "$cargo_log" || true)"
+          workspace_path_compiles="$(grep -E -c 'Compiling.*\([^)]*(reiclaw|zeroclaw)' "$cargo_log" || true)"
           total_compiles="$(grep -c 'Compiling' "$cargo_log" || true)"
           downloaded_crates="$(grep -c 'Downloaded' "$cargo_log" || true)"
           cache_hit="${RUST_CACHE_HIT:-unknown}"
@@ -439,7 +439,7 @@ jobs:
 
       - name: Test Windows command adapters
         if: runner.os == 'Windows'
-        run: cargo test --locked -p zeroclaw-platform --target x86_64-pc-windows-msvc
+        run: cargo test --locked -p reiclaw-platform --target x86_64-pc-windows-msvc
 
   # `lint` checks the ci-all graph. Keep these distinct no-default-feature
   # graphs in the required gate; check-32bit below covers the 32-bit target.
@@ -664,7 +664,7 @@ jobs:
       - name: Evaluate package feature overrides
         run: |
           sudo nix --extra-experimental-features "nix-command flakes" \
-            eval --json .#packages.x86_64-linux.zeroclaw \
+            eval --json .#packages.x86_64-linux.reiclaw \
             --apply "$(cat nix/package-eval.nix)"
 
   nix-hash-drift:

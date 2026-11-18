@@ -4,7 +4,7 @@
 use std::collections::BTreeMap;
 use std::time::{Duration, Instant};
 
-use zeroclaw_gateway_client::Decision;
+use reiclaw_gateway_client::Decision;
 
 /// Least time between two edits of a streaming message; Telegram rate
 /// limits edits.

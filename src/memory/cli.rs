@@ -7,7 +7,7 @@ use crate::config::Config;
 use anyhow::{Result, bail};
 use console::style;
 #[cfg(feature = "agent-runtime")]
-use zeroclaw_runtime::i18n;
+use reiclaw_runtime::i18n;
 
 /// Resolve a `cli-*` Fluent key for memory CLI output. Under `agent-runtime`
 /// (default, and what CI/release build) this routes through Fluent; without it

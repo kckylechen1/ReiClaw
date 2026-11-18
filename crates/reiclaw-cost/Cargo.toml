@@ -1,0 +1,20 @@
+[package]
+name = "reiclaw-cost"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+description = "Cost pricing, budget enforcement, and JSONL accounting for ZeroClaw."
+publish = false
+
+[dependencies]
+reiclaw-api.workspace = true
+reiclaw-config.workspace = true
+reiclaw-log.workspace = true
+anyhow = "1.0"
+jiff.workspace = true
+parking_lot = "0.12"
+serde_json = { version = "1.0", default-features = false, features = ["std"] }
+uuid = { version = "1.22", default-features = false, features = ["v4", "std"] }
+
+[dev-dependencies]
+tempfile = "3.26"

@@ -58,8 +58,8 @@ class GraphViolation(RuntimeError):
 
 
 def check_graph(cargo, repo, manifest=None, *, workspace=False,
-                selection=("-p", "zeroclawlabs"), extra_args=(),
-                expected_package="zeroclawlabs", allow_reviewed_agpl=False,
+                selection=("-p", "reiclaw"), extra_args=(),
+                expected_package="reiclaw", allow_reviewed_agpl=False,
                 scope_label=None):
     manifest = manifest or repo / "Cargo.toml"
     scope = scope_label or ("workspace/all-features" if workspace else "default production")
@@ -149,7 +149,7 @@ def write_fixture(directory, name, packages, wildcard=False,
 def check_graph_rejection(cargo, repo, directory, name, packages, *,
                           expected_agpl=(), expected_rng=(), workspace=False,
                           table="dependencies", optional=False):
-    root = write_fixture(directory, name, packages, root_name="zeroclawlabs",
+    root = write_fixture(directory, name, packages, root_name="reiclaw",
                          table=table, member=workspace, optional=optional)
     manifest = root / "Cargo.toml"
     command, result = run(cargo, [
@@ -234,17 +234,17 @@ def main():
     args = parser.parse_args()
     config = args.config.resolve(strict=True)
     cargo = str(Path(args.cargo).resolve()) if os.sep in args.cargo else args.cargo
-    # Route B enables memory-tachi by default on zeroclawlabs; keep the lean
-    # core profiles (--no-default-features, slim-control, and zeroclaw-memory
+    # Route B enables memory-tachi by default on reiclaw; keep the lean
+    # core profiles (--no-default-features, slim-control, and reiclaw-memory
     # without `tachi`) strictly AGPL-free.
     check_graph(cargo, repo, allow_reviewed_agpl=True)
     check_graph(cargo, repo, extra_args=("--no-default-features",),
                 scope_label="minimal (--no-default-features)")
     check_graph(cargo, repo, extra_args=("--no-default-features", "--features", "slim-control"),
                 scope_label="slim-control")
-    check_graph(cargo, repo, selection=("-p", "zeroclaw-memory"),
-                expected_package="zeroclaw-memory",
-                scope_label="zeroclaw-memory default")
+    check_graph(cargo, repo, selection=("-p", "reiclaw-memory"),
+                expected_package="reiclaw-memory",
+                scope_label="reiclaw-memory default")
     check_graph(cargo, repo, workspace=True)
     retired_rng = (
         ("rand", "0.8.6", "MIT"), ("rand", "0.9.4", "MIT"),

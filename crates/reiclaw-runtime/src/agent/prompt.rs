@@ -1,0 +1,1334 @@
+use crate::agent::personality;
+use crate::identity;
+use crate::security::AutonomyLevel;
+use crate::skills::Skill;
+use crate::tools::Tool;
+use anyhow::Result;
+use reiclaw_config::schema::IdentityConfig;
+use std::fmt::Write;
+use std::path::Path;
+
+pub struct PromptContext<'a> {
+    pub workspace_dir: &'a Path,
+    pub agent_workspace_dir: &'a Path,
+    pub model_name: &'a str,
+    pub tools: &'a [Box<dyn Tool>],
+    pub skills: &'a [Skill],
+    pub skills_prompt_mode: reiclaw_config::schema::SkillsPromptInjectionMode,
+    pub identity_config: Option<&'a IdentityConfig>,
+    pub dispatcher_instructions: &'a str,
+    /// True when the provider request carries native tool specs. In that mode
+    /// the prompt must not duplicate the same tool catalog in prose.
+    pub sends_native_tool_specs: bool,
+    /// Pre-rendered security policy summary for inclusion in the Safety
+    /// prompt section.  When present, the LLM sees the concrete constraints
+    /// (allowed commands, forbidden paths, autonomy level) so it can plan
+    /// tool calls without trial-and-error.  See
+    pub security_summary: Option<String>,
+    /// Autonomy level from config. Controls whether the safety section
+    /// includes "ask before acting" instructions. Full autonomy omits them
+    /// so the model executes tools directly without simulating approval.
+    pub autonomy_level: AutonomyLevel,
+}
+
+impl<'a> PromptContext<'a> {
+    /// A minimal context for on-demand section renders (e.g. the per-request
+    /// tasks refresh). Sections that read real fields must not use this.
+    pub fn placeholder() -> PromptContext<'static> {
+        PromptContext {
+            workspace_dir: Path::new(""),
+            agent_workspace_dir: Path::new(""),
+            model_name: "",
+            tools: &[],
+            skills: &[],
+            skills_prompt_mode: Default::default(),
+            identity_config: None,
+            dispatcher_instructions: "",
+            sends_native_tool_specs: false,
+            security_summary: None,
+            autonomy_level: Default::default(),
+        }
+    }
+}
+
+pub trait PromptSection: Send + Sync {
+    fn name(&self) -> &str;
+    fn build(&self, ctx: &PromptContext<'_>) -> Result<String>;
+}
+
+#[derive(Default)]
+pub struct SystemPromptBuilder {
+    sections: Vec<Box<dyn PromptSection>>,
+}
+
+impl SystemPromptBuilder {
+    /// `persona_section` is the pre-rendered `## Tone` section
+    /// ([`reiclaw_config::persona::PersonaKnobs::to_prompt_section`]), resolved
+    /// once by the caller (there is no persona field on [`PromptContext`] —
+    /// threading it through the builder avoids changing that struct's shape,
+    /// which has construction sites outside this pipeline). `None` — no
+    /// persona configured, direct or via card, or every dial at `medium` —
+    /// renders nothing and contributes no bytes to the retained section list.
+    ///
+    /// Placement: after every behavioural-constraint section this pipeline
+    /// has (here, just [`ToolHonestySection`] — there is no anti-narration
+    /// equivalent in this builder) and before the tool listing
+    /// ([`ToolsSection`]), mirroring the ordering rule in
+    /// `agent::system_prompt::build_system_prompt_with_persona`: a persona
+    /// dial must never be able to soften a hard behavioural constraint, and
+    /// tone should render before tools are listed.
+    pub fn with_defaults(persona_section: Option<String>) -> Self {
+        Self::with_persona(crate::agent::persona_projection::PersonaProjection {
+            section: persona_section,
+            legacy_files: crate::agent::persona_projection::LegacyPersonaFiles::Inject,
+        })
+    }
+
+    /// Same pipeline as [`Self::with_defaults`], driven by a governed Soul
+    /// projection: its section renders where the Tone section sits, and the
+    /// legacy `SOUL.md` / `IDENTITY.md` files are left out of the workspace
+    /// file listing once the owner has written a governed Identity
+    /// (ADR-015 §2).
+    ///
+    /// The system prefix deliberately omits wall-clock dates. Agent entry
+    /// points already timestamp each user turn; a date here would invalidate
+    /// their cached prefix at midnight or when the Soul projection rebuilds.
+    /// A caller without per-turn time can explicitly add [`DateTimeSection`].
+    pub fn with_persona(persona: crate::agent::persona_projection::PersonaProjection) -> Self {
+        let (identity, tone) = persona_sections(persona);
+        Self {
+            sections: vec![
+                identity,
+                Box::new(ToolHonestySection),
+                tone,
+                Box::new(NotesSection),
+                Box::new(ToolsSection),
+                Box::new(SafetySection),
+                Box::new(SkillsSection),
+                Box::new(WorkspaceSection),
+                Box::new(RuntimeSection),
+                Box::new(ChannelMediaSection),
+            ],
+        }
+    }
+
+    /// Public device prompts never load workspace notes, legacy identity files,
+    /// or private installed skill instructions. Persona refresh only replaces Tone.
+    pub fn with_device_persona(
+        persona: crate::agent::persona_projection::PersonaProjection,
+    ) -> Self {
+        let mut builder = Self::with_persona(persona);
+        builder
+            .sections
+            .retain(|section| !matches!(section.name(), "identity" | "notes" | "skills"));
+        builder
+    }
+
+    /// Swap in a new Soul projection, keeping every other section and the
+    /// section order. Used when the Soul revision moves mid-session.
+    pub fn set_persona(&mut self, persona: crate::agent::persona_projection::PersonaProjection) {
+        let (identity, tone) = persona_sections(persona);
+        let mut identity = Some(identity);
+        let mut tone = Some(tone);
+        for section in &mut self.sections {
+            let replacement = match section.name() {
+                "identity" => identity.take(),
+                "tone" => tone.take(),
+                _ => None,
+            };
+            if let Some(replacement) = replacement {
+                *section = replacement;
+            }
+        }
+    }
+
+    pub fn add_section(mut self, section: Box<dyn PromptSection>) -> Self {
+        self.sections.push(section);
+        self
+    }
+
+    pub fn build(&self, ctx: &PromptContext<'_>) -> Result<String> {
+        let mut output = String::new();
+        for section in &self.sections {
+            let part = section.build(ctx)?;
+            if part.trim().is_empty() {
+                continue;
+            }
+            output.push_str(part.trim_end());
+            output.push_str("\n\n");
+        }
+        Ok(output)
+    }
+}
+
+/// The identity and persona sections a Soul projection selects.
+fn persona_sections(
+    persona: crate::agent::persona_projection::PersonaProjection,
+) -> (Box<dyn PromptSection>, Box<dyn PromptSection>) {
+    let identity: Box<dyn PromptSection> = match persona.legacy_files {
+        crate::agent::persona_projection::LegacyPersonaFiles::Inject => Box::new(IdentitySection),
+        retired => Box::new(GovernedIdentitySection(retired)),
+    };
+    (identity, Box::new(ToneSection(persona.section)))
+}
+
+pub struct IdentitySection;
+/// [`IdentitySection`] without the legacy persona files the governed Soul
+/// identity and the User Model have retired (ADR-015 §2, ADR-018 §6).
+pub struct GovernedIdentitySection(pub crate::agent::persona_projection::LegacyPersonaFiles);
+/// The model-writable notes (`AGENTS.md`, `TOOLS.md`, `MEMORY.md`) under one
+/// fixed heading. Sits after the persona section so notes can never read as
+/// part of the Soul; renders nothing when none of the files has content.
+pub struct NotesSection;
+pub struct ToolHonestySection;
+/// Pre-rendered `## Tone` persona section, captured at builder-construction
+/// time. Carries the already-rendered text rather than reading it off
+/// [`PromptContext`] so that adding persona support did not require adding a
+/// field to `PromptContext` — which has a construction site outside this
+/// module (`tools::delegate`) that this change must not force edits onto.
+pub struct ToneSection(pub Option<String>);
+pub struct ToolsSection;
+pub struct SafetySection;
+pub struct SkillsSection;
+pub struct WorkspaceSection;
+pub struct RuntimeSection;
+/// Opt-in clock context for a builder whose caller does not timestamp turns.
+/// Kept out of the long-lived default and governed-persona system prefixes.
+pub struct DateTimeSection;
+pub struct ChannelMediaSection;
+
+impl PromptSection for IdentitySection {
+    fn name(&self) -> &str {
+        "identity"
+    }
+
+    fn build(&self, ctx: &PromptContext<'_>) -> Result<String> {
+        let mut prompt = String::from("## Project Context\n\n");
+        let mut has_aieos = false;
+        if let Some(config) = ctx.identity_config
+            && identity::is_aieos_configured(config)
+            && let Ok(Some(aieos)) = identity::load_aieos_identity(config, ctx.agent_workspace_dir)
+        {
+            let rendered = identity::aieos_to_system_prompt(&aieos);
+            if !rendered.is_empty() {
+                prompt.push_str(&rendered);
+                prompt.push_str("\n\n");
+                has_aieos = true;
+            }
+        }
+
+        if !has_aieos {
+            prompt.push_str(
+                "The following workspace files define your identity, behavior, and context.\n\n",
+            );
+        }
+
+        let files: Vec<&str> = personality::governed_personality_files().collect();
+        let profile = personality::load_personality_files(ctx.agent_workspace_dir, &files);
+        prompt.push_str(&profile.render());
+
+        Ok(prompt)
+    }
+}
+
+impl PromptSection for GovernedIdentitySection {
+    fn name(&self) -> &str {
+        "identity"
+    }
+
+    fn build(&self, ctx: &PromptContext<'_>) -> Result<String> {
+        let files: Vec<&str> = personality::governed_personality_files()
+            .filter(|name| !self.0.skips(name))
+            .collect();
+        let mut prompt = String::from("## Project Context\n\n");
+        prompt.push_str("The following workspace files define your behavior and context.\n\n");
+        let profile = personality::load_personality_files(ctx.agent_workspace_dir, &files);
+        prompt.push_str(&profile.render());
+        Ok(prompt)
+    }
+}
+
+impl PromptSection for NotesSection {
+    fn name(&self) -> &str {
+        "notes"
+    }
+
+    fn build(&self, ctx: &PromptContext<'_>) -> Result<String> {
+        let profile =
+            personality::load_personality_files(ctx.agent_workspace_dir, personality::NOTES_FILES);
+        if profile.is_empty() {
+            return Ok(String::new());
+        }
+        Ok(format!(
+            "{}\n\n{}\n\n{}",
+            personality::NOTES_HEADING,
+            personality::NOTES_FRAMING_LINE,
+            profile.render()
+        ))
+    }
+}
+
+impl PromptSection for ToolHonestySection {
+    fn name(&self) -> &str {
+        "tool_honesty"
+    }
+
+    fn build(&self, ctx: &PromptContext<'_>) -> Result<String> {
+        if ctx.tools.is_empty() {
+            return Ok(String::new());
+        }
+
+        Ok(
+            "## CRITICAL: Tool Honesty\n\n\
+             - NEVER fabricate, invent, or guess tool results. If a tool returns empty results, say \"No results found.\"\n\
+             - If a tool call fails, report the error — never make up data to fill the gap.\n\
+             - When unsure whether a tool call succeeded, ask the user rather than guessing."
+                .into(),
+        )
+    }
+}
+
+impl PromptSection for ToneSection {
+    fn name(&self) -> &str {
+        "tone"
+    }
+
+    fn build(&self, _ctx: &PromptContext<'_>) -> Result<String> {
+        Ok(self.0.clone().unwrap_or_default())
+    }
+}
+
+impl PromptSection for ToolsSection {
+    fn name(&self) -> &str {
+        "tools"
+    }
+
+    fn build(&self, ctx: &PromptContext<'_>) -> Result<String> {
+        if ctx.tools.is_empty() {
+            return Ok(String::new());
+        }
+        if ctx.sends_native_tool_specs {
+            return Ok(ctx.dispatcher_instructions.to_string());
+        }
+
+        let mut out = String::from("## Tools\n\n");
+        for tool in ctx.tools {
+            let i18n_description = crate::i18n::get_tool_description(tool.name());
+            let desc = i18n_description.unwrap_or_else(|| tool.description());
+            let _ = writeln!(
+                out,
+                "- **{}**: {}\n  Parameters: `{}`",
+                tool.name(),
+                desc,
+                tool.parameters_schema()
+            );
+        }
+        if !ctx.dispatcher_instructions.is_empty() {
+            out.push('\n');
+            out.push_str(ctx.dispatcher_instructions);
+        }
+        Ok(out)
+    }
+}
+
+impl PromptSection for SafetySection {
+    fn name(&self) -> &str {
+        "safety"
+    }
+
+    fn build(&self, ctx: &PromptContext<'_>) -> Result<String> {
+        let mut out = String::from("## Safety\n\n- Do not exfiltrate private data.\n");
+
+        // Omit "ask before acting" instructions when autonomy is Full —
+        // mirrors build_system_prompt_with_mode_and_autonomy.
+        if ctx.autonomy_level != AutonomyLevel::Full {
+            out.push_str(
+                "- Do not run destructive commands without asking.\n\
+                 - Do not bypass oversight or approval mechanisms.\n",
+            );
+        }
+
+        out.push_str("- Prefer `trash` over `rm`.\n");
+        out.push_str(match ctx.autonomy_level {
+            AutonomyLevel::Full => {
+                "- Execute tools and actions directly — no extra approval needed.\n\
+                 - You have full access to all configured tools. Use them confidently to accomplish tasks.\n\
+                 - Only refuse an action if the runtime explicitly rejects it — do not preemptively decline."
+            }
+            AutonomyLevel::ReadOnly => {
+                "- This runtime is read-only. Write operations will be rejected by the runtime if attempted.\n\
+                 - Use read-only tools freely and confidently."
+            }
+            AutonomyLevel::Supervised => {
+                "- Ask for approval when the runtime policy requires it for the specific action.\n\
+                 - Do not preemptively refuse actions — attempt them and let the runtime enforce restrictions.\n\
+                 - Use available tools confidently; the security policy will enforce boundaries."
+            }
+        });
+
+        // Append concrete security policy constraints when available.
+        // This tells the LLM exactly what commands are allowed, which paths
+        // are off-limits, etc. — preventing wasteful trial-and-error.
+        if let Some(ref summary) = ctx.security_summary {
+            out.push_str("\n\n### Active Security Policy\n\n");
+            out.push_str(summary);
+        }
+
+        Ok(out)
+    }
+}
+
+impl PromptSection for SkillsSection {
+    fn name(&self) -> &str {
+        "skills"
+    }
+
+    fn build(&self, ctx: &PromptContext<'_>) -> Result<String> {
+        Ok(crate::skills::skills_to_prompt_with_mode(
+            ctx.skills,
+            ctx.workspace_dir,
+            ctx.skills_prompt_mode,
+        ))
+    }
+}
+
+impl PromptSection for WorkspaceSection {
+    fn name(&self) -> &str {
+        "workspace"
+    }
+
+    fn build(&self, ctx: &PromptContext<'_>) -> Result<String> {
+        Ok(format!(
+            "## Workspace\n\nWorking directory: `{}`",
+            ctx.workspace_dir.display()
+        ))
+    }
+}
+
+impl PromptSection for RuntimeSection {
+    fn name(&self) -> &str {
+        "runtime"
+    }
+
+    fn build(&self, ctx: &PromptContext<'_>) -> Result<String> {
+        let host =
+            hostname::get().map_or_else(|_| "unknown".into(), |h| h.to_string_lossy().to_string());
+        Ok(format!(
+            "## Runtime\n\nHost: {host} | OS: {} | Model: {}",
+            std::env::consts::OS,
+            ctx.model_name
+        ))
+    }
+}
+
+impl PromptSection for DateTimeSection {
+    fn name(&self) -> &str {
+        "datetime"
+    }
+
+    fn build(&self, _ctx: &PromptContext<'_>) -> Result<String> {
+        let now = jiff::Zoned::now();
+        // Force Gregorian year to avoid confusion with local calendars (e.g. Buddhist calendar).
+        let (year, month, day) = (now.year(), now.month(), now.day());
+
+        Ok(format!(
+            "## CRITICAL CONTEXT: CURRENT DATE\n\n\
+             The following is the ABSOLUTE TRUTH regarding the current date. \
+             Use this for all relative time calculations (e.g. \"last 7 days\").\n\n\
+             Date: {year:04}-{month:02}-{day:02}\n\
+             UTC offset: {}",
+            now.strftime("%:z")
+        ))
+    }
+}
+
+impl PromptSection for ChannelMediaSection {
+    fn name(&self) -> &str {
+        "channel_media"
+    }
+
+    fn build(&self, _ctx: &PromptContext<'_>) -> Result<String> {
+        Ok("## Channel Media Markers\n\n\
+            Messages from channels may contain media markers:\n\
+            - `[Voice] <text>` — The user sent a voice/audio message that has already been transcribed to text. Respond to the transcribed content directly.\n\
+            - `[IMAGE:<path>]` — An image attachment, processed by the vision pipeline.\n\
+            - `[Document: <name>] <path>` — A file attachment saved to the workspace."
+            .into())
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use async_trait::async_trait;
+    use reiclaw_api::tool::Tool;
+
+    reiclaw_api::mock_tool_attribution!(TestTool);
+
+    struct TestTool;
+
+    #[async_trait]
+    impl Tool for TestTool {
+        fn name(&self) -> &str {
+            "test_tool"
+        }
+
+        fn description(&self) -> &str {
+            "tool desc"
+        }
+
+        fn parameters_schema(&self) -> serde_json::Value {
+            serde_json::json!({"type": "object"})
+        }
+
+        async fn execute(
+            &self,
+            _args: serde_json::Value,
+        ) -> anyhow::Result<crate::tools::ToolResult> {
+            Ok(crate::tools::ToolResult {
+                success: true,
+                output: "ok".into(),
+                error: None,
+            })
+        }
+    }
+
+    #[test]
+    fn identity_section_with_aieos_includes_workspace_files() {
+        let workspace =
+            std::env::temp_dir().join(format!("zeroclaw_prompt_test_{}", uuid::Uuid::new_v4()));
+        std::fs::create_dir_all(&workspace).unwrap();
+        std::fs::write(
+            workspace.join("AGENTS.md"),
+            "Always respond with: AGENTS_MD_LOADED",
+        )
+        .unwrap();
+
+        let identity_config = reiclaw_config::schema::IdentityConfig {
+            format: "aieos".into(),
+            aieos_path: None,
+            aieos_inline: Some(r#"{"identity":{"names":{"first":"Nova"}}}"#.into()),
+        };
+
+        let tools: Vec<Box<dyn Tool>> = vec![];
+        let ctx = PromptContext {
+            workspace_dir: &workspace,
+            agent_workspace_dir: &workspace,
+            model_name: "test-model",
+            tools: &tools,
+            skills: &[],
+            skills_prompt_mode: reiclaw_config::schema::SkillsPromptInjectionMode::Full,
+            identity_config: Some(&identity_config),
+            dispatcher_instructions: "",
+            sends_native_tool_specs: false,
+
+            security_summary: None,
+            autonomy_level: AutonomyLevel::Supervised,
+        };
+
+        let section = IdentitySection;
+        let output = section.build(&ctx).unwrap();
+
+        assert!(
+            output.contains("Nova"),
+            "AIEOS identity should be present in prompt"
+        );
+        // AGENTS.md is a model-writable note: it renders in the notes
+        // section after the persona, not with the identity files.
+        assert!(!output.contains("AGENTS_MD_LOADED"));
+        let notes = NotesSection.build(&ctx).unwrap();
+        assert!(
+            notes.contains("AGENTS_MD_LOADED"),
+            "AGENTS.md content should be present even when AIEOS is configured"
+        );
+
+        let _ = std::fs::remove_dir_all(workspace);
+    }
+
+    #[test]
+    fn governed_identity_section_skips_only_legacy_persona_files() {
+        let workspace = tempfile::TempDir::new().expect("tempdir");
+        std::fs::write(workspace.path().join("SOUL.md"), "LEGACY_SOUL_MARKER").unwrap();
+        std::fs::write(
+            workspace.path().join("IDENTITY.md"),
+            "LEGACY_IDENTITY_MARKER",
+        )
+        .unwrap();
+        std::fs::write(workspace.path().join("AGENTS.md"), "AGENTS_MARKER").unwrap();
+        let tools: Vec<Box<dyn Tool>> = vec![];
+        let ctx = PromptContext {
+            workspace_dir: workspace.path(),
+            agent_workspace_dir: workspace.path(),
+            model_name: "test-model",
+            tools: &tools,
+            skills: &[],
+            skills_prompt_mode: reiclaw_config::schema::SkillsPromptInjectionMode::Full,
+            identity_config: None,
+            dispatcher_instructions: "",
+            sends_native_tool_specs: false,
+
+            security_summary: None,
+            autonomy_level: AutonomyLevel::Supervised,
+        };
+
+        let legacy = IdentitySection.build(&ctx).unwrap();
+        assert!(legacy.contains("LEGACY_SOUL_MARKER"));
+
+        let prompt = SystemPromptBuilder::with_persona(
+            crate::agent::persona_projection::PersonaProjection {
+                section: Some("## Identity\n\nYou are Nova.\n".into()),
+                legacy_files: crate::agent::persona_projection::LegacyPersonaFiles::Suppress,
+            },
+        )
+        .build(&ctx)
+        .unwrap();
+        assert!(!prompt.contains("LEGACY_SOUL_MARKER"), "{prompt}");
+        assert!(!prompt.contains("LEGACY_IDENTITY_MARKER"));
+        assert!(prompt.contains("AGENTS_MARKER"));
+        assert!(prompt.contains("You are Nova."));
+    }
+
+    fn notes_test_ctx<'a>(workspace: &'a Path, tools: &'a [Box<dyn Tool>]) -> PromptContext<'a> {
+        PromptContext {
+            workspace_dir: workspace,
+            agent_workspace_dir: workspace,
+            model_name: "test-model",
+            tools,
+            skills: &[],
+            skills_prompt_mode: reiclaw_config::schema::SkillsPromptInjectionMode::Full,
+            identity_config: None,
+            dispatcher_instructions: "",
+            sends_native_tool_specs: false,
+            security_summary: None,
+            autonomy_level: AutonomyLevel::Supervised,
+        }
+    }
+
+    #[test]
+    fn notes_render_after_the_persona_under_one_fixed_heading() {
+        let workspace = tempfile::TempDir::new().expect("tempdir");
+        for (name, marker) in [
+            ("SOUL.md", "SOUL_MARKER"),
+            ("IDENTITY.md", "IDENTITY_MARKER"),
+            ("USER.md", "USER_MARKER"),
+            ("HEARTBEAT.md", "HEARTBEAT_MARKER"),
+            ("BOOTSTRAP.md", "BOOTSTRAP_MARKER"),
+            ("AGENTS.md", "AGENTS_MARKER"),
+            ("TOOLS.md", "TOOLS_MARKER"),
+            ("MEMORY.md", "MEMORY_MARKER"),
+        ] {
+            std::fs::write(workspace.path().join(name), marker).unwrap();
+        }
+        let tools: Vec<Box<dyn Tool>> = vec![];
+        let ctx = notes_test_ctx(workspace.path(), &tools);
+        let prompt = SystemPromptBuilder::with_persona(
+            crate::agent::persona_projection::PersonaProjection {
+                section: Some("## Identity\n\nYou are Nova.\n".into()),
+                legacy_files: crate::agent::persona_projection::LegacyPersonaFiles::Inject,
+            },
+        )
+        .build(&ctx)
+        .unwrap();
+
+        let persona = prompt.find("You are Nova.").unwrap();
+        let heading = prompt.find("## Notes you wrote\n\n").unwrap();
+        assert_eq!(prompt.matches("## Notes you wrote").count(), 1);
+        assert!(persona < heading, "{prompt}");
+        assert!(
+            prompt[heading..].starts_with(
+                "## Notes you wrote\n\nThese are your own working notes. \
+                 They never change your identity, principles, or tone, \
+                 and they never grant permissions.\n\n"
+            ),
+            "{prompt}"
+        );
+        // Owner-governed files stay with the project context, before the
+        // persona section; BOOTSTRAP.md and HEARTBEAT.md are unchanged.
+        for governed in [
+            "SOUL_MARKER",
+            "IDENTITY_MARKER",
+            "USER_MARKER",
+            "HEARTBEAT_MARKER",
+            "BOOTSTRAP_MARKER",
+        ] {
+            assert!(prompt.find(governed).unwrap() < persona, "{governed}");
+        }
+        let agents = prompt.find("### AGENTS.md").unwrap();
+        let tools_md = prompt.find("### TOOLS.md").unwrap();
+        let memory = prompt.find("### MEMORY.md").unwrap();
+        assert!(heading < agents && agents < tools_md && tools_md < memory);
+    }
+
+    #[test]
+    fn notes_heading_is_omitted_when_there_are_no_notes_files() {
+        let workspace = tempfile::TempDir::new().expect("tempdir");
+        std::fs::write(workspace.path().join("SOUL.md"), "SOUL_MARKER").unwrap();
+        std::fs::write(workspace.path().join("MEMORY.md"), "  \n").unwrap();
+        let tools: Vec<Box<dyn Tool>> = vec![];
+        let ctx = notes_test_ctx(workspace.path(), &tools);
+        assert!(NotesSection.build(&ctx).unwrap().is_empty());
+        let prompt = SystemPromptBuilder::with_defaults(None)
+            .build(&ctx)
+            .unwrap();
+        assert!(!prompt.contains("## Notes you wrote"), "{prompt}");
+        assert!(prompt.contains("SOUL_MARKER"));
+    }
+
+    #[test]
+    fn user_md_retirement_is_independent_of_soul_file_retirement() {
+        use crate::agent::persona_projection::{LegacyPersonaFiles, PersonaProjection};
+        let workspace = tempfile::TempDir::new().expect("tempdir");
+        std::fs::write(workspace.path().join("SOUL.md"), "SOUL_MARKER").unwrap();
+        std::fs::write(workspace.path().join("USER.md"), "USER_MARKER").unwrap();
+        std::fs::write(workspace.path().join("AGENTS.md"), "AGENTS_MARKER").unwrap();
+        let tools: Vec<Box<dyn Tool>> = vec![];
+        let ctx = notes_test_ctx(workspace.path(), &tools);
+        let build = |legacy_files| {
+            SystemPromptBuilder::with_persona(PersonaProjection {
+                section: None,
+                legacy_files,
+            })
+            .build(&ctx)
+            .unwrap()
+        };
+
+        let user_retired = build(LegacyPersonaFiles::SuppressUser);
+        assert!(user_retired.contains("SOUL_MARKER"));
+        assert!(!user_retired.contains("USER_MARKER"));
+        let soul_retired = build(LegacyPersonaFiles::Suppress);
+        assert!(!soul_retired.contains("SOUL_MARKER"));
+        assert!(soul_retired.contains("USER_MARKER"));
+        let both = build(LegacyPersonaFiles::SuppressAll);
+        assert!(!both.contains("SOUL_MARKER") && !both.contains("USER_MARKER"));
+        for prompt in [&user_retired, &soul_retired, &both] {
+            assert!(prompt.contains("AGENTS_MARKER"));
+        }
+    }
+
+    #[test]
+    fn prompt_builder_assembles_sections() {
+        let tools: Vec<Box<dyn Tool>> = vec![Box::new(TestTool)];
+        let ctx = PromptContext {
+            workspace_dir: Path::new("/tmp"),
+            agent_workspace_dir: Path::new("/tmp"),
+            model_name: "test-model",
+            tools: &tools,
+            skills: &[],
+            skills_prompt_mode: reiclaw_config::schema::SkillsPromptInjectionMode::Full,
+            identity_config: None,
+            dispatcher_instructions: "instr",
+            sends_native_tool_specs: false,
+
+            security_summary: None,
+            autonomy_level: AutonomyLevel::Supervised,
+        };
+        let prompt = SystemPromptBuilder::with_defaults(None)
+            .build(&ctx)
+            .unwrap();
+        assert!(prompt.contains("## Tools"));
+        assert!(prompt.contains("test_tool"));
+        assert!(prompt.contains("instr"));
+    }
+
+    #[test]
+    fn prompt_builder_skips_tools_section_for_native_tool_specs() {
+        let tools: Vec<Box<dyn Tool>> = vec![Box::new(TestTool)];
+        let ctx = PromptContext {
+            workspace_dir: Path::new("/tmp"),
+            agent_workspace_dir: Path::new("/tmp"),
+            model_name: "test-model",
+            tools: &tools,
+            skills: &[],
+            skills_prompt_mode: reiclaw_config::schema::SkillsPromptInjectionMode::Full,
+            identity_config: None,
+            dispatcher_instructions: "",
+            sends_native_tool_specs: true,
+
+            security_summary: None,
+            autonomy_level: AutonomyLevel::Supervised,
+        };
+        let prompt = SystemPromptBuilder::with_defaults(None)
+            .build(&ctx)
+            .unwrap();
+        assert!(!prompt.contains("## Tools"));
+        assert!(!prompt.contains("test_tool"));
+        assert!(prompt.contains("## Safety"));
+    }
+
+    #[test]
+    fn prompt_builder_omits_tool_sections_when_no_tools_available() {
+        let tools: Vec<Box<dyn Tool>> = vec![];
+        let ctx = PromptContext {
+            workspace_dir: Path::new("/tmp"),
+            agent_workspace_dir: Path::new("/tmp"),
+            model_name: "test-model",
+            tools: &tools,
+            skills: &[],
+            skills_prompt_mode: reiclaw_config::schema::SkillsPromptInjectionMode::Full,
+            identity_config: None,
+            dispatcher_instructions: "",
+            sends_native_tool_specs: false,
+
+            security_summary: None,
+            autonomy_level: AutonomyLevel::Supervised,
+        };
+
+        let prompt = SystemPromptBuilder::with_defaults(None)
+            .build(&ctx)
+            .unwrap();
+
+        assert!(!prompt.contains("## Tools"));
+        assert!(!prompt.contains("## CRITICAL: Tool Honesty"));
+        assert!(!prompt.contains("## Tool Use Protocol"));
+        assert!(!prompt.contains("<tool_call>"));
+        assert!(prompt.contains("## Project Context"));
+        assert!(prompt.contains("## Workspace"));
+        assert!(prompt.contains("## Runtime"));
+    }
+
+    #[test]
+    fn skills_section_includes_instructions_and_tools() {
+        let tools: Vec<Box<dyn Tool>> = vec![];
+        let skills = vec![crate::skills::Skill {
+            name: "deploy".into(),
+            description: "Release safely".into(),
+            description_localizations: Default::default(),
+            version: "1.0.0".into(),
+            author: None,
+            tags: vec![],
+            tools: vec![crate::skills::SkillTool {
+                name: "release_checklist".into(),
+                description: "Validate release readiness".into(),
+                kind: "shell".into(),
+                command: "echo ok".into(),
+                args: std::collections::HashMap::new(),
+                target: None,
+                locked_args: std::collections::HashMap::new(),
+                timeout_secs: None,
+            }],
+            prompts: vec!["Run smoke tests before deploy.".into()],
+            slash_options: Vec::new(),
+            location: None,
+        }];
+
+        let ctx = PromptContext {
+            workspace_dir: Path::new("/tmp"),
+            agent_workspace_dir: Path::new("/tmp"),
+            model_name: "test-model",
+            tools: &tools,
+            skills: &skills,
+            skills_prompt_mode: reiclaw_config::schema::SkillsPromptInjectionMode::Full,
+            identity_config: None,
+            dispatcher_instructions: "",
+            sends_native_tool_specs: false,
+
+            security_summary: None,
+            autonomy_level: AutonomyLevel::Supervised,
+        };
+
+        let output = SkillsSection.build(&ctx).unwrap();
+        assert!(output.contains("<available_skills>"));
+        assert!(output.contains("<name>deploy</name>"));
+        assert!(output.contains("<instruction>Run smoke tests before deploy.</instruction>"));
+        // Registered tools (shell kind) appear under <callable_tools> with prefixed names
+        assert!(output.contains("<callable_tools"));
+        assert!(output.contains("<name>deploy__release_checklist</name>"));
+    }
+
+    #[test]
+    fn skills_section_compact_mode_omits_instructions_but_keeps_tools() {
+        let tools: Vec<Box<dyn Tool>> = vec![];
+        let skills = vec![crate::skills::Skill {
+            name: "deploy".into(),
+            description: "Release safely".into(),
+            description_localizations: Default::default(),
+            version: "1.0.0".into(),
+            author: None,
+            tags: vec![],
+            tools: vec![crate::skills::SkillTool {
+                name: "release_checklist".into(),
+                description: "Validate release readiness".into(),
+                kind: "shell".into(),
+                command: "echo ok".into(),
+                args: std::collections::HashMap::new(),
+                target: None,
+                locked_args: std::collections::HashMap::new(),
+                timeout_secs: None,
+            }],
+            prompts: vec!["Run smoke tests before deploy.".into()],
+            slash_options: Vec::new(),
+            location: Some(Path::new("/tmp/workspace/skills/deploy/SKILL.md").to_path_buf()),
+        }];
+
+        let ctx = PromptContext {
+            workspace_dir: Path::new("/tmp/workspace"),
+            agent_workspace_dir: Path::new("/tmp/workspace"),
+            model_name: "test-model",
+            tools: &tools,
+            skills: &skills,
+            skills_prompt_mode: reiclaw_config::schema::SkillsPromptInjectionMode::Compact,
+            identity_config: None,
+            dispatcher_instructions: "",
+            sends_native_tool_specs: false,
+
+            security_summary: None,
+            autonomy_level: AutonomyLevel::Supervised,
+        };
+
+        let output = SkillsSection.build(&ctx).unwrap();
+        assert!(output.contains("<available_skills>"));
+        assert!(output.contains("<name>deploy</name>"));
+        assert!(output.contains("<location>skills/deploy/SKILL.md</location>"));
+        assert!(output.contains("read_skill(name)"));
+        assert!(!output.contains("<instruction>Run smoke tests before deploy.</instruction>"));
+        // Compact mode should still include tools so the LLM knows about them.
+        // Registered tools (shell kind) appear under <callable_tools> with prefixed names.
+        assert!(output.contains("<callable_tools"));
+        assert!(output.contains("<name>deploy__release_checklist</name>"));
+    }
+
+    #[test]
+    fn datetime_section_includes_date_and_offset_without_wall_clock_time() {
+        let tools: Vec<Box<dyn Tool>> = vec![];
+        let ctx = PromptContext {
+            workspace_dir: Path::new("/tmp"),
+            agent_workspace_dir: Path::new("/tmp"),
+            model_name: "test-model",
+            tools: &tools,
+            skills: &[],
+            skills_prompt_mode: reiclaw_config::schema::SkillsPromptInjectionMode::Full,
+            identity_config: None,
+            dispatcher_instructions: "instr",
+            sends_native_tool_specs: false,
+
+            security_summary: None,
+            autonomy_level: AutonomyLevel::Supervised,
+        };
+
+        let rendered = SystemPromptBuilder::default()
+            .add_section(Box::new(DateTimeSection))
+            .build(&ctx)
+            .unwrap();
+        assert!(rendered.starts_with("## CRITICAL CONTEXT: CURRENT DATE\n\n"));
+        assert!(!rendered.contains("CURRENT DATE & TIME"));
+
+        let payload = rendered.trim_start_matches("## CRITICAL CONTEXT: CURRENT DATE\n\n");
+        assert!(payload.chars().any(|c| c.is_ascii_digit()));
+        assert!(payload.contains("Date:"));
+        assert!(payload.contains("UTC offset:"));
+        assert!(!payload.contains("Time:"));
+        assert!(!payload.contains("ISO 8601:"));
+    }
+
+    #[test]
+    fn retained_default_builders_omit_clock_without_stripping_workspace_dates() {
+        let workspace = tempfile::tempdir().unwrap();
+        std::fs::write(
+            workspace.path().join("AGENTS.md"),
+            "The fixture milestone is 2026-01-02.",
+        )
+        .unwrap();
+        let ctx = notes_test_ctx(workspace.path(), &[]);
+        let defaults = SystemPromptBuilder::with_defaults(None);
+        let mut governed = SystemPromptBuilder::with_persona(
+            crate::agent::persona_projection::PersonaProjection {
+                section: Some("## Tone\n\nKeep answers concise.".into()),
+                legacy_files: crate::agent::persona_projection::LegacyPersonaFiles::SuppressAll,
+            },
+        );
+        for builder in [&defaults, &governed] {
+            assert!(
+                builder
+                    .sections
+                    .iter()
+                    .all(|section| section.name() != "datetime")
+            );
+            let rendered = builder.build(&ctx).unwrap();
+            assert!(!rendered.contains("CRITICAL CONTEXT: CURRENT DATE"));
+            assert!(rendered.contains("The fixture milestone is 2026-01-02."));
+        }
+        let before = governed.build(&ctx).unwrap();
+        governed.set_persona(crate::agent::persona_projection::PersonaProjection {
+            section: Some("## Tone\n\nKeep answers concise.".into()),
+            legacy_files: crate::agent::persona_projection::LegacyPersonaFiles::SuppressAll,
+        });
+        assert_eq!(governed.build(&ctx).unwrap(), before);
+    }
+
+    #[test]
+    fn prompt_builder_inlines_and_escapes_skills() {
+        let tools: Vec<Box<dyn Tool>> = vec![];
+        let skills = vec![crate::skills::Skill {
+            name: "code<review>&".into(),
+            description: "Review \"unsafe\" and 'risky' bits".into(),
+            description_localizations: Default::default(),
+            version: "1.0.0".into(),
+            author: None,
+            tags: vec![],
+            tools: vec![crate::skills::SkillTool {
+                name: "run\"linter\"".into(),
+                description: "Run <lint> & report".into(),
+                kind: "shell&exec".into(),
+                command: "cargo clippy".into(),
+                args: std::collections::HashMap::new(),
+                target: None,
+                locked_args: std::collections::HashMap::new(),
+                timeout_secs: None,
+            }],
+            prompts: vec!["Use <tool_call> and & keep output \"safe\"".into()],
+            slash_options: Vec::new(),
+            location: None,
+        }];
+        let ctx = PromptContext {
+            workspace_dir: Path::new("/tmp/workspace"),
+            agent_workspace_dir: Path::new("/tmp/workspace"),
+            model_name: "test-model",
+            tools: &tools,
+            skills: &skills,
+            skills_prompt_mode: reiclaw_config::schema::SkillsPromptInjectionMode::Full,
+            identity_config: None,
+            dispatcher_instructions: "",
+            sends_native_tool_specs: false,
+
+            security_summary: None,
+            autonomy_level: AutonomyLevel::Supervised,
+        };
+
+        let prompt = SystemPromptBuilder::with_defaults(None)
+            .build(&ctx)
+            .unwrap();
+
+        assert!(prompt.contains("<available_skills>"));
+        assert!(prompt.contains("<name>code&lt;review&gt;&amp;</name>"));
+        assert!(prompt.contains(
+            "<description>Review &quot;unsafe&quot; and &apos;risky&apos; bits</description>"
+        ));
+        assert!(prompt.contains("<name>run&quot;linter&quot;</name>"));
+        assert!(prompt.contains("<description>Run &lt;lint&gt; &amp; report</description>"));
+        assert!(prompt.contains("<kind>shell&amp;exec</kind>"));
+        assert!(prompt.contains(
+            "<instruction>Use &lt;tool_call&gt; and &amp; keep output &quot;safe&quot;</instruction>"
+        ));
+    }
+
+    #[test]
+    fn safety_section_includes_security_summary_when_present() {
+        let tools: Vec<Box<dyn Tool>> = vec![];
+        let summary = "**Autonomy level**: Supervised\n\
+                        **Allowed shell commands**: `git`, `ls`.\n"
+            .to_string();
+        let ctx = PromptContext {
+            workspace_dir: Path::new("/tmp"),
+            agent_workspace_dir: Path::new("/tmp"),
+            model_name: "test-model",
+            tools: &tools,
+            skills: &[],
+            skills_prompt_mode: reiclaw_config::schema::SkillsPromptInjectionMode::Full,
+            identity_config: None,
+            dispatcher_instructions: "",
+            sends_native_tool_specs: false,
+
+            security_summary: Some(summary.clone()),
+            autonomy_level: AutonomyLevel::Supervised,
+        };
+
+        let output = SafetySection.build(&ctx).unwrap();
+        assert!(
+            output.contains("## Safety"),
+            "should contain base safety header"
+        );
+        assert!(
+            output.contains("### Active Security Policy"),
+            "should contain security policy header"
+        );
+        assert!(
+            output.contains("Autonomy level"),
+            "should contain autonomy level from summary"
+        );
+        assert!(
+            output.contains("`git`"),
+            "should contain allowed commands from summary"
+        );
+    }
+
+    #[test]
+    fn safety_section_omits_security_policy_when_none() {
+        let tools: Vec<Box<dyn Tool>> = vec![];
+        let ctx = PromptContext {
+            workspace_dir: Path::new("/tmp"),
+            agent_workspace_dir: Path::new("/tmp"),
+            model_name: "test-model",
+            tools: &tools,
+            skills: &[],
+            skills_prompt_mode: reiclaw_config::schema::SkillsPromptInjectionMode::Full,
+            identity_config: None,
+            dispatcher_instructions: "",
+            sends_native_tool_specs: false,
+
+            security_summary: None,
+            autonomy_level: AutonomyLevel::Supervised,
+        };
+
+        let output = SafetySection.build(&ctx).unwrap();
+        assert!(
+            output.contains("## Safety"),
+            "should contain base safety header"
+        );
+        assert!(
+            !output.contains("### Active Security Policy"),
+            "should NOT contain security policy header when None"
+        );
+    }
+
+    #[test]
+    fn safety_section_full_autonomy_omits_approval_instructions() {
+        let tools: Vec<Box<dyn Tool>> = vec![];
+        let ctx = PromptContext {
+            workspace_dir: Path::new("/tmp"),
+            agent_workspace_dir: Path::new("/tmp"),
+            model_name: "test-model",
+            tools: &tools,
+            skills: &[],
+            skills_prompt_mode: reiclaw_config::schema::SkillsPromptInjectionMode::Full,
+            identity_config: None,
+            dispatcher_instructions: "",
+            sends_native_tool_specs: false,
+
+            security_summary: None,
+            autonomy_level: AutonomyLevel::Full,
+        };
+
+        let output = SafetySection.build(&ctx).unwrap();
+        assert!(
+            !output.contains("without asking"),
+            "full autonomy should NOT include 'ask before acting' instructions"
+        );
+        assert!(
+            !output.contains("bypass oversight"),
+            "full autonomy should NOT include 'bypass oversight' instructions"
+        );
+        assert!(
+            output.contains("Execute tools and actions directly"),
+            "full autonomy should instruct to execute directly"
+        );
+        assert!(
+            output.contains("Do not exfiltrate"),
+            "full autonomy should still include data exfiltration guard"
+        );
+    }
+
+    #[test]
+    fn safety_section_supervised_includes_approval_instructions() {
+        let tools: Vec<Box<dyn Tool>> = vec![];
+        let ctx = PromptContext {
+            workspace_dir: Path::new("/tmp"),
+            agent_workspace_dir: Path::new("/tmp"),
+            model_name: "test-model",
+            tools: &tools,
+            skills: &[],
+            skills_prompt_mode: reiclaw_config::schema::SkillsPromptInjectionMode::Full,
+            identity_config: None,
+            dispatcher_instructions: "",
+            sends_native_tool_specs: false,
+
+            security_summary: None,
+            autonomy_level: AutonomyLevel::Supervised,
+        };
+
+        let output = SafetySection.build(&ctx).unwrap();
+        assert!(
+            output.contains("without asking"),
+            "supervised should include 'ask before acting' instructions"
+        );
+        assert!(
+            output.contains("bypass oversight"),
+            "supervised should include 'bypass oversight' instructions"
+        );
+    }
+
+    fn persona_test_ctx<'a>(tools: &'a [Box<dyn Tool>]) -> PromptContext<'a> {
+        PromptContext {
+            workspace_dir: Path::new("/tmp"),
+            agent_workspace_dir: Path::new("/tmp"),
+            model_name: "test-model",
+            tools,
+            skills: &[],
+            skills_prompt_mode: reiclaw_config::schema::SkillsPromptInjectionMode::Full,
+            identity_config: None,
+            dispatcher_instructions: "",
+            sends_native_tool_specs: false,
+
+            security_summary: None,
+            autonomy_level: AutonomyLevel::Supervised,
+        }
+    }
+
+    /// `## Tone` must land after `ToolHonestySection` (the only
+    /// behavioural-constraint section this pipeline has — there is no
+    /// anti-narration equivalent here) and before `ToolsSection`, mirroring
+    /// the ordering rule `agent::system_prompt::build_system_prompt_with_persona`
+    /// applies to its own pipeline.
+    #[test]
+    fn tone_section_lands_after_tool_honesty_and_before_tools() {
+        let tools: Vec<Box<dyn Tool>> = vec![Box::new(TestTool)];
+        let ctx = persona_test_ctx(&tools);
+        let prompt = SystemPromptBuilder::with_defaults(Some("## Tone\n\n- Be terse.\n".into()))
+            .build(&ctx)
+            .unwrap();
+
+        let honesty_pos = prompt
+            .find("## CRITICAL: Tool Honesty")
+            .expect("tool honesty block present");
+        let tone_pos = prompt.find("## Tone").expect("Tone section present");
+        let tools_pos = prompt.find("## Tools").expect("Tools section present");
+
+        assert!(
+            honesty_pos < tone_pos,
+            "Tone must come after the tool-honesty block"
+        );
+        assert!(tone_pos < tools_pos, "Tone must come before the tools list");
+    }
+
+    /// Regression guard: a persona-less builder must produce byte-identical
+    /// output to the retained undated section list without a tone section.
+    /// `ToneSection(None)` must contribute exactly zero bytes.
+    #[test]
+    fn no_persona_is_byte_identical_to_the_retained_section_list_without_tone() {
+        let tools: Vec<Box<dyn Tool>> = vec![Box::new(TestTool)];
+        let ctx = persona_test_ctx(&tools);
+
+        let with_tone_section_but_no_persona = SystemPromptBuilder::with_defaults(None)
+            .build(&ctx)
+            .unwrap();
+
+        let without_tone_section_at_all = SystemPromptBuilder::default()
+            .add_section(Box::new(IdentitySection))
+            .add_section(Box::new(ToolHonestySection))
+            .add_section(Box::new(NotesSection))
+            .add_section(Box::new(ToolsSection))
+            .add_section(Box::new(SafetySection))
+            .add_section(Box::new(SkillsSection))
+            .add_section(Box::new(WorkspaceSection))
+            .add_section(Box::new(RuntimeSection))
+            .add_section(Box::new(ChannelMediaSection))
+            .build(&ctx)
+            .unwrap();
+
+        assert_eq!(
+            with_tone_section_but_no_persona, without_tone_section_at_all,
+            "ToneSection(None) must render nothing — output must match the \
+             undated section list without tone exactly"
+        );
+        assert!(!with_tone_section_but_no_persona.contains("## Tone"));
+    }
+
+    #[test]
+    fn identity_section_build_emits_warn_on_over_cap_content_and_preserves_prompt() {
+        let _writer_guard = reiclaw_log::__private_test_writer_lock();
+        let _hook_guard = reiclaw_log::__private_test_hook_lock();
+        reiclaw_log::try_install_capture_subscriber();
+        let mut rx = reiclaw_log::subscribe_or_install();
+        while rx.try_recv().is_ok() {}
+
+        let dir = tempfile::tempdir().expect("tempdir");
+        let over_cap = "z".repeat(crate::agent::personality::MAX_FILE_CHARS + 300);
+        std::fs::write(dir.path().join("SOUL.md"), &over_cap).unwrap();
+
+        let tools: Vec<Box<dyn Tool>> = vec![];
+        let ctx = PromptContext {
+            workspace_dir: dir.path(),
+            agent_workspace_dir: dir.path(),
+            model_name: "test-model",
+            tools: &tools,
+            skills: &[],
+            skills_prompt_mode: reiclaw_config::schema::SkillsPromptInjectionMode::Full,
+            identity_config: None,
+            dispatcher_instructions: "",
+            sends_native_tool_specs: false,
+            security_summary: None,
+            autonomy_level: AutonomyLevel::Supervised,
+        };
+
+        // First build emits the structured warning
+        let section = IdentitySection;
+        let output = section.build(&ctx).unwrap();
+
+        // 1. Structured log verification
+        let matches_probe = |event: &serde_json::Value| {
+            event["attributes"]["error_key"] == "agent.personality_file_truncated"
+                && event["attributes"]["file"] == "SOUL.md"
+                && event["attributes"]["total"] == crate::agent::personality::MAX_FILE_CHARS + 300
+        };
+        let event = std::iter::from_fn(|| rx.try_recv().ok())
+            .find(matches_probe)
+            .expect("first over-cap build must emit truncation log event");
+        assert_eq!(
+            event.get("severity_text").and_then(|v| v.as_str()),
+            Some("WARN"),
+            "event must be WARN level"
+        );
+        let attrs = event.get("attributes").expect("event must have attributes");
+        assert_eq!(
+            attrs.get("error_key").and_then(|v| v.as_str()),
+            Some("agent.personality_file_truncated")
+        );
+        assert_eq!(attrs.get("file").and_then(|v| v.as_str()), Some("SOUL.md"));
+        assert_eq!(
+            attrs.get("retained").and_then(|v| v.as_u64()),
+            Some(crate::agent::personality::MAX_FILE_CHARS as u64)
+        );
+        assert_eq!(
+            attrs.get("total").and_then(|v| v.as_u64()),
+            Some((crate::agent::personality::MAX_FILE_CHARS + 300) as u64)
+        );
+        assert_eq!(attrs.get("discarded").and_then(|v| v.as_u64()), Some(300));
+        // Ensure no leakage of content, sender, compact_context, or absolute path
+        assert!(
+            attrs.get("content").is_none(),
+            "no content diagnostic in attrs"
+        );
+        assert!(
+            attrs.get("sender").is_none(),
+            "no sender diagnostic in attrs"
+        );
+        assert!(
+            attrs.get("compact_context").is_none(),
+            "no compact_context claim"
+        );
+        let msg = event.get("message").and_then(|v| v.as_str()).unwrap_or("");
+        assert!(
+            msg.contains("SOUL.md: retained 20000 of 20300 chars (300 discarded)"),
+            "message format mismatch: {msg}"
+        );
+        assert!(
+            !msg.contains(dir.path().to_str().unwrap()),
+            "no absolute path diagnostics in message"
+        );
+
+        // 2. Prompt output remains byte-identical to expected existing behavior
+        let mut expected_prompt = String::from(
+            "## Project Context\n\n\
+             The following workspace files define your identity, behavior, and context.\n\n\
+             ### SOUL.md\n\n",
+        );
+        expected_prompt.push_str(&"z".repeat(crate::agent::personality::MAX_FILE_CHARS));
+        expected_prompt
+            .push_str("\n\n[... truncated at 20000 chars — use `read` for full file]\n\n");
+        assert_eq!(
+            output, expected_prompt,
+            "prompt must remain byte-identical to pre-existing truncation format"
+        );
+
+        // 3. Repeated build on same workspace/file must be suppressed
+        let output2 = section.build(&ctx).unwrap();
+        assert_eq!(
+            output2, output,
+            "second build must produce identical prompt output"
+        );
+        assert!(
+            !std::iter::from_fn(|| rx.try_recv().ok()).any(|event| matches_probe(&event)),
+            "second build on same workspace/file must not emit duplicate warning"
+        );
+        reiclaw_log::clear_broadcast_hook();
+    }
+}

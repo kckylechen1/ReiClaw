@@ -1,6 +1,6 @@
 //! TG2: Config Load/Save Round-Trip Tests
 
-use zeroclaw::config::Config;
+use reiclaw::config::Config;
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Config default construction
@@ -20,7 +20,7 @@ fn config_default_validates_without_provider_profiles() {
 
 #[test]
 fn config_toml_roundtrip_preserves_provider() {
-    use zeroclaw::config::{GroqModelProviderConfig, ModelProviderConfig};
+    use reiclaw::config::{GroqModelProviderConfig, ModelProviderConfig};
     let mut config = Config::default();
     config.providers.models.groq.insert(
         "default".to_string(),
@@ -34,7 +34,7 @@ fn config_toml_roundtrip_preserves_provider() {
     );
 
     let toml_str = toml::to_string(&config).expect("config should serialize to TOML");
-    let parsed = zeroclaw::config::current::parse_current(&toml_str)
+    let parsed = reiclaw::config::current::parse_current(&toml_str)
         .expect("TOML should round-trip through current parsing");
 
     assert!(

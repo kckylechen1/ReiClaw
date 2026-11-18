@@ -1,7 +1,7 @@
 //! Compatibility diagnostics for retired in-process Telegram operator tooling.
 
 use anyhow::Result;
-use zeroclaw_runtime::i18n::get_required_cli_string;
+use reiclaw_runtime::i18n::get_required_cli_string;
 
 /// Keep the legacy command parseable without writing markers that the
 /// standalone Telegram bridge cannot consume.

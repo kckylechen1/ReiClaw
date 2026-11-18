@@ -81,7 +81,7 @@ class ScopeTests(unittest.TestCase):
                 self.assertEqual(self.scope(base=directive_commit)["docs_build"], "true")
 
     def test_runtime_markdown_and_unknown_paths_are_not_prose(self):
-        for path in ("crates/zeroclaw-runtime/src/skills/review_prompt.md", "crates/zeroclaw-runtime/src/agent/personality_templates/SOUL.md", "AGENTS.md", ".github/CODEOWNERS", "unknown.md", "../README.md"):
+        for path in ("crates/reiclaw-runtime/src/skills/review_prompt.md", "crates/reiclaw-runtime/src/agent/personality_templates/SOUL.md", "AGENTS.md", ".github/CODEOWNERS", "unknown.md", "../README.md"):
             with self.subTest(path=path):
                 self.assertFalse(prose_path(path))
 

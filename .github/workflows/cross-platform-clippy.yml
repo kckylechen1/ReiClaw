@@ -7,8 +7,8 @@ on:
   # for the rest of the workspace.
   pull_request:
     paths:
-      - "crates/zeroclaw-runtime/**"
-      - "crates/zeroclaw-infra/**"
+      - "crates/reiclaw-runtime/**"
+      - "crates/reiclaw-infra/**"
       - ".github/workflows/cross-platform-clippy.yml"
   workflow_dispatch:
   schedule:
@@ -69,7 +69,7 @@ jobs:
           duration_seconds=$SECONDS
           set -e
 
-          workspace_path_compiles="$(grep -E -c 'Compiling.*\([^)]*zeroclaw' "$cargo_log" || true)"
+          workspace_path_compiles="$(grep -E -c 'Compiling.*\([^)]*(reiclaw|zeroclaw)' "$cargo_log" || true)"
           total_compiles="$(grep -c 'Compiling' "$cargo_log" || true)"
           downloaded_crates="$(grep -c 'Downloaded' "$cargo_log" || true)"
           cache_hit="${RUST_CACHE_HIT:-unknown}"

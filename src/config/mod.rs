@@ -3,9 +3,9 @@
 //! traits, property helpers) is pulled through here so `crate::config::*`
 //! continues to resolve for callers that predate the crate split.
 
-pub use zeroclaw_config::providers;
-pub use zeroclaw_config::{current, generate};
-pub use zeroclaw_http::{
+pub use reiclaw_config::providers;
+pub use reiclaw_config::{current, generate};
+pub use reiclaw_http::{
     apply_channel_proxy_to_builder, apply_persisted_proxy_on_boot, apply_runtime_proxy_to_builder,
     build_channel_proxy_client, build_channel_proxy_client_with_timeouts,
     build_runtime_proxy_client, build_runtime_proxy_client_with_timeouts, runtime_proxy_config,
@@ -35,7 +35,7 @@ pub use schema::{
 pub use schema::ModelProviderConfig;
 // Per-family model model_provider configs (typed split — Re-exported here
 // so tests + downstream binary callers can construct typed family entries
-// without reaching into `zeroclaw_config::schema` directly.
+// without reaching into `reiclaw_config::schema` directly.
 pub use schema::{
     AnthropicModelProviderConfig, CustomModelProviderConfig, GeminiModelProviderConfig,
     GroqModelProviderConfig, LlamacppModelProviderConfig, LmstudioModelProviderConfig,
@@ -50,8 +50,8 @@ pub use traits::SecretFieldInfo;
 
 // Property helpers — single source of truth in zeroclaw-config.
 #[cfg(feature = "schema-export")]
-pub use zeroclaw_config::helpers::enum_variants;
-pub use zeroclaw_config::helpers::{
+pub use reiclaw_config::helpers::enum_variants;
+pub use reiclaw_config::helpers::{
     make_prop_field, route_hashmap_path, serde_get_prop, serde_set_prop,
 };
 

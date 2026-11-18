@@ -83,7 +83,7 @@ function Assert-FixtureOrigin {
     param([string] $Directory, [string] $Expected)
     # Only the two synthetic fixture origins are accepted by this diagnostic;
     # never print an inherited/re-written URL or global credential configuration.
-    if ($Expected -notin @('https://github.com/kckylechen1/zeroclaw.git', 'https://github.com/zeroclaw-labs/zeroclaw.git')) {
+    if ($Expected -notin @('https://github.com/kckylechen1/ReiClaw.git', 'https://github.com/kckylechen1/zeroclaw.git', 'https://github.com/zeroclaw-labs/zeroclaw.git')) {
         throw 'Origin diagnostic requires a known synthetic fixture'
     }
     $configured = Invoke-Git @('-C', $Directory, 'config', '--local', '--get', 'remote.origin.url')
@@ -135,18 +135,18 @@ exit /b 97
     }
     $fork = Join-Path $scratch 'fork'
     $upstream = Join-Path $scratch 'upstream'
-    New-Checkout $fork 'https://github.com/kckylechen1/zeroclaw.git'
+    New-Checkout $fork 'https://github.com/kckylechen1/ReiClaw.git'
     New-Checkout $upstream 'https://github.com/zeroclaw-labs/zeroclaw.git'
     $upstreamHead = Invoke-Git @('-C', $upstream, 'rev-parse', 'HEAD')
     $marker = Get-Content -Raw -LiteralPath (Join-Path $upstream 'local-marker')
     $env:PATH = "$shim;$originalPath"
-    Assert-FixtureOrigin $fork 'https://github.com/kckylechen1/zeroclaw.git'
+    Assert-FixtureOrigin $fork 'https://github.com/kckylechen1/ReiClaw.git'
     Assert-FixtureOrigin $upstream 'https://github.com/zeroclaw-labs/zeroclaw.git'
 
     foreach ($flags in @('--prebuilt', '--dry-run --prebuilt', '--prebuilt --source', '--source --prebuilt', '--minimal --prebuilt')) {
         $output = Invoke-Setup $outside $false ($flags -split ' ')
         Assert-Contains $output 'no verified prebuilt binary channel'
-        Assert-Contains $output 'https://github.com/kckylechen1/zeroclaw.git'
+        Assert-Contains $output 'https://github.com/kckylechen1/ReiClaw.git'
         Assert-Contains $output 'setup.bat --source'
         if ($output.Contains('Checking prerequisites')) { throw 'Refusal reached prerequisites' }
     }
@@ -175,12 +175,12 @@ exit /b 97
 
     $output = Invoke-Setup $outside $false @('--dry-run')
     Assert-Contains $output 'Run this script from the fork repository root'
-    foreach ($origin in @('https://github.com/kckylechen1/zeroclaw', 'git@github.com:kckylechen1/zeroclaw', 'git@github.com:kckylechen1/zeroclaw.git', 'ssh://git@github.com/kckylechen1/zeroclaw', 'ssh://git@github.com/kckylechen1/zeroclaw.git', 'HTTPS://GITHUB.COM/KCKYLECHEN1/ZEROCLAW.GIT')) {
+    foreach ($origin in @('https://github.com/kckylechen1/ReiClaw', 'git@github.com:kckylechen1/ReiClaw', 'git@github.com:kckylechen1/ReiClaw.git', 'ssh://git@github.com/kckylechen1/ReiClaw', 'ssh://git@github.com/kckylechen1/ReiClaw.git', 'HTTPS://GITHUB.COM/KCKYLECHEN1/REICLAW.GIT', 'https://github.com/kckylechen1/zeroclaw', 'https://github.com/kckylechen1/zeroclaw.git', 'git@github.com:kckylechen1/zeroclaw', 'git@github.com:kckylechen1/zeroclaw.git', 'ssh://git@github.com/kckylechen1/zeroclaw', 'ssh://git@github.com/kckylechen1/zeroclaw.git', 'HTTPS://GITHUB.COM/KCKYLECHEN1/ZEROCLAW.GIT')) {
         $null = Invoke-Git @('-C', $fork, 'remote', 'set-url', 'origin', $origin)
         $output = Invoke-Setup $fork $true @('--dry-run')
         Assert-Contains $output '[dry-run] Would run: cargo build --release --locked'
     }
-    foreach ($origin in @('https://github.com/kckylechen1/zeroclaw.git/extra', 'https://github.com/kckylechen1/zeroclaw.git ', "https://github.com/kckylechen1/zeroclaw.git`nhttps://example.invalid/extra")) {
+    foreach ($origin in @('https://github.com/kckylechen1/ReiClaw.git/extra', 'https://github.com/kckylechen1/ReiClaw.git ', "https://github.com/kckylechen1/ReiClaw.git`nhttps://example.invalid/extra", 'https://github.com/kckylechen1/zeroclaw.git/extra')) {
         $null = Invoke-Git @('-C', $fork, 'remote', 'set-url', 'origin', $origin)
         $output = Invoke-Setup $fork $false @('--dry-run')
         Assert-Contains $output 'Source origin is not this fork'

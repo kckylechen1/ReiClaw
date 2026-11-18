@@ -18,7 +18,7 @@ use std::ffi::{OsStr, OsString};
 use std::path::Path;
 use std::process::Command;
 
-const ZH_CN_CLI_FTL: &str = include_str!("../../crates/zeroclaw-runtime/locales/zh-CN/cli.ftl");
+const ZH_CN_CLI_FTL: &str = include_str!("../../crates/reiclaw-runtime/locales/zh-CN/cli.ftl");
 
 /// Minimal catalog a user could still have on disk from a pre-retirement
 /// `zeroclaw locales fetch ja`. Only the key under test is needed;
@@ -173,7 +173,7 @@ async fn locales_fetch_restores_same_build_catalogs_without_network() {
         );
         assert_eq!(
             std::fs::read_to_string(destination.join("tools.ftl")).unwrap(),
-            include_str!("../../crates/zeroclaw-runtime/locales/zh-CN/tools.ftl"),
+            include_str!("../../crates/reiclaw-runtime/locales/zh-CN/tools.ftl"),
         );
         let cli = std::fs::read_to_string(destination.join("cli.ftl")).unwrap();
         if catalogs.is_some() {

@@ -1,6 +1,6 @@
 //! Security component tests.
 
-use zeroclaw::config::Config;
+use reiclaw::config::Config;
 
 // ═════════════════════════════════════════════════════════════════════════════
 // Autonomy configuration defaults and validation

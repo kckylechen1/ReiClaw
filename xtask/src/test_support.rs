@@ -20,7 +20,7 @@
 use std::collections::BTreeSet;
 use std::path::PathBuf;
 
-use zeroclaw_config::schema::{Config, is_retired_transport};
+use reiclaw_config::schema::{Config, is_retired_transport};
 
 use crate::util::repo_root;
 
@@ -86,11 +86,11 @@ fn cargo_toml() -> toml::Value {
     toml::from_str(&raw).unwrap_or_else(|e| panic!("parsing {}: {e}", path.display()))
 }
 
-fn zeroclaw_metadata() -> toml::Value {
+fn reiclaw_metadata() -> toml::Value {
     cargo_toml()
         .get("package")
         .and_then(|p| p.get("metadata"))
-        .and_then(|m| m.get("zeroclaw"))
+        .and_then(|m| m.get("reiclaw"))
         .cloned()
         .unwrap_or(toml::Value::Table(toml::map::Map::new()))
 }
@@ -107,17 +107,17 @@ fn string_list(value: Option<&toml::Value>) -> Vec<String> {
         .unwrap_or_default()
 }
 
-/// One string list from `[package.metadata.zeroclaw]`, parsed straight out of
+/// One string list from `[package.metadata.reiclaw]`, parsed straight out of
 /// Cargo.toml. Tests compare production's resolved value against the *file*,
 /// not against the same in-memory value production already resolved.
 pub fn registry_string_list(key: &str) -> Vec<String> {
-    string_list(zeroclaw_metadata().get(key))
+    string_list(reiclaw_metadata().get(key))
 }
 
-/// `[package.metadata.zeroclaw.dist_target_exclusions]`, parsed straight out of
+/// `[package.metadata.reiclaw.dist_target_exclusions]`, parsed straight out of
 /// Cargo.toml.
 pub fn registry_target_exclusions() -> std::collections::BTreeMap<String, Vec<String>> {
-    zeroclaw_metadata()
+    reiclaw_metadata()
         .get("dist_target_exclusions")
         .and_then(|v| v.as_table())
         .map(|table| {

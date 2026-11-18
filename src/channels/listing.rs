@@ -1,7 +1,7 @@
 //! Enumerate the channel types compiled into this binary.
 
-use zeroclaw_api::config_metadata::ChannelInfo;
-use zeroclaw_config::schema::ChannelsConfig;
+use reiclaw_api::config_metadata::ChannelInfo;
+use reiclaw_config::schema::ChannelsConfig;
 
 struct ChannelCompileSpec {
     /// Display name from `ChannelsConfig::channels()`, when the channel lives
@@ -147,7 +147,7 @@ mod tests {
         let expected: BTreeSet<_> = CHANNEL_COMPILE_SPECS
             .iter()
             .filter(|spec| spec.compiled)
-            .filter(|spec| !zeroclaw_config::schema::is_retired_transport(spec.type_keys[0]))
+            .filter(|spec| !reiclaw_config::schema::is_retired_transport(spec.type_keys[0]))
             .filter_map(|spec| spec.schema_name)
             .collect();
 
@@ -161,7 +161,7 @@ mod tests {
         let mut cfg = ChannelsConfig::default();
         cfg.webhook.insert(
             "default".to_string(),
-            zeroclaw_config::schema::WebhookConfig::default(),
+            reiclaw_config::schema::WebhookConfig::default(),
         );
 
         let names: BTreeSet<_> = configured_uncompiled_channels(&cfg)
@@ -266,7 +266,7 @@ mod tests {
 
     #[test]
     fn channel_compile_specs_cover_schema_channel_types() {
-        let live_types: Vec<_> = zeroclaw_config::schema::Config::map_key_sections()
+        let live_types: Vec<_> = reiclaw_config::schema::Config::map_key_sections()
             .into_iter()
             .filter_map(|section| {
                 section

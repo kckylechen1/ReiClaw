@@ -1,19 +1,19 @@
 # Maintainer: zeroclaw-labs <bot@zeroclaw.dev>
-pkgname=zeroclawlabs
-_reponame=zeroclaw
+pkgname=reiclaw
+_reponame=ReiClaw
 # >>> generated:pkgbuild-version by `cargo generate installers` - do not edit <<<
 pkgver=0.8.3
 # >>> end generated:pkgbuild-version <<<
 pkgrel=1
 pkgdesc="Zero overhead. Zero compromise. 100% Rust. The fastest, smallest AI assistant."
 arch=('x86_64' 'aarch64')
-url="https://github.com/zeroclaw-labs/zeroclaw"
+url="https://github.com/kckylechen1/ReiClaw"
 license=('MIT' 'Apache-2.0')
 depends=('gcc-libs' 'openssl')
 makedepends=('cargo' 'git' 'nodejs' 'npm')
-provides=('zeroclaw')
+provides=('zeroclaw' 'rei')
 conflicts=('zeroclaw')
-source=("${pkgname}-${pkgver}.tar.gz::https://github.com/zeroclaw-labs/zeroclaw/archive/refs/tags/v${pkgver}.tar.gz")
+source=("${pkgname}-${pkgver}.tar.gz::https://github.com/kckylechen1/ReiClaw/archive/refs/tags/v${pkgver}.tar.gz")
 sha256sums=('SKIP')
 
 prepare() {
@@ -39,7 +39,7 @@ build() {
 
 package() {
   cd "${_reponame}-${pkgver}"
-  install -Dm0755 -t "${pkgdir}/usr/bin/" "target/dist/zeroclaw"
+  install -Dm0755 -t "${pkgdir}/usr/bin/" "target/dist/rei" "target/dist/zeroclaw"
 
   # Install web dashboard assets (served from filesystem at runtime)
   install -dm0755 "${pkgdir}/usr/share/${pkgname}/web/dist"

@@ -2,15 +2,15 @@
 
 use std::sync::Arc;
 
-use zeroclaw::config::MemoryConfig;
-use zeroclaw::memory::traits::{Memory, MemoryCategory};
-use zeroclaw::providers::ToolCall;
+use reiclaw::config::MemoryConfig;
+use reiclaw::memory::traits::{Memory, MemoryCategory};
+use reiclaw::providers::ToolCall;
 
 use crate::support::helpers::{build_agent_with_memory, text_response, tool_response};
 use crate::support::{CountingTool, EchoTool, MockModelProvider};
 
 fn make_persistent_memory(dir: &std::path::Path) -> Arc<dyn Memory> {
-    let backend = if zeroclaw::memory::TACHI_COMPILED {
+    let backend = if reiclaw::memory::TACHI_COMPILED {
         "tachi"
     } else {
         "markdown"
@@ -19,7 +19,7 @@ fn make_persistent_memory(dir: &std::path::Path) -> Arc<dyn Memory> {
         backend: backend.into(),
         ..MemoryConfig::default()
     };
-    Arc::from(zeroclaw::memory::create_memory(&cfg, dir, None).unwrap())
+    Arc::from(reiclaw::memory::create_memory(&cfg, dir, None).unwrap())
 }
 
 // ═════════════════════════════════════════════════════════════════════════════
@@ -244,14 +244,14 @@ async fn agent_handles_interleaved_tools_and_text() {
 
 #[tokio::test]
 async fn agent_survives_large_tool_output() {
-    use zeroclaw::tools::{Tool, ToolResult};
+    use reiclaw::tools::{Tool, ToolResult};
 
     /// Tool that returns a very large output.
     struct LargeOutputTool;
 
-    impl ::zeroclaw_api::attribution::Attributable for LargeOutputTool {
-        fn role(&self) -> ::zeroclaw_api::attribution::Role {
-            ::zeroclaw_api::attribution::Role::Tool(::zeroclaw_api::attribution::ToolKind::Plugin)
+    impl ::reiclaw_api::attribution::Attributable for LargeOutputTool {
+        fn role(&self) -> ::reiclaw_api::attribution::Role {
+            ::reiclaw_api::attribution::Role::Tool(::reiclaw_api::attribution::ToolKind::Plugin)
         }
         fn alias(&self) -> &str {
             <Self as Tool>::name(self)
@@ -400,7 +400,7 @@ async fn consolidation_extracts_facts_to_memory() {
         r#"{"history_entry": "User shared project deadline info", "memory_update": "Project deadline is April 15th 2026"}"#,
     )]);
 
-    let result = zeroclaw::agent::sleep_compactor::consolidate_turn_via_sleep(
+    let result = reiclaw::agent::sleep_compactor::consolidate_turn_via_sleep(
         &model_provider,
         "test-model",
         None,
@@ -434,7 +434,7 @@ async fn memory_survives_rapid_consolidation() {
             r#"{{"history_entry": "Turn {i} conversation", "memory_update": null}}"#,
         ))]);
 
-        let _ = zeroclaw::agent::sleep_compactor::consolidate_turn_via_sleep(
+        let _ = reiclaw::agent::sleep_compactor::consolidate_turn_via_sleep(
             &model_provider,
             "test-model",
             None,
@@ -470,9 +470,9 @@ async fn memory_survives_rapid_consolidation() {
 
 #[tokio::test]
 async fn session_backend_persists_messages() {
-    use zeroclaw::channels::session_backend::SessionBackend;
-    use zeroclaw::channels::session_sqlite::SqliteSessionBackend;
-    use zeroclaw::providers::traits::ChatMessage;
+    use reiclaw::channels::session_backend::SessionBackend;
+    use reiclaw::channels::session_sqlite::SqliteSessionBackend;
+    use reiclaw::providers::traits::ChatMessage;
 
     let tmp = tempfile::TempDir::new().unwrap();
     let backend = SqliteSessionBackend::new(tmp.path()).unwrap();
@@ -491,8 +491,8 @@ async fn session_backend_persists_messages() {
 
 #[tokio::test]
 async fn session_state_transitions() {
-    use zeroclaw::channels::session_backend::SessionBackend;
-    use zeroclaw::channels::session_sqlite::SqliteSessionBackend;
+    use reiclaw::channels::session_backend::SessionBackend;
+    use reiclaw::channels::session_sqlite::SqliteSessionBackend;
 
     let tmp = tempfile::TempDir::new().unwrap();
     let backend = SqliteSessionBackend::new(tmp.path()).unwrap();
@@ -502,7 +502,7 @@ async fn session_state_transitions() {
     assert!(state.is_none(), "Initial state should be absent");
 
     // Create the session row by appending a message (set_session_state only UPDATEs)
-    use zeroclaw::providers::traits::ChatMessage;
+    use reiclaw::providers::traits::ChatMessage;
     let msg = ChatMessage::user("hello".to_string());
     backend.append("test_session", &msg).unwrap();
 

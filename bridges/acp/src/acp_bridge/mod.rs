@@ -469,7 +469,7 @@ pub(super) async fn run() -> Result<()> {
                         let (config, out, session) = (cfg.clone(), output.clone(), name.clone());
                         let admission = Arc::new(Admission::default());
                         let actor_admission = admission.clone();
-                        let task = zeroclaw_spawn::spawn!(async move {
+                        let task = reiclaw_spawn::spawn!(async move {
                             session_loop(config, out, session, socket, epoch, rx, actor_admission)
                                 .await;
                         });
@@ -672,7 +672,7 @@ async fn execute(
                         if permissions.len() >= 16 { return Err("ACP_PERMISSION_LIMIT"); }
                         let expires = Instant::now() + Duration::from_secs(frame["timeout_secs"].as_u64().filter(|n| *n > 0 && *n <= 180).ok_or("GATEWAY_PROTOCOL")?);
                         let permission = Permission {rpc: rpc.clone(), request: request.into(), expires};
-                        out.send(json!({"jsonrpc":"2.0","id":permission.rpc,"method":"session/request_permission","params":{"sessionId":session,"toolCall":{"toolCallId":format!("approval-{request}"),"title":frame["tool"],"kind":"other","status":"pending","rawInput":frame["arguments_summary"]},"options":[{"optionId":"allow_once","name":zeroclaw_config::i18n::get_required_cli_string("acp-bridge-allow-once"),"kind":"allow_once"},{"optionId":"reject_once","name":zeroclaw_config::i18n::get_required_cli_string("acp-bridge-reject-once"),"kind":"reject_once"}]}})).await?;
+                        out.send(json!({"jsonrpc":"2.0","id":permission.rpc,"method":"session/request_permission","params":{"sessionId":session,"toolCall":{"toolCallId":format!("approval-{request}"),"title":frame["tool"],"kind":"other","status":"pending","rawInput":frame["arguments_summary"]},"options":[{"optionId":"allow_once","name":reiclaw_config::i18n::get_required_cli_string("acp-bridge-allow-once"),"kind":"allow_once"},{"optionId":"reject_once","name":reiclaw_config::i18n::get_required_cli_string("acp-bridge-reject-once"),"kind":"reject_once"}]}})).await?;
                         permissions.insert(rpc, permission);
                     }
                     "turn_cancel_ack" => { turn.bind(&frame)?; }

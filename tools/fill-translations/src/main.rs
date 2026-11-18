@@ -408,7 +408,7 @@ fn fail(err: anyhow::Error, raw_response: impl Into<String>) -> BatchFailure {
 /// builds no HTTP. One request per source string keeps the per-entry mapping
 /// unambiguous (the .po model is one msgid -> one msgstr).
 async fn translate_batch(
-    provider: &dyn zeroclaw_api::model_provider::ModelProvider,
+    provider: &dyn reiclaw_api::model_provider::ModelProvider,
     model: &str,
     locale: &str,
     batch: &[&str],
@@ -440,7 +440,7 @@ async fn translate_batch(
         } else {
             system.as_str()
         };
-        let content = zeroclaw_providers::ProviderDispatch::from_ref(provider)
+        let content = reiclaw_providers::ProviderDispatch::from_ref(provider)
             .chat_with_system(Some(system_ref), source, model, None)
             .await
             .map_err(|e| fail(e, String::new()))?;

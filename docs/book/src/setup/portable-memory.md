@@ -1,10 +1,10 @@
 # Portable memory kernel
 
 The `memory-tachi` feature uses the shared Portable Kernel for two
-ZeroClaw-owned databases. It is enabled by default on the root `zeroclawlabs`
-crate (and stays optional on `zeroclaw-memory`, so `--no-default-features` and
+ZeroClaw-owned databases. It is enabled by default on the root `reiclaw`
+crate (and stays optional on `reiclaw-memory`, so `--no-default-features` and
 `slim-control` builds remain free of AGPL dependencies). The backend name
-`tachi`, the crate feature `zeroclaw-memory/tachi`, configuration keys and
+`tachi`, the crate feature `reiclaw-memory/tachi`, configuration keys and
 existing database locations are unchanged.
 
 | Store | Owner role | Location |

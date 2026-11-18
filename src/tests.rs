@@ -100,7 +100,7 @@ fn probe_config_dir_follows_clap_token_ownership() {
 
 #[test]
 fn cli_quickstart_uses_advertised_local_provider_runtime_default() {
-    let providers = vec![zeroclaw_runtime::quickstart::QuickstartTypeOption {
+    let providers = vec![reiclaw_runtime::quickstart::QuickstartTypeOption {
         kind: "lmstudio".into(),
         display_name: "LM Studio".into(),
         local: true,
@@ -119,7 +119,7 @@ fn cli_quickstart_uses_advertised_local_provider_runtime_default() {
 
 #[test]
 fn cli_quickstart_uses_advertised_remote_provider_runtime_default() {
-    let providers = vec![zeroclaw_runtime::quickstart::QuickstartTypeOption {
+    let providers = vec![reiclaw_runtime::quickstart::QuickstartTypeOption {
         kind: "anthropic".into(),
         display_name: "Anthropic".into(),
         local: false,
@@ -138,7 +138,7 @@ fn cli_quickstart_uses_advertised_remote_provider_runtime_default() {
 
 #[test]
 fn cli_quickstart_uses_state_fallback_when_provider_has_no_override() {
-    let providers = vec![zeroclaw_runtime::quickstart::QuickstartTypeOption {
+    let providers = vec![reiclaw_runtime::quickstart::QuickstartTypeOption {
         kind: "ollama".into(),
         display_name: "Ollama".into(),
         local: true,
@@ -422,7 +422,7 @@ fn gateway_get_paircode_cli_accepts_port_and_host_overrides() {
     match cli.command {
         Commands::Gateway {
             gateway_command:
-                Some(zeroclaw::GatewayCommands::GetPaircode {
+                Some(reiclaw::GatewayCommands::GetPaircode {
                     new,
                     rotate,
                     rotate_device,
@@ -528,7 +528,7 @@ fn gateway_get_paircode_rotate_flags_parse_and_conflict() {
         .expect("gateway get-paircode --rotate should parse");
     match cli.command {
         Commands::Gateway {
-            gateway_command: Some(zeroclaw::GatewayCommands::GetPaircode { rotate, .. }),
+            gateway_command: Some(reiclaw::GatewayCommands::GetPaircode { rotate, .. }),
         } => assert!(rotate),
         other => panic!("expected gateway get-paircode command, got {other:?}"),
     }
@@ -543,7 +543,7 @@ fn gateway_get_paircode_rotate_flags_parse_and_conflict() {
     .expect("gateway get-paircode --rotate-device should parse");
     match cli.command {
         Commands::Gateway {
-            gateway_command: Some(zeroclaw::GatewayCommands::GetPaircode { rotate_device, .. }),
+            gateway_command: Some(reiclaw::GatewayCommands::GetPaircode { rotate_device, .. }),
         } => assert_eq!(rotate_device.as_deref(), Some("dash-1")),
         other => panic!("expected gateway get-paircode command, got {other:?}"),
     }
@@ -738,7 +738,7 @@ fn gateway_restart_hint_uses_gateway_bind_fallback_for_hostnames() {
 
 #[test]
 fn gateway_bind_addr_resolver_accepts_bracketed_ipv6_hosts() {
-    let addr = zeroclaw_infra::effective_gateway_bind_socket_addr("[::1]", 9001);
+    let addr = reiclaw_infra::effective_gateway_bind_socket_addr("[::1]", 9001);
 
     assert_eq!(addr.port(), 9001);
     assert!(addr.is_ipv6());
@@ -808,7 +808,7 @@ fn onboard_cli_bare_parses() {
 #[test]
 #[cfg(feature = "agent-runtime")]
 fn onboard_cli_positional_sections_parse() {
-    for w in zeroclaw_config::sections::QUICKSTART_SECTIONS {
+    for w in reiclaw_config::sections::QUICKSTART_SECTIONS {
         let cli = Cli::try_parse_from(["zeroclaw", "onboard", w.as_str()])
             .unwrap_or_else(|_| panic!("onboard {} should parse", w.as_str()));
         match cli.command {
@@ -1055,7 +1055,7 @@ fn config_set_materializes_missing_typed_provider_alias() {
     );
 
     let known_paths: Vec<String> = config.prop_paths();
-    let api_key_path = zeroclaw_config::helpers::resolve_field_path(
+    let api_key_path = reiclaw_config::helpers::resolve_field_path(
         &known_paths,
         "providers.models.groq.default.api-key",
     );
@@ -1122,12 +1122,12 @@ fn config_set_materializes_missing_transcription_provider_alias() {
     // Mirror the CLI `config set` path exactly: resolve, materialize the
     // map key, then re-resolve so the now-present alias field is found.
     let known: Vec<String> = config.prop_paths();
-    let mut path = zeroclaw_config::helpers::resolve_field_path(&known, raw);
+    let mut path = reiclaw_config::helpers::resolve_field_path(&known, raw);
     let created = commands::config::ensure_map_key_for_prop_path(&mut config, &path)
         .expect("known typed transcription provider path should be materialized");
     assert!(created, "missing transcription alias should be created");
     let known: Vec<String> = config.prop_paths();
-    path = zeroclaw_config::helpers::resolve_field_path(&known, &path);
+    path = reiclaw_config::helpers::resolve_field_path(&known, &path);
 
     config
         .set_prop_persistent(&path, "whisper-large-v3")
@@ -1219,13 +1219,13 @@ fn config_set_materializes_agent_workspace_path() {
     let raw = "agents.assistant.workspace.path";
 
     let known: Vec<String> = config.prop_paths();
-    let mut path = zeroclaw_config::helpers::resolve_field_path(&known, raw);
+    let mut path = reiclaw_config::helpers::resolve_field_path(&known, raw);
     let created = commands::config::ensure_map_key_for_prop_path(&mut config, &path)
         .expect("agent alias and workspace path should materialize");
     assert!(created, "missing agent alias should be created");
 
     let known: Vec<String> = config.prop_paths();
-    path = zeroclaw_config::helpers::resolve_field_path(&known, &path);
+    path = reiclaw_config::helpers::resolve_field_path(&known, &path);
     config
         .set_prop_persistent(&path, "/srv/zeroclaw/assistant")
         .expect("agent workspace path should be writable");
@@ -1265,7 +1265,7 @@ fn ensure_map_key_for_prop_path_leaves_existing_hyphenated_alias_alone() {
     let mut config = Config::default();
     config.cron.insert(
         "morning-brief".to_string(),
-        zeroclaw_config::schema::CronJobDecl::default(),
+        reiclaw_config::schema::CronJobDecl::default(),
     );
 
     let created =
@@ -1596,13 +1596,13 @@ fn interactive_agent_rejects_flags_that_only_apply_with_message() {
 async fn paircode_owner_secret_never_follows_redirects() {
     use tokio::io::{AsyncReadExt, AsyncWriteExt};
     let tmp = tempfile::tempdir().unwrap();
-    let guard = zeroclaw_runtime::security::pairing::PairingGuard::new(true, &[]);
+    let guard = reiclaw_runtime::security::pairing::PairingGuard::new(true, &[]);
     let secret = guard.rotate_admin_token(tmp.path()).unwrap();
     let destination = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
     let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
     let port = listener.local_addr().unwrap().port();
     let destination_port = destination.local_addr().unwrap().port();
-    let server = ::zeroclaw_spawn::spawn!(async move {
+    let server = ::reiclaw_spawn::spawn!(async move {
         let (mut socket, _) = listener.accept().await.unwrap();
         let mut bytes = vec![0; 8192];
         let count = socket.read(&mut bytes).await.unwrap();
@@ -1615,7 +1615,7 @@ async fn paircode_owner_secret_never_follows_redirects() {
         socket.write_all(format!("HTTP/1.1 302 Found\r\nLocation: http://127.0.0.1:{destination_port}/collect\r\nContent-Length: 2\r\nConnection: close\r\n\r\n{{}}").as_bytes()).await.unwrap();
     });
     // If followed, this destination replies promptly so the test cannot hang.
-    let receiver = ::zeroclaw_spawn::spawn!(async move {
+    let receiver = ::reiclaw_spawn::spawn!(async move {
         if let Ok(Ok((mut socket, _))) =
             tokio::time::timeout(std::time::Duration::from_secs(2), destination.accept()).await
         {
@@ -1671,7 +1671,7 @@ async fn paircode_owner_secret_rejects_nonlocal_authority_before_reading_token()
 async fn paircode_owner_cli_sends_token_for_show_mint_and_rotation() {
     use tokio::io::{AsyncReadExt, AsyncWriteExt};
     let tmp = tempfile::tempdir().unwrap();
-    let guard = zeroclaw_runtime::security::pairing::PairingGuard::new(true, &[]);
+    let guard = reiclaw_runtime::security::pairing::PairingGuard::new(true, &[]);
     let secret = guard.rotate_admin_token(tmp.path()).unwrap();
     for (host, action, expected) in [
         (
@@ -1698,7 +1698,7 @@ async fn paircode_owner_cli_sends_token_for_show_mint_and_rotation() {
         let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
         let port = listener.local_addr().unwrap().port();
         let secret = secret.clone();
-        let server = ::zeroclaw_spawn::spawn!(async move {
+        let server = ::reiclaw_spawn::spawn!(async move {
             let (mut socket, _) = listener.accept().await.unwrap();
             let mut bytes = vec![0; 8192];
             let count = socket.read(&mut bytes).await.unwrap();

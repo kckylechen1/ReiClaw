@@ -1,2 +1,2 @@
 #[allow(unused_imports)]
-pub use zeroclaw_runtime::heartbeat::*;
+pub use reiclaw_runtime::heartbeat::*;

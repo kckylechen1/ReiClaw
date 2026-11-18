@@ -1,22 +1,22 @@
 pub mod listing;
 pub mod session_backend {
-    pub use zeroclaw_infra::session_backend::*;
+    pub use reiclaw_infra::session_backend::*;
 }
 pub mod session_sqlite {
-    pub use zeroclaw_infra::session_sqlite::*;
+    pub use reiclaw_infra::session_sqlite::*;
 }
 
-pub use zeroclaw_api::channel::{Channel, ChannelMessage, SendMessage};
-pub use zeroclaw_config::multi_agent::{
+pub use reiclaw_api::channel::{Channel, ChannelMessage, SendMessage};
+pub use reiclaw_config::multi_agent::{
     ChannelIdentityNormalizer, bind_channel_identity_into, channel_alias_configured,
     channel_identity_normalizer,
 };
 
 use crate::config::Config;
 use anyhow::{Context, Result};
+use reiclaw_runtime::i18n::{get_required_cli_string, get_required_cli_string_with_args};
 use std::path::PathBuf;
 use std::process::Command;
-use zeroclaw_runtime::i18n::{get_required_cli_string, get_required_cli_string_with_args};
 
 const SYSTEMD_STATUS_ARGS: [&str; 3] = ["--user", "is-active", "zeroclaw.service"];
 const SYSTEMD_RESTART_ARGS: [&str; 3] = ["--user", "restart", "zeroclaw.service"];
@@ -240,7 +240,7 @@ pub async fn send_channel_message(
     message: &str,
 ) -> Result<()> {
     if config.gateway.bridges.contains_key(channel_id) {
-        zeroclaw_runtime::cron::scheduler::enqueue_for_bridge(
+        reiclaw_runtime::cron::scheduler::enqueue_for_bridge(
             config, channel_id, recipient, None, message,
         )
         .with_context(|| format!("Failed to enqueue message for bridge {channel_id}"))?;
@@ -277,7 +277,7 @@ pub async fn deliver_announcement(
     output: &str,
 ) -> Result<()> {
     if config.gateway.bridges.contains_key(channel) {
-        return zeroclaw_runtime::cron::scheduler::enqueue_for_bridge(
+        return reiclaw_runtime::cron::scheduler::enqueue_for_bridge(
             config,
             channel,
             target,
@@ -296,7 +296,7 @@ pub async fn start_channels(
     cancel: tokio_util::sync::CancellationToken,
 ) -> Result<()> {
     #[cfg(feature = "agent-runtime")]
-    zeroclaw_runtime::health::mark_component_ok("channels");
+    reiclaw_runtime::health::mark_component_ok("channels");
     println!(
         "In-process channels are retired; run `zeroclaw gateway` (or `zeroclaw daemon`) \
          and connect channel bridge processes over `/ws/chat` and `/ws/bridge`."

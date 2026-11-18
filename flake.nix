@@ -42,7 +42,7 @@
         };
         # >>> generated:flake-packages by `cargo generate installers` - do not edit <<<
         # Default feature set: canonical lean Dist.
-        # Override with `packages.zeroclaw.override { features = [ ... ]; }`.
+        # Override with `packages.reiclaw.override { features = [ ... ]; }`.
         zeroclawDefaultFeatures = [ "agent-runtime" "channel-acp-server" "channel-telegram" "channel-webhook" "gateway" "memory-tachi" "observability-prometheus" "schema-export" ];
         rootFeatureGraph = (builtins.fromTOML (builtins.readFile ./Cargo.toml)).features;
         rootFeatureClosure = features: builtins.map (node: node.key) (builtins.genericClosure {
@@ -76,15 +76,19 @@
               doCheck = false;
               buildInputs = [ pkgs.stdenv.cc.cc ];
               postInstall = ''
+                test -x "$out/bin/rei"
                 test -x "$out/bin/zeroclaw"
               '' + pkgs.lib.optionalString withAcpBridge ''
                 test -x "$out/bin/zeroclaw-acp-bridge"
               '';
             });
         # >>> end generated:flake-packages <<<
+      in let
+        reiclawPkg = buildZeroclaw { pname = "reiclaw"; cargoPkg = "reiclaw"; };
       in {
-        packages.zeroclaw = buildZeroclaw { pname = "zeroclaw"; cargoPkg = "zeroclawlabs"; };
-        packages.default = buildZeroclaw { pname = "zeroclaw"; cargoPkg = "zeroclawlabs"; };
+        packages.reiclaw = reiclawPkg;
+        packages.zeroclaw = reiclawPkg;
+        packages.default = reiclawPkg;
         checks = pkgs.lib.optionalAttrs pkgs.stdenv.isLinux {
           nixos-module-eval = pkgs.writeText "zeroclaw-nixos-module-eval" (
             builtins.toJSON nixosModuleEvalTests

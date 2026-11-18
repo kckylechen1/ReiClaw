@@ -12,13 +12,13 @@ use axum::Router;
 use axum::extract::{Json, Path, State};
 use axum::routing::post;
 use futures_util::{SinkExt, StreamExt};
+use reiclaw_gateway_client::ConnectOptions;
 use serde_json::{Value, json};
 use tokio::net::{TcpListener, TcpStream};
 use tokio::sync::mpsc;
 use tokio_tungstenite::WebSocketStream;
 use tokio_tungstenite::tungstenite::Message;
 use zeroclaw_bridge_telegram::{BridgeConfig, run};
-use zeroclaw_gateway_client::ConnectOptions;
 
 const OWNER: i64 = 42;
 const STRANGER: i64 = 7;

@@ -1,0 +1,18 @@
+[package]
+name = "reiclaw-provider-dispatch"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+description = "Attributed model calls through the provider interface, independent of vendor implementations."
+publish = false
+
+[dependencies]
+reiclaw-api.workspace = true
+reiclaw-log.workspace = true
+anyhow = "1.0"
+futures-util = { version = "0.3", default-features = false, features = ["std"] }
+serde_json = { version = "1.0", default-features = false, features = ["std"] }
+
+[dev-dependencies]
+async-trait = "0.1"
+tokio = { version = "1.50", default-features = false, features = ["rt-multi-thread", "macros", "time"] }

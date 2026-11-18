@@ -1,16 +1,16 @@
-pub use zeroclaw_runtime::cron::*;
+pub use reiclaw_runtime::cron::*;
 
 use crate::config::Config;
 use anyhow::{Context, Result, bail};
-use zeroclaw_runtime::i18n::{get_required_cli_string, get_required_cli_string_with_args};
+use reiclaw_runtime::i18n::{get_required_cli_string, get_required_cli_string_with_args};
 
 /// Bail with a clear error if the named agent isn't configured.
 fn require_configured_agent(config: &Config, agent_alias: &str) -> Result<()> {
     if config.agent(agent_alias).is_none() {
-        ::zeroclaw_log::record!(
+        ::reiclaw_log::record!(
             WARN,
-            ::zeroclaw_log::Event::new(module_path!(), ::zeroclaw_log::Action::Reject)
-                .with_outcome(::zeroclaw_log::EventOutcome::Failure)
+            ::reiclaw_log::Event::new(module_path!(), ::reiclaw_log::Action::Reject)
+                .with_outcome(::reiclaw_log::EventOutcome::Failure)
                 .with_attrs(::serde_json::json!({"agent_alias": agent_alias})),
             "cron CLI rejected: unknown agent alias"
         );
@@ -20,12 +20,12 @@ fn require_configured_agent(config: &Config, agent_alias: &str) -> Result<()> {
 }
 
 fn parse_explicit_rfc3339_utc(raw: &str) -> Result<jiff::Timestamp> {
-    zeroclaw_api::time::parse_rfc3339(raw)
+    reiclaw_api::time::parse_rfc3339(raw)
         .map_err(|err| {
-            ::zeroclaw_log::record!(
+            ::reiclaw_log::record!(
                 WARN,
-                ::zeroclaw_log::Event::new(module_path!(), ::zeroclaw_log::Action::Reject)
-                    .with_outcome(::zeroclaw_log::EventOutcome::Failure)
+                ::reiclaw_log::Event::new(module_path!(), ::reiclaw_log::Action::Reject)
+                    .with_outcome(::reiclaw_log::EventOutcome::Failure)
                     .with_attrs(::serde_json::json!({
                         "raw": raw,
                         "error": format!("{}", err),
@@ -59,13 +59,13 @@ pub fn handle_command(command: crate::CronCommands, config: &Config) -> Result<(
             for job in jobs {
                 let last_run = job
                     .last_run
-                    .map_or_else(|| "never".into(), zeroclaw_api::time::format_rfc3339);
+                    .map_or_else(|| "never".into(), reiclaw_api::time::format_rfc3339);
                 let last_status = job.last_status.unwrap_or_else(|| "n/a".into());
                 println!(
                     "- {} | {:?} | next={} | last={} ({})",
                     job.id,
                     job.schedule,
-                    zeroclaw_api::time::format_rfc3339(job.next_run),
+                    reiclaw_api::time::format_rfc3339(job.next_run),
                     last_run,
                     last_status,
                 );
@@ -134,7 +134,7 @@ pub fn handle_command(command: crate::CronCommands, config: &Config) -> Result<(
                     "{}",
                     get_required_cli_string_with_args(
                         "cli-cron-next",
-                        &[("v", &zeroclaw_api::time::format_rfc3339(job.next_run))]
+                        &[("v", &reiclaw_api::time::format_rfc3339(job.next_run))]
                     )
                 );
                 println!(
@@ -161,7 +161,7 @@ pub fn handle_command(command: crate::CronCommands, config: &Config) -> Result<(
                     "{}",
                     get_required_cli_string_with_args(
                         "cli-cron-next2",
-                        &[("v", &zeroclaw_api::time::format_rfc3339(job.next_run))]
+                        &[("v", &reiclaw_api::time::format_rfc3339(job.next_run))]
                     )
                 );
                 println!(
@@ -211,7 +211,7 @@ pub fn handle_command(command: crate::CronCommands, config: &Config) -> Result<(
                     "{}",
                     get_required_cli_string_with_args(
                         "cli-cron-at",
-                        &[("v", &zeroclaw_api::time::format_rfc3339(job.next_run))]
+                        &[("v", &reiclaw_api::time::format_rfc3339(job.next_run))]
                     )
                 );
                 println!(
@@ -234,7 +234,7 @@ pub fn handle_command(command: crate::CronCommands, config: &Config) -> Result<(
                     "{}",
                     get_required_cli_string_with_args(
                         "cli-cron-at2",
-                        &[("v", &zeroclaw_api::time::format_rfc3339(job.next_run))]
+                        &[("v", &reiclaw_api::time::format_rfc3339(job.next_run))]
                     )
                 );
                 println!(
@@ -290,7 +290,7 @@ pub fn handle_command(command: crate::CronCommands, config: &Config) -> Result<(
                     "{}",
                     get_required_cli_string_with_args(
                         "cli-cron-next3",
-                        &[("v", &zeroclaw_api::time::format_rfc3339(job.next_run))]
+                        &[("v", &reiclaw_api::time::format_rfc3339(job.next_run))]
                     )
                 );
                 println!(
@@ -323,7 +323,7 @@ pub fn handle_command(command: crate::CronCommands, config: &Config) -> Result<(
                     "{}",
                     get_required_cli_string_with_args(
                         "cli-cron-next3",
-                        &[("v", &zeroclaw_api::time::format_rfc3339(job.next_run))]
+                        &[("v", &reiclaw_api::time::format_rfc3339(job.next_run))]
                     )
                 );
                 println!(
@@ -376,7 +376,7 @@ pub fn handle_command(command: crate::CronCommands, config: &Config) -> Result<(
                     "{}",
                     get_required_cli_string_with_args(
                         "cli-cron-at",
-                        &[("v", &zeroclaw_api::time::format_rfc3339(job.next_run))]
+                        &[("v", &reiclaw_api::time::format_rfc3339(job.next_run))]
                     )
                 );
                 println!(
@@ -399,7 +399,7 @@ pub fn handle_command(command: crate::CronCommands, config: &Config) -> Result<(
                     "{}",
                     get_required_cli_string_with_args(
                         "cli-cron-at2",
-                        &[("v", &zeroclaw_api::time::format_rfc3339(job.next_run))]
+                        &[("v", &reiclaw_api::time::format_rfc3339(job.next_run))]
                     )
                 );
                 println!(
@@ -493,7 +493,7 @@ pub fn handle_command(command: crate::CronCommands, config: &Config) -> Result<(
                 "{}",
                 get_required_cli_string_with_args(
                     "cli-cron-next2",
-                    &[("v", &zeroclaw_api::time::format_rfc3339(job.next_run))]
+                    &[("v", &reiclaw_api::time::format_rfc3339(job.next_run))]
                 )
             );
             println!(
@@ -555,7 +555,7 @@ mod tests {
             .ensure("openai", "test-agent")
             .expect("known family");
         config.agents.entry("test-agent".to_string()).or_insert(
-            zeroclaw_config::schema::AliasedAgentConfig {
+            reiclaw_config::schema::AliasedAgentConfig {
                 model_provider: "openai.test-agent".into(),
                 risk_profile: "test-agent".into(),
                 runtime_profile: "test-agent".into(),

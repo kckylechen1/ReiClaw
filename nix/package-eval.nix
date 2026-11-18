@@ -21,7 +21,7 @@ let
         featureArgs);
       installLines = builtins.filter builtins.isString (builtins.split "\n" drv.postInstall);
       checksBinary = binary: builtins.elem ''test -x "$out/bin/${binary}"'' installLines;
-      expectedPackages = [ "zeroclawlabs" ]
+      expectedPackages = [ "reiclaw" ]
         ++ (if wantAcp then [ "zeroclaw-bridge-acp" ] else [ ]);
     in
     assert require name (drv.type == "derivation") "expected a real package derivation";
@@ -31,8 +31,9 @@ let
       (if expectedFeatures == null then builtins.length featureArgs == 1 else featureArgs == expectedFeatures)
       "unexpected root feature arguments";
     assert require name
-      (builtins.all (feature: builtins.match "zeroclawlabs/.+" feature != null) featureNames)
+      (builtins.all (feature: builtins.match "reiclaw/.+" feature != null) featureNames)
       "root features must be package-qualified";
+    assert require name (checksBinary "rei") "missing rei executable postInstall check";
     assert require name (checksBinary "zeroclaw") "missing main executable postInstall check";
     assert require name ((checksBinary "zeroclaw-acp-bridge") == wantAcp)
       "ACP postInstall check does not match the selected features";
@@ -45,9 +46,9 @@ in
   default = check "default" package null true;
   minimal = check "features=[]" (package.override { features = [ ]; }) [ ] false;
   schemaExport = check "schema-export" (package.override { features = [ "schema-export" ]; })
-    [ "zeroclawlabs/schema-export" ] false;
+    [ "reiclaw/schema-export" ] false;
   agentRuntime = check "agent-runtime" (package.override { features = [ "agent-runtime" ]; })
-    [ "zeroclawlabs/agent-runtime" ] true;
+    [ "reiclaw/agent-runtime" ] true;
   slimControl = check "slim-control" (package.override { features = [ "slim-control" ]; })
-    [ "zeroclawlabs/slim-control" ] true;
+    [ "reiclaw/slim-control" ] true;
 }

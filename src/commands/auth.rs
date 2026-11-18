@@ -41,12 +41,12 @@ fn format_expiry(profile: &auth::profiles::AuthProfile) -> String {
         Some(ts) => {
             let now = jiff::Timestamp::now();
             if ts <= now {
-                format!("expired at {}", zeroclaw_api::time::format_rfc3339(ts))
+                format!("expired at {}", reiclaw_api::time::format_rfc3339(ts))
             } else {
                 let mins = ts.duration_since(now).as_mins();
                 format!(
                     "expires in {mins}m ({})",
-                    zeroclaw_api::time::format_rfc3339(ts)
+                    reiclaw_api::time::format_rfc3339(ts)
                 )
             }
         }

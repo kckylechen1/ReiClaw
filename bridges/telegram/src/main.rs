@@ -2,8 +2,8 @@ use std::time::Duration;
 
 use anyhow::{Context, Result};
 use clap::Parser;
+use reiclaw_gateway_client::ConnectOptions;
 use zeroclaw_bridge_telegram::{BridgeConfig, run};
-use zeroclaw_gateway_client::ConnectOptions;
 
 /// Relay the owner's private Telegram chat to a ZeroClaw gateway session.
 #[derive(Debug, Parser)]
@@ -41,7 +41,7 @@ struct Args {
 #[tokio::main]
 async fn main() -> Result<()> {
     let args = Args::parse();
-    zeroclaw_log::install_global_subscriber(None, "info", true);
+    reiclaw_log::install_global_subscriber(None, "info", true);
     let config = BridgeConfig {
         telegram_api: args.telegram_api,
         telegram_token: args.telegram_token,

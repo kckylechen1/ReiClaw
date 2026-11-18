@@ -1,8 +1,8 @@
+use reiclaw::config::Config;
+use reiclaw::config::schema::{AliasedAgentConfig, CronJobDecl, CronScheduleDecl};
+use reiclaw::cron::{JobType, Schedule, get_job, list_jobs, sync_declarative_jobs};
 use std::collections::HashMap;
 use tempfile::TempDir;
-use zeroclaw::config::Config;
-use zeroclaw::config::schema::{AliasedAgentConfig, CronJobDecl, CronScheduleDecl};
-use zeroclaw::cron::{JobType, Schedule, get_job, list_jobs, sync_declarative_jobs};
 
 fn test_config(tmp: &TempDir, schedule_cron: Option<String>) -> Config {
     let mut config = Config {

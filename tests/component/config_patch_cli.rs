@@ -2,17 +2,17 @@
 
 use axum::{Router, routing::patch};
 use parking_lot::RwLock;
+use reiclaw::gateway::{self, AppState};
+use reiclaw_api::attribution::Attributable;
+use reiclaw_config::schema::Config;
+use reiclaw_memory::NoneMemory;
+use reiclaw_providers::ModelProvider;
+use reiclaw_runtime::security::PairingGuard;
 use std::collections::HashMap;
 use std::process::{Command, Output, Stdio};
 use std::sync::Arc;
 use std::time::Duration;
 use tower::ServiceExt;
-use zeroclaw::gateway::{self, AppState};
-use zeroclaw_api::attribution::Attributable;
-use zeroclaw_config::schema::Config;
-use zeroclaw_memory::NoneMemory;
-use zeroclaw_providers::ModelProvider;
-use zeroclaw_runtime::security::PairingGuard;
 
 #[derive(Default)]
 struct MockModelProvider;
@@ -31,9 +31,9 @@ impl ModelProvider for MockModelProvider {
 }
 
 impl Attributable for MockModelProvider {
-    fn role(&self) -> zeroclaw_api::attribution::Role {
-        zeroclaw_api::attribution::Role::Provider(zeroclaw_api::attribution::ProviderKind::Model(
-            zeroclaw_api::attribution::ModelProviderKind::Custom,
+    fn role(&self) -> reiclaw_api::attribution::Role {
+        reiclaw_api::attribution::Role::Provider(reiclaw_api::attribution::ProviderKind::Model(
+            reiclaw_api::attribution::ModelProviderKind::Custom,
         ))
     }
 
@@ -43,7 +43,7 @@ impl Attributable for MockModelProvider {
 }
 
 fn test_state(config: Config) -> AppState {
-    let memory: Arc<dyn zeroclaw_memory::Memory> =
+    let memory: Arc<dyn reiclaw_memory::Memory> =
         Arc::new(NoneMemory::new("config-patch-cli-test"));
     AppState {
         config: Arc::new(RwLock::new(config)),
@@ -53,9 +53,9 @@ fn test_state(config: Config) -> AppState {
         temperature: None,
         mem: memory.clone(),
         memory_strategy: Arc::new(
-            zeroclaw_runtime::agent::memory_strategy::DefaultMemoryStrategy::with_config(
+            reiclaw_runtime::agent::memory_strategy::DefaultMemoryStrategy::with_config(
                 memory,
-                zeroclaw_config::schema::MemoryConfig::default(),
+                reiclaw_config::schema::MemoryConfig::default(),
                 std::path::PathBuf::new(),
             ),
         ),
@@ -70,7 +70,7 @@ fn test_state(config: Config) -> AppState {
             Duration::from_secs(300),
             1000,
         )),
-        observer: Arc::new(zeroclaw_runtime::observability::NoopObserver),
+        observer: Arc::new(reiclaw_runtime::observability::NoopObserver),
         tools_registry: Arc::new(Vec::new()),
         tools_registry_by_agent: Arc::new(HashMap::new()),
         cost_tracker: None,
@@ -647,7 +647,7 @@ fn config_patch_add_does_not_materialize_resource_keyed_rate_alias() {
 #[test]
 fn config_patch_replace_on_dotted_resource_id_does_not_plant_phantom_sibling() {
     let config_dir = tempfile::tempdir().expect("temp config dir");
-    let version = zeroclaw_config::current::CURRENT_SCHEMA_VERSION;
+    let version = reiclaw_config::current::CURRENT_SCHEMA_VERSION;
     std::fs::write(
         config_dir.path().join("config.toml"),
         format!(

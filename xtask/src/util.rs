@@ -203,7 +203,7 @@ pub fn run_cmd(cmd: &mut Command) -> anyhow::Result<()> {
 }
 
 pub fn fluent_catalog_roots_named(root: &Path) -> Vec<(&'static str, PathBuf)> {
-    vec![("runtime", root.join("crates/zeroclaw-runtime/locales"))]
+    vec![("runtime", root.join("crates/reiclaw-runtime/locales"))]
 }
 
 /// Catalogue roots filtered by an optional `--catalog` name. `None` returns all
@@ -234,7 +234,7 @@ pub fn fluent_catalog_roots(root: &Path) -> Vec<PathBuf> {
 }
 
 pub fn fluent_locales_dir(root: &Path) -> PathBuf {
-    root.join("crates/zeroclaw-runtime/locales")
+    root.join("crates/reiclaw-runtime/locales")
 }
 
 /// Locale codes present in a single catalogue root (its `<locale>/` subdirs).
@@ -272,7 +272,7 @@ pub fn ftl_files_in(locale_dir: &Path) -> anyhow::Result<Vec<PathBuf>> {
 pub fn build_model_provider(
     provider_name: &str,
     config_dir: Option<&str>,
-) -> anyhow::Result<(Box<dyn zeroclaw_api::model_provider::ModelProvider>, String)> {
+) -> anyhow::Result<(Box<dyn reiclaw_api::model_provider::ModelProvider>, String)> {
     let home =
         std::env::var("HOME").unwrap_or_else(|_| std::env::var("USERPROFILE").unwrap_or_default());
     let dir_candidates: Vec<std::path::PathBuf> = match config_dir {
@@ -292,10 +292,10 @@ pub fn build_model_provider(
         })?;
 
     let raw = std::fs::read_to_string(dir.join("config.toml"))?;
-    let mut config: zeroclaw_config::schema::Config = toml::from_str(&raw)?;
+    let mut config: reiclaw_config::schema::Config = toml::from_str(&raw)?;
 
     // Decrypt secrets through the canonical store (same path the daemon uses).
-    let store = zeroclaw_config::secrets::SecretStore::new(&dir, config.secrets.encrypt);
+    let store = reiclaw_config::secrets::SecretStore::new(&dir, config.secrets.encrypt);
     config.decrypt_secrets(&store)?;
 
     // Resolve bare-or-dotted name to a concrete `kind.alias` + its model + key.
@@ -320,8 +320,8 @@ pub fn build_model_provider(
     };
     let dotted = format!("{kind}.{alias}");
 
-    let options = zeroclaw_providers::provider_runtime_options_for_alias(&config, kind, &alias);
-    let provider = zeroclaw_providers::create_resilient_model_provider_from_ref(
+    let options = reiclaw_providers::provider_runtime_options_for_alias(&config, kind, &alias);
+    let provider = reiclaw_providers::create_resilient_model_provider_from_ref(
         &config,
         &dotted,
         api_key.as_deref(),

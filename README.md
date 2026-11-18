@@ -29,7 +29,7 @@
 
 > **Independent fork (`ReiClaw` / `rei`).** Originally forked from
 > [zeroclaw-labs/zeroclaw](https://github.com/zeroclaw-labs/zeroclaw). This
-> repository (`kckylechen1/zeroclaw`) is an independently maintained fork,
+> repository (`kckylechen1/ReiClaw`) is an independently maintained fork,
 > **not** the official ZeroClaw Labs repository or release. See
 > [Official upstream and fork identity](#official-upstream-and-fork-identity).
 
@@ -93,7 +93,7 @@ Full details: [ADR-013](docs/book/src/architecture/decisions/ADR-013-channels-as
 
 This fork is mid-transition. This status was checked on 2026-11-02 against
 `47baee196`; the acceptance gates come from ADR-017 and whole-package
-acceptance is tracked in [#374](https://github.com/kckylechen1/zeroclaw/issues/374).
+acceptance is tracked in [#374](https://github.com/kckylechen1/ReiClaw/issues/374).
 
 | ADR-017 acceptance gate | Status |
 |---|---|
@@ -118,8 +118,8 @@ Clone this fork and use its installer in source mode (upstream prebuilt
 releases do not certify this fork's code):
 
 ```bash
-git clone --recurse-submodules https://github.com/kckylechen1/zeroclaw.git
-cd zeroclaw
+git clone --recurse-submodules https://github.com/kckylechen1/ReiClaw.git
+cd ReiClaw
 ./install.sh --source
 ```
 
@@ -296,8 +296,8 @@ Read [AGENTS.md](AGENTS.md) first. The short version:
 Good places to start:
 
 - New messaging bridge → `bridges/` (a client of the gateway, ADR-013)
-- New provider → `crates/zeroclaw-providers/`
-- New tool → `crates/zeroclaw-tools/`
+- New provider → `crates/reiclaw-providers/`
+- New tool → `crates/reiclaw-tools/`
 - Docs → `docs/book/src/`
 
 <!-- BEGIN:RECENT_CONTRIBUTORS -->
@@ -313,7 +313,7 @@ ReiClaw (`rei`) is originally forked from
 [zeroclaw-labs/zeroclaw](https://github.com/zeroclaw-labs/zeroclaw) (official
 upstream repository: <https://github.com/zeroclaw-labs/zeroclaw>).
 
-This repository (`kckylechen1/zeroclaw`) is an independent fork and does
+This repository (`kckylechen1/ReiClaw`) is an independent fork and does
 **not** claim to be an official ZeroClaw Labs distribution or to be
 affiliated with its maintainers. Upstream documentation, release links and
 contribution information refer to upstream unless explicitly marked as

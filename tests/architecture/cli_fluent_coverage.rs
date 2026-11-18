@@ -14,7 +14,7 @@ fn user_facing_strings_route_through_fluent() {
     assert!(
         violations.is_empty(),
         "Bare user-facing string literals detected. User-facing text must come \
-         from Fluent (via the shared `zeroclaw_config::i18n` implementation), not a literal: \
+         from Fluent (via the shared `reiclaw_config::i18n` implementation), not a literal: \
          clap `about`/`long_about`/`help = \"...\"` and `println!`/`eprintln!`/\
          `print!`/`eprint!` with a literal format string. Wrap the text in a \
          Fluent lookup, or exempt a deliberate line with `// i18n-exempt: <reason>`.\n\n\

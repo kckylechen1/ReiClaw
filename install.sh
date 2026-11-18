@@ -6,7 +6,7 @@ set -eu
 # All feature lists and version info read from Cargo.toml — nothing hardcoded.
 # POSIX sh — no bash required. Works on Alpine, Debian, macOS, everywhere.
 
-REPO_URL="https://github.com/kckylechen1/zeroclaw.git"
+REPO_URL="https://github.com/kckylechen1/ReiClaw.git"
 
 # ── Output helpers (terminal-aware) ──────────────────────────────
 
@@ -211,7 +211,10 @@ require_fork_origin() {
   origin=$(git -C "$1" remote get-url origin 2>/dev/null) ||
     die "Cannot verify source checkout. Clone $REPO_URL into a new directory and run ./install.sh --source there."
   case "$origin" in
-  https://github.com/kckylechen1/zeroclaw | https://github.com/kckylechen1/zeroclaw.git | \
+  https://github.com/kckylechen1/ReiClaw | https://github.com/kckylechen1/ReiClaw.git | \
+    git@github.com:kckylechen1/ReiClaw | git@github.com:kckylechen1/ReiClaw.git | \
+    ssh://git@github.com/kckylechen1/ReiClaw | ssh://git@github.com/kckylechen1/ReiClaw.git | \
+    https://github.com/kckylechen1/zeroclaw | https://github.com/kckylechen1/zeroclaw.git | \
     git@github.com:kckylechen1/zeroclaw | git@github.com:kckylechen1/zeroclaw.git | \
     ssh://git@github.com/kckylechen1/zeroclaw | ssh://git@github.com/kckylechen1/zeroclaw.git) ;;
   *) die "Source origin is not this fork. Clone $REPO_URL into a new directory and run ./install.sh --source there. Existing checkout was not changed." ;;
@@ -674,7 +677,7 @@ fi
   fi
   echo
 
-  if [ -f "Cargo.toml" ] && grep -q "zeroclaw" "Cargo.toml" 2>/dev/null; then
+  if [ -f "Cargo.toml" ] && grep -qE "reiclaw|zeroclaw" "Cargo.toml" 2>/dev/null; then
     INSTALL_DIR="$(pwd)"
     require_fork_origin "$INSTALL_DIR"
     info "Building from $INSTALL_DIR"
@@ -893,7 +896,7 @@ See all available features:
   echo
 
   # embedded-web includes web/dist at Rust compile time, so the dashboard must
-  # exist before cargo install reaches zeroclaw-gateway's build script.
+  # exist before cargo install reaches reiclaw-gateway's build script.
   if [ "$WANT_EMBEDDED_WEB" = true ]; then
     if [ "$DRY_RUN" = true ]; then
       info "[dry-run] Would build web dashboard before cargo install for embedded-web"
