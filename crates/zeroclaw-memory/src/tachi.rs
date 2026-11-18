@@ -46,6 +46,7 @@ use std::sync::Arc;
 use uuid::Uuid;
 
 mod recent;
+mod sleep;
 
 const METADATA_ZC_KEY: &str = "zeroclaw_key";
 pub(crate) const METADATA_ZC_CATEGORY: &str = "zeroclaw_category";
