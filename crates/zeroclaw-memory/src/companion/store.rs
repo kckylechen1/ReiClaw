@@ -2,7 +2,7 @@
 
 use std::path::{Path, PathBuf};
 
-use crate::kernel_store::{KernelStoreKind, MIGRATE_CLI_HINT};
+use crate::kernel_store::{KernelStoreKind, LEGACY_STORE_UNSUPPORTED};
 use anyhow::Context;
 use parking_lot::Mutex;
 use portable_kernel::{DbOpenContext, MemoryError, MemoryStore, StoreProfile};
@@ -60,8 +60,8 @@ impl CompanionStore {
     ///
     /// This seam upgrades only an already owned companion store under typed
     /// `Allow { approved_by }` authority. It never adopts an unstamped role or
-    /// a different profile. Legacy conversion uses the separate offline
-    /// `zeroclaw memory migrate-kernel` source-to-destination path.
+    /// a different profile. Legacy stores are refused; their offline
+    /// conversion tool was retired.
     ///
     /// # Errors
     /// Returns when approval is empty, the path is missing, or the kernel
@@ -155,19 +155,18 @@ fn map_open_error(err: MemoryError, path: &Path) -> anyhow::Error {
             stored, expected, ..
         } => format!(
             "companion memory at {} is schema {stored} (this build expects {expected}); \
-             runtime opens never migrate. Use `{MIGRATE_CLI_HINT}` for supported \
-             legacy stores with a separate destination, then select the verified copy.",
+             runtime opens never migrate, and {LEGACY_STORE_UNSUPPORTED}.",
             path.display()
         ),
         MemoryError::DbCreateTargetExists { stored, .. } => format!(
             "companion memory at {} is already stamped at schema {stored}; \
              runtime must not call create_fresh on an existing store. Reopen with \
-             open_existing, or run `{MIGRATE_CLI_HINT}` if the schema is older.",
+             open_existing.",
             path.display()
         ),
         other => format!(
             "failed to open companion memory at {}: {other}; runtime opens never adopt \
-             a store identity. Use `{MIGRATE_CLI_HINT}` for supported legacy stores.",
+             a store identity, and {LEGACY_STORE_UNSUPPORTED}.",
             path.display()
         ),
     };
@@ -443,7 +442,7 @@ mod tests {
             .err()
             .expect("deny older schema");
         let msg = err.to_string();
-        assert!(msg.contains(MIGRATE_CLI_HINT), "{msg}");
+        assert!(msg.contains(LEGACY_STORE_UNSUPPORTED), "{msg}");
         assert!(msg.contains("never migrate"), "{msg}");
     }
 

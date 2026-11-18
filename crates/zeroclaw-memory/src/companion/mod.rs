@@ -1,8 +1,8 @@
 //! Companion-memory PortableKernel store.
 //!
 //! Sibling of the generic [`crate::Memory`] backend. `TachiMemory` must never
-//! open this file. Runtime opens always deny schema migration; upgrades go
-//! through the explicit offline `zeroclaw memory migrate-kernel` command.
+//! open this file. Runtime opens always deny schema migration, and legacy
+//! stores are refused: the offline conversion tool was retired.
 
 use std::sync::Arc;
 

@@ -1,7 +1,8 @@
 //! Host-owned identities for ZeroClaw's optional shared memory kernel.
 //!
 //! Profile and role are admission requirements, never a request to reshape or
-//! adopt an existing store. Legacy stores need the explicit offline migration.
+//! adopt an existing store. Legacy and foreign stores are refused: the one-time
+//! offline conversions were retired, so nothing converts them.
 
 use portable_kernel::{DbOpenContext, StoreProfile};
 
@@ -9,7 +10,9 @@ use portable_kernel::{DbOpenContext, StoreProfile};
 const _: () = assert!(portable_kernel::IS_PORTABLE_BUILD);
 const _: () = assert!(!portable_kernel::ADMIN_SURFACE_ENABLED);
 
-pub(crate) const MIGRATE_CLI_HINT: &str = "zeroclaw memory migrate-kernel";
+/// Operator guidance appended when runtime refuses a store it cannot admit.
+pub(crate) const LEGACY_STORE_UNSUPPORTED: &str = "legacy and foreign stores are unsupported; \
+     the offline migration tool was retired, so restore a supported store or start a fresh one";
 
 /// Which ZeroClaw owner may admit a shared-kernel database.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -90,7 +93,10 @@ mod tests {
         let path = store_path(workspace, kind);
         let before = files(path.parent().unwrap());
         let error = runtime_open(workspace, kind).expect_err("runtime must refuse");
-        assert!(error.to_string().contains(MIGRATE_CLI_HINT), "{error:#}");
+        assert!(
+            error.to_string().contains(LEGACY_STORE_UNSUPPORTED),
+            "{error:#}"
+        );
         assert_eq!(
             files(path.parent().unwrap()),
             before,

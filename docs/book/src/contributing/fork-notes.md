@@ -259,8 +259,8 @@ Tachi/memcore/Portable Kernel adapter in its tree or memory dependency manifest.
 This implements the fork's existing owner boundary, with no upstream code port.
 The standalone `memcore` runtime dependency is replaced only after preserving
 the existing memory, enrichment, governance and companion consumers. No store or
-configuration key is retired. See the
-[operator migration procedure](../setup/portable-memory.md).
+configuration key is retired. The one-time offline legacy conversions were
+retired on 2026-11-18; see [Portable memory kernel](../setup/portable-memory.md).
 
 ## Yonbo device host ownership
 
@@ -378,9 +378,10 @@ this fork converges default conversation memory on the embedded Tachi
 - Parse-only config tombstones stay in `zeroclaw-config` (`sqlite`, `lucid`,
   `postgres`, `qdrant`, `[storage.*]`, `memory.snapshot_enabled`,
   `memory.snapshot_on_hygiene`, `memory.auto_hydrate`), emitting structured
-  warnings and failing memory construction explicitly with guidance to run
-  offline `zeroclaw memory migrate-native` (`--source`, `--destination`,
-  `--approved-by`) rather than silently falling back.
+  warnings and failing memory construction explicitly rather than silently
+  falling back. The offline `brain.db` conversion that once accompanied this
+  guidance was retired on 2026-11-18 after the owner's stores were converted;
+  existing `brain.db` data is neither read nor converted.
 - Non-memory SQLite stores remain untouched (`zeroclaw-infra` sessions, ACP
   sessions, approvals, Soul, User Model, audit, cron, devices, and knowledge
   graph).

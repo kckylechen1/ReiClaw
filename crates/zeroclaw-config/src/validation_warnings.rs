@@ -89,8 +89,8 @@ use serde::{Deserialize, Serialize};
 ///   or a `[storage.postgres]` / `[storage.qdrant]` / `[storage.sqlite]` /
 ///   `[storage.lucid]` section (or `memory.sqlite_open_timeout_secs`) is still
 ///   present. The config keeps loading, but selecting a removed backend fails
-///   memory construction with an explicit error steering to
-///   `zeroclaw memory migrate-native`; it never falls back to another store
+///   memory construction with an explicit error (existing brain.db data is
+///   neither read nor converted); it never falls back to another store
 ///   (see `RETIRED_CONFIG_VALUES`, `RETIRED_CONFIG_SURFACES`,
 ///   `RETIRED_CONFIG_FIELDS`, and [`RETIRED_MEMORY_BACKENDS`]).
 /// - `memory_snapshot_removed`: `memory.snapshot_enabled`,
@@ -466,7 +466,8 @@ fn retired_field_reason(code: &str) -> &'static str {
         "memory_backend_removed" => {
             "the postgres, qdrant, sqlite, and lucid memory backends were removed; selecting one \
              fails memory construction instead of falling back to another store. \
-             Choose tachi, markdown or none (migrate existing brain.db offline via `zeroclaw memory migrate-native`)"
+             Choose tachi, markdown or none; existing brain.db data is neither read nor \
+             converted (the offline migration tool was retired)"
         }
         "memory_snapshot_removed" => {
             "MEMORY_SNAPSHOT.md export and auto-hydration were removed alongside the \

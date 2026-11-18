@@ -34,7 +34,7 @@ pub enum MemoryBackendKind {
     None,
     /// Embedded SQLite (`crates/zeroclaw-memory/src/sqlite.rs`). Retired —
     /// retained only for deserializing legacy config files so startup can
-    /// report the tombstone warning and steer to `zeroclaw memory migrate-native`.
+    /// report the tombstone warning; existing brain.db data is not converted.
     Sqlite,
     /// Retired PostgreSQL backend. Still parses so an old config loads (with
     /// the `memory_backend_removed` warning); selecting it fails memory

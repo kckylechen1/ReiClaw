@@ -43,36 +43,35 @@ check() {
   diff -u "$fixture/expected" "$TEST_LEG_TRACE"
 }
 
-app='-p zeroclawlabs -p zeroclaw-config --features zeroclawlabs/nodes'
-migration='-p zeroclawlabs --test component --features zeroclawlabs/nodes\,zeroclawlabs/memory-tachi -- memory_kernel_migration_cli'
+runtime='-p zeroclaw-runtime --features zeroclaw-runtime/heavy-tests\,zeroclaw-runtime/memory-tachi'
+landlock='-p zeroclaw-runtime --features zeroclaw-runtime/heavy-tests\,zeroclaw-runtime/memory-tachi\,zeroclaw-runtime/sandbox-landlock -- landlock'
 for LEG_RUNNER in test nextest; do
   prefix=test
   [[ "$LEG_RUNNER" == test ]] || prefix='nextest run'
-  main="$prefix --locked $app"
-  extra="$prefix --locked $migration"
+  main="$prefix --locked $runtime"
+  extra="$prefix --locked $landlock"
 
-  run bash scripts/dev/leg.sh app
+  run bash scripts/dev/leg.sh runtime
   check 0 "$main" "$extra"
-  run bash scripts/dev/leg.sh --no-run app
-  check 0 "$prefix --locked --no-run $app" "$prefix --locked --no-run $migration"
+  run bash scripts/dev/leg.sh --no-run runtime
+  check 0 "$prefix --locked --no-run $runtime" "$prefix --locked --no-run $landlock"
   # Preserve old post-leg arguments: only the explicit pre-leg mode covers all phases.
-  run bash scripts/dev/leg.sh app --no-run
+  run bash scripts/dev/leg.sh runtime --no-run
   check 0 "$main --no-run" "$extra"
-  run bash scripts/dev/leg.sh app -- 'name with spaces'
+  run bash scripts/dev/leg.sh runtime -- 'name with spaces'
   check 0 "$main -- name\ with\ spaces" "$extra"
-  run bash scripts/dev/leg.sh --no-run --dry-run app
+  run bash scripts/dev/leg.sh --no-run --dry-run runtime
   check 0
-  TEST_LEG_FAIL_EVENT="$main" run bash scripts/dev/leg.sh app
+  TEST_LEG_FAIL_EVENT="$main" run bash scripts/dev/leg.sh runtime
   check 7 "$main"
-  TEST_LEG_FAIL_EVENT="$extra" run bash scripts/dev/leg.sh app
+  TEST_LEG_FAIL_EVENT="$extra" run bash scripts/dev/leg.sh runtime
   check 7 "$main" "$extra"
 done
 
 LEG_RUNNER=test
-run bash scripts/dev/leg.sh runtime
-check 0 \
-  'test --locked -p zeroclaw-runtime --features zeroclaw-runtime/heavy-tests\,zeroclaw-runtime/memory-tachi' \
-  'test --locked -p zeroclaw-runtime --features zeroclaw-runtime/heavy-tests\,zeroclaw-runtime/memory-tachi\,zeroclaw-runtime/sandbox-landlock -- landlock'
+# A leg without extra runs emits only its main phase.
+run bash scripts/dev/leg.sh app
+check 0 'test --locked -p zeroclawlabs -p zeroclaw-config --features zeroclawlabs/nodes'
 run bash scripts/dev/leg.sh channels
 check 0 \
   'test --locked -p zeroclaw-gateway --features zeroclaw-gateway/nodes\,zeroclaw-gateway/memory-tachi' \
@@ -88,24 +87,24 @@ awk '
   body { exit }
 ' "$source_root/.github/workflows/ci.yml" > "$fixture/ci-run.sh"
 [[ -s "$fixture/ci-run.sh" ]] || { echo 'missing CI test step' >&2; exit 1; }
-export LEG=app LEG_RUNNER=nextest CARGO_PROFILE_DEV_DEBUG=line-tables-only
-main="nextest run --locked --no-fail-fast $app"
-extra="nextest run --locked --no-fail-fast $migration"
+export LEG=runtime LEG_RUNNER=nextest CARGO_PROFILE_DEV_DEBUG=line-tables-only
+main="nextest run --locked --no-fail-fast $runtime"
+extra="nextest run --locked --no-fail-fast $landlock"
 run bash -e -o pipefail "$fixture/ci-run.sh"
 check 0 "$main" "$extra"
 TEST_LEG_FAIL_EVENT="$main" run bash -e -o pipefail "$fixture/ci-run.sh"
 check 7 "$main"
 
 # Exercise multiple extra phases and prove a failed extra prevents later work.
-jq '.extra_runs.app += [{"name":"following","features":["following"],"filter":"following"}]' \
+jq '.extra_runs.runtime += [{"name":"following","features":["following"],"filter":"following"}]' \
   dev/ci/test-partition.json > "$fixture/partition.json"
 mv "$fixture/partition.json" dev/ci/test-partition.json
-main="nextest run --locked $app"
-extra="nextest run --locked $migration"
-run bash scripts/dev/leg.sh app
+main="nextest run --locked $runtime"
+extra="nextest run --locked $landlock"
+run bash scripts/dev/leg.sh runtime
 check 0 "$main" "$extra" \
-  'nextest run --locked -p zeroclawlabs -p zeroclaw-config --features zeroclawlabs/nodes\,following -- following'
-TEST_LEG_FAIL_EVENT="$extra" run bash scripts/dev/leg.sh app
+  'nextest run --locked -p zeroclaw-runtime --features zeroclaw-runtime/heavy-tests\,zeroclaw-runtime/memory-tachi\,following -- following'
+TEST_LEG_FAIL_EVENT="$extra" run bash scripts/dev/leg.sh runtime
 check 7 "$main" "$extra"
 
-echo 'PASS: targeted extra builds, compile-only phases, CI parity, legacy arguments and failure propagation'
+echo 'PASS: extra phases, compile-only phases, CI parity, legacy arguments and failure propagation'

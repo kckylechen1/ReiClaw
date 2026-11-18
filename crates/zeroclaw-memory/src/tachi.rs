@@ -33,7 +33,7 @@ use super::traits::{
     ExportFilter, Memory, MemoryCategory, MemoryEntry, MemoryStats, RecallEntryPredicate,
     StoreOptions, is_recent_recall_query,
 };
-use crate::kernel_store::{KernelStoreKind, MIGRATE_CLI_HINT};
+use crate::kernel_store::{KernelStoreKind, LEGACY_STORE_UNSUPPORTED};
 use crate::point_scope::PointScope;
 use anyhow::Context;
 use async_trait::async_trait;
@@ -143,7 +143,7 @@ impl TachiMemory {
         .map_err(|e| {
             anyhow::Error::msg(format!(
                 "failed to open tachi memory db: {e}; runtime opens never migrate or adopt \
-                 a store identity. Use `{MIGRATE_CLI_HINT}` for supported legacy stores."
+                 a store identity, and {LEGACY_STORE_UNSUPPORTED}."
             ))
         })?;
         let list_page_size = list_page_size.max(1);
@@ -3028,33 +3028,101 @@ mod tests {
         );
     }
 
+    /// Seed a default-scope core row through the kernel's public snapshot
+    /// import, carrying sub-millisecond created/updated instants the way
+    /// imported history does (ordinary stores stamp the current instant).
+    fn import_core_row(mem: &TachiMemory, id: &str, key: &str, content: &str, created: &str) {
+        let instant = zeroclaw_api::time::parse_stored_timestamp(created).unwrap();
+        let nanos = TachiMemory::format_utc_nanos(instant);
+        let millis = TachiMemory::format_utc_millis(instant);
+        let category = MemoryCategory::Core;
+        let options = StoreOptions {
+            namespace: Some("default".into()),
+            importance: Some(0.5),
+            ..StoreOptions::default()
+        };
+        let mut metadata = TachiMemory::build_metadata(
+            key,
+            &category,
+            None,
+            Some("default"),
+            Some("default"),
+            &options,
+        );
+        let fields = metadata.as_object_mut().unwrap();
+        fields.insert(
+            METADATA_ZC_CREATED_AT.to_string(),
+            serde_json::Value::String(nanos.clone()),
+        );
+        fields.insert(
+            METADATA_ZC_UPDATED_AT.to_string(),
+            serde_json::Value::String(nanos.clone()),
+        );
+        let entry = portable_kernel::MemoryEntry {
+            id: id.into(),
+            path: TachiMemory::scoped_storage_path(
+                Some("default"),
+                Some("default"),
+                &category,
+                key,
+                None,
+            ),
+            summary: content.into(),
+            text: content.into(),
+            importance: 0.5,
+            timestamp: millis.clone(),
+            valid_from: millis,
+            valid_until: None,
+            category: TachiMemory::category_to_memcore(&category),
+            topic: String::new(),
+            keywords: Vec::new(),
+            persons: Vec::new(),
+            entities: Vec::new(),
+            location: String::new(),
+            source: "external:zeroclaw".into(),
+            scope: TachiMemory::scope_for_namespace(Some("default")),
+            archived: false,
+            access_count: 0,
+            scored_count: 0,
+            last_use_at: None,
+            last_access: None,
+            revision: 1,
+            vector: None,
+            retention_policy: None,
+            domain: None,
+            metadata,
+            recall_count: 0,
+            query_diversity: 0,
+            tier: portable_kernel::types::default_tier(),
+        };
+        mem.store
+            .lock()
+            .import_snapshot_batch(&[portable_kernel::PortableImportEntry {
+                entry,
+                created_at: nanos.clone(),
+                updated_at: nanos,
+                superseded_by: None,
+            }])
+            .unwrap();
+    }
+
     #[tokio::test]
     async fn supersede_preserves_submillisecond_timestamps_and_mixed_ordering() {
-        let dir = TempDir::new().unwrap();
-        let source = dir.path().join("mixed.db");
-        let conn = rusqlite::Connection::open(&source).unwrap();
-        conn.execute_batch(
-            "CREATE TABLE memories (
-                 id TEXT PRIMARY KEY,
-                 key TEXT NOT NULL,
-                 content TEXT NOT NULL,
-                 category TEXT NOT NULL,
-                 created_at TEXT NOT NULL
-             );
-             INSERT INTO memories (id, key, content, category, created_at) VALUES
-                 ('m-mid', 'k-mid', 'migrated mid subms', 'core', '2026-07-10T10:00:00.123500Z'),
-                 ('m-high', 'k-high', 'migrated high subms', 'core', '2026-07-10T10:00:00.123900Z');",
-        )
-        .unwrap();
-        drop(conn);
-
-        let dst_ws = dir.path().join("ws");
-        std::fs::create_dir_all(dst_ws.join("memory")).unwrap();
-        let dest = dst_ws.join("memory").join("tachi.db");
-        crate::native_migration::migrate_native_brain_store(&source, &dest, "captain@test")
-            .unwrap();
-
-        let mem = TachiMemory::new("tachi", &dst_ws).unwrap();
+        let (_dir, mem) = temp_tachi();
+        import_core_row(
+            &mem,
+            "m-mid",
+            "k-mid",
+            "imported mid subms",
+            "2026-07-10T10:00:00.123500Z",
+        );
+        import_core_row(
+            &mem,
+            "m-high",
+            "k-high",
+            "imported high subms",
+            "2026-07-10T10:00:00.123900Z",
+        );
         {
             // Insert a millisecond-only raw row in the same millisecond to verify
             // mixed .123Z vs .123500000Z vs .123900000Z sorting in export/recall.
