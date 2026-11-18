@@ -300,3 +300,23 @@ Negative:
 - ZeroClaw #374, #382, #388, #688, #713, and #714: execution order, pruning, direction, provider consolidation, and safety gates.
 - Tachi [#1682](https://github.com/kckylechen1/Tachi/issues/1682), [#1684](https://github.com/kckylechen1/Tachi/issues/1684), [#1770](https://github.com/kckylechen1/Tachi/pull/1770), and [#1776](https://github.com/kckylechen1/Tachi/pull/1776): prior gateway/OAuth scope and retirement evidence.
 - Source review on 2026-11-17 used ZeroClaw `3805d2ac9a165fd6f41a7f5e11b424d0ff975605` and Sigil `dd973675a110d651e1449367f890fa70dfffd4db` (`codex/2113-eval-receipts`). The Sigil revision identifies the inspected evidence; it is not a claim that these contracts already exist on its main branch.
+
+## Amendment 1: the end state is zero providers in the body
+
+Owner direction, 2026-11-18. This amendment fixes the destination; it does not accept the pilot or change any slice gate.
+
+### Target end state
+
+ZeroClaw holds no model-provider families, provider adapters, or upstream credentials. The body keeps exactly one generic inference client that talks to the Tachi broker over the contract in §5–§8, and every model-dependent path is admitted through that broker. The sole-broker availability contract in §12 is therefore the intended destination, not one possible outcome among several; the "permanent direct path" in §12 is rejected as an end state.
+
+### How the body gets there
+
+The route is unchanged: consumer-driven slices, each proving parity for a named production path and then deleting the replaced ZeroClaw adapter and credential handling (Migration slices 3–6). A universal gateway is still not built ahead of its consumers; Tachi [#1776](https://github.com/kckylechen1/Tachi/pull/1776) remains the precedent for why.
+
+One reduction does not wait for the broker. Families that are only a URL and header preset over the OpenAI-compatible client carry no protocol behavior of their own, so they collapse into the existing `custom` family with an explicit `base_url` now, together with the unused `xai` family and its OAuth (owner decision, tracked by #688). Families with their own wire protocol, authentication, or quirks (for example `openai` with its Codex OAuth and Responses paths, `anthropic`, `gemini`) leave the body only through broker slices.
+
+### What changes downstream
+
+- Provider deletions after the URL-preset collapse cite the broker slice that replaced them; #688 no longer tracks provider-count targets for native-protocol families.
+- At cutover the owner accepts that model-dependent work, including cron, summaries, and advisors, returns typed `inference-unavailable` while Tachi is unreachable, with no direct fallback (§12).
+- The stop conditions still apply. If the pilot stops, the fallback architecture in "Stop conditions" governs the families that remain, and this end state is revisited by a later amendment rather than pursued around the failed pilot.
