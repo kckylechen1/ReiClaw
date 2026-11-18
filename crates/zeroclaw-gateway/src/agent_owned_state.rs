@@ -1,11 +1,11 @@
-//! Agent-deletion **owned-state** cascade— the non-config half of
-//! deleting an agent.
+//! Transport-neutral agent rename orchestration and owned-state cascades.
 
 use std::path::Path;
 use std::sync::Arc;
 
 use anyhow::Context;
 use zeroclaw_api::memory_traits::Memory;
+use zeroclaw_config::alias_refs::{self, AliasKind, RenameError};
 use zeroclaw_config::schema::Config;
 use zeroclaw_infra::acp_session_store::AcpSessionStore;
 use zeroclaw_infra::session_backend::SessionBackend;
@@ -232,6 +232,191 @@ pub async fn cascade_rename_agent(
         acp_sessions,
         sessions_repointed,
         warnings,
+    }
+}
+
+/// A failed rename has not reached its owned-state followers. A commit adapter
+/// retains its own persistence error type so HTTP and CLI keep their contracts.
+#[derive(Debug)]
+pub enum AgentRenameError<CommitError> {
+    Config(RenameError),
+    Identity(anyhow::Error),
+    Commit(CommitError),
+}
+
+#[derive(Debug)]
+pub struct AgentRenameReport {
+    pub dirty_paths: usize,
+    /// Includes workspace failures as well as the individual store failures.
+    pub owned: RenameStateReport,
+}
+
+/// Rename once, or resume the followers of an already-committed rename.
+///
+/// The adapter commits the prepared config when `persist` is true and returns
+/// its committed snapshot. It must finish any live swap and release its config
+/// write guard before returning, including a retry where `persist` is false.
+/// Identity binds before that boundary; workspace and store changes follow it.
+pub async fn rename_agent_with_commit<Commit, CommitFuture, CommitError>(
+    mut working: Config,
+    mem: &Arc<dyn Memory>,
+    session_backend: Option<&Arc<dyn SessionBackend>>,
+    from: &str,
+    to: &str,
+    commit: Commit,
+) -> Result<AgentRenameReport, AgentRenameError<CommitError>>
+where
+    Commit: FnOnce(Config, bool) -> CommitFuture,
+    CommitFuture: std::future::Future<Output = Result<Config, CommitError>>,
+{
+    // A retry skips the config rewrite, but never its reserved/name guards.
+    if alias_refs::is_reserved_agent_alias(from) || alias_refs::is_reserved_agent_alias(to) {
+        return Err(AgentRenameError::Config(RenameError::Reserved(
+            "default".to_string(),
+        )));
+    }
+    zeroclaw_config::helpers::validate_alias_key(to)
+        .map_err(|error| AgentRenameError::Config(RenameError::InvalidName(error)))?;
+
+    let committed_to = working.agent(from).is_none() && working.agent(to).is_some();
+    if committed_to {
+        // An absent source cannot supply a configured workspace. Reject path
+        // syntax before treating its derived per-alias directory as residue.
+        zeroclaw_config::helpers::validate_alias_key(from)
+            .map_err(|error| AgentRenameError::Config(RenameError::InvalidName(error)))?;
+    }
+    // Resolve custom paths before the source entry is moved.
+    let old_ws = working.agent_workspace_dir(from);
+    let resumed = committed_to && rename_residue_exists(&working, mem, session_backend, from).await;
+    let dirty_paths = if resumed {
+        0
+    } else {
+        let report = alias_refs::rename_with_cascade(&mut working, &AliasKind::Agent, from, to)
+            .map_err(AgentRenameError::Config)?;
+        for path in &report.dirty_paths {
+            working.mark_dirty(path);
+        }
+        let store_dir = working
+            .companion_memory
+            .resolved_store_dir(&working.data_dir);
+        // This preserves the source mapping if config persistence fails. A
+        // post-commit retry must never rebind the target's current identity.
+        zeroclaw_memory::companion::rename_alias_identity(&store_dir, from, to)
+            .map_err(AgentRenameError::Identity)?;
+        report.dirty_paths.len()
+    };
+
+    let config = commit(working, !resumed)
+        .await
+        .map_err(AgentRenameError::Commit)?;
+    let new_ws = config.agent_workspace_dir(to);
+    let ws_existed = old_ws != new_ws && old_ws.exists();
+    let move_warning = move_renamed_workspace(&old_ws, &new_ws).await;
+    let workspace_moved = ws_existed && move_warning.is_none();
+    let mut owned = cascade_rename_agent(&config, mem, session_backend, from, to).await;
+    if let Some(warning) = move_warning {
+        owned.warnings.insert(0, warning);
+    }
+
+    if owned.warnings.is_empty() {
+        ::zeroclaw_log::record!(INFO, ::zeroclaw_log::Event::new(module_path!(), ::zeroclaw_log::Action::Note).with_attrs(::serde_json::json!({"from": from, "to": to, "memory": owned.memory_rows, "cron": owned.cron_jobs, "acp": owned.acp_sessions, "sessions": owned.sessions_repointed, "workspace_moved": workspace_moved, "dirty_paths": dirty_paths})), "agent renamed with owned-state cascade");
+    } else {
+        ::zeroclaw_log::record!(WARN, ::zeroclaw_log::Event::new(module_path!(), ::zeroclaw_log::Action::Note).with_attrs(::serde_json::json!({"from": from, "to": to, "memory": owned.memory_rows, "cron": owned.cron_jobs, "acp": owned.acp_sessions, "sessions": owned.sessions_repointed, "workspace_moved": workspace_moved, "dirty_paths": dirty_paths, "warnings": owned.warnings})), "agent rename persisted but a post-persist side-effect did not follow; re-issue the rename to converge");
+    }
+    Ok(AgentRenameReport { dirty_paths, owned })
+}
+
+async fn rename_residue_exists(
+    config: &Config,
+    mem: &Arc<dyn Memory>,
+    session_backend: Option<&Arc<dyn SessionBackend>>,
+    from: &str,
+) -> bool {
+    // With the source absent, this is its default per-alias directory. Custom
+    // alias-independent workspaces are never moved and are not rename residue.
+    if config.agent_workspace_dir(from).exists() {
+        return true;
+    }
+    if zeroclaw_runtime::cron::list_jobs_by_agent(config, from)
+        .map(|jobs| !jobs.is_empty())
+        .unwrap_or(false)
+    {
+        return true;
+    }
+    if let Ok(store) = AcpSessionStore::new(&config.data_dir)
+        && store
+            .list_sessions_by_agent(from)
+            .map(|sessions| !sessions.is_empty())
+            .unwrap_or(false)
+    {
+        return true;
+    }
+    if mem.count_agent(from).await.unwrap_or(0) > 0 {
+        return true;
+    }
+    session_backend.is_some_and(|backend| backend.count_agent_attribution(from).unwrap_or(0) > 0)
+}
+
+async fn move_renamed_workspace(old_ws: &Path, new_ws: &Path) -> Option<String> {
+    if old_ws == new_ws || !old_ws.exists() {
+        return None;
+    }
+    if let Some(parent) = new_ws.parent() {
+        let _ = tokio::fs::create_dir_all(parent).await;
+    }
+    match tokio::fs::rename(old_ws, new_ws).await {
+        Ok(()) => None,
+        Err(err) => {
+            ::zeroclaw_log::record!(
+                WARN,
+                ::zeroclaw_log::Event::new(module_path!(), ::zeroclaw_log::Action::Note)
+                    .with_outcome(::zeroclaw_log::EventOutcome::Unknown)
+                    .with_attrs(::serde_json::json!({
+                        "old": old_ws.display().to_string(),
+                        "new": new_ws.display().to_string(),
+                        "err": err.to_string()
+                    })),
+                "agent rename: workspace move failed"
+            );
+            Some(format!(
+                "workspace move {} -> {} failed: {err}",
+                old_ws.display(),
+                new_ws.display()
+            ))
+        }
+    }
+}
+
+#[cfg(test)]
+mod rename_tests {
+    use super::*;
+
+    #[tokio::test]
+    async fn renamed_workspace_move_failure_is_surfaced() {
+        // A failed workspace move during rename must surface a warning (so the
+        // caller learns config/DB moved to `to` while the workspace is stranded
+        // at `from`), not be swallowed as a clean success.
+        let tmp = tempfile::tempdir().unwrap();
+        let old_ws = tmp.path().join("from-ws");
+        std::fs::create_dir_all(&old_ws).unwrap();
+        // Force the move to fail: new_ws's parent is a FILE, so create_dir_all
+        // and rename both fail.
+        let blocker = tmp.path().join("blocker");
+        std::fs::write(&blocker, b"x").unwrap();
+        let new_ws = blocker.join("to-ws");
+
+        let warning = move_renamed_workspace(&old_ws, &new_ws).await;
+        assert!(
+            warning.is_some(),
+            "a failed workspace move must surface a warning"
+        );
+        assert!(warning.unwrap().contains("workspace move"));
+        assert!(old_ws.exists(), "source dir stays put when the move fails");
+
+        // Nothing-to-move paths return None (no spurious warning).
+        assert!(move_renamed_workspace(&old_ws, &old_ws).await.is_none());
+        let missing = tmp.path().join("does-not-exist");
+        assert!(move_renamed_workspace(&missing, &new_ws).await.is_none());
     }
 }
 

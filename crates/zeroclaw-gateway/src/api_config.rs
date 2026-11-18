@@ -1789,199 +1789,53 @@ async fn rename_config_cascade(
     .into_response()
 }
 
-async fn move_renamed_workspace(
-    old_ws: &std::path::Path,
-    new_ws: &std::path::Path,
-) -> Option<String> {
-    if old_ws == new_ws || !old_ws.exists() {
-        return None;
-    }
-    if let Some(parent) = new_ws.parent() {
-        let _ = tokio::fs::create_dir_all(parent).await;
-    }
-    match tokio::fs::rename(old_ws, new_ws).await {
-        Ok(()) => None,
-        Err(err) => {
-            ::zeroclaw_log::record!(
-                WARN,
-                ::zeroclaw_log::Event::new(module_path!(), ::zeroclaw_log::Action::Note)
-                    .with_outcome(::zeroclaw_log::EventOutcome::Unknown)
-                    .with_attrs(::serde_json::json!({
-                        "old": old_ws.display().to_string(),
-                        "new": new_ws.display().to_string(),
-                        "err": err.to_string()
-                    })),
-                "agent rename: workspace move failed"
-            );
-            Some(format!(
-                "workspace move {} -> {} failed: {err}",
-                old_ws.display(),
-                new_ws.display()
-            ))
-        }
-    }
-}
-
-async fn rename_residue_exists(
-    state: &AppState,
-    working: &zeroclaw_config::schema::Config,
-    from: &str,
-) -> bool {
-    // Workspace: the default per-alias dir for `from`. A custom/alias-independent
-    // path is not moved by the cascade, so it is not residue.
-    if working.agent_workspace_dir(from).exists() {
-        return true;
-    }
-
-    // Short-lived clone for the DB-backed stores - never hold the lock across an
-    // `.await`.
-    let cfg = state.config.read().clone();
-
-    // Cron jobs still owned by `from`.
-    if zeroclaw_runtime::cron::list_jobs_by_agent(&cfg, from)
-        .map(|jobs| !jobs.is_empty())
-        .unwrap_or(false)
-    {
-        return true;
-    }
-
-    // ACP sessions (live OR killed) still owned by `from`.
-    if let Ok(store) = zeroclaw_infra::acp_session_store::AcpSessionStore::new(&cfg.data_dir)
-        && store
-            .list_sessions_by_agent(from)
-            .map(|s| !s.is_empty())
-            .unwrap_or(false)
-    {
-        return true;
-    }
-
-    // Memory rows still attributed to `from`.
-    if state.mem.count_agent(from).await.unwrap_or(0) > 0 {
-        return true;
-    }
-
-    // Session-metadata attribution still pointing at `from`.
-    if let Some(backend) = state.session_backend.as_ref()
-        && backend.count_agent_attribution(from).unwrap_or(0) > 0
-    {
-        return true;
-    }
-
-    false
-}
-
 async fn rename_agent_cascade(
     state: &AppState,
-    mut working: zeroclaw_config::schema::Config,
+    working: zeroclaw_config::schema::Config,
     body: &RenameMapKeyBody,
     guard: ConfigWriteGuard,
 ) -> Response {
-    use zeroclaw_config::alias_refs::{self, AliasKind, RenameError};
-    let (from, to) = (&body.from, &body.to);
+    use crate::agent_owned_state::{AgentRenameError, rename_agent_with_commit};
 
-    // A retry of committed config bypasses rename_with_cascade below, but
-    // must still obey its name and reserved-agent guards before moving state.
-    if alias_refs::is_reserved_agent_alias(from) || alias_refs::is_reserved_agent_alias(to) {
-        return rename_error_response(
-            &body.path,
-            from,
-            RenameError::Reserved("default".to_string()),
-        );
-    }
-    if let Err(message) = zeroclaw_config::helpers::validate_alias_key(to) {
-        return rename_error_response(&body.path, from, RenameError::InvalidName(message));
-    }
-
-    // Capture the OLD workspace path while the entry still lives under `from`
-    // (custom paths are read off the entry, which is about to move).
-    let old_ws = working.agent_workspace_dir(from);
-
-    let committed_to = working.agent(from).is_none() && working.agent(to).is_some();
-    let dirty_count = if committed_to && rename_residue_exists(state, &working, from).await {
-        0
-    } else {
-        match alias_refs::rename_with_cascade(&mut working, &AliasKind::Agent, from, to) {
-            Ok(report) => {
-                for path in &report.dirty_paths {
-                    working.mark_dirty(path);
-                }
-                let dirty_count = report.dirty_paths.len();
-                // The config cascade has validated the target and collisions.
-                // Bind its identity before committing: a stale target mapping
-                // must never become visible to a renamed agent after a failed
-                // best-effort owned-state cascade. The source mapping stays
-                // intact if config persistence subsequently fails.
-                let store_dir = working
-                    .companion_memory
-                    .resolved_store_dir(&working.data_dir);
-                if let Err(err) =
-                    zeroclaw_memory::companion::rename_alias_identity(&store_dir, from, to)
-                {
-                    return error_response(
-                        ConfigApiError::new(ConfigApiCode::InternalError, err.to_string())
-                            .with_path(format!("agents.{from}")),
-                    );
-                }
-                if let Err(e) = persist_and_swap(state, working, &guard, None).await {
-                    return e;
-                }
-                dirty_count
-            }
-            Err(e) => return rename_error_response(&body.path, from, e),
-        }
-    };
-    // Config is committed (saved + swapped, or already committed by a prior
-    // crashed run). Release before the post-commit side effects below:
-    // workspace move and the memory/cron/ACP/session-backend cascade can be
-    // slow or wedge, and holding the lock across them would stall every
-    // other gateway config write process-wide.
-    drop(guard);
-
-    let cfg = state.config.read().clone();
-    // The NEW workspace path off the committed config (the rewritten `to`).
-    let new_ws = cfg.agent_workspace_dir(to);
-
-    // Move the workspace dir. For the default per-alias location this is
-    // `<install>/agents/<from>/workspace` → `…/<to>/workspace`. A custom
-    // workspace path is alias-independent, so `old_ws == new_ws` and we skip.
-    let ws_existed = old_ws != new_ws && old_ws.exists();
-    let move_warning = move_renamed_workspace(&old_ws, &new_ws).await;
-    let workspace_moved = ws_existed && move_warning.is_none();
-    let mut warnings: Vec<String> = Vec::new();
-    warnings.extend(move_warning);
-
-    // Re-point owned DB state (memory/cron/acp/session). Best-effort + reported.
-    let owned = crate::agent_owned_state::cascade_rename_agent(
-        &cfg,
+    let report = match rename_agent_with_commit(
+        working,
         &state.mem,
         state.session_backend.as_ref(),
-        from,
-        to,
+        &body.from,
+        &body.to,
+        |working, persist| async move {
+            let committed = if persist {
+                persist_and_swap(state, working, &guard, None).await?;
+                state.config.read().clone()
+            } else {
+                working
+            };
+            // Release even on an already-committed retry, before slow followers.
+            drop(guard);
+            Ok::<_, Response>(committed)
+        },
     )
-    .await;
-    // Combine the workspace-move warning (if any) with the owned-store warnings
-    // so every partial failure reaches the caller, not just the server log.
-    warnings.extend(owned.warnings);
+    .await
+    {
+        Ok(report) => report,
+        Err(AgentRenameError::Config(error)) => {
+            return rename_error_response(&body.path, &body.from, error);
+        }
+        Err(AgentRenameError::Identity(error)) => {
+            return error_response(
+                ConfigApiError::new(ConfigApiCode::InternalError, error.to_string())
+                    .with_path(format!("agents.{}", body.from)),
+            );
+        }
+        Err(AgentRenameError::Commit(response)) => return response,
+    };
 
-    // The config rename committed. A non-empty `warnings` means a post-persist
-    // side-effect did not follow (config is `to`, some follower lags at `from`,
-    // re-runnable) - escalate to WARN so that degraded outcome is visible
-    // operationally instead of buried at INFO.
-    if warnings.is_empty() {
-        ::zeroclaw_log::record!(INFO, ::zeroclaw_log::Event::new(module_path!(), ::zeroclaw_log::Action::Note).with_attrs(::serde_json::json!({"from": from, "to": to, "memory": owned.memory_rows, "cron": owned.cron_jobs, "acp": owned.acp_sessions, "sessions": owned.sessions_repointed, "workspace_moved": workspace_moved, "dirty_paths": dirty_count})), "agent renamed with owned-state cascade");
-    } else {
-        ::zeroclaw_log::record!(WARN, ::zeroclaw_log::Event::new(module_path!(), ::zeroclaw_log::Action::Note).with_attrs(::serde_json::json!({"from": from, "to": to, "memory": owned.memory_rows, "cron": owned.cron_jobs, "acp": owned.acp_sessions, "sessions": owned.sessions_repointed, "workspace_moved": workspace_moved, "dirty_paths": dirty_count, "warnings": warnings})), "agent rename persisted but a post-persist side-effect did not follow; re-issue the rename to converge");
-    }
-
-    // Persisted rename. `warnings` carries any post-persist side-effect that did
-    // not follow, so the split can be remediated rather than reported as a clean
-    // success (207-style partial success).
     axum::Json(RenameMapKeyResponse {
         path: body.path.clone(),
-        from: from.clone(),
-        to: to.clone(),
+        from: body.from.clone(),
+        to: body.to.clone(),
         renamed: true,
-        warnings,
+        warnings: report.owned.warnings,
     })
     .into_response()
 }
@@ -3762,34 +3616,6 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn renamed_workspace_move_failure_is_surfaced() {
-        // A failed workspace move during rename must surface a warning (so the
-        // caller learns config/DB moved to `to` while the workspace is stranded
-        // at `from`), not be swallowed as a clean success.
-        let tmp = tempfile::tempdir().unwrap();
-        let old_ws = tmp.path().join("from-ws");
-        std::fs::create_dir_all(&old_ws).unwrap();
-        // Force the move to fail: new_ws's parent is a FILE, so create_dir_all
-        // and rename both fail.
-        let blocker = tmp.path().join("blocker");
-        std::fs::write(&blocker, b"x").unwrap();
-        let new_ws = blocker.join("to-ws");
-
-        let warning = move_renamed_workspace(&old_ws, &new_ws).await;
-        assert!(
-            warning.is_some(),
-            "a failed workspace move must surface a warning"
-        );
-        assert!(warning.unwrap().contains("workspace move"));
-        assert!(old_ws.exists(), "source dir stays put when the move fails");
-
-        // Nothing-to-move paths return None (no spurious warning).
-        assert!(move_renamed_workspace(&old_ws, &old_ws).await.is_none());
-        let missing = tmp.path().join("does-not-exist");
-        assert!(move_renamed_workspace(&missing, &new_ws).await.is_none());
-    }
-
-    #[tokio::test]
     async fn agent_rename_into_retired_alias_mints_identity_before_config_commit() {
         let tmp = tempfile::tempdir().unwrap();
         let mut config = temp_config(&tmp);
@@ -3979,8 +3805,13 @@ mod tests {
             from: "from".to_string(),
             to: "to".to_string(),
         };
-        let guard = Arc::clone(&state.config_write_lock).lock_owned().await;
-        let resp = rename_agent_cascade(&state, config.clone(), &body, guard).await;
+        let resp = handle_rename_map_key(
+            ConnectInfo("127.0.0.1:12345".parse().unwrap()),
+            State(state.clone()),
+            HeaderMap::new(),
+            axum::Json(body),
+        )
+        .await;
 
         // Persist failed -> error response, not a clean rename.
         assert!(
@@ -4045,8 +3876,13 @@ mod tests {
             from: "from".to_string(),
             to: "to".to_string(),
         };
-        let guard = Arc::clone(&state.config_write_lock).lock_owned().await;
-        let resp = rename_agent_cascade(&state, config.clone(), &body, guard).await;
+        let resp = handle_rename_map_key(
+            ConnectInfo("127.0.0.1:12345".parse().unwrap()),
+            State(state.clone()),
+            HeaderMap::new(),
+            axum::Json(body),
+        )
+        .await;
         assert!(resp.status().is_success(), "a clean rename returns success");
 
         // Config swapped to `to`.
@@ -4133,8 +3969,13 @@ mod tests {
         };
         // Re-issue the SAME rename. Beforethis returned 404 (from absent in
         // the committed config); now it resumes and re-runs the lagging effects.
-        let guard = Arc::clone(&state.config_write_lock).lock_owned().await;
-        let resp = rename_agent_cascade(&state, config.clone(), &body, guard).await;
+        let resp = handle_rename_map_key(
+            ConnectInfo("127.0.0.1:12345".parse().unwrap()),
+            State(state.clone()),
+            HeaderMap::new(),
+            axum::Json(body),
+        )
+        .await;
         assert!(
             resp.status().is_success(),
             "re-issuing a rename after a post-persist lag must converge, not 404"
@@ -4206,8 +4047,13 @@ mod tests {
             from: "gone".to_string(),
             to: "to".to_string(),
         };
-        let guard = Arc::clone(&state.config_write_lock).lock_owned().await;
-        let resp = rename_agent_cascade(&state, config.clone(), &body, guard).await;
+        let resp = handle_rename_map_key(
+            ConnectInfo("127.0.0.1:12345".parse().unwrap()),
+            State(state.clone()),
+            HeaderMap::new(),
+            axum::Json(body),
+        )
+        .await;
 
         // No residue → NOT a resume → the normal branch runs `rename_with_cascade`
         // with `gone` absent → NotFound → an error response, not a silent success.
@@ -4218,6 +4064,85 @@ mod tests {
         // Config untouched: no rename happened, `to` still present, `gone` absent.
         assert!(state.config.read().agents.contains_key("to"));
         assert!(!state.config.read().agents.contains_key("gone"));
+    }
+
+    #[tokio::test]
+    async fn agent_rename_http_reports_workspace_lag_and_retry_keeps_current_identity() {
+        let tmp = tempfile::tempdir().unwrap();
+        let mut config = temp_config(&tmp);
+        config.agents.insert("from".into(), Default::default());
+        config.save().await.unwrap();
+        let config_path = config.config_path.clone();
+        let old_ws = config.agent_workspace_dir("from");
+        let new_ws = config.agent_workspace_dir("to");
+        std::fs::create_dir_all(&old_ws).unwrap();
+        std::fs::write(old_ws.join("USER.md"), "retained workspace").unwrap();
+        let blocker = new_ws.parent().unwrap();
+        std::fs::write(blocker, "blocks workspace move").unwrap();
+        let store_dir = config.companion_memory.resolved_store_dir(&config.data_dir);
+        let state = test_state(config);
+
+        let rename = |from: &str| {
+            handle_rename_map_key(
+                ConnectInfo("127.0.0.1:12345".parse().unwrap()),
+                State(state.clone()),
+                HeaderMap::new(),
+                axum::Json(RenameMapKeyBody {
+                    path: "agents".into(),
+                    from: from.into(),
+                    to: "to".into(),
+                }),
+            )
+        };
+        let (status, body) = response_json(rename("from").await).await;
+        assert_eq!(status, StatusCode::OK, "{body}");
+        assert_eq!(body["renamed"], true);
+        assert!(
+            body["warnings"]
+                .as_array()
+                .unwrap()
+                .iter()
+                .any(|warning| { warning.as_str().unwrap().contains("workspace move") })
+        );
+        assert!(state.config.read().agents.contains_key("to"));
+        assert!(old_ws.join("USER.md").exists());
+        let committed_bytes = std::fs::read(&config_path).unwrap();
+
+        let foreign_ws = tmp.path().join("foreign/workspace");
+        std::fs::create_dir_all(&foreign_ws).unwrap();
+        std::fs::write(foreign_ws.join("USER.md"), "unrelated workspace").unwrap();
+        let (status, _) = response_json(rename("../foreign").await).await;
+        assert_eq!(status, StatusCode::BAD_REQUEST);
+        assert!(foreign_ws.join("USER.md").exists());
+        assert_eq!(std::fs::read(&config_path).unwrap(), committed_bytes);
+
+        zeroclaw_memory::companion::invalidate_alias_identity(&store_dir, "to").unwrap();
+        let current =
+            zeroclaw_memory::companion::resolve_or_mint_agent_identity(&store_dir, "to").unwrap();
+        std::fs::remove_file(blocker).unwrap();
+        let persist_blocker = tmp.path().join("persist-blocker");
+        std::fs::create_dir(&persist_blocker).unwrap();
+        state.config.write().config_path = persist_blocker;
+        let (status, body) = response_json(rename("from").await).await;
+        assert_eq!(status, StatusCode::OK, "{body}");
+        assert!(
+            !body["warnings"]
+                .as_array()
+                .unwrap()
+                .iter()
+                .any(|warning| { warning.as_str().unwrap().contains("workspace move") })
+        );
+        assert!(!old_ws.exists());
+        assert_eq!(
+            std::fs::read_to_string(new_ws.join("USER.md")).unwrap(),
+            "retained workspace"
+        );
+        assert_eq!(std::fs::read(&config_path).unwrap(), committed_bytes);
+        assert_eq!(
+            zeroclaw_memory::companion::peek_agent_identity(&store_dir, "to"),
+            Some(current)
+        );
+        assert!(state.config_write_lock.try_lock().is_ok());
     }
 
     #[test]

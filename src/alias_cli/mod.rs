@@ -290,61 +290,56 @@ fn apply_delete(config: &mut Config, kind: &AliasKind, alias: &str) -> Result<()
 
 /// Rename an aliased entry's config references (config-layer only).
 fn rename_config(config: &mut Config, kind: &AliasKind, from: &str, to: &str) -> Result<()> {
-    match alias_refs::rename_with_cascade(config, kind, from, to) {
-        Ok(report) => {
-            for path in &report.dirty_paths {
-                config.mark_dirty(path);
-            }
-            let section = section_path(kind);
-            let count = report.dirty_paths.len().to_string();
-            println!(
-                "{}",
-                mta(
-                    "cli-alias-renamed",
-                    &[
-                        ("section", section.as_str()),
-                        ("from", from),
-                        ("to", to),
-                        ("count", count.as_str())
-                    ],
-                    "renamed {$section}.{$from} → {$section}.{$to} (rewrote {$count} reference path(s))"
-                )
-            );
-            Ok(())
-        }
-        Err(RenameError::NotFound(p)) => bail!(
-            "{}",
-            mta(
-                "cli-alias-not-configured",
-                &[("path", p.as_str())],
-                "{$path} is not configured"
-            )
-        ),
-        Err(RenameError::InvalidName(m)) => bail!(
-            "{}",
-            mta(
-                "cli-alias-rename-invalid",
-                &[("message", m.as_str())],
-                "invalid new alias: {$message}"
-            )
-        ),
-        Err(RenameError::Reserved(a)) => bail!(
-            "{}",
-            mta(
-                "cli-alias-rename-reserved",
-                &[("alias", a.as_str())],
-                "alias `{$alias}` is reserved and cannot be renamed"
-            )
-        ),
-        Err(RenameError::PostCondition(m)) => bail!(
-            "{}",
-            mta(
-                "cli-alias-rename-postcondition",
-                &[("message", m.as_str())],
-                "rename cascade post-condition failed: {$message}"
-            )
-        ),
+    let report = alias_refs::rename_with_cascade(config, kind, from, to).map_err(rename_error)?;
+    for path in &report.dirty_paths {
+        config.mark_dirty(path);
     }
+    print_renamed(kind, from, to, report.dirty_paths.len());
+    Ok(())
+}
+
+fn print_renamed(kind: &AliasKind, from: &str, to: &str, dirty_paths: usize) {
+    let section = section_path(kind);
+    let count = dirty_paths.to_string();
+    println!(
+        "{}",
+        mta(
+            "cli-alias-renamed",
+            &[
+                ("section", section.as_str()),
+                ("from", from),
+                ("to", to),
+                ("count", count.as_str())
+            ],
+            "renamed {$section}.{$from} → {$section}.{$to} (rewrote {$count} reference path(s))"
+        )
+    );
+}
+
+fn rename_error(error: RenameError) -> anyhow::Error {
+    let message = match error {
+        RenameError::NotFound(path) => mta(
+            "cli-alias-not-configured",
+            &[("path", path.as_str())],
+            "{$path} is not configured",
+        ),
+        RenameError::InvalidName(message) => mta(
+            "cli-alias-rename-invalid",
+            &[("message", message.as_str())],
+            "invalid new alias: {$message}",
+        ),
+        RenameError::Reserved(alias) => mta(
+            "cli-alias-rename-reserved",
+            &[("alias", alias.as_str())],
+            "alias `{$alias}` is reserved and cannot be renamed",
+        ),
+        RenameError::PostCondition(message) => mta(
+            "cli-alias-rename-postcondition",
+            &[("message", message.as_str())],
+            "rename cascade post-condition failed: {$message}",
+        ),
+    };
+    anyhow::Error::msg(message)
 }
 
 async fn save(config: &mut Config) -> Result<()> {
@@ -381,26 +376,7 @@ pub async fn handle_agents(cmd: AgentsCommands, config: &mut Config) -> Result<(
             *config = working;
             Ok(())
         }
-        AgentsCommands::Rename { from, to } => {
-            let mut working = config.clone();
-            // Capture the workspace path while the `from` entry still exists
-            // (custom paths are read off the entry, which the rename moves).
-            let old_ws = working.agent_workspace_dir(&from);
-            rename_config(&mut working, &AliasKind::Agent, &from, &to)?;
-            // Validate the config rename first, then bind identity before any
-            // config commit. Failure leaves both disk and caller's live config
-            // under the source alias, ready for a safe retry.
-            let store_dir = working
-                .companion_memory
-                .resolved_store_dir(&working.data_dir);
-            zeroclaw_memory::companion::rename_alias_identity(&store_dir, &from, &to)?;
-            // Persist the config rename before the irreversible owned-state side
-            // effects (workspace move + DB re-point), so a later failure can't
-            // leave the config and owned state split.
-            save(&mut working).await?;
-            *config = working;
-            agent_rename_owned_state(config, &from, &to, &old_ws).await
-        }
+        AgentsCommands::Rename { from, to } => rename_agent(config, &from, &to).await,
         AgentsCommands::Delete {
             alias,
             dry_run,
@@ -584,44 +560,44 @@ async fn agent_delete_owned_state(
 }
 
 #[cfg(all(feature = "gateway", feature = "agent-runtime"))]
-async fn agent_rename_owned_state(
-    config: &Config,
-    from: &str,
-    to: &str,
-    old_ws: &std::path::Path,
-) -> Result<()> {
-    // Move the workspace dir (default per-alias location only; a custom path is
-    // alias-independent → old_ws == new_ws → skip).
-    let new_ws = config.agent_workspace_dir(to);
-    if old_ws != new_ws && old_ws.exists() {
-        if let Some(parent) = new_ws.parent() {
-            tokio::fs::create_dir_all(parent).await.ok();
-        }
-        if let Err(e) = tokio::fs::rename(old_ws, &new_ws).await {
-            let es = e.to_string();
-            eprintln!(
-                "{}",
-                mta(
-                    "cli-alias-warn-workspace-move",
-                    &[("error", es.as_str())],
-                    "warning: workspace move failed: {$error}"
-                )
-            );
-        }
-    }
-    let (mem, session_backend) = build_owned_state_handles(config)?;
-    let report = crate::gateway::agent_owned_state::cascade_rename_agent(
-        config,
+async fn rename_agent(config: &mut Config, from: &str, to: &str) -> Result<()> {
+    use crate::gateway::agent_owned_state::{AgentRenameError, rename_agent_with_commit};
+
+    // Opening the followers before committing makes a backend-open failure
+    // fail closed instead of leaving a saved rename that this CLI cannot finish.
+    // The normal memory factory also runs retention and light-sleep governance.
+    // Disable that maintenance only for this opening; backend, storage routes,
+    // scanning/audit policy and the config that will be committed stay intact.
+    let (mem, session_backend) = {
+        let mut opening = config.clone();
+        opening.memory.hygiene_enabled = false;
+        build_owned_state_handles(&opening)?
+    };
+    let report = Box::pin(rename_agent_with_commit(
+        config.clone(),
         &mem,
         session_backend.as_ref(),
         from,
         to,
-    )
-    .await;
-    let memory = report.memory_rows.to_string();
-    let cron = report.cron_jobs.to_string();
-    let acp = report.acp_sessions.to_string();
-    let sessions = report.sessions_repointed.to_string();
+        |mut working, persist| async move {
+            if persist {
+                save(&mut working).await?;
+                *config = working.clone();
+            }
+            Ok::<_, anyhow::Error>(working)
+        },
+    ))
+    .await
+    .map_err(|error| match error {
+        AgentRenameError::Config(error) => rename_error(error),
+        AgentRenameError::Identity(error) | AgentRenameError::Commit(error) => error,
+    })?;
+
+    print_renamed(&AliasKind::Agent, from, to, report.dirty_paths);
+    let memory = report.owned.memory_rows.to_string();
+    let cron = report.owned.cron_jobs.to_string();
+    let acp = report.owned.acp_sessions.to_string();
+    let sessions = report.owned.sessions_repointed.to_string();
     println!(
         "{}",
         mta(
@@ -635,12 +611,12 @@ async fn agent_rename_owned_state(
             "owned-state re-pointed: memory {$memory} · cron {$cron} · acp {$acp} · sessions {$sessions}"
         )
     );
-    for w in &report.warnings {
+    for warning in &report.owned.warnings {
         eprintln!(
             "{}",
             mta(
                 "cli-alias-warn",
-                &[("warning", w.as_str())],
+                &[("warning", warning.as_str())],
                 "warning: {$warning}"
             )
         );
@@ -649,12 +625,15 @@ async fn agent_rename_owned_state(
 }
 
 #[cfg(not(all(feature = "gateway", feature = "agent-runtime")))]
-async fn agent_rename_owned_state(
-    _config: &Config,
-    _from: &str,
-    _to: &str,
-    _old_ws: &std::path::Path,
-) -> Result<()> {
+async fn rename_agent(config: &mut Config, from: &str, to: &str) -> Result<()> {
+    let mut working = config.clone();
+    rename_config(&mut working, &AliasKind::Agent, from, to)?;
+    let store_dir = working
+        .companion_memory
+        .resolved_store_dir(&working.data_dir);
+    zeroclaw_memory::companion::rename_alias_identity(&store_dir, from, to)?;
+    save(&mut working).await?;
+    *config = working;
     warn_agent_owned_state();
     Ok(())
 }
@@ -968,6 +947,255 @@ mod tests {
             toml::from_str(&std::fs::read_to_string(&config.config_path).unwrap()).unwrap();
         assert!(disk["agents"].get("a").is_some());
         assert!(disk["agents"].get("c").is_none());
+    }
+
+    #[cfg(all(feature = "gateway", feature = "agent-runtime"))]
+    fn rename_test_config(tmp: &tempfile::TempDir) -> Config {
+        let mut config = agent_test_config(tmp);
+        config.agents.insert(
+            "from".into(),
+            AliasedAgentConfig {
+                risk_profile: "default".into(),
+                ..Default::default()
+            },
+        );
+        config
+            .risk_profiles
+            .entry("default".into())
+            .or_default()
+            .allowed_commands = vec!["echo".into()];
+        config.runtime_profiles.entry("default".into()).or_default();
+        config
+    }
+
+    #[cfg(all(feature = "gateway", feature = "agent-runtime"))]
+    #[tokio::test]
+    async fn agent_rename_partial_workspace_failure_retries_without_rebinding_identity() {
+        let tmp = tempfile::tempdir().unwrap();
+        let mut config = rename_test_config(&tmp);
+        Box::pin(config.save()).await.unwrap();
+        let config_path = config.config_path.clone();
+        let old_ws = config.agent_workspace_dir("from");
+        let new_ws = config.agent_workspace_dir("to");
+        std::fs::create_dir_all(&old_ws).unwrap();
+        std::fs::write(old_ws.join("USER.md"), "retained workspace").unwrap();
+        let blocker = new_ws.parent().unwrap();
+        std::fs::write(blocker, "blocks workspace move").unwrap();
+        zeroclaw_runtime::cron::add_job(&config, "from", "* * * * *", "echo hi").unwrap();
+
+        Box::pin(handle_agents(
+            AgentsCommands::Rename {
+                from: "from".into(),
+                to: "to".into(),
+            },
+            &mut config,
+        ))
+        .await
+        .unwrap();
+        assert!(config.agents.contains_key("to"));
+        assert!(!config.agents.contains_key("from"));
+        assert!(old_ws.join("USER.md").exists());
+        assert_eq!(
+            zeroclaw_runtime::cron::list_jobs_by_agent(&config, "to")
+                .unwrap()
+                .len(),
+            1,
+            "an independent follower still converges after the workspace failure"
+        );
+        let committed_bytes = std::fs::read(&config_path).unwrap();
+
+        let foreign_ws = tmp.path().join("foreign/workspace");
+        std::fs::create_dir_all(&foreign_ws).unwrap();
+        std::fs::write(foreign_ws.join("USER.md"), "unrelated workspace").unwrap();
+        assert!(
+            Box::pin(handle_agents(
+                AgentsCommands::Rename {
+                    from: "../foreign".into(),
+                    to: "to".into()
+                },
+                &mut config,
+            ))
+            .await
+            .is_err()
+        );
+        assert!(foreign_ws.join("USER.md").exists());
+        assert_eq!(std::fs::read(&config_path).unwrap(), committed_bytes);
+
+        let store_dir = config.companion_memory.resolved_store_dir(&config.data_dir);
+        zeroclaw_memory::companion::invalidate_alias_identity(&store_dir, "to").unwrap();
+        let current =
+            zeroclaw_memory::companion::resolve_or_mint_agent_identity(&store_dir, "to").unwrap();
+        assert_ne!(
+            zeroclaw_memory::companion::peek_agent_identity(&store_dir, "from"),
+            Some(current.clone())
+        );
+        std::fs::remove_file(blocker).unwrap();
+        // A committed retry must not persist again. This path cannot be
+        // replaced by an atomic file save, but keeps the same install root.
+        config.config_path = tmp.path().join("persist-blocker");
+        std::fs::create_dir(&config.config_path).unwrap();
+        Box::pin(handle_agents(
+            AgentsCommands::Rename {
+                from: "from".into(),
+                to: "to".into(),
+            },
+            &mut config,
+        ))
+        .await
+        .unwrap();
+
+        assert!(!old_ws.exists());
+        assert_eq!(
+            std::fs::read_to_string(new_ws.join("USER.md")).unwrap(),
+            "retained workspace"
+        );
+        assert_eq!(std::fs::read(&config_path).unwrap(), committed_bytes);
+        assert_eq!(
+            zeroclaw_memory::companion::peek_agent_identity(&store_dir, "to"),
+            Some(current)
+        );
+        // Once all residue is gone, an unrelated/duplicate request is refused.
+        assert!(
+            Box::pin(handle_agents(
+                AgentsCommands::Rename {
+                    from: "from".into(),
+                    to: "to".into()
+                },
+                &mut config,
+            ))
+            .await
+            .is_err()
+        );
+    }
+
+    #[cfg(all(feature = "gateway", feature = "agent-runtime"))]
+    #[tokio::test]
+    async fn agent_rename_failed_commit_keeps_workspace_and_cron_at_source() {
+        let tmp = tempfile::tempdir().unwrap();
+        let mut config = rename_test_config(&tmp);
+        std::fs::create_dir_all(&config.config_path).unwrap();
+        let old_ws = config.agent_workspace_dir("from");
+        let new_ws = config.agent_workspace_dir("to");
+        std::fs::create_dir_all(&old_ws).unwrap();
+        std::fs::write(old_ws.join("USER.md"), "source workspace").unwrap();
+        zeroclaw_runtime::cron::add_job(&config, "from", "* * * * *", "echo hi").unwrap();
+        let store_dir = config.companion_memory.resolved_store_dir(&config.data_dir);
+        let identity =
+            zeroclaw_memory::companion::resolve_or_mint_agent_identity(&store_dir, "from").unwrap();
+
+        assert!(
+            Box::pin(handle_agents(
+                AgentsCommands::Rename {
+                    from: "from".into(),
+                    to: "to".into()
+                },
+                &mut config,
+            ))
+            .await
+            .is_err()
+        );
+        assert!(config.agents.contains_key("from"));
+        assert!(!config.agents.contains_key("to"));
+        assert!(old_ws.join("USER.md").exists());
+        assert!(!new_ws.exists());
+        assert_eq!(
+            zeroclaw_runtime::cron::list_jobs_by_agent(&config, "from")
+                .unwrap()
+                .len(),
+            1
+        );
+        assert!(
+            zeroclaw_runtime::cron::list_jobs_by_agent(&config, "to")
+                .unwrap()
+                .is_empty()
+        );
+        assert_eq!(
+            zeroclaw_memory::companion::peek_agent_identity(&store_dir, "from"),
+            Some(identity)
+        );
+    }
+
+    #[cfg(all(feature = "gateway", feature = "agent-runtime"))]
+    #[tokio::test]
+    async fn agent_rename_refusal_and_failed_commit_do_not_run_memory_retention() {
+        for invalid_target in [true, false] {
+            let tmp = tempfile::tempdir().unwrap();
+            let mut config = rename_test_config(&tmp);
+            config.memory.hygiene_enabled = true;
+            config.memory.archive_after_days = 1;
+            config.memory.purge_after_days = 1;
+            config.memory.audit_retention_days = 1;
+            config.memory.audit_enabled = false;
+            Box::pin(config.save()).await.unwrap();
+            if !invalid_target {
+                std::fs::remove_file(&config.config_path).unwrap();
+                std::fs::create_dir(&config.config_path).unwrap();
+            }
+
+            let retained_files = [
+                "memory/2000-01-01.md",
+                "memory/archive/2000-01-02.md",
+                "sessions/2000-01-01.jsonl",
+                "sessions/archive/2000-01-02.jsonl",
+            ];
+            for file in retained_files {
+                let path = config.data_dir.join(file);
+                std::fs::create_dir_all(path.parent().unwrap()).unwrap();
+                std::fs::write(path, "retained record").unwrap();
+            }
+            let audit_path = config.data_dir.join("memory/audit.db");
+            {
+                let audit = rusqlite::Connection::open(&audit_path).unwrap();
+                audit
+                    .execute_batch(
+                        "CREATE TABLE memory_audit (
+                        id INTEGER PRIMARY KEY, operation TEXT NOT NULL, key TEXT,
+                        namespace TEXT, session_id TEXT, timestamp TEXT NOT NULL,
+                        metadata TEXT
+                    );
+                    INSERT INTO memory_audit (operation, timestamp)
+                    VALUES ('store', '2000-01-01T00:00:00+00:00');",
+                    )
+                    .unwrap();
+            }
+            assert!(zeroclaw_memory::hygiene::is_due(&config.data_dir).unwrap());
+
+            assert!(
+                Box::pin(handle_agents(
+                    AgentsCommands::Rename {
+                        from: "from".into(),
+                        to: if invalid_target { "BadName" } else { "to" }.into(),
+                    },
+                    &mut config,
+                ))
+                .await
+                .is_err()
+            );
+
+            assert!(config.agents.contains_key("from"));
+            assert!(
+                config.memory.hygiene_enabled,
+                "the operator setting stays enabled"
+            );
+            for file in retained_files {
+                assert_eq!(
+                    std::fs::read_to_string(config.data_dir.join(file)).unwrap(),
+                    "retained record",
+                    "{file} must survive a rename that never commits"
+                );
+            }
+            let audit = rusqlite::Connection::open(&audit_path).unwrap();
+            let count: i64 = audit
+                .query_row("SELECT COUNT(*) FROM memory_audit", [], |row| row.get(0))
+                .unwrap();
+            assert_eq!(count, 1);
+            assert!(
+                !config
+                    .data_dir
+                    .join("state/memory_hygiene_state.json")
+                    .exists()
+            );
+        }
     }
 
     #[test]
