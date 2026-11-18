@@ -101,8 +101,6 @@ replacement surface exists. Until then, keep them compatible and policy-visible.
 |---|---|---|
 | `composio` | MCP server or CLI-backed integration. | These mostly wrap third-party products and authentication models that can evolve independently from the core runtime. |
 | `claude_code`, `claude_code_runner`, `codex_cli`, `gemini_cli`, `opencode_cli` | Removed; retired raw launchers. | These Parent-visible raw CLI launchers were removed from the registry (#197 wall 2); harness execution goes through the typed subagent / Tachi paths instead. |
-| `email_search`, `email_read` | Channel companion plugin or MCP server. | Email search/read is useful but tied to external account auth and channel setup rather than the baseline agent contract. |
-| `discord_search` | Channel companion plugin or archive-query skill. | It depends on a Discord archive database produced by the channel; keep it close to that channel until the archive API is explicit. |
 | `image_gen` | Skill package or MCP server. | These are optional workflows or vendor/data-service wrappers rather than core execution primitives. |
 | `git_operations` | CLI-backed integration or narrowly scoped plugin. | It has local and remote repository side effects, so any external replacement must preserve policy checks, receipts, and explicit operator visibility. |
 

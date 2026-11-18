@@ -174,7 +174,7 @@ export interface Session {
    * with no attribution at all (channel_id null too). */
   agent_alias: string | null;
   /** Owning channel as `<type>.<alias>` for channel-driven sessions
-   * (Discord, Matrix, …). `null` for gateway WebSocket sessions. */
+   * (Telegram, …). `null` for gateway WebSocket sessions. */
   channel_id: string | null;
 }
 
@@ -192,7 +192,7 @@ export interface ChannelReadiness {
 export interface ChannelDetail {
   /** Composite `<type>.<alias>` identifier (v0.8.0). */
   name: string;
-  /** Channel type as the schema emits it (kebab; e.g. `"discord"`). */
+  /** Channel type as the schema emits it (kebab; e.g. `"telegram"`). */
   type: string;
   /** Per-alias HashMap key (e.g. `"loneliness"`). */
   alias: string;

@@ -36,59 +36,6 @@ fn test_config(tmp: &TempDir) -> Config {
 }
 
 #[test]
-fn email_factory_respects_compile_feature_and_channel_activation() {
-    for enabled in [None, Some(false), Some(true)] {
-        let tmp = TempDir::new().unwrap();
-        let mut cfg = test_config(&tmp);
-        cfg.composition = Some(zeroclaw_config::composition::Composition::Full);
-        if let Some(enabled) = enabled {
-            cfg.channels.email.insert(
-                "fixture".into(),
-                zeroclaw_config::scattered_types::EmailConfig {
-                    enabled,
-                    imap_host: "mail.invalid".into(),
-                    ..Default::default()
-                },
-            );
-        }
-        let security = Arc::new(SecurityPolicy {
-            workspace_dir: tmp.path().to_path_buf(),
-            ..SecurityPolicy::default()
-        });
-        let mem_cfg = MemoryConfig {
-            backend: "markdown".into(),
-            ..MemoryConfig::default()
-        };
-        let mem: Arc<dyn Memory> =
-            Arc::from(zeroclaw_memory::create_memory(&mem_cfg, tmp.path(), None).unwrap());
-        let risk_profile = zeroclaw_config::schema::RiskProfileConfig {
-            sandbox_enabled: Some(false),
-            ..Default::default()
-        };
-        let tools = all_tools(
-            Arc::new(cfg.clone()),
-            &security,
-            &risk_profile,
-            "test-agent",
-            mem,
-            &zeroclaw_config::schema::HttpRequestConfig::default(),
-            &zeroclaw_config::schema::WebFetchConfig::default(),
-            tmp.path(),
-            &HashMap::new(),
-            None,
-            &cfg,
-            None,
-        )
-        .tools;
-        let names: Vec<&str> = tools.iter().map(|tool| tool.name()).collect();
-        let expected = cfg!(feature = "email-tools") && enabled == Some(true);
-        assert_eq!(names.contains(&"email_search"), expected, "{enabled:?}");
-        assert_eq!(names.contains(&"email_read"), expected, "{enabled:?}");
-        assert!(names.contains(&"file_read"));
-    }
-}
-
-#[test]
 fn default_tools_has_expected_count() {
     let security = Arc::new(SecurityPolicy::default());
     let tools = default_tools(security);
@@ -242,17 +189,9 @@ fn shared_store_tools_open_data_dir_not_per_agent_workspace() {
     let web = zeroclaw_config::schema::WebFetchConfig::default();
     let risk = zeroclaw_config::schema::RiskProfileConfig::default();
 
-    // root_config: shared data_dir + a Discord alias that archives (this is
-    // what gates discord_search registration).
+    // root_config carries the shared data_dir.
     let mut root_config = test_config(&tmp);
     root_config.data_dir = data_dir.clone();
-    root_config.channels.discord.insert(
-        "oracle".to_string(),
-        zeroclaw_config::schema::DiscordConfig {
-            archive: true,
-            ..Default::default()
-        },
-    );
 
     // `config` (arg 1) carries the canonical shared data_dir — exactly how
     // the production callers pass it (a clone of the runtime config).
@@ -283,21 +222,13 @@ fn shared_store_tools_open_data_dir_not_per_agent_workspace() {
 
     let names: Vec<&str> = tools.iter().map(|t| t.name()).collect();
     assert!(
-        names.contains(&"discord_search"),
-        "discord_search must register when a Discord alias archives"
-    );
-    assert!(
         names.iter().any(|n| n.starts_with("sessions")),
         "session tools must register"
     );
 
-    // The fix: both stores open under the shared data_dir, never the
-    // per-agent workspace. Pre-fix the readers created `memory/discord.db`
-    // and `sessions/sessions.db` under the workspace_dir.
-    assert!(
-        !workspace_dir.join("memory").exists(),
-        "discord_search must not open/create a store under the per-agent workspace_dir"
-    );
+    // The store opens under the shared data_dir, never the per-agent
+    // workspace. Pre-fix the readers created `sessions/sessions.db` under the
+    // workspace_dir.
     assert!(
         !workspace_dir.join("sessions").exists(),
         "session tools must not open/create a store under the per-agent workspace_dir"

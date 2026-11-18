@@ -44,8 +44,7 @@ pub fn all_integrations(config: &Config) -> Vec<IntegrationEntry> {
     // Retired transports (in-process runners removed with #579/#581) are not
     // integrations: presenting them as Available would invite configuring a
     // section nothing consumes. The retained rows are the live surfaces —
-    // Telegram bridge, webhook ingress, and the Email/Discord tool
-    // configuration (#584).
+    // Telegram bridge and webhook ingress (#584).
     let channels = config
         .channels
         .channels()

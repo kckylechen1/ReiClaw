@@ -19,17 +19,6 @@ A **bridge** is a channel that runs as its own process and attaches to the gatew
 | Voice surface (opt-in) | Spoken text over `/ws/chat` with `surface=voice`; audio belongs to the adapter | [Voice & telephony](./voice.md) |
 | Gateway REST/WS | HTTP + WebSocket (`gateway`, enabled by default) | [Gateway](../gateway/api.md) |
 
-### Retained tool configuration
-
-Email and Discord are **not transports anymore, and not dead config either**: their `[channels.*]` sections feed live tools and are kept deliberately (#584).
-
-| Surface | What it drives | Guide |
-|---|---|---|
-| Email | `email_search` / `email_read` tools (IMAP, read-only) + email authentication | [Email](./email.md) |
-| Discord | `discord_search` archive-history tool (`archive = true`) | [Discord](./discord.md) |
-
-The `channel-email` root feature forwards to the `email-tools` runtime feature and is part of the default build.
-
 ## Retired transports
 
 The legacy transports lost their in-process runners with #579/#581. Their

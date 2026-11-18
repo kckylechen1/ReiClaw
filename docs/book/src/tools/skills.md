@@ -70,7 +70,7 @@ A skill can also be a structured TOML manifest (`SKILL.toml`). The `[skill]` tab
 
 ### Slash command options and localizations
 
-A skill tagged `slash` is surfaced as a chat-channel slash command (e.g. Discord `/search`). It may declare typed `[[skill.slash_options]]`; a skill that declares none falls back to a single required free-text input. Both the command description and each option description accept an optional `description_localizations` map keyed by locale code. Unknown or unsupported locale codes are dropped with a warning rather than failing registration, so a typo never wedges command registration.
+A skill tagged `slash` is surfaced as a chat-channel slash command (e.g. `/search`). It may declare typed `[[skill.slash_options]]`; a skill that declares none falls back to a single required free-text input. Both the command description and each option description accept an optional `description_localizations` map keyed by locale code. Unknown or unsupported locale codes are dropped with a warning rather than failing registration, so a typo never wedges command registration.
 
 ```toml
 [skill]

@@ -42,7 +42,7 @@ channel page states the identifier shape it expects.
 
 ## Example
 
-{{#peer-group-example discord}}
+{{#peer-group-example telegram}}
 
 Each channel page shows the directive form with that channel's sender-identifier
 shape.

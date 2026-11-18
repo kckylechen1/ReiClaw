@@ -34,7 +34,7 @@ pub struct ModelProviderChoice {
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 #[cfg_attr(feature = "schema-export", derive(schemars::JsonSchema))]
 pub struct ChannelQuickStart {
-    /// Channel type identifier (`cli`, `telegram`, `discord`, `web`
+    /// Channel type identifier (`cli`, `telegram`, `webhook`, `web`
     /// in the FTUE-supported set).
     pub channel_type: String,
     /// User-named alias for this channel entry. Defaults to

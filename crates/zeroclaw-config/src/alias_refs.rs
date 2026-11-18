@@ -724,7 +724,7 @@ fn provider_section(category: ProviderCategory) -> &'static str {
 }
 
 /// The dotted entry path for a kind + alias (e.g. `agents.bot`,
-/// `providers.models.anthropic.default`, `channels.discord.main`).
+/// `providers.models.anthropic.default`, `channels.telegram.main`).
 fn entry_path(kind: &AliasKind, alias: &str) -> String {
     format!("{}.{alias}", section_path(kind))
 }
@@ -1150,7 +1150,7 @@ fn collect_channel_refs(cfg: &Config, channel_type: &str, alias: &str, sites: &m
         }
     }
     // peer_groups.<g>.channel — mandatory ChannelRef; deletion refused.
-    // A bare-type group channel (`"discord"`) does not equal the dotted target,
+    // A bare-type group channel (`"telegram"`) does not equal the dotted target,
     // so single-alias deletes don't match it.
     for (gname, group) in sorted_peer_groups(cfg) {
         if group.channel.trim() == target {

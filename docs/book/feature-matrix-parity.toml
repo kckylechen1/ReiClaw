@@ -38,14 +38,6 @@
 openclaw = "supported"
 hermes = "supported"
 
-[channels.discord]
-openclaw = "supported"
-hermes = "supported"
-
-[channels.email]
-openclaw = "none"
-hermes = "supported"
-
 [channels.webhook]
 openclaw = "supported"
 hermes = "supported"

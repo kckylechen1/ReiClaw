@@ -113,8 +113,8 @@ hard-coding.
 
 Plain fields (`ATTRIBUTION_FIELDS`) carry a single string each.
 Composite prefixes get three keys: `<prefix>`, `<prefix>_type`,
-`<prefix>_alias` (e.g. `channel = "discord.glados"`,
-`channel_type = "discord"`, `channel_alias = "glados"`). Filters can
+`<prefix>_alias` (e.g. `channel = "telegram.glados"`,
+`channel_type = "telegram"`, `channel_alias = "glados"`). Filters can
 match either coarse or precise.
 
 When a tracing call sets a composite-prefix field to a bare type (no
@@ -154,8 +154,8 @@ curl "$ZEROCLAW_GATEWAY/api/logs?severity_min=13"
 # A specific agent's events:
 curl "$ZEROCLAW_GATEWAY/api/logs?agent_alias=glados"
 
-# Discord traffic for one bot:
-curl "$ZEROCLAW_GATEWAY/api/logs?channel=discord.glados"
+# Telegram traffic for one bot:
+curl "$ZEROCLAW_GATEWAY/api/logs?channel=telegram.glados"
 
 # A single agent turn:
 curl "$ZEROCLAW_GATEWAY/api/logs?trace_id=<value-from-a-prior-event>"
@@ -246,10 +246,10 @@ The daemon's stderr formatter prefixes every line with the closest
 enclosing alias-bound identity:
 
 - agent context → `[<agent_alias>]`
-- channel-only context (channel listener, no agent yet) → `[<channel_composite>]` (e.g. `[discord.glados]`)
+- channel-only context (channel listener, no agent yet) → `[<channel_composite>]` (e.g. `[telegram.glados]`)
 - otherwise → `[system]`
 
-The span chain follows: `channel_listener{channel=discord.glados}: …`.
+The span chain follows: `channel_listener{channel=telegram.glados}: …`.
 Span fields are visible inline.
 
 ## Schema migration

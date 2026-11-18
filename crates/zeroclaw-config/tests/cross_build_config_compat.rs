@@ -25,19 +25,12 @@ enabled = true
 bot_token = "123456789:ABCdefGhIJKlmNoPQRsTUVwxyZ"
 allowed_users = ["user1", "user2"]
 
-# Discord channel settings
-[channels.discord.default]
+# Webhook channel settings
+[channels.webhook.default]
 enabled = true
-bot_token = "discord_bot_token_secret"
-
-# Email channel settings
-[channels.email.default]
-enabled = true
-imap_host = "imap.example.com"
-smtp_host = "smtp.example.com"
-username = "agent@example.com"
-password = "email_secret_password"
-from_address = "agent@example.com"
+port = 8090
+secret = "webhook_secret_value"
+send_url = "https://hooks.example.com/outbound"
 
 # An extension unknown to this binary
 [future_extension]
@@ -69,10 +62,10 @@ async fn cross_build_full_save_preserves_uncompiled_channel_sections() {
     assert_eq!(
         config
             .channels
-            .email
+            .webhook
             .get("default")
-            .map(|c| c.imap_host.as_str()),
-        Some("imap.example.com")
+            .and_then(|c| c.send_url.as_deref()),
+        Some("https://hooks.example.com/outbound")
     );
     assert_eq!(
         config
@@ -85,10 +78,10 @@ async fn cross_build_full_save_preserves_uncompiled_channel_sections() {
     assert_eq!(
         config
             .channels
-            .discord
+            .webhook
             .get("default")
-            .map(|c| c.bot_token.as_str()),
-        Some("discord_bot_token_secret")
+            .and_then(|c| c.secret.as_deref()),
+        Some("webhook_secret_value")
     );
 
     // Mutate an agent setting
@@ -105,8 +98,8 @@ async fn cross_build_full_save_preserves_uncompiled_channel_sections() {
         .expect("read saved config");
 
     assert!(
-        saved_raw.contains("[channels.email.default]"),
-        "Email section must exist in saved config"
+        saved_raw.contains("[channels.webhook.default]"),
+        "Webhook section must exist in saved config"
     );
     assert!(
         saved_raw.contains("[channels.telegram.default]"),
@@ -117,16 +110,12 @@ async fn cross_build_full_save_preserves_uncompiled_channel_sections() {
         "Telegram bot_token must be securely encrypted on disk"
     );
     assert!(
-        saved_raw.contains("[channels.discord.default]"),
-        "Discord section must survive full save"
+        saved_raw.contains("secret = \"enc2:"),
+        "Webhook secret must be securely encrypted on disk"
     );
     assert!(
-        saved_raw.contains("[channels.email.default]"),
-        "Email section must survive full save"
-    );
-    assert!(
-        saved_raw.contains("agent@example.com"),
-        "Email username must survive full save"
+        saved_raw.contains("https://hooks.example.com/outbound"),
+        "Webhook send_url must survive full save"
     );
 
     // Reload and decrypt with the secret store at the same dir
@@ -147,11 +136,11 @@ async fn cross_build_full_save_preserves_uncompiled_channel_sections() {
     assert_eq!(
         reloaded
             .channels
-            .discord
+            .webhook
             .get("default")
-            .map(|c| c.bot_token.as_str()),
-        Some("discord_bot_token_secret"),
-        "Discord token decrypts back to original plaintext"
+            .and_then(|c| c.secret.as_deref()),
+        Some("webhook_secret_value"),
+        "Webhook secret decrypts back to original plaintext"
     );
     assert_eq!(
         reloaded.agents.get("default").map(|a| a.acp_enable_mcp),
@@ -171,10 +160,10 @@ async fn cross_build_dirty_save_preserves_untouched_sections() {
     config.loaded_from = Some(config_path.clone());
 
     // Modify only a single field and mark it dirty
-    if let Some(email) = config.channels.email.get_mut("default") {
-        email.imap_host = "modified.example.com".to_string();
+    if let Some(webhook) = config.channels.webhook.get_mut("default") {
+        webhook.send_url = Some("https://modified.example.com/outbound".to_string());
     }
-    config.mark_dirty("channels.email.default.imap_host");
+    config.mark_dirty("channels.webhook.default.send_url");
 
     // Save only dirty paths
     config.save_dirty().await.expect("save_dirty succeeds");
@@ -185,8 +174,8 @@ async fn cross_build_dirty_save_preserves_untouched_sections() {
 
     // Verify the modified field changed
     assert!(
-        saved_raw.contains("imap_host = \"modified.example.com\""),
-        "modified imap_host must be written"
+        saved_raw.contains("send_url = \"https://modified.example.com/outbound\""),
+        "modified send_url must be written"
     );
 
     // Verify untouched broad channels and comments are preserved verbatim
@@ -199,12 +188,8 @@ async fn cross_build_dirty_save_preserves_untouched_sections() {
         "Telegram section must remain"
     );
     assert!(
-        saved_raw.contains("[channels.discord.default]"),
-        "Discord section must remain"
-    );
-    assert!(
-        saved_raw.contains("[channels.email.default]"),
-        "Email section must remain"
+        saved_raw.contains("[channels.webhook.default]"),
+        "Webhook section must remain"
     );
     assert!(
         saved_raw.contains("[future_extension]"),
@@ -242,8 +227,8 @@ async fn cross_build_dirty_save_secret_preservation() {
         "telegram token must not be erased"
     );
     assert!(
-        saved_raw.contains("discord_bot_token_secret"),
-        "discord token must not be erased"
+        saved_raw.contains("webhook_secret_value"),
+        "webhook secret must not be erased"
     );
 }
 
@@ -258,16 +243,16 @@ async fn cross_build_parent_table_edit_preserves_sibling_entries() {
     config.config_path = config_path.clone();
     config.loaded_from = Some(config_path.clone());
 
-    // Add a second wechat alias via create_map_key
+    // Add a second webhook alias via create_map_key
     let created = config
-        .create_map_key("channels.email", "secondary")
-        .expect("create email secondary alias");
+        .create_map_key("channels.webhook", "secondary")
+        .expect("create webhook secondary alias");
     assert!(created);
 
-    if let Some(sec) = config.channels.email.get_mut("secondary") {
-        sec.imap_host = "secondary.example.com".to_string();
+    if let Some(sec) = config.channels.webhook.get_mut("secondary") {
+        sec.send_url = Some("https://secondary.example.com/hook".to_string());
     }
-    config.mark_dirty("channels.email.secondary.imap_host");
+    config.mark_dirty("channels.webhook.secondary.send_url");
 
     config.save_dirty().await.expect("save_dirty succeeds");
 
@@ -275,9 +260,9 @@ async fn cross_build_parent_table_edit_preserves_sibling_entries() {
         .await
         .expect("read saved config");
 
-    // Both email default and secondary must exist, plus all broad channels
-    assert!(saved_raw.contains("smtp.example.com"));
+    // Both webhook default and secondary must exist, plus all broad channels
+    assert!(saved_raw.contains("hooks.example.com"));
     assert!(saved_raw.contains("secondary.example.com"));
     assert!(saved_raw.contains("[channels.telegram.default]"));
-    assert!(saved_raw.contains("[channels.discord.default]"));
+    assert!(saved_raw.contains("[channels.webhook.default]"));
 }

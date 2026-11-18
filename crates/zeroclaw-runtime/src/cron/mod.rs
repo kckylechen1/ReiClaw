@@ -33,8 +33,7 @@ pub use types::{
 /// deliver, so the tool schema must not offer it (#584). Runtime delivery
 /// is provided by the registered channel delivery handler (gateway
 /// bridges), not this static enum.
-pub(crate) const CRON_DELIVERY_SCHEMA_CHANNELS: &[&str] =
-    &["telegram", "discord", "webhook", "email"];
+pub(crate) const CRON_DELIVERY_SCHEMA_CHANNELS: &[&str] = &["telegram", "webhook"];
 
 /// Delivery channel names for the cron tool schemas: the in-core channels
 /// plus every configured `[gateway.bridges.<name>]`, whose deliveries go to

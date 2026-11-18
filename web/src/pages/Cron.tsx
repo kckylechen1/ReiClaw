@@ -859,7 +859,7 @@ export default function Cron() {
 
               {/* Delivery section — scoped to the picked agent's channel
                   bindings. The channel composite + identity field
-                  (matrix user_id, discord guild_ids, ...) come from the
+                  (telegram bot identity, ...) come from the
                   agentBoundChannels helper so the operator sees exactly
                   which channel goes where. Dangling channel refs are
                   accepted on add; the scheduler logs loudly when a

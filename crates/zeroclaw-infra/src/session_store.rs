@@ -374,13 +374,13 @@ mod tests {
             .append("telegram_alice", &ChatMessage::user("hi"))
             .unwrap();
         store
-            .append("discord_bob", &ChatMessage::user("hey"))
+            .append("webhook_bob", &ChatMessage::user("hey"))
             .unwrap();
 
         let mut sessions = store.list_sessions();
         sessions.sort();
         assert_eq!(sessions.len(), 2);
-        assert!(sessions.contains(&"discord_bob".to_string()));
+        assert!(sessions.contains(&"webhook_bob".to_string()));
         assert!(sessions.contains(&"telegram_alice".to_string()));
     }
 

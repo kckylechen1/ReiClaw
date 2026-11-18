@@ -32,19 +32,3 @@ Every new default capability must evaluate all 6 extension planes:
 ## Minimal Profile Exception Invariants
 
 A legitimate exception to the 5,000-token provider-wire ceiling or minimal membership table needs an explicit owner decision recorded in the PR that raises it, naming the owner, the tool, why it must be in the kernel, its measured provider-wire token cost, and whether the exception is permanent or has a sunset date. The ceiling constant in `provider_wire_budget.rs` changes only with that decision.
-
-## Email tool compile boundary
-
-The existing root `channel-email` feature selects the optional email tool and
-channel implementations. The crate-local `email-tools` features forward that
-selection; they add no runtime configuration or admission authority.
-
-| Integration | Current module / feature | Default build | Default tool-visible | Heavy dependencies | Extension plane | Compatibility | Source deletion now? |
-|---|---|---|---|---|---|---|---|
-| Email search/read | `zeroclaw-tools/src/email_{imap,read,search}.rs`; tools/runtime `email-tools`; root/channels `channel-email` | Yes for root defaults and standalone tools/runtime defaults; no for root `--no-default-features --features agent-runtime` | No with default disabled email config; full composition registers both tools only with the compile feature and an enabled email channel | `async-imap`, `mail-parser` | Optional first-party tools shared with the Email Channel | Config, environment, credentials, permissions and data formats unchanged; custom no-default builds must opt in to compile email tools | No; retained for explicit email builds |
-
-Root `channel-email` conditionally forwards to an already selected runtime.
-The channel feature also forwards to the shared IMAP utility in the tools crate.
-Minimal runtime composition still applies its existing membership policy even
-when email support is compiled. SaaS feature selection is separate.
-This is the email compile-graph slice of [issue #211](https://github.com/kckylechen1/zeroclaw/issues/211), not completion of its remaining integration census.

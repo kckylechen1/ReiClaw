@@ -4,7 +4,7 @@
 
 use crate::domain_matcher::DomainMatcher;
 use crate::schema::{
-    Config, DiscordConfig, EmbeddingRouteConfig, ExternalRegistry, ExternalRegistryKind,
+    Config, EmbeddingRouteConfig, ExternalRegistry, ExternalRegistryKind,
     MAX_MEMORY_RERANK_CANDIDATE_MULTIPLIER, McpConfig, McpTransport, MemoryConfig,
     ModelProviderConfig, NevisConfig, ProxyConfig, ProxyScope, REPLY_MIN_INTERVAL_MAX_SECS,
     REPLY_QUEUE_DEPTH_CEILING, SearchMode, TEMPERATURE_RANGE, TelegramConfig,
@@ -22,7 +22,6 @@ pub(crate) const SUPPORTED_PROXY_SERVICE_KEYS: &[&str] = &[
     "model_provider.ollama",
     "model_provider.openai",
     "channel.dingtalk",
-    "channel.discord",
     "channel.qq",
     "channel.telegram",
     "channel.wechat",
@@ -38,6 +37,7 @@ pub(crate) const SUPPORTED_PROXY_SERVICE_KEYS: &[&str] = &[
 /// leftover `proxy.services` entry does not fail config load, but no longer
 /// advertised: nothing consumes them.
 const RETIRED_PROXY_SERVICE_KEYS: &[&str] = &[
+    "channel.discord",
     "channel.lark",
     "channel.matrix",
     "channel.mattermost",
@@ -226,7 +226,7 @@ fn validate_http_base_url(field: &str, url: &str) -> Result<()> {
 }
 
 /// Shared bot-token rule for channel structs whose `bot_token` is required
-/// once the alias is enabled (Telegram, Discord). `field_path` must be the
+/// once the alias is enabled (Telegram). `field_path` must be the
 /// `channels.<type>.<alias>.bot_token` leaf; the enabled-state message
 /// derives the sibling `.enabled` path from it.
 fn validate_required_bot_token(field_path: &str, enabled: bool, token: &str) -> Result<()> {
@@ -418,18 +418,6 @@ impl TelegramConfig {
     pub fn validate_bot_token(&self, alias: &str) -> Result<()> {
         validate_required_bot_token(
             &format!("channels.telegram.{alias}.bot_token"),
-            self.enabled,
-            &self.bot_token,
-        )
-    }
-}
-
-impl DiscordConfig {
-    /// Validate this alias's bot-token placeholder and enabled-state rules.
-    /// Mirrors `TelegramConfig::validate_bot_token`.
-    pub fn validate_bot_token(&self, alias: &str) -> Result<()> {
-        validate_required_bot_token(
-            &format!("channels.discord.{alias}.bot_token"),
             self.enabled,
             &self.bot_token,
         )
@@ -1117,10 +1105,6 @@ impl Config {
                 &format!("channels.telegram.{alias}.api_base_url"),
                 &tg.api_base_url,
             )?;
-        }
-
-        for (alias, dc) in &self.channels.discord {
-            dc.validate_bot_token(alias)?;
         }
 
         for name in self.http_request.secrets.keys() {
@@ -2307,7 +2291,7 @@ impl Config {
                 validation_bail!(
                     RequiredFieldEmpty,
                     format!("peer_groups.{group_name}.channel"),
-                    "peer_groups.{group_name}.channel must name a channel type (e.g. \"discord\") or dotted alias (e.g. \"discord.work\")",
+                    "peer_groups.{group_name}.channel must name a channel type (e.g. \"telegram\") or dotted alias (e.g. \"telegram.work\")",
                 );
             }
             // `get_map_keys` stores section names using the raw field ident

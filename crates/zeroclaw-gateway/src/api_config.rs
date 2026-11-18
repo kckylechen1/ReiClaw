@@ -503,6 +503,7 @@ async fn persist_and_swap(
         if !e.is::<zeroclaw_config::current::RetiredSopConfigError>()
             && !e.is::<zeroclaw_config::current::UnsupportedSchemaError>()
             && !e.is::<zeroclaw_config::providers::RetiredModelProviderError>()
+            && !e.is::<zeroclaw_config::current::RetiredChannelConfigError>()
         {
             if let Some(prev) = snapshot {
                 let _ = tokio::fs::write(&config_path, prev).await;
@@ -1122,7 +1123,7 @@ pub async fn handle_resolve_alias_source(
 }
 
 /// `GET /api/config/map-keys?path=<section>` — list the current alias keys at
-/// a map-keyed section path, e.g. `channels.discord` → `["default","work"]`.
+/// a map-keyed section path, e.g. `channels.telegram` → `["default","work"]`.
 pub async fn handle_get_map_keys(
     State(state): State<AppState>,
     headers: HeaderMap,
@@ -1620,7 +1621,7 @@ fn unsupported_delete_cascade_message(
 #[derive(Debug, Deserialize)]
 #[cfg_attr(feature = "schema-export", derive(schemars::JsonSchema))]
 pub struct RenameMapKeyBody {
-    /// Section path, e.g. `channels.discord` or `model_providers.anthropic`.
+    /// Section path, e.g. `channels.telegram` or `model_providers.anthropic`.
     pub path: String,
     /// Current alias name.
     pub from: String,
@@ -3467,18 +3468,18 @@ mod tests {
     async fn delete_map_key_handler_cascades_channel_and_persists() {
         let tmp = tempfile::tempdir().unwrap();
         let mut config = temp_config(&tmp);
-        config.create_map_key("channels.discord", "main").unwrap();
+        config.create_map_key("channels.telegram", "main").unwrap();
         config.agents.insert(
             "ops".to_string(),
             zeroclaw_config::schema::AliasedAgentConfig {
-                channels: vec!["discord.main".into()],
+                channels: vec!["telegram.main".into()],
                 ..Default::default()
             },
         );
         config
             .escalation
             .alert_channels
-            .push("discord.main".to_string());
+            .push("telegram.main".to_string());
         config.save().await.unwrap();
 
         let state = test_state(config);
@@ -3488,7 +3489,7 @@ mod tests {
                 axum::extract::State(state.clone()),
                 axum::http::HeaderMap::new(),
                 axum::extract::Query(MapKeyQuery {
-                    path: "channels.discord".to_string(),
+                    path: "channels.telegram".to_string(),
                     key: "main".to_string(),
                 }),
             )
@@ -3497,11 +3498,11 @@ mod tests {
         .await;
 
         assert_eq!(status, StatusCode::OK);
-        assert_eq!(json["path"], "channels.discord");
+        assert_eq!(json["path"], "channels.telegram");
         assert_eq!(json["key"], "main");
         let cfg = state.config.read();
         assert!(
-            !cfg.get_map_keys("channels.discord")
+            !cfg.get_map_keys("channels.telegram")
                 .unwrap_or_default()
                 .iter()
                 .any(|k| k == "main")
@@ -3510,7 +3511,7 @@ mod tests {
         assert!(cfg.escalation.alert_channels.is_empty());
         drop(cfg);
         let written = std::fs::read_to_string(tmp.path().join("config.toml")).unwrap();
-        assert!(!written.contains("discord.main"));
+        assert!(!written.contains("telegram.main"));
     }
 
     #[tokio::test]

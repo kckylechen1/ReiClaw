@@ -575,9 +575,9 @@ mod tests {
     #[test]
     fn set_composite_splits_channel() {
         let mut attribution = ZeroclawAttribution::default();
-        attribution.set_composite("channel", "discord.clamps");
-        assert_eq!(attribution.get("channel"), Some("discord.clamps"));
-        assert_eq!(attribution.get("channel_type"), Some("discord"));
+        attribution.set_composite("channel", "telegram.clamps");
+        assert_eq!(attribution.get("channel"), Some("telegram.clamps"));
+        assert_eq!(attribution.get("channel_type"), Some("telegram"));
         assert_eq!(attribution.get("channel_alias"), Some("clamps"));
     }
 

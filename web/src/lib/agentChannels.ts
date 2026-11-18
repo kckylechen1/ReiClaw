@@ -2,8 +2,7 @@
 // of each. Consumed by the Cron UI: when an operator picks an agent for a
 // new cron job, the delivery-channel select narrows to that agent's
 // `agents.<alias>.channels` list with the matching identity info visible
-// inline (matrix.<alias> shows the user_id, discord.<alias> shows the
-// guild_ids, etc.) so the operator doesn't have to remember which
+// inline (telegram.<alias> shows the bot identity, etc.) so the operator doesn't have to remember which
 // composite goes where.
 //
 // Source of truth for the channel slot list is the schema's
@@ -17,7 +16,7 @@ import { getProp } from './api';
 export interface AgentBoundChannel {
   /** Composite `<type>.<alias>` as it appears in `agents.<alias>.channels`. */
   composite: string;
-  /** Bare channel type (`matrix`, `discord`, ...). */
+  /** Bare channel type (`telegram`, `webhook`, ...). */
   type: string;
   /** Operator-chosen alias half of the composite. */
   alias: string;
@@ -40,9 +39,7 @@ interface IdentityField {
 // `ChannelsConfig` and the picker derives from there; this table only
 // names which field to surface alongside the composite.
 const CHANNEL_IDENTITY: Record<string, IdentityField> = {
-  discord: { field: 'guild_ids', label: 'guilds' },
   telegram: { field: 'bot_token', label: '' }, // bot identity, no separate id
-  email: { field: 'address', label: '' },
 };
 
 /** Parse a config-encoded value into a short identity string. The

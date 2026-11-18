@@ -4,7 +4,7 @@ import { ApiError, ConfigApiCodes, patchConfig } from '@/lib/api';
 import { t } from '@/lib/i18n';
 
 export interface EntityEnabledToggleProps {
-  /** Dotted prefix of the entity (`agents.clamps`, `channels.discord.clamps`, …).
+  /** Dotted prefix of the entity (`agents.clamps`, `channels.telegram.clamps`, …).
    *  The toggle writes to `<prefix>.enabled`. */
   prefix: string;
   enabled: boolean;

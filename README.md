@@ -103,8 +103,7 @@ still runs through an interim adapter; switching that brain to ZeroClaw (S5)
 and enabling its face capability as a Node (S8) are pending.
 
 The in-process `zeroclaw-channels` crate has been removed (#579). External
-channel ingress follows the gateway-client and bridge boundary in ADR-013;
-the retained Email and Discord search tools still have live consumers.
+channel ingress follows the gateway-client and bridge boundary in ADR-013.
 
 ## Install
 
@@ -157,7 +156,7 @@ Flags:
 ./install.sh --source                # always build from source
 ./install.sh --preset minimal        # kernel-only source preset
 ./install.sh --minimal               # alias for --preset minimal
-./install.sh --source --features agent-runtime,channel-discord  # custom feature set
+./install.sh --source --features agent-runtime,channel-telegram  # custom feature set
 ./install.sh --with-gateway          # force gateway support on
 ./install.sh --without-gateway       # force gateway support off
 ./install.sh --prefix /tmp/zc-test   # install under a custom prefix

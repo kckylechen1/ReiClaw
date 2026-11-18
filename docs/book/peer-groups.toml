@@ -12,19 +12,9 @@
 #   ignore_example  optional example blocked sender for the example block
 
 [[channel]]
-key = "discord"
-sender_desc = "the Discord user ID (snowflake)"
-sender_example = "111111111111111111"
-agents_example = ["researcher", "summariser"]
-ignore_example = "222222222222222222"
-
-[[channel]]
 key = "telegram"
 sender_desc = "the Telegram user ID or @username"
 sender_example = "111111111"
-
-[[channel]]
-key = "email"
-sender_desc = "the sender's email address"
-sender_example = "sender@example.com"
+agents_example = ["researcher", "summariser"]
+ignore_example = "222222222"
 

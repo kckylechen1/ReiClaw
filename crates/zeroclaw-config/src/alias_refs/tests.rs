@@ -97,21 +97,21 @@ fn channel_hard_and_soft() {
     cfg.agents.insert(
         "ops".to_string(),
         AliasedAgentConfig {
-            channels: vec!["discord.main".into()],
+            channels: vec!["telegram.main".into()],
             ..Default::default()
         },
     );
     let group = PeerGroupConfig {
-        channel: "discord.main".into(),
+        channel: "telegram.main".into(),
         ..Default::default()
     };
     cfg.peer_groups.insert("crew".to_string(), group);
     cfg.escalation
         .alert_channels
-        .push("discord.main".to_string());
+        .push("telegram.main".to_string());
 
     let kind = AliasKind::Channel {
-        channel_type: "discord".to_string(),
+        channel_type: "telegram".to_string(),
     };
     let report = plan_delete(&cfg, &kind, "main");
     assert_eq!(
@@ -129,12 +129,12 @@ fn channel_bare_type_group_is_not_matched_by_alias_delete() {
     let mut cfg = empty_config();
     // bare type, not a specific alias
     let group = PeerGroupConfig {
-        channel: "discord".into(),
+        channel: "telegram".into(),
         ..Default::default()
     };
     cfg.peer_groups.insert("crew".to_string(), group);
     let kind = AliasKind::Channel {
-        channel_type: "discord".to_string(),
+        channel_type: "telegram".to_string(),
     };
     assert!(find_all_references(&cfg, &kind, "main").is_empty());
 }
@@ -337,16 +337,16 @@ fn provider_transcription_is_soft_clear() {
 #[test]
 fn channel_delete_of_last_alias_blocks_bare_type_peer_group() {
     let mut cfg = empty_config();
-    cfg.create_map_key("channels.discord", "main").unwrap(); // the ONLY discord alias
+    cfg.create_map_key("channels.telegram", "main").unwrap(); // the ONLY telegram alias
     cfg.peer_groups.insert(
         "crew".to_string(),
         PeerGroupConfig {
-            channel: "discord".into(), // bare type — would dangle if discord empties
+            channel: "telegram".into(), // bare type — would dangle if telegram empties
             ..Default::default()
         },
     );
     let kind = AliasKind::Channel {
-        channel_type: "discord".to_string(),
+        channel_type: "telegram".to_string(),
     };
     // Deleting the last alias is HARD-blocked by the bare group's channel.
     let report = plan_delete(&cfg, &kind, "main");
@@ -361,8 +361,8 @@ fn channel_delete_of_last_alias_blocks_bare_type_peer_group() {
     );
 
     // With a SECOND alias present, deleting one is fine (the bare group still
-    // has a `discord.*` to resolve against).
-    cfg.create_map_key("channels.discord", "backup").unwrap();
+    // has a `telegram.*` to resolve against).
+    cfg.create_map_key("channels.telegram", "backup").unwrap();
     assert!(plan_delete(&cfg, &kind, "main").allowed);
 }
 
@@ -370,27 +370,27 @@ fn channel_delete_of_last_alias_blocks_bare_type_peer_group() {
 fn channel_delete_blocks_when_bare_group_member_loses_only_channel() {
     // Audacity88's case: the TYPE survives (backup remains) but a bare-group
     // MEMBER's only `<type>.*` channel is the target. Soft-scrubbing it would
-    // leave the member with no discord channel → validate() fails at
+    // leave the member with no telegram channel → validate() fails at
     // peer_groups.crew.agents[0]. The planner must HARD-block it instead.
     let mut cfg = empty_config();
-    cfg.create_map_key("channels.discord", "main").unwrap();
-    cfg.create_map_key("channels.discord", "backup").unwrap(); // type stays alive
+    cfg.create_map_key("channels.telegram", "main").unwrap();
+    cfg.create_map_key("channels.telegram", "backup").unwrap(); // type stays alive
     cfg.agents.insert(
         "bot".to_string(),
         AliasedAgentConfig {
-            channels: vec!["discord.main".into()], // bot's ONLY discord channel
+            channels: vec!["telegram.main".into()], // bot's ONLY telegram channel
             ..Default::default()
         },
     );
     let mut crew = PeerGroupConfig {
-        channel: "discord".into(), // bare type
+        channel: "telegram".into(), // bare type
         ..Default::default()
     };
     crew.agents.push(AgentAlias::new("bot"));
     cfg.peer_groups.insert("crew".to_string(), crew);
 
     let kind = AliasKind::Channel {
-        channel_type: "discord".to_string(),
+        channel_type: "telegram".to_string(),
     };
     let report = plan_delete(&cfg, &kind, "main");
     assert!(
@@ -407,13 +407,13 @@ fn channel_delete_blocks_when_bare_group_member_loses_only_channel() {
         report.blockers
     );
 
-    // If the member also has `discord.backup`, deleting `main` keeps it a
+    // If the member also has `telegram.backup`, deleting `main` keeps it a
     // member of the bare group → allowed.
     cfg.agents.get_mut("bot").unwrap().channels =
-        vec!["discord.main".into(), "discord.backup".into()];
+        vec!["telegram.main".into(), "telegram.backup".into()];
     assert!(
         plan_delete(&cfg, &kind, "main").allowed,
-        "member keeps a sibling discord channel → not orphaned"
+        "member keeps a sibling telegram channel → not orphaned"
     );
 }
 
@@ -424,7 +424,7 @@ fn agent_delete_blocks_on_solely_owned_channel() {
         "bot".to_string(),
         AliasedAgentConfig {
             enabled: true,
-            channels: vec!["discord.main".into()], // bot owns discord.main
+            channels: vec!["telegram.main".into()], // bot owns telegram.main
             ..Default::default()
         },
     );
@@ -446,7 +446,7 @@ fn agent_delete_blocks_on_solely_owned_channel() {
         "bot2".to_string(),
         AliasedAgentConfig {
             enabled: true,
-            channels: vec!["discord.main".into()],
+            channels: vec!["telegram.main".into()],
             ..Default::default()
         },
     );
@@ -463,7 +463,7 @@ fn agent_delete_blocks_on_solely_owned_channel() {
         "off".to_string(),
         AliasedAgentConfig {
             enabled: false,
-            channels: vec!["discord.main".into()],
+            channels: vec!["telegram.main".into()],
             ..Default::default()
         },
     );
@@ -729,7 +729,7 @@ fn cascade_agent_refuses_when_solely_owned_channel() {
         "bot".to_string(),
         AliasedAgentConfig {
             enabled: true,
-            channels: vec!["discord.main".into()], // bot is the sole enabled owner
+            channels: vec!["telegram.main".into()], // bot is the sole enabled owner
             ..Default::default()
         },
     );
@@ -755,7 +755,10 @@ fn cascade_agent_refuses_when_solely_owned_channel() {
     }
     // Refuse-before-mutate: the agent and its channel ownership survive intact.
     assert!(cfg.agents.contains_key("bot"));
-    assert_eq!(cfg.agents["bot"].channels, vec!["discord.main".to_string()]);
+    assert_eq!(
+        cfg.agents["bot"].channels,
+        vec!["telegram.main".to_string()]
+    );
 }
 
 #[test]
@@ -888,12 +891,12 @@ fn cascade_agent_self_reference_is_scrubbed() {
 
 fn channel_kind() -> AliasKind {
     AliasKind::Channel {
-        channel_type: "discord".to_string(),
+        channel_type: "telegram".to_string(),
     }
 }
 
 fn has_channel(cfg: &Config, alias: &str) -> bool {
-    cfg.get_map_keys("channels.discord")
+    cfg.get_map_keys("channels.telegram")
         .unwrap_or_default()
         .iter()
         .any(|k| k == alias)
@@ -902,17 +905,17 @@ fn has_channel(cfg: &Config, alias: &str) -> bool {
 #[test]
 fn cascade_channel_scrubs_soft_refs_and_removes_entry() {
     let mut cfg = empty_config();
-    cfg.create_map_key("channels.discord", "main").unwrap();
+    cfg.create_map_key("channels.telegram", "main").unwrap();
     cfg.agents.insert(
         "ops".to_string(),
         AliasedAgentConfig {
-            channels: vec!["discord.main".into()],
+            channels: vec!["telegram.main".into()],
             ..Default::default()
         },
     );
     cfg.escalation
         .alert_channels
-        .push("discord.main".to_string());
+        .push("telegram.main".to_string());
 
     let report = delete_with_cascade(
         &mut cfg,
@@ -924,7 +927,7 @@ fn cascade_channel_scrubs_soft_refs_and_removes_entry() {
     assert_eq!(report.applied.len(), 2, "agent channel + alert_channel");
     assert_eq!(
         report.deleted_entry.as_deref(),
-        Some("channels.discord.main")
+        Some("channels.telegram.main")
     );
     assert!(!has_channel(&cfg, "main"));
     assert!(cfg.agents["ops"].channels.is_empty());
@@ -935,11 +938,11 @@ fn cascade_channel_scrubs_soft_refs_and_removes_entry() {
 #[test]
 fn cascade_channel_refuses_on_hard_peer_group_ref() {
     let mut cfg = empty_config();
-    cfg.create_map_key("channels.discord", "main").unwrap();
+    cfg.create_map_key("channels.telegram", "main").unwrap();
     cfg.peer_groups.insert(
         "crew".to_string(),
         PeerGroupConfig {
-            channel: "discord.main".into(),
+            channel: "telegram.main".into(),
             ..Default::default()
         },
     );
@@ -962,11 +965,11 @@ fn cascade_channel_refuses_on_hard_peer_group_ref() {
 #[test]
 fn cascade_channel_dry_run_mutates_nothing() {
     let mut cfg = empty_config();
-    cfg.create_map_key("channels.discord", "main").unwrap();
+    cfg.create_map_key("channels.telegram", "main").unwrap();
     cfg.agents.insert(
         "ops".to_string(),
         AliasedAgentConfig {
-            channels: vec!["discord.main".into()],
+            channels: vec!["telegram.main".into()],
             ..Default::default()
         },
     );
@@ -993,21 +996,21 @@ fn cascade_channel_not_found() {
 
 #[test]
 fn cascade_channel_refuses_orphaning_bare_group_member() {
-    // BARE-type group ("discord", not "discord.main"). validate
-    // (schema.rs:17461-17478) requires each member to keep some `discord.*`
-    // channel. `ops`'s only discord channel is the one being deleted, so the
+    // BARE-type group ("telegram", not "telegram.main"). validate
+    // (schema.rs:17461-17478) requires each member to keep some `telegram.*`
+    // channel. `ops`'s only telegram channel is the one being deleted, so the
     // delete must REFUSE — scrubbing it would yield a config validate() rejects.
     let mut cfg = empty_config();
-    cfg.create_map_key("channels.discord", "main").unwrap();
+    cfg.create_map_key("channels.telegram", "main").unwrap();
     cfg.agents.insert(
         "ops".to_string(),
         AliasedAgentConfig {
-            channels: vec!["discord.main".into()],
+            channels: vec!["telegram.main".into()],
             ..Default::default()
         },
     );
     let mut group = PeerGroupConfig {
-        channel: "discord".into(), // bare type
+        channel: "telegram".into(), // bare type
         ..Default::default()
     };
     group.agents.push(AgentAlias::new("ops"));
@@ -1043,21 +1046,21 @@ fn cascade_channel_refuses_orphaning_bare_group_member() {
 
 #[test]
 fn cascade_channel_proceeds_when_bare_group_member_keeps_another() {
-    // Same bare-type group, but `ops` also has `discord.backup`. Deleting
-    // `discord.main` leaves it with a surviving `discord.*`, so membership
+    // Same bare-type group, but `ops` also has `telegram.backup`. Deleting
+    // `telegram.main` leaves it with a surviving `telegram.*`, so membership
     // stays valid and the delete proceeds (scrubbing only the main ref).
     let mut cfg = empty_config();
-    cfg.create_map_key("channels.discord", "main").unwrap();
-    cfg.create_map_key("channels.discord", "backup").unwrap();
+    cfg.create_map_key("channels.telegram", "main").unwrap();
+    cfg.create_map_key("channels.telegram", "backup").unwrap();
     cfg.agents.insert(
         "ops".to_string(),
         AliasedAgentConfig {
-            channels: vec!["discord.main".into(), "discord.backup".into()],
+            channels: vec!["telegram.main".into(), "telegram.backup".into()],
             ..Default::default()
         },
     );
     let mut group = PeerGroupConfig {
-        channel: "discord".into(), // bare type
+        channel: "telegram".into(), // bare type
         ..Default::default()
     };
     group.agents.push(AgentAlias::new("ops"));
@@ -1072,7 +1075,7 @@ fn cascade_channel_proceeds_when_bare_group_member_keeps_another() {
     .expect("delete proceeds when a sibling channel keeps membership valid");
     assert_eq!(
         report.deleted_entry.as_deref(),
-        Some("channels.discord.main")
+        Some("channels.telegram.main")
     );
     assert!(!has_channel(&cfg, "main"));
     let remaining: Vec<&str> = cfg.agents["ops"]
@@ -1082,7 +1085,7 @@ fn cascade_channel_proceeds_when_bare_group_member_keeps_another() {
         .collect();
     assert_eq!(
         remaining,
-        vec!["discord.backup"],
+        vec!["telegram.backup"],
         "only the deleted channel is scrubbed; backup survives"
     );
 }
@@ -1346,18 +1349,18 @@ fn rename_model_provider_rewrites_dotted_refs() {
 #[test]
 fn rename_channel_rewrites_refs_and_preserves_bare_group_membership() {
     let mut cfg = empty_config();
-    cfg.create_map_key("channels.discord", "main").unwrap();
-    // member of a BARE-type group whose only discord channel is the target:
+    cfg.create_map_key("channels.telegram", "main").unwrap();
+    // member of a BARE-type group whose only telegram channel is the target:
     // delete would REFUSE (orphan), but rename keeps membership valid.
     cfg.agents.insert(
         "ops".to_string(),
         AliasedAgentConfig {
-            channels: vec!["discord.main".into()],
+            channels: vec!["telegram.main".into()],
             ..Default::default()
         },
     );
     let mut group = PeerGroupConfig {
-        channel: "discord".into(), // bare type
+        channel: "telegram".into(), // bare type
         ..Default::default()
     };
     group.agents.push(AgentAlias::new("ops"));
@@ -1366,13 +1369,13 @@ fn rename_channel_rewrites_refs_and_preserves_bare_group_membership() {
     cfg.peer_groups.insert(
         "ops_team".to_string(),
         PeerGroupConfig {
-            channel: "discord.main".into(), // dotted HARD ref — rewritten
+            channel: "telegram.main".into(), // dotted HARD ref — rewritten
             ..Default::default()
         },
     );
     cfg.escalation
         .alert_channels
-        .push("discord.main".to_string());
+        .push("telegram.main".to_string());
 
     let kind = channel_kind();
     let report = rename_with_cascade(&mut cfg, &kind, "main", "primary")
@@ -1386,16 +1389,16 @@ fn rename_channel_rewrites_refs_and_preserves_bare_group_membership() {
             .iter()
             .map(|c| c.as_str())
             .collect::<Vec<_>>(),
-        vec!["discord.primary"],
-        "member still has a discord.* channel — membership preserved"
+        vec!["telegram.primary"],
+        "member still has a telegram.* channel — membership preserved"
     );
     assert_eq!(
         cfg.peer_groups["ops_team"].channel.as_str(),
-        "discord.primary"
+        "telegram.primary"
     );
     assert_eq!(
         cfg.escalation.alert_channels,
-        vec!["discord.primary".to_string()]
+        vec!["telegram.primary".to_string()]
     );
     assert!(find_all_references(&cfg, &kind, "main").is_empty());
 }

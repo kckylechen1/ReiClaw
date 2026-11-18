@@ -288,13 +288,12 @@ Add a new channel configuration.
 Provide the channel type and a JSON object with the required \
 configuration keys for that channel type.
 
-Supported types: telegram, discord, slack, matrix, imessage, email.
+Supported types: telegram, webhook.
 
 Examples:
-  zeroclaw channel add telegram '{\"bot_token\":\"...\",\"name\":\"my-bot\"}'
-  zeroclaw channel add discord '{\"bot_token\":\"...\",\"name\":\"my-discord\"}'")]
+  zeroclaw channel add telegram '{\"bot_token\":\"...\",\"name\":\"my-bot\"}'")]
     Add {
-        /// Channel type (telegram, discord, slack, matrix, imessage, email)
+        /// Channel type (telegram, webhook)
         channel_type: String,
         /// Optional configuration as JSON
         config: String,
@@ -340,16 +339,15 @@ the full agent loop. Useful for scripted notifications, hardware \
 sensor alerts, and automation pipelines.
 
 The --channel-id selects the channel by its config section name \
-(e.g. 'telegram', 'discord', 'slack'). The --recipient is the \
+(e.g. 'telegram', 'webhook'). The --recipient is the \
 platform-specific destination (e.g. a Telegram chat ID).
 
 Examples:
-  zeroclaw channel send 'Someone is near your device.' --channel-id telegram --recipient 123456789
-  zeroclaw channel send 'Build succeeded!' --channel-id discord --recipient 987654321")]
+  zeroclaw channel send 'Someone is near your device.' --channel-id telegram --recipient 123456789")]
     Send {
         /// Message text to send
         message: String,
-        /// Channel config name (e.g. telegram, discord, slack)
+        /// Channel config name (e.g. telegram, webhook)
         #[arg(long)]
         channel_id: String,
         /// Recipient identifier (platform-specific, e.g. Telegram chat ID)
@@ -433,13 +431,13 @@ pub enum ProvidersCommands {
 pub enum ChannelsCommands {
     /// List channel aliases (optionally filtered by type)
     List {
-        /// Channel type, e.g. discord, telegram
+        /// Channel type, e.g. webhook, telegram
         #[arg(long)]
         channel_type: Option<String>,
     },
     /// Create a new channel alias with default config
     Create {
-        /// Channel type (discord, telegram, slack, …)
+        /// Channel type (telegram, webhook)
         channel_type: String,
         /// New alias
         alias: String,

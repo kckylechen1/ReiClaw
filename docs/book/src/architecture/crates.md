@@ -212,7 +212,7 @@ The microkernel roadmap (RFC #5574) defines a feature-flag taxonomy. The practic
 - `slim-control`: an opt-in personal-agent build with the agent runtime, gateway,
   ACP server, webhook, WeChat, WeCom, and WeCom WebSocket channels
 - `ci-all`: everything on, for CI
-- `channel-<name>`: opt-in per channel (e.g. `channel-matrix`, `channel-discord`)
+- `channel-<name>`: opt-in per channel (e.g. `channel-telegram`, `channel-webhook`)
 - `gateway`: opt-in capability group
 
 Providers are not feature-gated; they all compile in. Channel selection is the main per-build knob. Read the top-level `Cargo.toml` `[features]` table for the full list.

@@ -166,7 +166,7 @@ impl Tool for CronAddTool {
          use schedule={\"kind\":\"after\",\"after_seconds\":...}; the runtime resolves it \
          with the live clock when the tool executes. \
          To deliver output to a configured channel, set \
-         delivery={\"mode\":\"announce\",\"channel\":\"discord\",\"to\":\"<channel_id_or_chat_id>\"}. \
+         delivery={\"mode\":\"announce\",\"channel\":\"telegram\",\"to\":\"<channel_id_or_chat_id>\"}. \
          For webhook deliveries that must thread through the originating conversation, also set \
          delivery.thread_id=\"<reply_target>\". \
          This is the preferred tool for sending scheduled/delayed messages to users via channels."
@@ -269,7 +269,7 @@ impl Tool for CronAddTool {
                         },
                         "to": {
                             "type": "string",
-                            "description": "Destination ID: Discord channel ID, Telegram chat ID, Slack channel name, webhook recipient, etc."
+                            "description": "Destination ID: Telegram chat ID, webhook recipient, etc."
                         },
                         "thread_id": {
                             "type": "string",
@@ -663,7 +663,7 @@ mod tests {
                 "command": "echo ok",
                 "delivery": {
                     "mode": "announce",
-                    "channel": "discord",
+                    "channel": "telegram",
                     "to": "1234567890",
                     "best_effort": true
                 }
@@ -676,7 +676,7 @@ mod tests {
         let jobs = cron::list_jobs(&cfg).unwrap();
         assert_eq!(jobs.len(), 1);
         assert_eq!(jobs[0].delivery.mode, "announce");
-        assert_eq!(jobs[0].delivery.channel.as_deref(), Some("discord"));
+        assert_eq!(jobs[0].delivery.channel.as_deref(), Some("telegram"));
         assert_eq!(jobs[0].delivery.to.as_deref(), Some("1234567890"));
         assert!(jobs[0].delivery.best_effort);
     }
@@ -1200,7 +1200,9 @@ mod tests {
         assert_eq!(values.as_slice(), cron::CRON_DELIVERY_SCHEMA_CHANNELS);
         assert!(values.contains(&"telegram"));
         assert!(values.contains(&"webhook"));
-        assert!(values.contains(&"email"));
+        // Owner-retired 2026-11-18: never offered as delivery targets.
+        assert!(!values.contains(&"email"));
+        assert!(!values.contains(&"discord"));
         // Retired transports must never be offered as delivery targets.
         for retired in [
             "slack",

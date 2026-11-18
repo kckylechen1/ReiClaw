@@ -57,7 +57,7 @@ async fn scheduled_run_does_not_leak_conversation_memory_into_provider_request()
         mem_cfg.hygiene_enabled = false;
         let mem = create_memory(&mem_cfg, &workspace_dir, None).unwrap();
         mem.store(
-            "discord:guild:chan:msg-42",
+            "telegram:guild:chan:msg-42",
             // Includes overlap words ("reminder", "today") so the keyword
             // search returns this entry for the cron prompt below, plus the
             // unique SECRET_SENTINEL the assertion looks for.

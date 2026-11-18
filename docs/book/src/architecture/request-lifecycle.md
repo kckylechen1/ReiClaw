@@ -11,7 +11,7 @@ flowchart LR
     C -->|workspace binding| D[Runtime: process_message]
 ```
 
-A channel adapter (e.g. `discord.rs`, `telegram.rs`, `email_channel.rs`) receives platform-native events and converts them into a uniform inbound envelope. The adapter handles:
+A channel adapter (e.g. the Telegram bridge) receives platform-native events and converts them into a uniform inbound envelope. The adapter handles:
 
 - **Decoding**: platform-specific payload → canonical message format
 - **Deduplication**: prevents replaying the same message twice (restarts, retries)
@@ -27,8 +27,7 @@ If the channel is not paired or the user isn't allowed, the event is dropped bef
 
 The `zeroclaw-channels` crate has since been retired outright (#579/#581):
 in-process channel runners are gone, channel surfaces run through the
-gateway (bridges, webhook ingress) or as tool configuration (Email,
-Discord), and cron/heartbeat delivery runs through the gateway bridge
+gateway (bridges, webhook ingress), and cron/heartbeat delivery runs through the gateway bridge
 outbox.
 
 ## Agent loop

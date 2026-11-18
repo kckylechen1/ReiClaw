@@ -13,7 +13,7 @@ export interface DoctorFixModalProps {
   /** Whether the modal is mounted/visible. */
   open: boolean;
   /** Dotted config entity prefix to edit, e.g. `providers.models.openai.ss`
-   *  or `channels.discord.gnosis`. FieldForm fetches and renders every field
+   *  or `channels.telegram.gnosis`. FieldForm fetches and renders every field
    *  under this prefix and owns its own Save. */
   prefix: string;
   /** Human-friendly entity name shown in the header (e.g. `openai.ss`). */

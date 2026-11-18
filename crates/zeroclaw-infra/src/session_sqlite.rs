@@ -2013,7 +2013,7 @@ mod tests {
             .set_session_context(
                 "s1",
                 SessionContext {
-                    channel_id: Some("discord.clamps"),
+                    channel_id: Some("telegram.clamps"),
                     room_id: Some("1234567890"),
                     sender_id: Some("@user:matrix"),
                 },
@@ -2021,7 +2021,7 @@ mod tests {
             .unwrap();
 
         let meta = backend.get_session_metadata("s1").unwrap();
-        assert_eq!(meta.channel_id.as_deref(), Some("discord.clamps"));
+        assert_eq!(meta.channel_id.as_deref(), Some("telegram.clamps"));
         assert_eq!(meta.room_id.as_deref(), Some("1234567890"));
         assert_eq!(meta.sender_id.as_deref(), Some("@user:matrix"));
 
@@ -2038,7 +2038,7 @@ mod tests {
             )
             .unwrap();
         let meta = backend.get_session_metadata("s1").unwrap();
-        assert_eq!(meta.channel_id.as_deref(), Some("discord.clamps"));
+        assert_eq!(meta.channel_id.as_deref(), Some("telegram.clamps"));
         assert_eq!(meta.sender_id.as_deref(), Some("@user:matrix"));
     }
 

@@ -174,7 +174,7 @@ impl Tool for CronUpdateTool {
                                 },
                                 "to": {
                                     "type": "string",
-                                    "description": "Destination ID: Discord channel ID, Telegram chat ID, Slack channel name, webhook recipient, etc."
+                                    "description": "Destination ID: Telegram chat ID, webhook recipient, etc."
                                 },
                                 "thread_id": {
                                     "type": "string",
@@ -657,7 +657,8 @@ mod tests {
         assert_eq!(channel_strs.as_slice(), cron::CRON_DELIVERY_SCHEMA_CHANNELS);
         assert!(channel_strs.contains(&"telegram"));
         assert!(channel_strs.contains(&"webhook"));
-        assert!(channel_strs.contains(&"email"));
+        assert!(!channel_strs.contains(&"email"));
+        assert!(!channel_strs.contains(&"discord"));
         // Retired transports must never be offered as delivery targets.
         for retired in [
             "slack",

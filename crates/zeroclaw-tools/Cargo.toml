@@ -46,21 +46,8 @@ urlencoding = "2.1"
 uuid = { version = "1.22", default-features = false, features = ["v4", "std"] }
 which = "8.0"
 
-# The existing protocol implementation with its date parser migrated to Jiff.
-# Source, local patch and upstream exit condition: vendor/async-imap/UPSTREAM.md.
-async-imap = { workspace = true, optional = true }
-mail-parser = { version = "0.11", optional = true }
-rustls = { version = "0.23", default-features = false, features = ["ring", "std", "tls12"] }
-rustls-pki-types = "1.14.0"
-tokio-rustls = { version = "0.26.4", default-features = false, features = ["ring", "tls12"] }
-webpki-roots = "1.0.6"
 
 [features]
-# Concrete SaaS/vendor business tool family (Composio). Default-on so the standard
-# build is unchanged; slim companion builds drop this feature to keep the
-# family out of the compiled surface.
-email-tools = ["dep:async-imap", "dep:mail-parser"]
-default = ["email-tools"]
 # Exposes cross-crate test-only constructors (e.g.
 # `McpRegistry::for_test_with_server_count`) so downstream test
 # suites can build registry fixtures without spawning real stdio

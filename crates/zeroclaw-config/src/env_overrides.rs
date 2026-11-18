@@ -130,6 +130,11 @@ pub fn apply_env_overrides(config: &mut Config) -> Result<AppliedOverrides> {
         if tail_segments.first() == Some(&"sop") {
             return Err(crate::current::RetiredSopConfigError.into());
         }
+        if tail_segments.first() == Some(&"channels")
+            && let Some(kind) = tail_segments.get(1)
+        {
+            crate::current::reject_retired_channel(kind)?;
+        }
         if tail_segments.starts_with(&["providers", "models"])
             && let Some(family) = tail_segments.get(2)
         {
@@ -714,6 +719,24 @@ mod tests {
         assert!(config.channels.webhook["voice_duplex"].enabled);
         assert_eq!(applied.paths.len(), 1);
         assert!(applied.tombstone_warnings.is_empty());
+    }
+
+    #[tokio::test]
+    async fn walker_refuses_retired_email_and_discord_channel_overrides() {
+        let _guard = super::env_test_lock().await;
+        for (name, kind) in [
+            ("ZEROCLAW_channels__email__default__enabled", "email"),
+            ("ZEROCLAW_channels__discord__default__bot_token", "discord"),
+        ] {
+            let _value = EnvVarGuard::set(name, "private-test-value");
+            let mut config = Config::default();
+            let error = apply_env_overrides(&mut config).unwrap_err();
+            assert!(
+                error.is::<crate::current::RetiredChannelConfigError>(),
+                "{kind}: {error:#}"
+            );
+            assert!(!format!("{error:#}").contains("private-test-value"));
+        }
     }
 
     #[tokio::test]

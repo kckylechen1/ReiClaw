@@ -160,7 +160,7 @@ list_features() {
   printf "  %s\n" "$(bold "Build profiles:")"
   printf "    %s                                        # full (default features)\n" "$0"
   printf "    %s --minimal                              # kernel only (~6.6MB)\n" "$0"
-  printf "    %s --minimal --features agent-runtime,channel-discord\n" "$0"
+  printf "    %s --minimal --features agent-runtime,channel-telegram\n" "$0"
   echo
 }
 
@@ -253,7 +253,7 @@ Examples:
   $0                                           # build this fork from source
   $0 --source                                  # always build from source
   $0 --source --minimal                        # smallest possible binary
-  $0 --source --features agent-runtime,channel-discord  # custom feature set
+  $0 --source --features agent-runtime,channel-telegram  # custom feature set
   $0 --source --preset full                   # all heavyweight extras (no preset adds channels)
   $0 --full                                    # same as --preset full
   $0 --skip-quickstart                            # install only, configure later
