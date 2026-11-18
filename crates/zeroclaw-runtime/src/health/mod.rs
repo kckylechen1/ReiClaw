@@ -1,4 +1,3 @@
-use chrono::Utc;
 use parking_lot::Mutex;
 use serde::Serialize;
 use std::collections::BTreeMap;
@@ -24,7 +23,7 @@ pub struct HealthSnapshot {
 
 struct HealthRegistry {
     started_at: Instant,
-    started_at_wall: chrono::DateTime<chrono::Utc>,
+    started_at_wall: jiff::Timestamp,
     components: Mutex<BTreeMap<String, ComponentHealth>>,
 }
 
@@ -33,7 +32,7 @@ static REGISTRY: OnceLock<HealthRegistry> = OnceLock::new();
 fn registry() -> &'static HealthRegistry {
     REGISTRY.get_or_init(|| HealthRegistry {
         started_at: Instant::now(),
-        started_at_wall: Utc::now(),
+        started_at_wall: jiff::Timestamp::now(),
         components: Mutex::new(BTreeMap::new()),
     })
 }
@@ -42,11 +41,11 @@ fn registry() -> &'static HealthRegistry {
 /// lifetime so the dashboard can implement "since daemon start"
 /// log queries without drift.
 pub fn daemon_started_at() -> String {
-    registry().started_at_wall.to_rfc3339()
+    zeroclaw_api::time::format_rfc3339(registry().started_at_wall)
 }
 
 fn now_rfc3339() -> String {
-    Utc::now().to_rfc3339()
+    zeroclaw_api::time::format_rfc3339(jiff::Timestamp::now())
 }
 
 fn upsert_component<F>(component: &str, update: F)

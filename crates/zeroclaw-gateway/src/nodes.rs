@@ -18,7 +18,6 @@ use axum::{
     http::{HeaderMap, StatusCode, header},
     response::IntoResponse,
 };
-use chrono::Utc;
 use futures_util::{SinkExt, StreamExt};
 use parking_lot::RwLock;
 use serde::{Deserialize, Serialize};
@@ -638,7 +637,7 @@ fn verify_node_auth(
     let challenge_ok = challenge.as_ref().is_some_and(|c| !c.expired());
     let challenge = challenge.unwrap_or_else(|| PendingChallenge {
         nonce: "00".repeat(32),
-        expires_at: Utc::now(),
+        expires_at: jiff::Timestamp::now(),
         device_id: "unknown".into(),
         key_fingerprint: "unknown".into(),
     });
@@ -954,7 +953,7 @@ async fn handle_node_socket(socket: WebSocket, registry: Arc<NodeRegistry>) {
     };
     let frame = GatewayToNode::Challenge {
         nonce: challenge.nonce.clone(),
-        expires_at: challenge.expires_at.to_rfc3339(),
+        expires_at: zeroclaw_api::time::format_rfc3339(challenge.expires_at),
     };
     if send_json(&mut sender, &frame).await.is_err() {
         return;

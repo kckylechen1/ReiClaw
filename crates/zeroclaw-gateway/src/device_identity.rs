@@ -5,7 +5,6 @@
 //! capability ceiling is bound to the pairing code at issue time; enroll
 //! inherits that ceiling and never accepts a device-declared one.
 
-use chrono::Utc;
 use parking_lot::Mutex;
 use ring::rand::{SecureRandom, SystemRandom};
 use ring::signature::{ED25519, Ed25519KeyPair, KeyPair, UnparsedPublicKey};
@@ -344,7 +343,7 @@ impl DeviceIdentityStore {
                     algorithm: DeviceKeyAlgorithm::Ed25519,
                     role: DeviceRole::Node,
                     identity_epoch: 1,
-                    admitted_at: Utc::now().to_rfc3339(),
+                    admitted_at: zeroclaw_api::time::format_rfc3339(jiff::Timestamp::now()),
                     revoked_at: None,
                     capability_ceiling,
                 },
@@ -409,7 +408,7 @@ impl DeviceIdentityStore {
     }
 
     pub fn revoke(&self, device_id: &str) -> Result<bool, IdentityError> {
-        let revoked_at = Utc::now().to_rfc3339();
+        let revoked_at = zeroclaw_api::time::format_rfc3339(jiff::Timestamp::now());
         {
             let rows = self.inner.rows.lock();
             let Some(row) = rows.get(device_id) else {
@@ -481,7 +480,7 @@ impl DeviceIdentityStore {
 #[derive(Debug, Clone)]
 pub struct PendingChallenge {
     pub nonce: String,
-    pub expires_at: chrono::DateTime<Utc>,
+    pub expires_at: jiff::Timestamp,
     pub device_id: String,
     pub key_fingerprint: String,
 }
@@ -494,7 +493,8 @@ impl PendingChallenge {
             .map_err(|_| IdentityError::Crypto("challenge rng failed"))?;
         Ok(Self {
             nonce: hex::encode(bytes),
-            expires_at: Utc::now() + chrono::Duration::seconds(CHALLENGE_TTL_SECS),
+            expires_at: jiff::Timestamp::now()
+                + jiff::SignedDuration::from_secs(CHALLENGE_TTL_SECS),
             device_id,
             key_fingerprint,
         })
@@ -502,7 +502,7 @@ impl PendingChallenge {
 
     #[must_use]
     pub fn expired(&self) -> bool {
-        Utc::now() > self.expires_at
+        jiff::Timestamp::now() > self.expires_at
     }
 }
 

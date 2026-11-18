@@ -42,7 +42,7 @@ impl HookHandler for CommandLoggerHook {
     async fn on_after_tool_call(&self, tool: &str, result: &ToolResult, duration: Duration) {
         let entry = format!(
             "[{}] {} ({}ms) success={}",
-            chrono::Utc::now().format("%H:%M:%S"),
+            jiff::Timestamp::now().strftime("%H:%M:%S"),
             tool,
             duration.as_millis(),
             result.success,

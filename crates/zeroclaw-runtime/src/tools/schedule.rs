@@ -2,7 +2,6 @@ use crate::cron;
 use crate::security::SecurityPolicy;
 use anyhow::Result;
 use async_trait::async_trait;
-use chrono::{DateTime, Utc};
 use serde_json::json;
 use std::sync::Arc;
 use zeroclaw_api::tool::{Tool, ToolOutput, ToolResult};
@@ -262,13 +261,13 @@ impl ScheduleTool {
             };
             let last_run = job
                 .last_run
-                .map_or_else(|| "never".to_string(), |value| value.to_rfc3339());
+                .map_or_else(|| "never".to_string(), zeroclaw_api::time::format_rfc3339);
             let last_status = job.last_status.unwrap_or_else(|| "n/a".to_string());
             lines.push(format!(
                 "- {} | {} | next={} | last={} ({}){} | cmd: {}",
                 job.id,
                 job.expression,
-                job.next_run.to_rfc3339(),
+                zeroclaw_api::time::format_rfc3339(job.next_run),
                 last_run,
                 last_status,
                 flags,
@@ -290,8 +289,8 @@ impl ScheduleTool {
                     "id": job.id,
                     "expression": job.expression,
                     "command": job.command,
-                    "next_run": job.next_run.to_rfc3339(),
-                    "last_run": job.last_run.map(|value| value.to_rfc3339()),
+                    "next_run": zeroclaw_api::time::format_rfc3339(job.next_run),
+                    "last_run": job.last_run.map(zeroclaw_api::time::format_rfc3339),
                     "last_status": job.last_status,
                     "enabled": job.enabled,
                     "one_shot": matches!(job.schedule, cron::Schedule::At { .. }),
@@ -416,7 +415,7 @@ impl ScheduleTool {
                     "Created recurring job {} (expr: {}, next: {}, cmd: {})",
                     job.id,
                     job.expression,
-                    job.next_run.to_rfc3339(),
+                    zeroclaw_api::time::format_rfc3339(job.next_run),
                     job.command
                 )
                 .into(),
@@ -446,7 +445,7 @@ impl ScheduleTool {
                 output: format!(
                     "Created one-shot job {} (runs at: {}, cmd: {})",
                     job.id,
-                    job.next_run.to_rfc3339(),
+                    zeroclaw_api::time::format_rfc3339(job.next_run),
                     job.command
                 )
                 .into(),
@@ -463,7 +462,7 @@ impl ScheduleTool {
             );
             anyhow::Error::msg("Missing scheduling parameters")
         })?;
-        let run_at_parsed: DateTime<Utc> = DateTime::parse_from_rfc3339(run_at_raw)
+        let run_at_parsed: jiff::Timestamp = zeroclaw_api::time::parse_rfc3339(run_at_raw)
             .map_err(|error| {
                 ::zeroclaw_log::record!(
                     WARN,
@@ -476,8 +475,7 @@ impl ScheduleTool {
                     "schedule tool: invalid run_at timestamp"
                 );
                 anyhow::Error::msg(format!("Invalid run_at timestamp: {error}"))
-            })?
-            .with_timezone(&Utc);
+            })?;
 
         let job = match cron::add_once_at_validated(
             &self.config,
@@ -500,7 +498,7 @@ impl ScheduleTool {
             output: format!(
                 "Created one-shot job {} (runs at: {}, cmd: {})",
                 job.id,
-                job.next_run.to_rfc3339(),
+                zeroclaw_api::time::format_rfc3339(job.next_run),
                 job.command
             )
             .into(),

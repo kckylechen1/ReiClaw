@@ -1276,7 +1276,7 @@ async fn delete_agent_cascade(
     // Read it back from the (now-swapped) AppState for the side-effects below.
     let committed = state.config.read().clone();
 
-    let ts = chrono::Utc::now().format("%Y%m%d%H%M%S");
+    let ts = jiff::Timestamp::now().strftime("%Y%m%d%H%M%S");
     let archive_dir = committed
         .data_dir
         .join("agents")

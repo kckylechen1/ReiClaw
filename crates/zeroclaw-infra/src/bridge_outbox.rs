@@ -526,7 +526,7 @@ impl BridgeOutbox {
 }
 
 fn now_secs() -> i64 {
-    chrono::Utc::now().timestamp()
+    zeroclaw_api::time::epoch_second(jiff::Timestamp::now())
 }
 
 #[cfg(test)]

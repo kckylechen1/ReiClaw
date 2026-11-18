@@ -193,7 +193,7 @@ fn cron_schedule_from_api(
     tz: Option<String>,
 ) -> Result<zeroclaw_runtime::cron::Schedule, (StatusCode, Json<serde_json::Value>)> {
     let schedule = zeroclaw_runtime::cron::Schedule::Cron { expr, tz };
-    zeroclaw_runtime::cron::validate_schedule(&schedule, chrono::Utc::now())
+    zeroclaw_runtime::cron::validate_schedule(&schedule, jiff::Timestamp::now())
         .map_err(|e| bad_request(format!("Invalid cron schedule: {e}")))?;
     Ok(schedule)
 }
@@ -537,8 +537,8 @@ pub async fn handle_api_cron_runs(
                     serde_json::json!({
                         "id": r.id,
                         "job_id": r.job_id,
-                        "started_at": r.started_at.to_rfc3339(),
-                        "finished_at": r.finished_at.to_rfc3339(),
+                        "started_at": zeroclaw_api::time::format_rfc3339(r.started_at),
+                        "finished_at": zeroclaw_api::time::format_rfc3339(r.finished_at),
                         "status": r.status,
                         "output": r.output,
                         "duration_ms": r.duration_ms,
@@ -593,8 +593,8 @@ pub async fn handle_api_cron_run(
         "success": result.success,
         "output": result.output,
         "duration_ms": result.duration_ms,
-        "started_at": result.started_at.to_rfc3339(),
-        "finished_at": result.finished_at.to_rfc3339(),
+        "started_at": zeroclaw_api::time::format_rfc3339(result.started_at),
+        "finished_at": zeroclaw_api::time::format_rfc3339(result.finished_at),
     }))
     .into_response()
 }
@@ -1017,11 +1017,7 @@ pub async fn handle_api_cost(
         return e.into_response();
     }
 
-    let parse_bound = |s: &str| {
-        chrono::DateTime::parse_from_rfc3339(s)
-            .ok()
-            .map(|d| d.with_timezone(&chrono::Utc))
-    };
+    let parse_bound = |s: &str| zeroclaw_api::time::parse_rfc3339(s).ok();
     let from = query.from.as_deref().and_then(parse_bound);
     let to = query.to.as_deref().and_then(parse_bound);
 
@@ -1298,12 +1294,12 @@ fn component_health_ok_and_fresh(component: &zeroclaw_runtime::health::Component
         return false;
     }
 
-    let Ok(updated_at) = chrono::DateTime::parse_from_rfc3339(&component.updated_at) else {
+    let Ok(updated_at) = zeroclaw_api::time::parse_rfc3339(&component.updated_at) else {
         return false;
     };
-    let age = chrono::Utc::now().signed_duration_since(updated_at.with_timezone(&chrono::Utc));
-    age >= chrono::Duration::zero()
-        && age <= chrono::Duration::seconds(CHANNEL_LISTENER_HEALTH_MAX_AGE_SECS)
+    let age = jiff::Timestamp::now().duration_since(updated_at);
+    age >= jiff::SignedDuration::ZERO
+        && age <= jiff::SignedDuration::from_secs(CHANNEL_LISTENER_HEALTH_MAX_AGE_SECS)
 }
 
 fn normalized_webhook_path(path: Option<&str>) -> String {
@@ -1395,8 +1391,8 @@ pub async fn handle_api_sessions_list(
                 "session_id": session_id,
                 // Full DB key for API operations (delete, messages, abort).
                 "session_key": meta.key.clone(),
-                "created_at": meta.created_at.to_rfc3339(),
-                "last_activity": meta.last_activity.to_rfc3339(),
+                "created_at": zeroclaw_api::time::format_rfc3339(meta.created_at),
+                "last_activity": zeroclaw_api::time::format_rfc3339(meta.last_activity),
                 "message_count": meta.message_count,
                 "agent_alias": agent_alias,
                 "channel_id": meta.channel_id,
@@ -1460,7 +1456,7 @@ pub async fn handle_api_session_messages(
             serde_json::json!({
                 "role": m.message.role,
                 "content": m.message.content,
-                "created_at": m.created_at.map(|dt| dt.to_rfc3339()),
+                "created_at": m.created_at.map(zeroclaw_api::time::format_rfc3339),
             })
         })
         .collect();
@@ -1548,7 +1544,7 @@ pub async fn handle_api_session_message_post(
         "role": "assistant",
         "content": body.content.clone(),
         "source": "api",
-        "timestamp": chrono::Utc::now().to_rfc3339(),
+        "timestamp": zeroclaw_api::time::format_rfc3339(jiff::Timestamp::now()),
     });
     let _ = state.event_tx.send(event);
 
@@ -1724,8 +1720,8 @@ pub async fn handle_api_sessions_running(
             let session_id = meta.key.strip_prefix("gw_")?;
             Some(serde_json::json!({
                 "session_id": session_id,
-                "created_at": meta.created_at.to_rfc3339(),
-                "last_activity": meta.last_activity.to_rfc3339(),
+                "created_at": zeroclaw_api::time::format_rfc3339(meta.created_at),
+                "last_activity": zeroclaw_api::time::format_rfc3339(meta.last_activity),
                 "message_count": meta.message_count,
             }))
         })
@@ -1763,7 +1759,8 @@ pub async fn handle_api_session_state(
                 resp["turn_id"] = serde_json::Value::String(turn_id);
             }
             if let Some(started) = ss.turn_started_at {
-                resp["turn_started_at"] = serde_json::Value::String(started.to_rfc3339());
+                resp["turn_started_at"] =
+                    serde_json::Value::String(zeroclaw_api::time::format_rfc3339(started));
             }
             Json(resp).into_response()
         }
@@ -2612,12 +2609,13 @@ pub(crate) mod tests {
     fn channel_readiness_webhook_rejects_stale_listener_health() {
         let config = config_with_webhook("stale", true, true, 42632, Some("/eyrie"));
         let component = "channel:webhook.stale".to_string();
-        let old = (chrono::Utc::now()
-            - chrono::Duration::seconds(CHANNEL_LISTENER_HEALTH_MAX_AGE_SECS + 5))
-        .to_rfc3339();
+        let old = zeroclaw_api::time::format_rfc3339(
+            jiff::Timestamp::now()
+                - jiff::SignedDuration::from_secs(CHANNEL_LISTENER_HEALTH_MAX_AGE_SECS + 5),
+        );
         let health = zeroclaw_runtime::health::HealthSnapshot {
             pid: std::process::id(),
-            updated_at: chrono::Utc::now().to_rfc3339(),
+            updated_at: zeroclaw_api::time::format_rfc3339(jiff::Timestamp::now()),
             uptime_seconds: 1,
             components: std::collections::BTreeMap::from([(
                 component,
@@ -3830,7 +3828,6 @@ pub(crate) mod tests {
         DeviceInfo, DeviceRegistry, revoke_device, rotate_token as rotate_device_token,
         submit_pairing_enhanced,
     };
-    use chrono::Utc;
 
     async fn paired_state_with_device(tmp: &tempfile::TempDir) -> (AppState, String, String) {
         let data_dir = tmp.path().join("workspace");
@@ -3855,8 +3852,8 @@ pub(crate) mod tests {
                     id: device_id.clone(),
                     name: None,
                     device_type: None,
-                    paired_at: Utc::now(),
-                    last_seen: Utc::now(),
+                    paired_at: jiff::Timestamp::now(),
+                    last_seen: jiff::Timestamp::now(),
                     ip_address: None,
                     capabilities: None,
                 },
@@ -3892,8 +3889,8 @@ pub(crate) mod tests {
                     id: "known".into(),
                     name: Some("My Laptop".into()),
                     device_type: Some("desktop".into()),
-                    paired_at: Utc::now(),
-                    last_seen: Utc::now(),
+                    paired_at: jiff::Timestamp::now(),
+                    last_seen: jiff::Timestamp::now(),
                     ip_address: None,
                     capabilities: None,
                 },
@@ -4163,8 +4160,8 @@ pub(crate) mod tests {
                         id: id.to_string(),
                         name: None,
                         device_type: None,
-                        paired_at: Utc::now(),
-                        last_seen: Utc::now(),
+                        paired_at: jiff::Timestamp::now(),
+                        last_seen: jiff::Timestamp::now(),
                         ip_address: None,
                         capabilities: None,
                     },

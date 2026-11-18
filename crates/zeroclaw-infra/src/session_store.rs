@@ -240,14 +240,13 @@ impl SessionBackend for SessionStore {
     }
 
     fn list_sessions_with_metadata(&self) -> Vec<crate::session_backend::SessionMetadata> {
-        use chrono::{DateTime, Utc};
         self.list_sessions()
             .into_iter()
             .map(|key| {
-                let last_activity: DateTime<Utc> = self
+                let last_activity: jiff::Timestamp = self
                     .session_mtime(&key)
-                    .map(DateTime::<Utc>::from)
-                    .unwrap_or_else(Utc::now);
+                    .and_then(|mtime| jiff::Timestamp::try_from(mtime).ok())
+                    .unwrap_or_else(jiff::Timestamp::now);
                 crate::session_backend::SessionMetadata {
                     name: None,
                     created_at: last_activity,

@@ -393,7 +393,7 @@ fn paths_equal(a: &Path, b: &Path) -> bool {
 }
 
 fn backup_target_memory(workspace_dir: &Path) -> Result<Option<PathBuf>> {
-    let timestamp = chrono::Local::now().format("%Y%m%d-%H%M%S").to_string();
+    let timestamp = jiff::Zoned::now().strftime("%Y%m%d-%H%M%S").to_string();
     let backup_root = workspace_dir
         .join("memory")
         .join("migrations")

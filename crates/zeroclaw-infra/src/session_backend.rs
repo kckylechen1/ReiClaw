@@ -1,6 +1,4 @@
 //! Trait abstraction for session persistence backends.
-
-use chrono::{DateTime, Utc};
 use zeroclaw_api::bridge_intake::{BridgeInput, BridgeReceipt, BridgeResume, BridgeSource};
 use zeroclaw_api::model_provider::ChatMessage;
 
@@ -16,9 +14,9 @@ pub struct SessionMetadata {
     /// Optional human-readable name (e.g. `eyrie-commander-briefing`).
     pub name: Option<String>,
     /// When the session was first created.
-    pub created_at: DateTime<Utc>,
+    pub created_at: jiff::Timestamp,
     /// When the last message was appended.
-    pub last_activity: DateTime<Utc>,
+    pub last_activity: jiff::Timestamp,
     /// Total number of messages in the session.
     pub message_count: usize,
     /// Alias of the agent that owned this session (HashMap key in
@@ -67,7 +65,7 @@ pub struct SessionQuery {
 #[derive(Debug, Clone)]
 pub struct TimestampedMessage {
     pub message: ChatMessage,
-    pub created_at: Option<DateTime<Utc>>,
+    pub created_at: Option<jiff::Timestamp>,
     /// Original text and source before runtime enrichment. Missing on legacy or
     /// unsupported history; neither session metadata nor history is a substitute.
     pub ingress: Option<zeroclaw_api::review::UserMessageIngress>,
@@ -132,8 +130,8 @@ pub trait SessionBackend: Send + Sync {
                 SessionMetadata {
                     key,
                     name: None,
-                    created_at: Utc::now(),
-                    last_activity: Utc::now(),
+                    created_at: jiff::Timestamp::now(),
+                    last_activity: jiff::Timestamp::now(),
                     message_count: messages.len(),
                     agent_alias: None,
                     channel_id: None,
@@ -230,8 +228,8 @@ pub trait SessionBackend: Send + Sync {
         Some(SessionMetadata {
             key: session_key.to_string(),
             name: self.get_session_name(session_key).ok().flatten(),
-            created_at: Utc::now(),
-            last_activity: Utc::now(),
+            created_at: jiff::Timestamp::now(),
+            last_activity: jiff::Timestamp::now(),
             message_count: messages.len(),
             agent_alias: None,
             channel_id: None,
@@ -359,7 +357,7 @@ pub struct SessionState {
     /// Turn ID of the active or last turn.
     pub turn_id: Option<String>,
     /// When the current state was entered.
-    pub turn_started_at: Option<DateTime<Utc>>,
+    pub turn_started_at: Option<jiff::Timestamp>,
 }
 
 #[cfg(test)]
@@ -371,8 +369,8 @@ mod tests {
         let meta = SessionMetadata {
             key: "test".into(),
             name: None,
-            created_at: Utc::now(),
-            last_activity: Utc::now(),
+            created_at: jiff::Timestamp::now(),
+            last_activity: jiff::Timestamp::now(),
             message_count: 5,
             agent_alias: None,
             channel_id: None,

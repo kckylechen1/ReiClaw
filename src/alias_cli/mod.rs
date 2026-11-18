@@ -510,7 +510,7 @@ async fn agent_delete_owned_state(
     workspace: &std::path::Path,
 ) -> Result<()> {
     let (mem, session_backend) = build_owned_state_handles(config)?;
-    let ts = chrono::Utc::now().format("%Y%m%d%H%M%S");
+    let ts = jiff::Timestamp::now().strftime("%Y%m%d%H%M%S");
     let archive_dir = config
         .data_dir
         .join("agents")

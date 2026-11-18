@@ -24,7 +24,8 @@ pub struct TokenUsage {
     #[serde(default = "default_true", skip_serializing_if = "is_true_bool")]
     pub pricing_available: bool,
     /// Timestamp of the request
-    pub timestamp: chrono::DateTime<chrono::Utc>,
+    #[serde(with = "crate::time::serde")]
+    pub timestamp: jiff::Timestamp,
 }
 
 fn is_zero_u64(v: &u64) -> bool {

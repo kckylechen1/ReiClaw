@@ -75,7 +75,7 @@ impl Agent {
         let now = self.current_turn_datetime();
         let (year, month, day) = (now.year(), now.month(), now.day());
         let (hour, minute, second) = (now.hour(), now.minute(), now.second());
-        let tz = now.format("%Z");
+        let tz = now.strftime("%:z");
         let date_str =
             format!("{year:04}-{month:02}-{day:02} {hour:02}:{minute:02}:{second:02} {tz}");
 
@@ -634,7 +634,9 @@ impl Agent {
                         turn_id: Some(turn_id.clone()),
                     });
                 }
-                let now = self.current_turn_datetime().format("%Y-%m-%d %H:%M:%S %Z");
+                let now = self
+                    .current_turn_datetime()
+                    .strftime("%Y-%m-%d %H:%M:%S %:z");
                 let enriched = format!("[{now}] {steering_message}");
                 round_added.push(ChatMessage::user(enriched));
             }

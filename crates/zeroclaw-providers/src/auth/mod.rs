@@ -953,7 +953,7 @@ pub fn save_pending_oauth_login(config: &Config, pending: &PendingOAuthLogin) ->
     let tmp = path.with_extension(format!(
         "tmp.{}.{}",
         std::process::id(),
-        chrono::Utc::now().timestamp_nanos_opt().unwrap_or_default()
+        jiff::Timestamp::now().as_nanosecond()
     ));
     let json = serde_json::to_vec_pretty(&persisted)?;
     std::fs::write(&tmp, json)?;
@@ -1164,7 +1164,7 @@ impl AuthProviderFlow for OpenaiCodexFlow {
             profile: profile.to_string(),
             code_verifier: pkce.code_verifier.clone(),
             state: pkce.state.clone(),
-            created_at: chrono::Utc::now().to_rfc3339(),
+            created_at: zeroclaw_api::time::format_rfc3339(jiff::Timestamp::now()),
         };
         save_pending_oauth_login(ctx.config, &pending)?;
 
@@ -1412,7 +1412,7 @@ impl AuthProviderFlow for GeminiFlow {
             profile: profile.to_string(),
             code_verifier: pkce.code_verifier.clone(),
             state: pkce.state.clone(),
-            created_at: chrono::Utc::now().to_rfc3339(),
+            created_at: zeroclaw_api::time::format_rfc3339(jiff::Timestamp::now()),
         };
         save_pending_oauth_login(ctx.config, &pending)?;
 
@@ -1677,7 +1677,7 @@ impl AuthProviderFlow for XaiFlow {
             profile: profile.to_string(),
             code_verifier: pkce.code_verifier.clone(),
             state: pkce.state.clone(),
-            created_at: chrono::Utc::now().to_rfc3339(),
+            created_at: zeroclaw_api::time::format_rfc3339(jiff::Timestamp::now()),
         };
         save_pending_oauth_login(ctx.config, &pending)?;
 
@@ -1872,8 +1872,8 @@ mod tests {
                 token_set: None,
                 token: Some("x".into()),
                 metadata: std::collections::BTreeMap::default(),
-                created_at: chrono::Utc::now(),
-                updated_at: chrono::Utc::now(),
+                created_at: jiff::Timestamp::now(),
+                updated_at: jiff::Timestamp::now(),
             },
         );
         data.profiles.insert(
@@ -1888,8 +1888,8 @@ mod tests {
                 token_set: None,
                 token: Some("y".into()),
                 metadata: std::collections::BTreeMap::default(),
-                created_at: chrono::Utc::now(),
-                updated_at: chrono::Utc::now(),
+                created_at: jiff::Timestamp::now(),
+                updated_at: jiff::Timestamp::now(),
             },
         );
 
@@ -2057,7 +2057,7 @@ mod tests {
             access_token: access_token.to_string(),
             refresh_token: Some(refresh_token.to_string()),
             id_token: None,
-            expires_at: Some(chrono::Utc::now() - chrono::Duration::minutes(5)),
+            expires_at: Some(jiff::Timestamp::now() - jiff::SignedDuration::from_mins(5)),
             token_type: Some("Bearer".to_string()),
             scope: Some("offline_access".to_string()),
         }

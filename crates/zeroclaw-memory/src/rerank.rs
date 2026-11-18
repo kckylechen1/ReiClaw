@@ -2,7 +2,6 @@
 
 use crate::importance::weighted_final_score;
 use crate::traits::{MemoryCategory, MemoryEntry};
-use chrono::{DateTime, Utc};
 use std::collections::HashSet;
 
 const DEFAULT_NEAR_DUPLICATE_THRESHOLD: f64 = 0.92;
@@ -189,12 +188,12 @@ fn recency_factor(entry: &MemoryEntry) -> f64 {
         return 1.0;
     }
 
-    let Ok(timestamp) = DateTime::parse_from_rfc3339(&entry.timestamp) else {
+    let Ok(timestamp) = zeroclaw_api::time::parse_rfc3339(&entry.timestamp) else {
         return 1.0;
     };
-    let age_days = Utc::now()
-        .signed_duration_since(timestamp.with_timezone(&Utc))
-        .num_seconds()
+    let age_days = jiff::Timestamp::now()
+        .duration_since(timestamp)
+        .as_secs()
         .max(0) as f64
         / 86_400.0;
 
@@ -311,7 +310,6 @@ fn shingle_similarity(left: &str, right: &str) -> f64 {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use chrono::Duration;
 
     fn entry(id: &str, content: &str, score: f64, importance: f64) -> MemoryEntry {
         MemoryEntry {
@@ -319,7 +317,7 @@ mod tests {
             key: id.into(),
             content: content.into(),
             category: MemoryCategory::Daily,
-            timestamp: Utc::now().to_rfc3339(),
+            timestamp: zeroclaw_api::time::format_rfc3339(jiff::Timestamp::now()),
             session_id: None,
             score: Some(score),
             namespace: "default".into(),
@@ -432,7 +430,9 @@ mod tests {
     #[test]
     fn old_entries_get_lower_recency_signal() {
         let mut old = entry("old", "old", 1.0, 0.0);
-        old.timestamp = (Utc::now() - Duration::days(7)).to_rfc3339();
+        old.timestamp = zeroclaw_api::time::format_rfc3339(
+            jiff::Timestamp::now() - jiff::SignedDuration::from_hours((7) * 24),
+        );
         assert!(recency_factor(&old) < 0.6);
     }
 

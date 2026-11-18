@@ -681,7 +681,7 @@ impl SkillManageTool {
         }
         let target = canonical_archive_dir.join(slug);
         let final_target = if target.exists() {
-            let stamp = chrono::Utc::now().format("%Y%m%dT%H%M%SZ");
+            let stamp = jiff::Timestamp::now().strftime("%Y%m%dT%H%M%SZ");
             canonical_archive_dir.join(format!("{slug}-{stamp}"))
         } else {
             target
@@ -961,7 +961,7 @@ mod tests {
         // whose front-matter carries a fresh `updated_at` is on cooldown and
         // a patch must be refused with a structured error rather than writing.
         let dir = tempdir();
-        let recent = chrono::Utc::now().to_rfc3339();
+        let recent = zeroclaw_api::time::format_rfc3339(jiff::Timestamp::now());
         let md = format!(
             "---\nname: deploy\ndescription: Run a production deploy\nversion: \"0.1.0\"\nupdated_at: {recent}\n---\n\n# Deploy\nDoes a production deploy.\n"
         );
@@ -999,7 +999,9 @@ mod tests {
         // an `updated_at` older than cooldown_secs is
         // stale and a patch must proceed.
         let dir = tempdir();
-        let stale = (chrono::Utc::now() - chrono::Duration::seconds(7200)).to_rfc3339();
+        let stale = zeroclaw_api::time::format_rfc3339(
+            jiff::Timestamp::now() - jiff::SignedDuration::from_secs(7200),
+        );
         let md = format!(
             "---\nname: deploy\ndescription: Run a production deploy\nversion: \"0.1.0\"\nupdated_at: {stale}\n---\n\n# Deploy\nDoes a production deploy.\n"
         );

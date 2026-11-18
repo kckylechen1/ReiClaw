@@ -1,7 +1,6 @@
 //! Response cache — avoid burning tokens on repeated prompts.
 
 use anyhow::Result;
-use chrono::{Duration, Local};
 use parking_lot::Mutex;
 use rusqlite::{Connection, params};
 use sha2::{Digest, Sha256};
@@ -104,7 +103,7 @@ impl ResponseCache {
                     drop(hot);
                     // Still bump SQLite hit count for accurate stats
                     let conn = self.conn.lock();
-                    let now_str = Local::now().to_rfc3339();
+                    let now_str = zeroclaw_api::time::format_rfc3339_zoned(&jiff::Zoned::now());
                     conn.execute(
                         "UPDATE response_cache
                          SET accessed_at = ?1, hit_count = hit_count + 1
@@ -119,8 +118,10 @@ impl ResponseCache {
         // Tier 2: SQLite (warm)
         let result: Option<(String, u32)> = {
             let conn = self.conn.lock();
-            let now = Local::now();
-            let cutoff = (now - Duration::minutes(self.ttl_minutes)).to_rfc3339();
+            let now = jiff::Zoned::now();
+            let cutoff = zeroclaw_api::time::format_rfc3339_zoned(
+                &now.checked_sub(jiff::SignedDuration::from_mins(self.ttl_minutes))?,
+            );
 
             let mut stmt = conn.prepare(
                 "SELECT response, token_count FROM response_cache
@@ -132,7 +133,7 @@ impl ResponseCache {
                 .ok();
 
             if result.is_some() {
-                let now_str = now.to_rfc3339();
+                let now_str = zeroclaw_api::time::format_rfc3339_zoned(&now);
                 conn.execute(
                     "UPDATE response_cache
                      SET accessed_at = ?1, hit_count = hit_count + 1
@@ -159,7 +160,7 @@ impl ResponseCache {
         // Write to SQLite (warm)
         let conn = self.conn.lock();
 
-        let now = Local::now().to_rfc3339();
+        let now = zeroclaw_api::time::format_rfc3339_zoned(&jiff::Zoned::now());
 
         conn.execute(
             "INSERT OR REPLACE INTO response_cache
@@ -169,7 +170,9 @@ impl ResponseCache {
         )?;
 
         // Evict expired entries
-        let cutoff = (Local::now() - Duration::minutes(self.ttl_minutes)).to_rfc3339();
+        let cutoff = zeroclaw_api::time::format_rfc3339_zoned(
+            &jiff::Zoned::now().checked_sub(jiff::SignedDuration::from_mins(self.ttl_minutes))?,
+        );
         conn.execute(
             "DELETE FROM response_cache WHERE created_at <= ?1",
             params![cutoff],

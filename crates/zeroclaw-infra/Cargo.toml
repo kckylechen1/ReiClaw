@@ -11,7 +11,7 @@ zeroclaw-log.workspace = true
 zeroclaw-api.workspace = true
 zeroclaw-spawn.workspace = true
 anyhow = "1.0"
-chrono = { version = "0.4", default-features = false, features = ["clock", "std", "serde"] }
+jiff.workspace = true
 parking_lot = "0.12"
 portable-atomic = "1"
 rusqlite = { version = "0.41.1", features = ["bundled", "fallible_uint"] }

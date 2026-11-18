@@ -1,7 +1,5 @@
 use crate::cron::{CronJob, CronJobPatch, Schedule, deserialize_maybe_stringified};
-use chrono::DateTime;
 use serde_json::{Value, json};
-use std::str::FromStr;
 
 pub(crate) const CRON_TZ_DESCRIPTION: &str = "Optional explicit IANA timezone name, e.g. 'America/New_York'. If omitted, the schedule uses the runtime local timezone. For user-facing schedules, pass an explicit IANA timezone.";
 
@@ -32,8 +30,8 @@ pub(crate) fn cron_add_output(job: &CronJob) -> Value {
         "name": job.name,
         "job_type": job.job_type,
         "schedule": job.schedule,
-        "next_run": job.next_run,
-        "next_run_utc": job.next_run,
+        "next_run": zeroclaw_api::time::format_rfc3339_z(job.next_run),
+        "next_run_utc": zeroclaw_api::time::format_rfc3339_z(job.next_run),
         "schedule_timezone": fields.schedule_timezone,
         "timezone_source": fields.timezone_source,
         "next_run_local": fields.next_run_local,
@@ -46,7 +44,10 @@ pub(crate) fn cron_job_output(job: &CronJob) -> serde_json::Result<Value> {
     let mut output = serde_json::to_value(job)?;
     if let Value::Object(ref mut object) = output {
         let fields = timezone_confirmation_fields(job);
-        object.insert("next_run_utc".to_string(), json!(job.next_run));
+        object.insert(
+            "next_run_utc".to_string(),
+            json!(zeroclaw_api::time::format_rfc3339_z(job.next_run)),
+        );
         object.insert("schedule_timezone".to_string(), fields.schedule_timezone);
         object.insert("timezone_source".to_string(), fields.timezone_source);
         object.insert("next_run_local".to_string(), fields.next_run_local);
@@ -63,8 +64,10 @@ struct TimezoneConfirmationFields {
 fn timezone_confirmation_fields(job: &CronJob) -> TimezoneConfirmationFields {
     match &job.schedule {
         Schedule::Cron { tz: Some(tz), .. } => {
-            let next_run_local = chrono_tz::Tz::from_str(tz).map_or(Value::Null, |timezone| {
-                json!(job.next_run.with_timezone(&timezone).to_rfc3339())
+            let next_run_local = jiff::tz::TimeZone::get(tz).map_or(Value::Null, |timezone| {
+                json!(zeroclaw_api::time::format_rfc3339_zoned(
+                    &job.next_run.to_zoned(timezone)
+                ))
             });
             TimezoneConfirmationFields {
                 schedule_timezone: json!(tz),
@@ -75,7 +78,9 @@ fn timezone_confirmation_fields(job: &CronJob) -> TimezoneConfirmationFields {
         Schedule::Cron { tz: None, .. } => TimezoneConfirmationFields {
             schedule_timezone: json!("runtime local timezone"),
             timezone_source: json!("runtime_local"),
-            next_run_local: json!(job.next_run.with_timezone(&chrono::Local).to_rfc3339()),
+            next_run_local: json!(zeroclaw_api::time::format_rfc3339_zoned(
+                &job.next_run.to_zoned(jiff::tz::TimeZone::system())
+            )),
         },
         Schedule::At { .. } | Schedule::Every { .. } => TimezoneConfirmationFields {
             schedule_timezone: Value::Null,
@@ -98,7 +103,7 @@ fn reject_at_without_explicit_offset(value: &Value) -> Result<(), String> {
         return Ok(());
     };
 
-    DateTime::parse_from_rfc3339(raw_at)
+    zeroclaw_api::time::parse_rfc3339(raw_at)
         .map(|_| ())
         .map_err(|err| {
             format!(

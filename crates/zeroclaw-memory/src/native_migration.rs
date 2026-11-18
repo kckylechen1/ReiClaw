@@ -24,7 +24,6 @@ use crate::tachi::{
 };
 use crate::traits::{MemoryCategory, MemoryKind, StoreOptions};
 use anyhow::{Context, Result, bail, ensure};
-use chrono::{DateTime, NaiveDateTime, SecondsFormat, Utc};
 use memcore::{DbOpenContext, PortableImportEntry};
 use portable_kernel as memcore;
 use rusqlite::{Connection, OptionalExtension};
@@ -107,7 +106,7 @@ struct ExpectedNativeRow {
     content: String,
     category: MemoryCategory,
     timestamp: String,
-    expected_created_instant: DateTime<Utc>,
+    expected_created_instant: jiff::Timestamp,
     session_id: Option<String>,
     namespace: String,
     importance: f64,
@@ -247,7 +246,7 @@ fn migrate_native_inner(
         receipt_namespace: RECEIPT_NAMESPACE.into(),
         receipt_key: receipt_key.clone(),
         approved_by: approved_by.into(),
-        created_at: Utc::now().to_rfc3339_opts(SecondsFormat::Millis, true),
+        created_at: zeroclaw_api::time::format_rfc3339_millis(jiff::Timestamp::now()),
         source: original.clone(),
         destination: final_path.clone(),
         target_schema,
@@ -752,22 +751,20 @@ fn parse_category(raw: &str) -> MemoryCategory {
     }
 }
 
-fn parse_native_timestamp_utc(raw: &str, row_id: &str, field: &str) -> Result<DateTime<Utc>> {
+fn parse_native_timestamp_utc(raw: &str, row_id: &str, field: &str) -> Result<jiff::Timestamp> {
     let trimmed = raw.trim();
     ensure!(
         !trimmed.is_empty(),
         "native memory row '{row_id}' has blank {field} timestamp"
     );
-    if let Ok(dt) = DateTime::parse_from_rfc3339(trimmed) {
-        return Ok(dt.with_timezone(&Utc));
-    }
-    if let Ok(dt) = trimmed.parse::<DateTime<Utc>>() {
+    if let Ok(dt) = zeroclaw_api::time::parse_stored_timestamp(trimmed) {
         return Ok(dt);
     }
-    if let Ok(naive) = NaiveDateTime::parse_from_str(trimmed, "%Y-%m-%d %H:%M:%S")
-        .or_else(|_| NaiveDateTime::parse_from_str(trimmed, "%Y-%m-%d %H:%M:%S%.f"))
-    {
-        return Ok(naive.and_utc());
+    // Native SQLite records also used a timezone-free UTC representation.
+    // Append the explicit zone before using the same guarded parser so an
+    // unsupported leap second or a Temporal annotation is never normalized.
+    if let Ok(dt) = zeroclaw_api::time::parse_stored_timestamp(&format!("{trimmed}Z")) {
+        return Ok(dt);
     }
     bail!("native memory row '{row_id}' has invalid {field} timestamp '{raw}'")
 }
@@ -883,14 +880,13 @@ fn verify_decoded_row(
     actual: &crate::traits::MemoryEntry,
     expected: &ExpectedNativeRow,
 ) -> Result<()> {
-    let actual_instant = DateTime::parse_from_rfc3339(&actual.timestamp)
-        .with_context(|| {
+    let actual_instant =
+        zeroclaw_api::time::parse_rfc3339(&actual.timestamp).with_context(|| {
             format!(
                 "invalid migrated timestamp '{}' for row '{}'",
                 actual.timestamp, expected.id
             )
-        })?
-        .with_timezone(&Utc);
+        })?;
     ensure!(
         actual_instant == expected.expected_created_instant,
         "native migration timestamp instant mismatch for row '{}': expected {:?}, got {:?}",
@@ -922,6 +918,28 @@ fn verify_decoded_row(
 #[cfg(all(test, unix))]
 mod tests {
     use super::*;
+
+    #[test]
+    fn native_timestamps_preserve_sql_fractions_and_explicit_offsets() {
+        let expected = zeroclaw_api::time::parse_rfc3339("2026-01-02T03:04:05.123456789Z").unwrap();
+        for raw in [
+            "2026-01-02T03:04:05.123456789Z",
+            "2026-01-02T12:04:05.123456789+09:00",
+            "2026-01-02 03:04:05.123456789",
+            " 2026-01-02 03:04:05.123456789999 ",
+            "2026-01-02 03:04:05.123456789 UTC",
+            "2026-01-02 03:04:05.123456789+0000",
+            "2026-1-2 3:4:5.123456789999",
+        ] {
+            assert_eq!(
+                parse_native_timestamp_utc(raw, "row", "created_at").unwrap(),
+                expected
+            );
+        }
+        for raw in ["2026-01-02 03:04:60", "2026-01-02T03:04:05Z[UTC]"] {
+            assert!(parse_native_timestamp_utc(raw, "row", "created_at").is_err());
+        }
+    }
     use crate::embeddings::EmbeddingProvider;
     use crate::traits::{ExportFilter, Memory, SemanticSubtype};
     use async_trait::async_trait;

@@ -116,10 +116,10 @@ async fn completion_route_classification_cache_and_next_turn() {
         zeroclaw_memory::response_cache::ResponseCache::new(agent._workspace.path(), 60, 10)
             .unwrap(),
     ));
-    let fixed = chrono::DateTime::parse_from_rfc3339("2026-01-01T12:00:00Z")
+    let fixed = zeroclaw_api::time::parse_rfc3339("2026-01-01T12:00:00Z")
         .unwrap()
-        .with_timezone(&chrono::Local);
-    agent.turn_datetime = Some(Arc::new(move || fixed));
+        .to_zoned(jiff::tz::TimeZone::system());
+    agent.turn_datetime = Some(Arc::new(move || fixed.clone()));
 
     for _ in 0..2 {
         agent.clear_history();

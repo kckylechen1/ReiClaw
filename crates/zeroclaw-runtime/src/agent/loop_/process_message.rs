@@ -361,7 +361,7 @@ pub async fn process_message_with_task_identity(
         // Pre-mint the turn id so the agent_turn bracket carries one
         // correlation id.
         let turn_id = uuid::Uuid::new_v4().to_string();
-        let now = chrono::Local::now().format("%Y-%m-%d %H:%M:%S %Z");
+        let now = jiff::Zoned::now().strftime("%Y-%m-%d %H:%M:%S %:z");
         let enriched = format!("[{now}] {effective_message}");
         let mut history = vec![
             ChatMessage::system(&system_prompt),

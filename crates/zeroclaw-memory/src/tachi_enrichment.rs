@@ -374,7 +374,7 @@ mod tests {
         tier: &str,
         revision: i64,
     ) -> MemoryEntry {
-        let now = chrono::Local::now().to_rfc3339();
+        let now = zeroclaw_api::time::format_rfc3339_zoned(&jiff::Zoned::now());
         MemoryEntry {
             id: id.into(),
             path: format!("/agents/default/default/core/{id}"),

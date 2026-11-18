@@ -1,5 +1,6 @@
 use crate::security::SecurityPolicy;
-use anyhow::{Result, bail};
+use anyhow::{Context, Result, bail};
+use jiff::{SignedDuration, Timestamp};
 use zeroclaw_config::schema::Config;
 
 mod schedule;
@@ -157,9 +158,9 @@ pub fn add_once_validated(
     approved: bool,
 ) -> Result<CronJob> {
     let duration = parse_delay(delay)?;
-    let at = chrono::Utc::now()
-        .checked_add_signed(duration)
-        .ok_or_else(|| anyhow::Error::msg(format!("delay '{delay}' is too far in the future")))?;
+    let at = Timestamp::now()
+        .checked_add(duration)
+        .with_context(|| format!("delay '{delay}' is too far in the future"))?;
     add_once_at_validated(config, agent_alias, at, command, approved)
 }
 
@@ -167,7 +168,7 @@ pub fn add_once_validated(
 pub fn add_once_at_validated(
     config: &Config,
     agent_alias: &str,
-    at: chrono::DateTime<chrono::Utc>,
+    at: Timestamp,
     command: &str,
     approved: bool,
 ) -> Result<CronJob> {
@@ -208,7 +209,7 @@ pub fn add_once(config: &Config, agent_alias: &str, delay: &str, command: &str) 
 pub fn add_once_at(
     config: &Config,
     agent_alias: &str,
-    at: chrono::DateTime<chrono::Utc>,
+    at: Timestamp,
     command: &str,
 ) -> Result<CronJob> {
     add_once_at_validated(config, agent_alias, at, command, false)
@@ -236,7 +237,7 @@ pub fn resume_job(config: &Config, id: &str) -> Result<CronJob> {
     )
 }
 
-pub fn parse_delay(input: &str) -> Result<chrono::Duration> {
+pub fn parse_delay(input: &str) -> Result<SignedDuration> {
     let input = input.trim();
     if input.is_empty() {
         anyhow::bail!("delay must not be empty");
@@ -247,17 +248,19 @@ pub fn parse_delay(input: &str) -> Result<chrono::Duration> {
     let (num, unit) = input.split_at(split);
     let amount: i64 = num.parse()?;
     let unit = if unit.is_empty() { "m" } else { unit };
-    // The `try_` constructors: the plain ones panic on overflow, and the
-    // release profile aborts on panic, so a model-supplied delay could take
-    // the whole daemon down.
-    let duration = match unit {
-        "s" => chrono::Duration::try_seconds(amount),
-        "m" => chrono::Duration::try_minutes(amount),
-        "h" => chrono::Duration::try_hours(amount),
-        "d" => chrono::Duration::try_days(amount),
+    // Preserve the signed-millisecond input bound and reject overflow before
+    // constructing a duration: model-supplied delays must never panic.
+    let millis_per_unit = match unit {
+        "s" => 1_000,
+        "m" => 60_000,
+        "h" => 3_600_000,
+        "d" => 86_400_000,
         _ => anyhow::bail!("unsupported delay unit '{unit}', use s/m/h/d"),
     };
-    duration.ok_or_else(|| anyhow::Error::msg(format!("delay '{input}' is out of range")))
+    amount
+        .checked_mul(millis_per_unit)
+        .map(SignedDuration::from_millis)
+        .ok_or_else(|| anyhow::Error::msg(format!("delay '{input}' is out of range")))
 }
 
 #[cfg(test)]
@@ -357,7 +360,7 @@ mod delay_overflow_tests {
     fn parse_delay_rejects_out_of_range_values_instead_of_panicking() {
         assert!(parse_delay("9999999999999999s").is_err());
         assert!(parse_delay("9999999999999999d").is_err());
-        assert_eq!(parse_delay("30m").unwrap(), chrono::Duration::minutes(30));
+        assert_eq!(parse_delay("30m").unwrap(), SignedDuration::from_mins(30));
     }
 
     #[test]

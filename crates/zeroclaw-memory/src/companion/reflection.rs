@@ -213,7 +213,7 @@ pub fn collect_owner_messages(
             };
             let Some(at) = row
                 .created_at
-                .and_then(|at| u64::try_from(at.timestamp()).ok())
+                .and_then(|at| u64::try_from(zeroclaw_api::time::epoch_second(at)).ok())
             else {
                 continue;
             };

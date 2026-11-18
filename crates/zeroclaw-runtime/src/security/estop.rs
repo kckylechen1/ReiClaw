@@ -289,9 +289,11 @@ fn now_rfc3339() -> String {
         .duration_since(UNIX_EPOCH)
         .map(|duration| duration.as_secs())
         .unwrap_or(0);
-    chrono::DateTime::<chrono::Utc>::from_timestamp(secs as i64, 0)
-        .unwrap_or(chrono::DateTime::<chrono::Utc>::UNIX_EPOCH)
-        .to_rfc3339()
+    let timestamp = i64::try_from(secs)
+        .ok()
+        .and_then(|secs| jiff::Timestamp::from_second(secs).ok())
+        .unwrap_or(jiff::Timestamp::UNIX_EPOCH);
+    zeroclaw_api::time::format_rfc3339(timestamp)
 }
 
 #[cfg(test)]

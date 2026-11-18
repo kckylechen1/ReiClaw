@@ -3,7 +3,6 @@ use crate::auth::oauth_common::{parse_query_params, url_encode};
 use crate::auth::profiles::TokenSet;
 use anyhow::{Context, Result};
 use base64::Engine;
-use chrono::Utc;
 use reqwest::Client;
 use serde::Deserialize;
 use std::collections::BTreeMap;
@@ -379,14 +378,14 @@ pub fn extract_account_id_from_jwt(token: &str) -> Option<String> {
     None
 }
 
-pub fn extract_expiry_from_jwt(token: &str) -> Option<chrono::DateTime<Utc>> {
+pub fn extract_expiry_from_jwt(token: &str) -> Option<jiff::Timestamp> {
     let payload = token.split('.').nth(1)?;
     let decoded = base64::engine::general_purpose::URL_SAFE_NO_PAD
         .decode(payload)
         .ok()?;
     let claims: serde_json::Value = serde_json::from_slice(&decoded).ok()?;
     let exp = claims.get("exp").and_then(|v| v.as_i64())?;
-    chrono::DateTime::<Utc>::from_timestamp(exp, 0)
+    jiff::Timestamp::from_second(exp).ok()
 }
 
 async fn parse_token_response(response: reqwest::Response) -> Result<TokenSet> {
@@ -401,13 +400,12 @@ async fn parse_token_response(response: reqwest::Response) -> Result<TokenSet> {
         .await
         .context("Failed to parse OpenAI token response")?;
 
-    let expires_at = token.expires_in.and_then(|seconds| {
-        if seconds <= 0 {
-            None
-        } else {
-            Some(Utc::now() + chrono::Duration::seconds(seconds))
-        }
-    });
+    let expires_at = token
+        .expires_in
+        .filter(|seconds| *seconds > 0)
+        .map(|seconds| jiff::Timestamp::now().checked_add(jiff::SignedDuration::from_secs(seconds)))
+        .transpose()
+        .context("OAuth token expiry is outside the supported range")?;
 
     Ok(TokenSet {
         access_token: token.access_token,

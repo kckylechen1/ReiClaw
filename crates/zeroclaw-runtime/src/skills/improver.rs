@@ -52,11 +52,11 @@ impl SkillImprover {
         let Some(value) = front_matter_value(&front, "updated_at") else {
             return false;
         };
-        let Ok(ts) = chrono::DateTime::parse_from_rfc3339(value.trim()) else {
+        let Ok(ts) = zeroclaw_api::time::parse_rfc3339(value.trim()) else {
             return false;
         };
-        let elapsed = chrono::Utc::now().signed_duration_since(ts);
-        elapsed.num_seconds() < self.config.cooldown_secs as i64
+        let elapsed = jiff::Timestamp::now().duration_since(ts);
+        elapsed.as_secs() < self.config.cooldown_secs as i64
     }
 
     pub async fn improve_skill(
@@ -81,7 +81,7 @@ impl SkillImprover {
 
         // Build updated content with audit metadata embedded in YAML front-matter
         // plus an HTML audit-trail comment at the file's tail.
-        let now = chrono::Utc::now().to_rfc3339();
+        let now = zeroclaw_api::time::format_rfc3339(jiff::Timestamp::now());
         let single_line_reason = improvement_reason.replace('\n', " ");
         let audit_entry = format!("\n<!-- Improvement: {now} | Reason: {single_line_reason} -->\n");
 
@@ -435,7 +435,7 @@ mod tests {
         let dir = tempfile::tempdir().unwrap();
         let skill_dir = dir.path().join("skills").join("test-skill");
         tokio::fs::create_dir_all(&skill_dir).await.unwrap();
-        let recent = chrono::Utc::now().to_rfc3339();
+        let recent = zeroclaw_api::time::format_rfc3339(jiff::Timestamp::now());
         let md = format!("---\nname: test-skill\nupdated_at: \"{recent}\"\n---\n\nBody\n");
         tokio::fs::write(skill_dir.join("SKILL.md"), md)
             .await
@@ -450,7 +450,9 @@ mod tests {
         let dir = tempfile::tempdir().unwrap();
         let skill_dir = dir.path().join("skills").join("test-skill");
         tokio::fs::create_dir_all(&skill_dir).await.unwrap();
-        let stale = (chrono::Utc::now() - chrono::Duration::seconds(10_000)).to_rfc3339();
+        let stale = zeroclaw_api::time::format_rfc3339(
+            jiff::Timestamp::now() - jiff::SignedDuration::from_secs(10_000),
+        );
         let md = format!("---\nname: test-skill\nupdated_at: \"{stale}\"\n---\n\nBody\n");
         tokio::fs::write(skill_dir.join("SKILL.md"), md)
             .await

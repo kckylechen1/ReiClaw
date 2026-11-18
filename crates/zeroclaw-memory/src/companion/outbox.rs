@@ -144,9 +144,9 @@ fn health_of(_store: &CompanionStore) -> CompanionOutboxHealth {
 
 #[cfg(feature = "tachi")]
 fn age_secs_from_rfc3339(stamp: &str) -> Option<u64> {
-    let parsed = chrono::DateTime::parse_from_rfc3339(stamp).ok()?;
-    let age = chrono::Utc::now().signed_duration_since(parsed.with_timezone(&chrono::Utc));
-    Some(u64::try_from(age.num_seconds().max(0)).unwrap_or(0))
+    let parsed = zeroclaw_api::time::parse_rfc3339(stamp).ok()?;
+    let age = jiff::Timestamp::now().duration_since(parsed);
+    Some(u64::try_from(age.as_secs().max(0)).unwrap_or(0))
 }
 
 #[cfg(test)]

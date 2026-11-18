@@ -22,8 +22,10 @@ impl CronRunsTool {
 struct RunView {
     id: i64,
     job_id: String,
-    started_at: chrono::DateTime<chrono::Utc>,
-    finished_at: chrono::DateTime<chrono::Utc>,
+    #[serde(with = "zeroclaw_api::time::serde")]
+    started_at: jiff::Timestamp,
+    #[serde(with = "zeroclaw_api::time::serde")]
+    finished_at: jiff::Timestamp,
     status: String,
     output: Option<String>,
     duration_ms: Option<i64>,
@@ -117,7 +119,6 @@ fn truncate(input: &str, max_chars: usize) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use chrono::{Duration as ChronoDuration, Utc};
     use tempfile::TempDir;
     use zeroclaw_config::schema::Config;
 
@@ -161,12 +162,12 @@ mod tests {
         let job = cron::add_job(&cfg, TEST_AGENT, "*/5 * * * *", "echo ok").unwrap();
 
         let long_output = "x".repeat(1000);
-        let now = Utc::now();
+        let now = jiff::Timestamp::now();
         cron::record_run(
             &cfg,
             &job.id,
             now,
-            now + ChronoDuration::milliseconds(1),
+            now + jiff::SignedDuration::from_millis(1),
             "ok",
             Some(&long_output),
             1,

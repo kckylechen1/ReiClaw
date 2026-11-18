@@ -1,6 +1,5 @@
 use crate::observability::{Observer, ObserverEvent};
 use anyhow::Result;
-use chrono::{DateTime, Utc};
 use parking_lot::Mutex as ParkingMutex;
 use serde::{Deserialize, Serialize};
 use std::fmt;
@@ -83,7 +82,8 @@ pub struct HeartbeatMetrics {
     /// Consecutive failed ticks (resets on success).
     pub consecutive_failures: u64,
     /// Timestamp of the most recent tick (UTC RFC 3339).
-    pub last_tick_at: Option<DateTime<Utc>>,
+    #[serde(default, with = "zeroclaw_api::time::serde::optional")]
+    pub last_tick_at: Option<jiff::Timestamp>,
     /// Exponential moving average of tick durations in milliseconds.
     pub avg_tick_duration_ms: f64,
     /// Total number of ticks executed since startup.
@@ -108,7 +108,7 @@ impl HeartbeatMetrics {
     pub fn record_success(&mut self, duration_ms: f64) {
         self.consecutive_successes += 1;
         self.consecutive_failures = 0;
-        self.last_tick_at = Some(Utc::now());
+        self.last_tick_at = Some(jiff::Timestamp::now());
         self.total_ticks += 1;
         self.update_avg_duration(duration_ms);
     }
@@ -117,7 +117,7 @@ impl HeartbeatMetrics {
     pub fn record_failure(&mut self, duration_ms: f64) {
         self.consecutive_failures += 1;
         self.consecutive_successes = 0;
-        self.last_tick_at = Some(Utc::now());
+        self.last_tick_at = Some(jiff::Timestamp::now());
         self.total_ticks += 1;
         self.update_avg_duration(duration_ms);
     }
@@ -325,7 +325,7 @@ impl HeartbeatEngine {
 
     /// Build the Phase 1 LLM decision prompt for two-phase heartbeat.
     pub fn build_decision_prompt(tasks: &[HeartbeatTask]) -> String {
-        let now = chrono::Utc::now();
+        let now = jiff::Timestamp::now();
         let mut prompt = format!(
             "You are a heartbeat scheduler. Review the following periodic tasks and decide \
              whether any should be executed right now.\n\n\
@@ -335,8 +335,8 @@ impl HeartbeatEngine {
              - Whether the task is time-sensitive or can wait\n\
              - Whether running the task now would provide value\n\n\
              Tasks:\n",
-            now.format("%Y-%m-%d %H:%M:%S"),
-            now.format("%A"),
+            now.strftime("%Y-%m-%d %H:%M:%S"),
+            now.strftime("%A"),
         );
 
         for (i, task) in tasks.iter().enumerate() {

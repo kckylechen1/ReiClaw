@@ -217,7 +217,7 @@ The on-disk JSON shape (`LogEvent` in `event.rs`):
 }
 ```
 
-`@timestamp` is `chrono::DateTime<Utc>` serialized as RFC 3339 with `Z`. The schema version is `2`; older `version: 1` rows are migrated in place at daemon startup by `migrate::migrate_legacy_jsonl_in_place`.
+`@timestamp` is an RFC 3339 string. New events format a `jiff::Timestamp` as UTC with a `Z` suffix and fixed millisecond precision. The schema version is `2`; older `version: 1` rows are migrated in place at daemon startup by `migrate::migrate_legacy_jsonl_in_place`.
 
 ## `LogConfig` vs `ObservabilityConfig`
 

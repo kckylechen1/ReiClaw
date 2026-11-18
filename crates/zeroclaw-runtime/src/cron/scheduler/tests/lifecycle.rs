@@ -105,7 +105,7 @@ async fn shell_timeout_persists_once_releases_claim_and_kills_descendants() {
         true,
     )
     .unwrap();
-    assert!(cron::claim_job(&config, &job.id, Utc::now()).unwrap());
+    assert!(cron::claim_job(&config, &job.id, Timestamp::now()).unwrap());
     let security = test_security(&config);
     let (_, success, output, _, _) = TEST_SHELL_JOB_TIMEOUT
         .scope(
@@ -133,7 +133,7 @@ async fn shell_timeout_persists_once_releases_claim_and_kills_descendants() {
     let runs = cron::list_runs(&config, &job.id, 10).unwrap();
     assert_eq!(runs.len(), 1, "timeout must not replay the command");
     assert_eq!(runs[0].status, "error");
-    assert!(cron::claim_job(&config, &job.id, Utc::now()).unwrap());
+    assert!(cron::claim_job(&config, &job.id, Timestamp::now()).unwrap());
     time::sleep(Duration::from_millis(650)).await;
     assert!(
         !config.data_dir.join("late-marker").exists(),

@@ -2,7 +2,6 @@ use crate::auth::oauth_common::{code_challenge_for_verifier, parse_query_params,
 use crate::auth::profiles::TokenSet;
 use anyhow::{Context, Result};
 use base64::Engine;
-use chrono::Utc;
 use reqwest::Client;
 use serde::Deserialize;
 use std::collections::BTreeMap;
@@ -335,7 +334,9 @@ async fn parse_token_response(response: reqwest::Response) -> Result<TokenSet> {
         serde_json::from_str(&body).context("Failed to parse xAI OAuth token response")?;
     let expires_at = parsed
         .expires_in
-        .map(|secs| Utc::now() + chrono::Duration::seconds(secs))
+        .map(|secs| jiff::Timestamp::now().checked_add(jiff::SignedDuration::from_secs(secs)))
+        .transpose()
+        .context("OAuth token expiry is outside the supported range")?
         .or_else(|| derive_expires_at_from_jwt(&parsed.access_token));
 
     Ok(TokenSet {
@@ -508,8 +509,7 @@ async fn import_grok_auth_profile_inner(
     let expires_at = entry
         .expires_at
         .as_deref()
-        .and_then(|value| chrono::DateTime::parse_from_rfc3339(value).ok())
-        .map(|dt| dt.with_timezone(&Utc))
+        .and_then(|value| zeroclaw_api::time::parse_rfc3339(value).ok())
         .or_else(|| derive_expires_at_from_jwt(&entry.key));
 
     let token_set = TokenSet {
@@ -533,10 +533,10 @@ async fn import_grok_auth_profile_inner(
     Ok(())
 }
 
-fn derive_expires_at_from_jwt(token: &str) -> Option<chrono::DateTime<Utc>> {
+fn derive_expires_at_from_jwt(token: &str) -> Option<jiff::Timestamp> {
     let payload = decode_jwt_payload(token)?;
     let exp = payload.get("exp")?.as_i64()?;
-    chrono::DateTime::<Utc>::from_timestamp(exp, 0)
+    jiff::Timestamp::from_second(exp).ok()
 }
 
 fn decode_jwt_payload(token: &str) -> Option<serde_json::Value> {
