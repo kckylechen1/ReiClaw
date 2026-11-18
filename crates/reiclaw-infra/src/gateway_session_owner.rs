@@ -144,7 +144,7 @@ mod tests {
     #[ignore = "subprocess helper"]
     fn owner_process_fixture() {
         use std::io::Write;
-        let Some(path) = std::env::var_os("ZEROCLAW_TEST_OWNER_DIR") else {
+        let Some(path) = std::env::var_os("REI_TEST_OWNER_DIR") else {
             return;
         };
         let _owner = GatewaySessionOwner::acquire(Path::new(&path)).unwrap();
@@ -173,7 +173,7 @@ mod tests {
                 "--ignored",
                 "--nocapture",
             ])
-            .env("ZEROCLAW_TEST_OWNER_DIR", dir.path())
+            .env("REI_TEST_OWNER_DIR", dir.path())
             .stdin(Stdio::piped())
             .stdout(Stdio::piped())
             .spawn()

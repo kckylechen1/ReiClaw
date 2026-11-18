@@ -24,7 +24,7 @@ pub enum Value {
     CargoFlags,
     /// Platform web/dist data dir (matches gateway auto-detect).
     WebDataDir,
-    /// Install bin dir (cargo bin on Unix, %USERPROFILE%\.zeroclaw\bin on Win).
+    /// Install bin dir (cargo bin on Unix, %USERPROFILE%\.rei\bin on Win).
     BinDir,
     /// Literal text that is platform-invariant and not drift-prone.
     Lit(String),
@@ -669,8 +669,8 @@ pub fn web_data_dir_expr(platform: Platform) -> &'static str {
     match platform {
         // Unix renderer's else-arm (Linux). The macOS arm is emitted by the
         // sh renderer's own case; both forms live in the renderer, not baked.
-        Platform::Unix => "${XDG_DATA_HOME:-${PREFIX}/.local/share}/zeroclaw/web/dist",
-        Platform::Windows => "%LOCALAPPDATA%\\zeroclaw\\web\\dist",
+        Platform::Unix => "${XDG_DATA_HOME:-${PREFIX}/.local/share}/reiclaw/web/dist",
+        Platform::Windows => "%LOCALAPPDATA%\\reiclaw\\web\\dist",
     }
 }
 
@@ -1006,10 +1006,10 @@ mod tests {
 
         let target_env = manual.find("- name: Configure target environment").unwrap();
         let release_step = manual.find("- name: Build release").unwrap();
-        let zeroclaw_upload = manual
-            .find("name: zeroclaw-manual-${{ inputs.distribution }}-${{ matrix.target }}")
+        let reiclaw_upload = manual
+            .find("name: reiclaw-manual-${{ inputs.distribution }}-${{ matrix.target }}")
             .unwrap();
-        assert!(target_env < release_step && release_step < zeroclaw_upload);
+        assert!(target_env < release_step && release_step < reiclaw_upload);
         assert!(
             manual[target_env..release_step]
                 .contains("echo \"${{ matrix.linker_env }}=${{ matrix.linker }}\"")
@@ -1055,8 +1055,8 @@ mod tests {
     #[test]
     fn web_data_dir_expr_matches_data_local_dir_semantics() {
         let win = web_data_dir_expr(Platform::Windows);
-        assert!(win.contains("LOCALAPPDATA") && win.ends_with("zeroclaw\\web\\dist"));
+        assert!(win.contains("LOCALAPPDATA") && win.ends_with("reiclaw\\web\\dist"));
         let unix = web_data_dir_expr(Platform::Unix);
-        assert!(unix.contains("XDG_DATA_HOME") && unix.ends_with("zeroclaw/web/dist"));
+        assert!(unix.contains("XDG_DATA_HOME") && unix.ends_with("reiclaw/web/dist"));
     }
 }

@@ -1,4 +1,4 @@
-//! `zeroclaw quickstart` CLI. Extracted from main.rs.
+//! `rei quickstart` CLI. Extracted from main.rs.
 
 use crate::config::Config;
 use crate::gateway_helpers::{t, ta};
@@ -32,7 +32,7 @@ pub(crate) fn quickstart_runtime_profile_for_provider(
         .to_string()
 }
 
-/// `zeroclaw quickstart` CLI entry — checklist UX, not a wizard.
+/// `rei quickstart` CLI entry — checklist UX, not a wizard.
 ///
 /// Mirrors the TUI Quickstart pane's structure: a single screen
 /// listing all six selectors with `[ ]` / `[✓]` status and a one-line
@@ -82,7 +82,7 @@ pub async fn run_quickstart_cli(
                 "cli-quickstart-needs-tty",
                 "Quickstart is interactive and needs a terminal on stdin and stderr. \
                  Run it from an interactive shell, or use \
-                 `zeroclaw config set <path> <value>` for headless configuration."
+                 `rei config set <path> <value>` for headless configuration."
             )
         );
     }
@@ -293,7 +293,7 @@ pub async fn run_quickstart_cli(
         } else if form.channels.is_empty() {
             t(
                 "cli-quickstart-summary-channels-none",
-                "none (chat via `zeroclaw agent` only)",
+                "none (chat via `rei agent` only)",
             )
         } else {
             form.channels
@@ -712,7 +712,7 @@ pub async fn run_quickstart_cli(
                                     "{}",
                                     t(
                                         "cli-quickstart-all-channels-bound",
-                                        "  Every configured channel is already bound to an agent. Free one with `zeroclaw config set agents.<alias>.channels ...` before reusing it here.",
+                                        "  Every configured channel is already bound to an agent. Free one with `rei config set agents.<alias>.channels ...` before reusing it here.",
                                     )
                                 );
                                 continue;

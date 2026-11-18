@@ -47,9 +47,9 @@ The runtime depends only on these traits, not on concrete implementations. This 
 
 ## Layer: Edge
 
-### `zeroclaw-bridge-acp`
+### `reiclaw-bridge-acp`
 
-The `bridges/acp` package builds `zeroclaw-acp-bridge`, a standalone ACP v1
+The `bridges/acp` package builds `rei-acp-bridge`, a standalone ACP v1
 stdio client of the gateway conversation. Its config dependency supplies shared
 locale handling; it has no dependency on runtime, providers, memory, tools or
 the gateway server. The [owner ACP bridge contract](../gateway/api.md#bounded-owner-bridges-and-acp)

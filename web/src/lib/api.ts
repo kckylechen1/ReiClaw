@@ -130,7 +130,7 @@ export async function apiFetch<T = unknown>(
 
   if (result.status === 401) {
     clearToken();
-    window.dispatchEvent(new Event("zeroclaw-unauthorized"));
+    window.dispatchEvent(new Event("reiclaw-unauthorized"));
     throw new UnauthorizedError();
   }
 
@@ -474,7 +474,7 @@ export async function patchConfig(
   // Config structure changed: notify listeners (e.g. the ⌘K search index)
   // so they can invalidate caches. Decoupled via a browser event to avoid a
   // circular import (configSearch.ts imports from this module).
-  window.dispatchEvent(new Event("zeroclaw-config-mutated"));
+  window.dispatchEvent(new Event("reiclaw-config-mutated"));
   return result;
 }
 
@@ -613,7 +613,7 @@ export async function putPersonalityFile(
   });
   if (response.status === 401) {
     clearToken();
-    window.dispatchEvent(new Event("zeroclaw-unauthorized"));
+    window.dispatchEvent(new Event("reiclaw-unauthorized"));
     throw new UnauthorizedError();
   }
   if (response.status === 409) {
@@ -1333,7 +1333,7 @@ export async function selectSectionItem(
   // listeners (e.g. the ⌘K search index) to invalidate their caches.
   // Decoupled via a browser event to avoid a circular import
   // (configSearch.ts imports from this module).
-  window.dispatchEvent(new Event("zeroclaw-config-mutated"));
+  window.dispatchEvent(new Event("reiclaw-config-mutated"));
   return result;
 }
 // ── Map-keyed alias CRUD ─────────────────────────────────────────────
@@ -1370,7 +1370,7 @@ export async function deleteMapKey(
   // An entity was removed: notify listeners (e.g. the ⌘K search index) to
   // invalidate their caches. Decoupled via a browser event to avoid a
   // circular import (configSearch.ts imports from this module).
-  window.dispatchEvent(new Event("zeroclaw-config-mutated"));
+  window.dispatchEvent(new Event("reiclaw-config-mutated"));
   return result;
 }
 
@@ -1385,7 +1385,7 @@ export async function renameMapKey(
     body: JSON.stringify({ path, from, to }),
   });
   // The alias changed: invalidate caches (⌘K search index, etc.).
-  window.dispatchEvent(new Event("zeroclaw-config-mutated"));
+  window.dispatchEvent(new Event("reiclaw-config-mutated"));
   return result;
 }
 
@@ -1784,7 +1784,7 @@ export interface BindChannelResponse {
 
 /**
  * Authorize an inbound identity on a pairing channel (telegram/wechat/line)
- * — the GUI equivalent of `zeroclaw channel bind-<type> <id> --alias <alias>`.
+ * — the GUI equivalent of `rei channel bind-<type> <id> --alias <alias>`.
  * The bound user can message the bot immediately, with no `/bind` round trip.
  */
 export function bindChannelIdentity(

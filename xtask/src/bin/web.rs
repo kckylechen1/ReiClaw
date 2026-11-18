@@ -7,7 +7,7 @@ use std::process::Command;
 use xtask::util::{repo_root, require_tool, run_cmd};
 
 #[derive(Parser, Debug)]
-#[command(name = "web", about = "Build the ZeroClaw web dashboard")]
+#[command(name = "web", about = "Build the ReiClaw web dashboard")]
 struct Cli {
     #[command(subcommand)]
     cmd: Cmd,

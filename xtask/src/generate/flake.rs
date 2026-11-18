@@ -1,6 +1,6 @@
 //! Nix flake renderer. The flake is the one packaged surface that rebuilds from
 //! source per-user, so it must expose feature selection (overridable), not a
-//! fixed set. We generate a sentinel-delimited zone defining the zeroclaw
+//! fixed set. We generate a sentinel-delimited zone defining the reiclaw
 //! package builder with the canonical Dist feature list as the default.
 
 use super::spec::{self, Selection};
@@ -17,7 +17,7 @@ const ZONE: &str = "flake-packages";
 
 /// Render the generated package-definition zone body: a Rust package builder
 /// with the Dist feature list as default buildFeatures (overridable), exposing
-/// zeroclaw and default. Indented to sit inside the per-system `in {`
+/// reiclaw and default. Indented to sit inside the per-system `in {`
 /// block of the flake.
 pub fn render_zone(root: &Path) -> anyhow::Result<String> {
     let version = spec::resolve_version(root)?;
@@ -34,7 +34,7 @@ pub fn render_zone(root: &Path) -> anyhow::Result<String> {
     let lines = [
         "        # Default feature set: canonical lean Dist.".to_string(),
         "        # Override with `packages.reiclaw.override { features = [ ... ]; }`.".to_string(),
-        format!("        zeroclawDefaultFeatures = [ {feature_list} ];"),
+        format!("        reiclawDefaultFeatures = [ {feature_list} ];"),
         "        rootFeatureGraph = (builtins.fromTOML (builtins.readFile ./Cargo.toml)).features;"
             .to_string(),
         "        rootFeatureClosure = features: builtins.map (node: node.key) (builtins.genericClosure {"
@@ -45,8 +45,8 @@ pub fn render_zone(root: &Path) -> anyhow::Result<String> {
             .to_string(),
         "              (rootFeatureGraph.${node.key} or []));".to_string(),
         "        });".to_string(),
-        "        buildZeroclaw = pkgs.lib.makeOverridable".to_string(),
-        "          ({ pname, cargoPkg, features ? zeroclawDefaultFeatures }:".to_string(),
+        "        buildReiclaw = pkgs.lib.makeOverridable".to_string(),
+        "          ({ pname, cargoPkg, features ? reiclawDefaultFeatures }:".to_string(),
         "            let".to_string(),
         "              withAcpBridge = builtins.elem \"agent-runtime\" (rootFeatureClosure features);"
             .to_string(),
@@ -65,7 +65,7 @@ pub fn render_zone(root: &Path) -> anyhow::Result<String> {
         "              };".to_string(),
         "              cargoBuildFlags =".to_string(),
         "                [ \"-p\" cargoPkg \"--no-default-features\" ]".to_string(),
-        "                ++ pkgs.lib.optionals withAcpBridge [ \"-p\" \"zeroclaw-bridge-acp\" ]"
+        "                ++ pkgs.lib.optionals withAcpBridge [ \"-p\" \"reiclaw-bridge-acp\" ]"
             .to_string(),
         "                ++ pkgs.lib.optionals (features != [])".to_string(),
         "                  [ \"--features\" (pkgs.lib.concatStringsSep \",\"".to_string(),
@@ -75,9 +75,8 @@ pub fn render_zone(root: &Path) -> anyhow::Result<String> {
         "              buildInputs = [ pkgs.stdenv.cc.cc ];".to_string(),
         "              postInstall = ''".to_string(),
         "                test -x \"$out/bin/rei\"".to_string(),
-        "                test -x \"$out/bin/zeroclaw\"".to_string(),
         "              '' + pkgs.lib.optionalString withAcpBridge ''".to_string(),
-        "                test -x \"$out/bin/zeroclaw-acp-bridge\"".to_string(),
+        "                test -x \"$out/bin/rei-acp-bridge\"".to_string(),
         "              '';".to_string(),
         "            });".to_string(),
     ];
@@ -125,7 +124,7 @@ mod tests {
     fn zone_exposes_overridable_features() {
         let z = render_zone(&root()).unwrap();
         assert!(
-            z.contains("zeroclawDefaultFeatures"),
+            z.contains("reiclawDefaultFeatures"),
             "default feature list present"
         );
         assert!(

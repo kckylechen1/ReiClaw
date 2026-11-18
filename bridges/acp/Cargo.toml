@@ -1,6 +1,6 @@
 [package]
-name = "zeroclaw-bridge-acp"
-description = "ACP v1 stdio bridge to the ZeroClaw gateway conversation"
+name = "reiclaw-bridge-acp"
+description = "ACP v1 stdio bridge to the ReiClaw gateway conversation"
 publish = false
 version.workspace = true
 edition.workspace = true
@@ -9,7 +9,7 @@ repository.workspace = true
 rust-version.workspace = true
 
 [[bin]]
-name = "zeroclaw-acp-bridge"
+name = "rei-acp-bridge"
 path = "src/main.rs"
 
 [dependencies]

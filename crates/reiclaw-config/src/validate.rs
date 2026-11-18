@@ -813,7 +813,7 @@ impl Config {
     }
 
     /// Surface every authored `[security.otp]` action-gating knob as
-    /// deprecated and unsupported: ZeroClaw has no OTP action-gating, so
+    /// deprecated and unsupported: ReiClaw has no OTP action-gating, so
     /// `gated_actions`, `gated_domains`, `gated_domain_categories`, and
     /// `challenge_max_attempts` have no runtime consumer and provide no
     /// authorization boundary. OTP itself remains a live authentication
@@ -834,7 +834,7 @@ impl Config {
         warnings: &mut Vec<crate::validation_warnings::ValidationWarning>,
     ) {
         let otp = &self.security.otp;
-        let deprecated = "is deprecated and unsupported: ZeroClaw has no OTP action-gating, so it \
+        let deprecated = "is deprecated and unsupported: ReiClaw has no OTP action-gating, so it \
                           is parsed for backward compatibility but not enforced and provides no \
                           authorization boundary. High-risk action authorization is owned by the \
                           Tachi approval/grant plane with Node-local enforcement. Remove the \
@@ -1410,7 +1410,7 @@ impl Config {
                     InvalidFormat,
                     &format!("gateway.bridges.{name}.token_hash"),
                     "gateway.bridges.{name}.token_hash must be the 64-character hex SHA-256 \
-                     of the bridge token (mint one with `zeroclaw gateway bridge add {name}`)"
+                     of the bridge token (mint one with `rei gateway bridge add {name}`)"
                 );
             }
         }
@@ -1609,7 +1609,7 @@ impl Config {
                         "action": normalized,
                         "known_actions": default_otp_gated_actions(),
                     })),
-                    "security.otp.gated_actions is deprecated and never enforced (ZeroClaw has no \
+                    "security.otp.gated_actions is deprecated and never enforced (ReiClaw has no \
                      OTP action-gating); entry does not match a known action name: "
                 );
             }
@@ -1770,7 +1770,7 @@ impl Config {
                 .is_some_and(|v| !v.trim().is_empty());
             if !has_uri && !has_api_key && !has_model {
                 ::reiclaw_log::record!(WARN, ::reiclaw_log::Event::new(crate::schema::CONFIG_SCHEMA_LOG_TARGET, ::reiclaw_log::Action::Note).with_outcome(::reiclaw_log::EventOutcome::Unknown).with_attrs(::serde_json::json!({"model_provider": profile_name, "profile_name": profile_name})), "providers.models. is empty (no uri / api_key / model). \
-                     Skipping at runtime; run `zeroclaw quickstart` (or use the dashboard) \
+                     Skipping at runtime; run `rei quickstart` (or use the dashboard) \
                      to make this model_provider usable.");
                 continue;
             }
@@ -1858,7 +1858,7 @@ impl Config {
                 && !has_ollama_cloud_credential(entry.api_key.as_deref())
             {
                 anyhow::bail!(
-                    "providers.models.ollama.{alias}.model uses ':cloud', but no API key is configured. Set api_key on [providers.models.ollama.{alias}] (or via the schema-mirror grammar: ZEROCLAW_providers__models__ollama__{alias}__api_key=<value>)."
+                    "providers.models.ollama.{alias}.model uses ':cloud', but no API key is configured. Set api_key on [providers.models.ollama.{alias}] (or via the schema-mirror grammar: REI_providers__models__ollama__{alias}__api_key=<value>)."
                 );
             }
         }
@@ -1999,7 +1999,7 @@ impl Config {
                         validation_bail!(
                             DanglingReference,
                             format!("agents.{alias}.model_provider"),
-                            "agents.{alias}.model_provider = {mp:?} but {ty:?} is not a known provider family; check [providers.models.<family>.<alias>] in config.toml (valid families: `zeroclaw providers`)",
+                            "agents.{alias}.model_provider = {mp:?} but {ty:?} is not a known provider family; check [providers.models.<family>.<alias>] in config.toml (valid families: `rei providers`)",
                         );
                     }
                     let exists = self

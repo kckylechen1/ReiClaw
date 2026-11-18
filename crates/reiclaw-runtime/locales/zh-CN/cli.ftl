@@ -1,6 +1,6 @@
-cli-about = 最快、最小的 AI 助手。
+cli-about = ReiClaw (rei) - 个人 AI 控制器
 cli-no-command-provided = 未提供命令。
-cli-try-quickstart = 尝试运行 `zeroclaw quickstart` 来创建你的第一个智能体。
+cli-try-quickstart = 尝试运行 `rei quickstart` 来创建你的第一个智能体。
 cli-quickstart-about = 端到端创建你的第一个智能体
 cli-agent-about = 启动 AI 智能体循环
 cli-gateway-about = 管理网关服务器（webhooks、websockets）
@@ -29,11 +29,11 @@ cli-skills-about = 管理技能（用户自定义能力）
 cli-migrate-about = 从其他智能体运行时迁移数据
 cli-auth-about = 管理提供商订阅认证配置文件
 cli-memory-about = 管理智能体记忆条目
-cli-config-about = 管理 ZeroClaw 配置
+cli-config-about = 管理 ReiClaw 配置
 cli-update-about = 从源码更新此 Fork
 cli-self-test-about = 运行诊断自检
 cli-completions-about = 生成 shell 补全脚本
-cli-desktop-about = 启动 ZeroClaw 伴侣桌面应用
+cli-desktop-about = 启动 ReiClaw 伴侣桌面应用
 cli-config-schema-about = 将完整的配置 JSON Schema 输出到 stdout
 cli-config-list-about = 列出所有配置属性及其当前值
 cli-config-get-about = 获取配置属性值
@@ -77,23 +77,23 @@ cli-skills-removed-global = { "  " }{$status} 技能 '{$name}' 已从全局技�
 cli-skills-install-tier-official = 正在安装 {$name} v{$version} — 官方（zeroclaw-labs 维护）
 cli-skills-install-tier-community =
     正在安装 {$name} v{$version} — 社区提交
-    此技能未经 ZeroClaw 审计。请检查技能内容，
-    并在授予任何权限或用于生产前运行 `zeroclaw skills audit {$name}`。
+    此技能未经 ReiClaw 审计。请检查技能内容，
+    并在授予任何权限或用于生产前运行 `rei skills audit {$name}`。
 cli-skills-add-scaffolded = 已在 {$dir} 搭建技能 {$target}
 cli-skills-bundle-add-prompt =
     要创建目录为 '{$dir}' 的 skill-bundle '{$alias}'，请运行：
-    zeroclaw config map-key skill-bundles {$alias}
-    zeroclaw config set skill-bundles.{$alias}.directory {$dir}
+    rei config map-key skill-bundles {$alias}
+    rei config set skill-bundles.{$alias}.directory {$dir}
 
-    （通过 `zeroclaw skills bundle add` 直接创建包会重复配置变更接口。）
+    （通过 `rei skills bundle add` 直接创建包会重复配置变更接口。）
 cli-skills-bundle-remove-prompt =
     要移除 skill-bundle '{$alias}'，请运行：
-    zeroclaw config map-key-delete skill-bundles {$alias}
+    rei config map-key-delete skill-bundles {$alias}
 
     （移除配置条目；磁盘上该包的目录会保留。）
 cli-skills-bundle-list-empty =
     未配置技能包。
-    创建一个：zeroclaw config set skill-bundles.default.directory shared/skills/default
+    创建一个：rei config set skill-bundles.default.directory shared/skills/default
 cli-skills-bundle-list-header = 技能包（{$count}）：
 cli-skills-bundle-entry = {$alias} -> {$dir}
 cli-skills-bundle-include = 包含：{$values}
@@ -130,16 +130,16 @@ cli-models-status-about = 显示当前模型配置和缓存状态
 cli-doctor-models-about = 探测各提供商的模型目录并报告可用性
 cli-doctor-traces-about = 查询运行时跟踪事件（工具诊断和模型回复）
 cli-doctor-update-context-windows-about = 从提供商的 /models 端点更新 config.toml 中的 context_window
-cli-migrate-openclaw-about = 将 OpenClaw 工作区中的记忆导入到此 ZeroClaw 工作区
+cli-migrate-openclaw-about = 将 OpenClaw 工作区中的记忆导入到此 ReiClaw 工作区
 cli-gateway-long-about =
     管理网关服务器（webhooks、websockets）。
 
     启动、重启或检查接受传入 webhook 事件和 WebSocket 连接的 HTTP/WebSocket 网关。
 
     示例：
-    zeroclaw gateway start              # 启动网关
-    zeroclaw gateway restart            # 重启网关
-    zeroclaw gateway get-paircode       # 显示配对码
+    rei gateway start              # 启动网关
+    rei gateway restart            # 重启网关
+    rei gateway get-paircode       # 显示配对码
 cli-acp-long-about =
     启动 ACP 服务器（通过 stdio 的 JSON-RPC 2.0）。
 
@@ -148,19 +148,19 @@ cli-acp-long-about =
     方法：initialize、session/new、session/prompt、session/stop。
 
     示例：
-    zeroclaw acp                        # 启动 ACP 服务器
-    zeroclaw acp --max-sessions 5       # 限制并发会话数
+    rei acp                        # 启动 ACP 服务器
+    rei acp --max-sessions 5       # 限制并发会话数
 cli-daemon-long-about =
     启动长期运行的自主守护进程。
 
-    启动完整的 ZeroClaw 运行时：网关服务器、所有已配置的通道面（Telegram bridge、webhook 接入）、心跳监视器以及 cron 调度器。这是在生产环境中或作为始终在线助手运行 ZeroClaw 的推荐方式。
+    启动完整的 ReiClaw 运行时：网关服务器、所有已配置的通道面（Telegram bridge、webhook 接入）、心跳监视器以及 cron 调度器。这是在生产环境中或作为始终在线助手运行 ReiClaw 的推荐方式。
 
-    使用 'zeroclaw service install' 将守护进程注册为操作系统服务（systemd/launchd），以便开机自动启动。
+    使用 'rei service install' 将守护进程注册为操作系统服务（systemd/launchd），以便开机自动启动。
 
     示例：
-    zeroclaw daemon                   # 使用配置默认值
-    zeroclaw daemon -p 9090           # 网关在端口 9090
-    zeroclaw daemon --host 127.0.0.1  # 仅 localhost
+    rei daemon                   # 使用配置默认值
+    rei daemon -p 9090           # 网关在端口 9090
+    rei daemon --host 127.0.0.1  # 仅 localhost
 cli-cron-long-about =
     配置和管理计划任务。
 
@@ -169,40 +169,40 @@ cli-cron-long-about =
     Cron 表达式使用标准的 5 字段格式：'min hour day month weekday'。时区默认为 UTC；使用 --tz 和 IANA 时区名称覆盖。
 
     示例：
-    zeroclaw cron list
-    zeroclaw cron add '0 9 * * 1-5' 'Good morning' --tz America/New_York --agent
-    zeroclaw cron add '*/30 * * * *' 'Check system health' --agent
-    zeroclaw cron add '*/5 * * * *' 'echo ok'
-    zeroclaw cron add-at 2025-01-15T14:00:00Z 'Send reminder' --agent
-    zeroclaw cron add-every 60000 'Ping heartbeat'
-    zeroclaw cron once 30m 'Run backup in 30 minutes' --agent
-    zeroclaw cron pause TASK_ID
-    zeroclaw cron update TASK_ID --expression '0 8 * * *' --tz Europe/London
+    rei cron list
+    rei cron add '0 9 * * 1-5' 'Good morning' --tz America/New_York --agent
+    rei cron add '*/30 * * * *' 'Check system health' --agent
+    rei cron add '*/5 * * * *' 'echo ok'
+    rei cron add-at 2025-01-15T14:00:00Z 'Send reminder' --agent
+    rei cron add-every 60000 'Ping heartbeat'
+    rei cron once 30m 'Run backup in 30 minutes' --agent
+    rei cron pause TASK_ID
+    rei cron update TASK_ID --expression '0 8 * * *' --tz Europe/London
 cli-channel-long-about =
     管理通信通道。
 
-    添加、删除、列出、发送以及对将 ZeroClaw 连接到消息平台的通道进行健康检查。可用通道类型：telegram、webhook（其余旧分节均已退役）。
+    添加、删除、列出、发送以及对将 ReiClaw 连接到消息平台的通道进行健康检查。可用通道类型：telegram、webhook（其余旧分节均已退役）。
 
     示例：
-    zeroclaw channel list
-    zeroclaw channel doctor
-    zeroclaw channel add telegram '{ "{" }"bot_token":"...","name":"my-bot"{ "}" }'
-    zeroclaw channel remove my-bot
-    zeroclaw channel bind-telegram zeroclaw_user
-    zeroclaw channel send 'Alert!' --channel-id telegram --recipient 123456789
+    rei channel list
+    rei channel doctor
+    rei channel add telegram '{ "{" }"bot_token":"...","name":"my-bot"{ "}" }'
+    rei channel remove my-bot
+    rei channel bind-telegram rei_user
+    rei channel send 'Alert!' --channel-id telegram --recipient 123456789
 cli-memory-long-about =
     管理代理记忆条目。
 
     列出、检视和清除代理存储的记忆条目。支持按类别和会话过滤、分页以及带确认的批量清除。
 
     示例：
-    zeroclaw memory stats
-    zeroclaw memory list
-    zeroclaw memory list --category core --limit 10
-    zeroclaw memory get KEY
-    zeroclaw memory clear --category conversation --yes
+    rei memory stats
+    rei memory list
+    rei memory list --category core --limit 10
+    rei memory get KEY
+    rei memory clear --category conversation --yes
 cli-config-long-about =
-    管理 ZeroClaw 配置。
+    管理 ReiClaw 配置。
 
     通过点分路径查看、设置或初始化配置属性。使用 'schema' 转储配置文件的完整 JSON Schema。
 
@@ -211,53 +211,53 @@ cli-config-long-about =
     枚举字段在省略值时提供交互式选择。
 
     示例：
-    zeroclaw config list                                  # 列出所有属性
-    zeroclaw config list --secrets                        # 仅列出密钥
-    zeroclaw config list --filter channels.matrix         # 按前缀过滤
-    zeroclaw config get channels.matrix.mention-only      # 获取值
-    zeroclaw config set channels.matrix.mention-only true # 设置值
-    zeroclaw config set channels.matrix.access-token      # 密钥：掩码输入
-    zeroclaw config set channels.matrix.stream-mode       # 枚举：交互式选择
-    zeroclaw config init channels.matrix                  # 使用默认值初始化部分
-    zeroclaw config schema                                # 将 JSON Schema 打印到 stdout
-    zeroclaw config schema > schema.json
+    rei config list                                  # 列出所有属性
+    rei config list --secrets                        # 仅列出密钥
+    rei config list --filter channels.matrix         # 按前缀过滤
+    rei config get channels.matrix.mention-only      # 获取值
+    rei config set channels.matrix.mention-only true # 设置值
+    rei config set channels.matrix.access-token      # 密钥：掩码输入
+    rei config set channels.matrix.stream-mode       # 枚举：交互式选择
+    rei config init channels.matrix                  # 使用默认值初始化部分
+    rei config schema                                # 将 JSON Schema 打印到 stdout
+    rei config schema > schema.json
 
-    属性路径 Tab 补全会自动包含在 `zeroclaw completions <shell>` 中。
+    属性路径 Tab 补全会自动包含在 `rei completions <shell>` 中。
 cli-update-long-about =
     此 Fork 尚无经过验证的二进制更新渠道。请更新 https://github.com/kckylechen1/ReiClaw 的源码检出，并使用原有 preset/features 运行 ./install.sh --source。上游发行包不能用于更新此 Fork。
 
 cli-self-test-long-about =
-    运行诊断自检以验证 ZeroClaw 安装。
+    运行诊断自检以验证 ReiClaw 安装。
 
     默认情况下，运行完整的测试套件，包括网络检查（网关健康状况、记忆往返）。使用 --quick 跳过网络检查以进行更快的离线验证。
 
     示例：
-    zeroclaw self-test             # 完整套件
-    zeroclaw self-test --quick     # 仅快速检查（无网络）
+    rei self-test             # 完整套件
+    rei self-test --quick     # 仅快速检查（无网络）
 cli-skills-install-suggestion =
     看起来此请求需要 `{$name}` 技能，但它尚未安装。
 
     匹配的能力：{$matched}
     下一步：运行 `{$install_command}` 进行安装。
 cli-completions-long-about =
-    为 `zeroclaw` 生成 shell 补全脚本。
+    为 `rei` 生成 shell 补全脚本。
 
     脚本会打印到 stdout，以便可以直接 source：
 
     示例：
-    source <(zeroclaw completions bash)
-    zeroclaw completions zsh > ~/.zfunc/_zeroclaw
-    zeroclaw completions fish > ~/.config/fish/completions/zeroclaw.fish
+    source <(rei completions bash)
+    rei completions zsh > ~/.zfunc/_rei
+    rei completions fish > ~/.config/fish/completions/rei.fish
 cli-desktop-long-about =
-    启动 ZeroClaw 配套桌面应用。
+    启动 ReiClaw 配套桌面应用。
 
     配套应用是一个轻量级的菜单栏 / 系统托盘应用程序，它连接到与 CLI 相同的网关。它提供对仪表板、状态监控和设备配对的快速访问。
 
     使用 --install 下载适用于您平台的预构建配套应用。
 
     示例：
-    zeroclaw desktop              # 启动配套应用
-    zeroclaw desktop --install    # 下载并安装
+    rei desktop              # 启动配套应用
+    rei desktop --install    # 下载并安装
 channel-needs-quickstart-reply = 此代理尚未完全设置。操作员需要先运行 Quickstart，然后我才能回复。
 channel-line-bind-success = ✅ 已配对！现在可以聊天了。
 channel-line-bind-invalid-code = ❌ 代码无效。请重试。
@@ -271,12 +271,12 @@ onboard-openai-auth-api-key = API 密钥
 onboard-openai-auth-codex = Codex 订阅
 onboard-openai-codex-followup =
     Codex 订阅身份验证使用您的 ChatGPT 账户。
-    在启动代理之前，运行 `zeroclaw auth login --provider openai-codex` 进行身份验证。
+    在启动代理之前，运行 `rei auth login --provider openai-codex` 进行身份验证。
 cli-web-dist-dir-reason-tilde = 以不会被展开的 `~` 开头
 cli-web-dist-dir-reason-dollar = 包含不会被展开的 `$`
 cli-doctor-web-dist-dir-expansion-warning = gateway.web_dist_dir = "{$path}" — {$reason}；gateway.web_dist_dir 按原样读取，请自行展开该值（例如使用绝对路径）
-cli-doctor-codex-auth-profile-no-slot = OpenAI Codex 凭据已登录，但没有模型提供方槽位使用它们。请在 OpenAI 提供方槽位上设置 `requires_openai_auth = true`，并将 agent 的 `model_provider` 指向它，或运行 `zeroclaw quickstart`。
-cli-doctor-codex-auth-slot-no-profile = OpenAI 槽位 {$slots} 已设置 `requires_openai_auth = true`，但没有 OpenAI Codex 凭据登录。请运行 `zeroclaw auth login --provider openai-codex`。
+cli-doctor-codex-auth-profile-no-slot = OpenAI Codex 凭据已登录，但没有模型提供方槽位使用它们。请在 OpenAI 提供方槽位上设置 `requires_openai_auth = true`，并将 agent 的 `model_provider` 指向它，或运行 `rei quickstart`。
+cli-doctor-codex-auth-slot-no-profile = OpenAI 槽位 {$slots} 已设置 `requires_openai_auth = true`，但没有 OpenAI Codex 凭据登录。请运行 `rei auth login --provider openai-codex`。
 cli-doctor-codex-auth-ok = OpenAI Codex 凭据已登录，并由模型提供方槽位引用。
 cli-doctor-systemd-linger-enabled = systemd 用户 linger 已启用
 cli-doctor-systemd-linger-disabled = systemd 用户 linger 已禁用；用户服务可能会在注销后停止。启用命令：loginctl enable-linger {$user}
@@ -285,10 +285,10 @@ cli-self-test-web-dist-dir-name = web_dist_dir
 cli-self-test-web-dist-dir-pass-unset = 未设置（使用自动检测）
 cli-self-test-web-dist-dir-pass-literal = {$path}（字面路径）
 cli-self-test-web-dist-dir-fail-expansion = 警告：{$path} — {$reason}；gateway.web_dist_dir 按原样读取，请自行展开该值（例如使用绝对路径）
-cli-service-systemd-linger-disabled-warning = systemd 用户 linger 已禁用。ZeroClaw 的用户服务可能会在注销后停止。启用命令：loginctl enable-linger {$user}
+cli-service-systemd-linger-disabled-warning = systemd 用户 linger 已禁用。ReiClaw 的用户服务可能会在注销后停止。启用命令：loginctl enable-linger {$user}
 cli-skills-none-installed = 未安装技能。
-cli-skills-create-hint = {"  "}创建一个: mkdir -p ~/.zeroclaw/workspace/skills/my-skill
-cli-skills-install-hint = {"  "}或安装: zeroclaw skills install <source>
+cli-skills-create-hint = {"  "}创建一个: mkdir -p ~/.rei/workspace/skills/my-skill
+cli-skills-install-hint = {"  "}或安装: rei skills install <source>
 cli-skills-installed-header = 已安装的技能 ({$count}):
 cli-skills-list-group-bundle = 技能包：{$alias}
 cli-skills-list-group-agent = 由代理 '{$alias}' 加载
@@ -300,7 +300,7 @@ cli-skills-multiple-locations-path = 技能 '{$name}' 存在于多个位置（{$
 cli-skills-tags = 标签:  {$tags}
 cli-skills-skipped-header = 已跳过 ({$count}):
 cli-skills-skipped-reason = {"    "}原因: {$reason}
-cli-skills-skipped-scripts-hint = {"    "}在 zeroclaw 配置中设置 `skills.allow_scripts = true` 以启用它。
+cli-skills-skipped-scripts-hint = {"    "}在 rei 配置中设置 `skills.allow_scripts = true` 以启用它。
 cli-memory-reindexing = 正在重新索引记忆后端...
 cli-memory-none = 未找到记忆条目。
 cli-memory-none-at-offset = 偏移量 {$offset} 处无条目(总计: {$total})。
@@ -351,7 +351,7 @@ cli-cron-every = {"  "}间隔(ms): {$v}
 cli-no-command = 未提供命令。
 cli-press-enter = 按 Enter 退出...
 cli-quickstart-title = Quickstart — 端到端创建一个可用的 agent。
-cli-quickstart-needs-tty = Quickstart 是交互式流程，需要 stdin 和 stderr 连接到终端。请从交互式 shell 中运行，或使用 `zeroclaw config set <path> <value>` 进行无头配置。
+cli-quickstart-needs-tty = Quickstart 是交互式流程，需要 stdin 和 stderr 连接到终端。请从交互式 shell 中运行，或使用 `rei config set <path> <value>` 进行无头配置。
 cli-quickstart-cancelled = 已取消 quickstart。未写入配置。
 cli-quickstart-incomplete = {"  "}尚未填写所有选择器。
 cli-quickstart-create-agent = ── 创建 agent
@@ -373,7 +373,7 @@ cli-quickstart-summary-not-yet-named = 尚未命名
 cli-quickstart-summary-provider-fresh = {$name}（别名：{$alias}，模型：{$model}）
 cli-quickstart-summary-use-existing = 使用已有 {$reference}
 cli-quickstart-summary-preset-fresh = 预设：{$name}
-cli-quickstart-summary-channels-none = 无（仅通过 `zeroclaw agent` 聊天）
+cli-quickstart-summary-channels-none = 无（仅通过 `rei agent` 聊天）
 cli-quickstart-summary-agent = 别名：{$alias}，system prompt：{$chars} 个字符，{$files} 个性格文件
 cli-quickstart-summary-peer-groups-none = 无 — 通道不接受任何对等方
 cli-quickstart-channel-remove-row = {"  "}{$reference}（移除）
@@ -382,17 +382,17 @@ cli-quickstart-provider-local-label = {$name}（本地）
 cli-quickstart-provider-type-prompt = 提供方类型
 cli-quickstart-alias-for = {$name} 的别名
 cli-quickstart-openai-auth-mode-label = 身份验证
-cli-quickstart-openai-auth-mode-help = 选择 `codex` 以使用 ChatGPT/Codex 订阅身份验证配置文件。如果你已通过 Codex CLI 登录，请运行 `zeroclaw auth login --model-provider openai-codex --import ~/.codex/auth.json`；否则请运行 `zeroclaw auth login --model-provider openai-codex`。
+cli-quickstart-openai-auth-mode-help = 选择 `codex` 以使用 ChatGPT/Codex 订阅身份验证配置文件。如果你已通过 Codex CLI 登录，请运行 `rei auth login --model-provider openai-codex --import ~/.codex/auth.json`；否则请运行 `rei auth login --model-provider openai-codex`。
 cli-quickstart-anthropic-auth-mode-label = 身份验证
 cli-quickstart-anthropic-auth-mode-help = 如需 Anthropic Console 密钥，请选择 `api_key`；如果你打算为 Claude Max 运行 `claude setup-token` 并粘贴生成的令牌，请选择 `setup_token`。
 cli-quickstart-anthropic-api-key-help = 粘贴 Anthropic Console API 密钥或由 `claude setup-token` 生成的令牌。
 cli-quickstart-auth-codex-prompt = 现在使用你的 ChatGPT 账户登录 OpenAI Codex 吗？
 cli-quickstart-auth-codex-import-prompt = 发现已有的 Codex 登录 (~/.codex/auth.json) — 现在导入吗？
-cli-quickstart-auth-codex-skip-hint = {"  "}稍后完成：zeroclaw auth login --model-provider openai-codex
+cli-quickstart-auth-codex-skip-hint = {"  "}稍后完成：rei auth login --model-provider openai-codex
 cli-quickstart-auth-anthropic-prompt = 现在为 Anthropic 提供方 `{$alias}` 运行 `claude setup-token` 吗？
 cli-quickstart-auth-anthropic-token-prompt = 粘贴 `claude setup-token` 生成的令牌
 cli-quickstart-auth-anthropic-saved = {"  "}已为 anthropic.{$alias} 保存 Claude setup token。
-cli-quickstart-auth-anthropic-skip-hint = {"  "}稍后完成：claude setup-token，然后 zeroclaw config set providers.models.anthropic.{$alias}.api_key <token>
+cli-quickstart-auth-anthropic-skip-hint = {"  "}稍后完成：claude setup-token，然后 rei config set providers.models.anthropic.{$alias}.api_key <token>
 cli-quickstart-auth-failed = {"  "}身份验证设置未完成：{$error}
 cli-quickstart-model-field-missing-warning = 警告：架构没有为 `{$provider}` 生成 `model` 字段 — 将退回到手动输入。请报告此问题。
 cli-quickstart-model-id-for = {$name} 的模型 ID
@@ -402,7 +402,7 @@ cli-quickstart-add-channel = + 添加通道
 cli-quickstart-channels-done = 完成（通道选择器会记为已访问）
 cli-quickstart-channels-prompt = 通道（可选，0..N）
 cli-quickstart-channel-source-prompt = 通道来源
-cli-quickstart-all-channels-bound = {"  "}所有已配置的通道都已经绑定到 agent。若要在这里复用，请先用 `zeroclaw config set agents.<alias>.channels ...` 释放一个通道。
+cli-quickstart-all-channels-bound = {"  "}所有已配置的通道都已经绑定到 agent。若要在这里复用，请先用 `rei config set agents.<alias>.channels ...` 释放一个通道。
 cli-quickstart-pick-configured-channel = 选择已配置的通道
 cli-quickstart-channel-type-prompt = 通道类型
 cli-quickstart-add-peer-group = + 添加对等组
@@ -419,7 +419,7 @@ cli-quickstart-personality-skip = 跳过
 cli-quickstart-esc-go-back = {" "}（Esc 返回）
 cli-quickstart-esc-return-checklist = {" "}（Esc 返回检查清单）
 cli-quickstart-personality-file-prompt = {$filename}{$position} — 下一步？{$back_hint}
-cli-quickstart-next-agent-command = {"  "}zeroclaw agent -a {$alias}  # 在终端中与此 agent 聊天
+cli-quickstart-next-agent-command = {"  "}rei agent -a {$alias}  # 在终端中与此 agent 聊天
 cli-quickstart-fix-and-rerun = 现有配置未被修改。请修复以下问题，然后重新运行 quickstart：
 cli-quickstart-could-not-finish = quickstart 无法完成：需要修复 {$count} 个问题
 cli-quickstart-pick-preset = 选择预设
@@ -467,8 +467,8 @@ cli-no-channels-compiled = {"  "}此二进制文件中未编译任何通道类�
 cli-quickstart-complete = Quickstart 完成。已创建 agent `{$alias}`。
 cli-next-steps = 后续步骤：
 cli-agent-not-created = 未创建您的 agent — 磁盘上没有任何更改。
-cli-onboard-deprecated = `zeroclaw onboard` 已弃用 — 请使用 `zeroclaw quickstart`。
-cli-otp-initialized = 已为 ZeroClaw 初始化 OTP 密钥。
+cli-onboard-deprecated = `rei onboard` 已弃用 — 请使用 `rei quickstart`。
+cli-otp-initialized = 已为 ReiClaw 初始化 OTP 密钥。
 cli-otp-enrollment-uri = 注册 URI：{$uri}
 cli-otp-received = {"  "}✓ OTP 已接收
 cli-secret-captured = {"  "}● 已接收输入 — 按 Enter 保存
@@ -479,8 +479,8 @@ cli-pairing-post = {"    "}POST /pair，附带请求头 X-Pairing-Code: {$code}
 cli-pairing-restart = {"   "}重启 gateway 以生成新的配对码。
 cli-pairing-disabled = ⚠️  配置中已禁用 gateway 配对。
 cli-gateway-running-q = {"   "}gateway 是否正在运行？使用以下命令启动它：
-cli-status-title = 🦀 ZeroClaw 状态
-cli-security-status-title = ZeroClaw 安全状态
+cli-status-title = 🦀 ReiClaw 状态
+cli-security-status-title = ReiClaw 安全状态
 cli-security-status-source = 来源：      {$v}
 cli-security-status-agent = Agent：       {$v}
 cli-security-status-agent-enabled = Agent 已启用：{$enabled}
@@ -510,10 +510,10 @@ cli-status-service-running = 🟢 服务：       运行中
 cli-status-service-stopped = 🔴 服务：       已停止
 cli-status-channels = 通道：
 cli-status-cli-always = {"  "}CLI:      ✅ 始终
-cli-desktop-download = 下载 ZeroClaw 配套应用：
+cli-desktop-download = 下载 ReiClaw 配套应用：
 cli-desktop-homebrew = 或通过 Homebrew 安装（即将推出）：
 cli-desktop-linux-pkg = {"  "}下载适合您架构的 .deb 或 .AppImage。
-cli-desktop-launching = 正在启动 ZeroClaw 配套应用...
+cli-desktop-launching = 正在启动 ReiClaw 配套应用...
 cli-status-version = 版本：     {$v}
 cli-status-workspace = 工作区：   {$v}
 cli-status-config = 配置：      {$v}
@@ -527,7 +527,7 @@ cli-status-runtime = ⚙️  运行时：       {$v}
 cli-status-heartbeat = 💓 心跳：      {$v}
 cli-status-heartbeat-every-minutes = 每 {$minutes} 分钟
 heartbeat-delivery-missing-field = 设置 {$configured} 时，必须同时设置 {$required}。
-heartbeat-delivery-bridge-required = {$field} 指向 '{$bridge}'，但尚未配置 [gateway.bridges.{$bridge}]。心跳投递需要明确的网关桥接器和接收目标；旧 [channels.*] 配置已不再提供出站投递。请用 zeroclaw gateway bridge add 注册投递桥接器，然后在 [heartbeat] 中设置桥接器名称和接收目标。
+heartbeat-delivery-bridge-required = {$field} 指向 '{$bridge}'，但尚未配置 [gateway.bridges.{$bridge}]。心跳投递需要明确的网关桥接器和接收目标；旧 [channels.*] 配置已不再提供出站投递。请用 rei gateway bridge add 注册投递桥接器，然后在 [heartbeat] 中设置桥接器名称和接收目标。
 heartbeat-delivery-scoped-bridge = {$field} 指向带权限范围的桥接器 '{$bridge}'，它无法连接 /ws/bridge 或接收发件箱投递。请选择没有 device 或 owner 范围的投递桥接器，并保留原有限定凭据的权限。
 cli-status-memory = 🧠 内存：         {$backend}（自动保存：{$auto_save}）
 cli-status-companion-outbox-not-configured = Companion 发件箱：未配置
@@ -555,13 +555,13 @@ cli-status-word-configured = 已配置
 cli-status-word-not-configured = 未配置
 cli-status-channel-not-compiled = 🚫 已配置，未编译
 cli-status-channel-retired = ⚠️ 分节可解析，但无任何组件运行；请移除
-cli-desktop-not-installed = 未安装 ZeroClaw 配套应用。
+cli-desktop-not-installed = 未安装 ReiClaw 配套应用。
 cli-desktop-blurb1 = 该配套应用是一个轻量级菜单栏应用，
 cli-desktop-blurb2 = 它连接到与 CLI 相同的网关。
 cli-config-all-configured = 所有部分均已配置。
 cli-config-valid = 配置有效。
 cli-config-applied-ops = 已应用 {$count} 个操作：
-cli-config-section-degraded = 警告：{$path} 中的配置部分 `{$section}` 格式不正确，本次运行已重置为默认值。该部分中的值不会生效。请运行 `zeroclaw config validate` 查看解析错误，然后修复文件。
+cli-config-section-degraded = 警告：{$path} 中的配置部分 `{$section}` 格式不正确，本次运行已重置为默认值。该部分中的值不会生效。请运行 `rei config validate` 查看解析错误，然后修复文件。
 cli-estop-resume-done = 急停恢复已完成。
 cli-estop-engaged = 急停已启用。
 cli-estop-status = 急停状态：
@@ -576,7 +576,7 @@ cli-config-legend = 图例：💉 env 已覆盖  🔒 密钥
 cli-config-secret-set = {$path} 已设置（加密密钥——不显示值）
 cli-config-secret-unset = {$path} 未设置（加密密钥）
 cli-config-updated = {$path} 已更新。
-cli-config-review-hint = 运行 `zeroclaw config list` 进行查看，然后设置必填字段。
+cli-config-review-hint = 运行 `rei config list` 进行查看，然后设置必填字段。
 cli-estop-domains-none = {"  "}domain_blocks:  （无）
 cli-estop-domains = {"  "}domain_blocks:  {$v}
 cli-estop-tools-none = {"  "}tool_freeze:    （无）
@@ -591,7 +591,7 @@ cli-auth-oauth-visit = 访问：{$uri}
 cli-auth-oauth-code = 代码：  {$code}
 cli-auth-oauth-fast-link = 快速链接：{$uri}
 cli-auth-callback-capture-failed = 回调捕获失败：{$error}
-cli-auth-run-paste-redirect = 运行 `zeroclaw auth paste-redirect --model-provider {$provider} --profile {$profile}`
+cli-auth-run-paste-redirect = 运行 `rei auth paste-redirect --model-provider {$provider} --profile {$profile}`
 cli-auth-paste-redirect-requires-input = paste-redirect 需要重定向 URL 或 OAuth 代码
 cli-locales-about = 恢复当前构建自带的语言文件
 cli-locales-long-about =
@@ -601,8 +601,8 @@ cli-locales-long-about =
     语言可选 en 或 zh-CN。默认恢复全部目录，也可用 --catalog 选择 cli,tools。
 
     示例：
-      zeroclaw locales fetch zh-CN
-      zeroclaw locales fetch zh-CN --catalog tools
+      rei locales fetch zh-CN
+      rei locales fetch zh-CN --catalog tools
 cli-locales-fetch-about = 离线恢复当前构建自带的 FTL 语言文件
 cli-locales-restored = {"  "}已恢复内嵌 {$name} -> {$path}
 cli-locales-missing-builtin = 当前构建未包含 {$locale} 的 {$name} 翻译目录
@@ -621,9 +621,9 @@ cli-channels-notion = {"  "}{$status} Notion
 cli-channels-not-compiled-header = {"  "}已配置但未编译进此二进制文件：
 cli-channels-not-compiled-entry = {"  "}🚫 {$name}（已配置，未编译）
 cli-channels-build-hint = {"  "}请从源码构建：`./install.sh --source --preset full`、`--features channels-full`，或指定对应的 `channel-*` 功能。
-cli-channels-start-hint = 启动渠道：zeroclaw channel start
-cli-channels-doctor-hint = 检查健康状况：    zeroclaw channel doctor
-cli-channels-configure-hint = 配置方法：      zeroclaw config set channels.<name>.<field>=<value>
+cli-channels-start-hint = 启动渠道：rei channel start
+cli-channels-doctor-hint = 检查健康状况：    rei channel doctor
+cli-channels-configure-hint = 配置方法：      rei config set channels.<name>.<field>=<value>
 cli-channels-retired-header = {"  "}已配置的退役传输分节（不存在运行器）：
 cli-channels-retired-entry = {"  "}⚠️ {$name}（分节可解析，但无任何组件运行；请移除）
 cli-channels-retired-hint = {"  "}可用面：Telegram bridge、webhook 接入。
@@ -682,14 +682,14 @@ cli-bundle-renamed = 已重命名 skill_bundles.{$from} → skill_bundles.{$to}
 
 # ── Web 仪表盘重启提示 — 应用内升级后显示的 RestartInfo.hint（PR #8173）──
 # 前四个是按原样展示的 shell 命令模板，不作翻译。
-cli-gateway-restart-hint-kubernetes = kubectl rollout restart deployment/zeroclaw
+cli-gateway-restart-hint-kubernetes = kubectl rollout restart deployment/rei
 cli-gateway-restart-hint-container = docker compose restart
-cli-gateway-restart-hint-systemd = systemctl restart zeroclaw
-cli-gateway-restart-hint-launchd = launchctl kickstart -k <your-zeroclaw-label>
-cli-gateway-restart-hint-process = 重启 `zeroclaw daemon` 进程
+cli-gateway-restart-hint-systemd = systemctl restart rei
+cli-gateway-restart-hint-launchd = launchctl kickstart -k <your-rei-label>
+cli-gateway-restart-hint-process = 重启 `rei daemon` 进程
 
-cli-daemon-gateway-already-running = ZeroClaw gateway 已在 {$host}:{$port} 运行。daemon 会管理自己的 gateway，不会在同一地址启动第二个 gateway。请停止该 gateway（或使用 `zeroclaw config set gateway.port <port>` 将 daemon 指向空闲端口），然后重新运行 daemon。
-cli-daemon-gateway-port-occupied = Gateway 地址 {$host}:{$port} 已被另一个进程占用。请释放该端口或将 daemon 指向空闲端口（`zeroclaw config set gateway.port <port>`），然后重新运行 daemon。
+cli-daemon-gateway-already-running = ReiClaw gateway 已在 {$host}:{$port} 运行。daemon 会管理自己的 gateway，不会在同一地址启动第二个 gateway。请停止该 gateway（或使用 `rei config set gateway.port <port>` 将 daemon 指向空闲端口），然后重新运行 daemon。
+cli-daemon-gateway-port-occupied = Gateway 地址 {$host}:{$port} 已被另一个进程占用。请释放该端口或将 daemon 指向空闲端口（`rei config set gateway.port <port>`），然后重新运行 daemon。
 cli-agent-context-bar = ctx: {$used} / {$max}  {$bar}  {$pct}%
 cli-agent-context-bar-unknown = ctx: 未知 / {$max}
 cli-doctor-ctxwin-already-set = {$provider_ref}: 已有 context_window = {$ctx}
@@ -707,31 +707,31 @@ cli-doctor-context-window-zero = {$provider_ref}：context_window 为 0（无效
 cli-doctor-context-window-unset = {$provider_ref}：未设置 context_window — 选择此配置时将使用 {$fallback} 个令牌的回退值；该值可能远低于模型的实际上限；请在此配置中设置 context_window
 
 # ── Degraded config sections (doctor diagnose, #8835) ──
-cli-doctor-degraded-security = 安全关键配置节 `{$path}` 无效，已重置为默认值以便守护进程启动；当前运行的安全态势可能弱于预期。运行 `zeroclaw config validate` 查看解析错误，然后修复该文件。
-cli-doctor-degraded-section = 配置节 `{$path}` 格式错误，已重置为默认值；该节中的值当前不生效。运行 `zeroclaw config validate` 查看解析错误，然后修复该文件。
+cli-doctor-degraded-security = 安全关键配置节 `{$path}` 无效，已重置为默认值以便守护进程启动；当前运行的安全态势可能弱于预期。运行 `rei config validate` 查看解析错误，然后修复该文件。
+cli-doctor-degraded-section = 配置节 `{$path}` 格式错误，已重置为默认值；该节中的值当前不生效。运行 `rei config validate` 查看解析错误，然后修复该文件。
 
 cli-agent-interactive-flags-need-message =
-    { $flags } 仅在与 -m/--message 一起使用时生效。交互式 `zeroclaw agent` 会打开 `zeroclaw chat`，并使用为代理 "{ $agent }" 配置的模型。如需用这些覆盖执行单轮任务，请添加 -m "<消息>"，或修改该代理的配置。
+    { $flags } 仅在与 -m/--message 一起使用时生效。交互式 `rei agent` 会打开 `rei chat`，并使用为代理 "{ $agent }" 配置的模型。如需用这些覆盖执行单轮任务，请添加 -m "<消息>"，或修改该代理的配置。
 cli-agent-long-about =
     启动 AI 代理循环。
 cli-bridge-added = 网桥 "{$name}" 已保存到 [gateway.bridges.{$name}]。
 cli-bridge-apply = 重启网关（或 POST /admin/reload）后生效。
 cli-bridge-exists = 网桥 "{$name}" 已存在；传入 --rotate 可替换其令牌。
 cli-bridge-invalid-name = 无效的网桥名称 "{$name}"：请使用字母、数字、'-' 和 '_'。
-cli-bridge-list-empty = 未配置任何网桥。可使用以下命令添加：zeroclaw gateway bridge add <名称>
+cli-bridge-list-empty = 未配置任何网桥。可使用以下命令添加：rei gateway bridge add <名称>
 cli-bridge-list-no-sessions = （无）
 cli-bridge-list-row = {$name}：会话 {$scope}
 cli-bridge-removed = 网桥 "{$name}" 已移除；其令牌不再有效。
 cli-bridge-scope = 此令牌可打开的聊天会话：{$scope}
 cli-bridge-scope-none = 此令牌不能打开任何聊天会话；添加 --session 或 --session-prefix 可允许部分会话。
-cli-bridge-token-once = 网桥令牌（仅显示一次；请提供给网桥，例如作为 ZEROCLAW_GATEWAY_TOKEN）：
+cli-bridge-token-once = 网桥令牌（仅显示一次；请提供给网桥，例如作为 REI_GATEWAY_TOKEN）：
 cli-bridge-unknown = 未配置名为 "{$name}" 的网桥。
 cli-chat-aborted = （回合已取消）
 cli-chat-about = 通过网关与代理聊天
 cli-chat-approval-prompt = 允许 {$tool}？{$summary} [y]es / [a]lways / [N]o：
 cli-chat-attached = 会话 {$session}（代理 {$agent}），历史消息 {$history} 条。/quit 退出，/cancel 或 Ctrl+C 停止正在运行的回合。
 cli-chat-closed = 网关已关闭连接。
-cli-chat-connect-failed = 无法连接到 {$gateway} 的网关：{$error}。请用 `zeroclaw daemon` 或 `zeroclaw gateway start` 启动它，或传入 --gateway。
+cli-chat-connect-failed = 无法连接到 {$gateway} 的网关：{$error}。请用 `rei daemon` 或 `rei gateway start` 启动它，或传入 --gateway。
 cli-chat-connect-refused = {$gateway} 的网关拒绝了聊天：{$error}
 cli-chat-duplicate = 已处理过（{$state}）。
 cli-chat-error = 错误：{$message}
@@ -754,13 +754,13 @@ cli-skills-install-skill-not-in-catalog-empty = 在 {$url} 中未找到技能 '{
 cli-skills-install-skill-requires-git = --skill <名称> 需要一个 git 仓库 URL 作为来源（收到的是 '{$source}'）
 cli-telegram-about = 已退役 Telegram 运维命令的兼容性提示
 cli-telegram-long-about =
-    进程内 Telegram 监听器已退役。Telegram 消息接入和游标恢复由 zeroclaw-bridge-telegram 负责。
+    进程内 Telegram 监听器已退役。Telegram 消息接入和游标恢复由 rei-bridge-telegram 负责。
 
     skip-update 保留参数解析以兼容旧调用，并返回迁移错误。它不会写入跳过标记，也不会推进桥接器游标。
 cli-telegram-skip-update-about = 查看已退役 Telegram 跳过命令的迁移说明
 cli-telegram-skip-update-long-about =
-    进程内 Telegram 监听器及其跳过标记已退役。这个兼容命令会返回迁移错误，不会写入标记。Telegram 消息接入和游标恢复由 zeroclaw-bridge-telegram 负责；本命令无法跳过桥接器的更新。
-telegram-skip-update-retired = 进程内 Telegram 监听器和 telegram skip-update 命令已退役，未写入跳过标记。Telegram 消息接入和游标恢复由 zeroclaw-bridge-telegram 负责；本命令无法跳过桥接器的更新。
+    进程内 Telegram 监听器及其跳过标记已退役。这个兼容命令会返回迁移错误，不会写入标记。Telegram 消息接入和游标恢复由 rei-bridge-telegram 负责；本命令无法跳过桥接器的更新。
+telegram-skip-update-retired = 进程内 Telegram 监听器和 telegram skip-update 命令已退役，未写入跳过标记。Telegram 消息接入和游标恢复由 rei-bridge-telegram 负责；本命令无法跳过桥接器的更新。
 tool-runtime-command-build-failed = 构建运行时命令失败：{$error}
 tool-runtime-command-docker-allowed-root = 构建运行时命令失败：无法规范化 Docker 工作区根 {$path}：{$cause}
 tool-runtime-command-docker-workspace-path = 构建运行时命令失败：无法规范化 Docker 工作区路径 {$path}：{$cause}

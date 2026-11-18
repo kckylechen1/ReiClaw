@@ -438,7 +438,7 @@ pub(super) async fn run() -> Result<()> {
                 output.error(id, -32602, "ACP_INVALID_INITIALIZE").await?;
             } else {
                 initialized = true;
-                output.reply(id, json!({"protocolVersion":1,"agentCapabilities":{},"agentInfo":{"name":"zeroclaw-acp-bridge","version":env!("CARGO_PKG_VERSION")},"authMethods":[]})).await?;
+                output.reply(id, json!({"protocolVersion":1,"agentCapabilities":{},"agentInfo":{"name":"rei-acp-bridge","version":env!("CARGO_PKG_VERSION")},"authMethods":[]})).await?;
             }
             continue;
         }

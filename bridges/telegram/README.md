@@ -1,15 +1,15 @@
-# zeroclaw-bridge-telegram
+# reiclaw-bridge-telegram
 
-A Telegram bridge for the ZeroClaw gateway. It runs as its own process and
-attaches to the gateway's `/ws/chat` socket, the same way `zeroclaw chat`
+A Telegram bridge for the ReiClaw gateway. It runs as its own process and
+attaches to the gateway's `/ws/chat` socket, the same way `rei chat`
 does. The core has no Telegram code on this path. The bridge only relays
 between one Telegram private chat and one gateway session.
 
 ```sh
-cargo build -p zeroclaw-bridge-telegram
-zeroclaw gateway bridge add telegram --session main   # prints a zcb_... token once
-TELEGRAM_BOT_TOKEN=123:abc TELEGRAM_OWNER_ID=4242 ZEROCLAW_GATEWAY_TOKEN=zcb_... \
-  zeroclaw-bridge-telegram --agent assistant
+cargo build -p reiclaw-bridge-telegram
+rei gateway bridge add telegram --session main   # prints a zcb_... token once
+TELEGRAM_BOT_TOKEN=123:abc TELEGRAM_OWNER_ID=4242 REI_GATEWAY_TOKEN=zcb_... \
+  rei-bridge-telegram --agent assistant
 ```
 
 The gateway token is a bridge token (`[gateway.bridges.telegram]`), scoped
@@ -26,7 +26,7 @@ a durable session backend. A paired token cannot negotiate source intake.
 | `--agent` | | required | Agent alias (`[agents.<alias>]` on the gateway) |
 | `--session` | | `main` | Gateway session the owner's chat maps to |
 | `--gateway` | | `ws://127.0.0.1:42617` | Gateway WebSocket base URL |
-| `--gateway-token` | `ZEROCLAW_GATEWAY_TOKEN` | none | Bridge token from `zeroclaw gateway bridge add` |
+| `--gateway-token` | `REI_GATEWAY_TOKEN` | none | Bridge token from `rei gateway bridge add` |
 | `--telegram-api` | | `https://api.telegram.org` | Bot API base URL (tests point it at a fake) |
 
 Pass the tokens through the environment. Values given as flags show up in
@@ -46,7 +46,7 @@ for the owner.
 The owner's chat maps to the configured agent and session, `main` by
 default. Every client attached to that session shares one conversation:
 
-- A turn started on Telegram streams to `zeroclaw chat -a <agent> -s main` on a
+- A turn started on Telegram streams to `rei chat -a <agent> -s main` on a
   laptop, and a turn started on the laptop is mirrored into the Telegram
   chat.
 - A Telegram message sent while a turn runs waits durably for its own turn.
@@ -120,7 +120,7 @@ messages in the gateway's outbox, and the gateway sends them here as
 scoped to this session, including when pairing is disabled. Tokenless chat
 can display a prompt but cannot answer it. Questions use Telegram ForceReply. Reply to that specific bot
 message with free text, an exact choice, or its number; ordinary chat and replies to ordinary bot text remain
-ordinary Gateway messages. Question messages carry a reserved `[ZeroClaw question]`
+ordinary Gateway messages. Question messages carry a reserved `[ReiClaw question]`
 marker so unknown or expired question replies can be refused after mapping loss.
 Ordinary model/proactive text beginning with this reserved marker uses a fullwidth
 opening bracket when rendered, so it remains ordinary text when replied to. The bridge checks the owner and private chat

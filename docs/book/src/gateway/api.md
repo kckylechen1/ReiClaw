@@ -511,7 +511,7 @@ expires. `zeroclaw chat` supports `/answer <request_id> <text or choice number>`
 ## Channel bridges
 
 A bridge is a channel that runs as its own process, for example
-`zeroclaw-bridge-telegram` (ADR-013). It relays conversations through
+`rei-bridge-telegram` (ADR-013). It relays conversations through
 `/ws/chat` and receives proactive messages (cron output, heartbeat alerts,
 the `notify` tool) on the `/ws/bridge` control socket.
 
@@ -675,15 +675,15 @@ invoking user with mode `0600`. Revoke the entry and disconnect clients before
 downgrading to a binary that does not understand `owner`; an old binary may
 otherwise interpret it as an unrestricted legacy channel bridge.
 
-Build the `zeroclaw-acp-bridge` binary from the independent
-`zeroclaw-bridge-acp` package:
+Build the `rei-acp-bridge` binary from the independent
+`reiclaw-bridge-acp` package:
 
 ```bash
-scripts/dev/cargo-local.sh build --release --locked -p zeroclaw-bridge-acp --bin zeroclaw-acp-bridge
+scripts/dev/cargo-local.sh build --release --locked -p reiclaw-bridge-acp --bin rei-acp-bridge
 ```
 
 The bridge uses JSON-RPC and gateway transport, with shared locale discovery
-and Fluent strings from `zeroclaw-config`. It does not compile the runtime,
+and Fluent strings from `reiclaw-config`. It does not compile the runtime,
 providers, memory, tools or gateway crates, and never constructs an Agent or
 ACP database. The source installer and Nix package also install this binary
 when the selected root features enable `agent-runtime`, including indirectly.
@@ -1462,7 +1462,7 @@ restart recovery. Attachment handles expire after 15 minutes regardless.
 ## Local read-only Node host
 
 Build the opt-in foreground host with
-`scripts/dev/cargo-local.sh build --bin zeroclaw-node-host --features nodes`.
+`scripts/dev/cargo-local.sh build --bin rei-node-host --features nodes`.
 The gateway also needs the `nodes` feature and `[nodes] enabled = true`.
 Keep the gateway listener on loopback for this local proof. The existing node
 bearer authentication and Ed25519 pairing are both required; starting the host

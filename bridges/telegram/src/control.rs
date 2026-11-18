@@ -101,7 +101,7 @@ pub async fn run(api: Api, gateway: String, token: String, owner_id: i64) {
                             })),
                         "the gateway refused the control socket; proactive messages \
                          (cron, notify) are off. Use a bridge token from \
-                         `zeroclaw gateway bridge add`"
+                         `rei gateway bridge add`"
                     );
                     return;
                 }

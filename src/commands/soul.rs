@@ -1,4 +1,4 @@
-//! `zeroclaw soul` — Soul diagnostics.
+//! `rei soul` — Soul diagnostics.
 
 use anyhow::Result;
 use reiclaw_runtime::agent::soul_check::{

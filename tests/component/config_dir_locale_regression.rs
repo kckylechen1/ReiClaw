@@ -1,5 +1,5 @@
 //! Regression: `--config-dir` must drive CLI locale detection, not only the
-//! `ZEROCLAW_CONFIG_DIR` env var.
+//! `REI_CONFIG_DIR` env var.
 //!
 //! Before the fix, locale was detected (and the clap help tree translated)
 //! *before* the parsed `--config-dir` flag was applied to the environment, so
@@ -49,15 +49,15 @@ where
     I: IntoIterator<Item = S>,
     S: AsRef<OsStr>,
 {
-    let out = Command::new(env!("CARGO_BIN_EXE_zeroclaw"))
+    let out = Command::new(env!("CARGO_BIN_EXE_rei"))
         .args(args)
         .output()
-        .expect("failed to run zeroclaw --help");
+        .expect("failed to run rei --help");
     let stdout = String::from_utf8_lossy(&out.stdout);
     let stderr = String::from_utf8_lossy(&out.stderr);
     assert!(
         out.status.success(),
-        "zeroclaw help failed with status {:?}\nstdout:\n{stdout}\nstderr:\n{stderr}",
+        "rei help failed with status {:?}\nstdout:\n{stdout}\nstderr:\n{stderr}",
         out.status.code()
     );
     stdout.into_owned()
@@ -140,7 +140,7 @@ async fn locales_fetch_restores_same_build_catalogs_without_network() {
     let proxy_url = format!("http://{}", proxy.local_addr().unwrap());
 
     for catalogs in [Some("tools"), None] {
-        let mut command = tokio::process::Command::new(env!("CARGO_BIN_EXE_zeroclaw"));
+        let mut command = tokio::process::Command::new(env!("CARGO_BIN_EXE_rei"));
         command
             .kill_on_drop(true)
             .arg("--config-dir")

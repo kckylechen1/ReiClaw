@@ -102,10 +102,10 @@ and WebSocket connections. Bind address defaults to the values in \
 your config file (gateway.host / gateway.port).
 
 Examples:
-  zeroclaw gateway start              # use config defaults
-  zeroclaw gateway start -p 8080      # listen on port 8080
-  zeroclaw gateway start --host 0.0.0.0   # requires [gateway].allow_public_bind=true or a tunnel
-  zeroclaw gateway start -p 0         # random available port")]
+  rei gateway start              # use config defaults
+  rei gateway start -p 8080      # listen on port 8080
+  rei gateway start --host 0.0.0.0   # requires [gateway].allow_public_bind=true or a tunnel
+  rei gateway start -p 0         # random available port")]
     Start {
         /// Port to listen on (use 0 for random available port); defaults to config gateway.port
         #[arg(short, long)]
@@ -130,8 +130,8 @@ Stops the running gateway if present, then starts a new instance \
 with the current configuration.
 
 Examples:
-  zeroclaw gateway restart            # restart with config defaults
-  zeroclaw gateway restart -p 8080    # restart on port 8080")]
+  rei gateway restart            # restart with config defaults
+  rei gateway restart -p 8080    # restart on port 8080")]
     Restart {
         /// Port to listen on (use 0 for random available port); defaults to config gateway.port
         #[arg(short, long)]
@@ -168,11 +168,11 @@ With --rotate-device ID, revokes just that device's bearer token \
 and issues a fresh code for re-pairing that one device.
 
 Examples:
-  zeroclaw gateway get-paircode               # show current pairing code
-  zeroclaw gateway get-paircode --new         # add another client (no revocation)
-  zeroclaw gateway get-paircode --rotate      # revoke ALL tokens, then issue a code
-  zeroclaw gateway get-paircode --rotate-device dash-1  # revoke one device's token
-  zeroclaw gateway get-paircode --new --port 3001 # target alternate-port gateway")]
+  rei gateway get-paircode               # show current pairing code
+  rei gateway get-paircode --new         # add another client (no revocation)
+  rei gateway get-paircode --rotate      # revoke ALL tokens, then issue a code
+  rei gateway get-paircode --rotate-device dash-1  # revoke one device's token
+  rei gateway get-paircode --new --port 3001 # target alternate-port gateway")]
     GetPaircode {
         /// Generate a new pairing code for adding a client (does not revoke existing tokens)
         #[arg(long)]
@@ -199,24 +199,24 @@ Examples:
     #[command(long_about = "\
 Manage channel bridges ([gateway.bridges.<name>]).
 
-A bridge is a separate process, such as zeroclaw-bridge-telegram, that \
+A bridge is a separate process, such as rei-bridge-telegram, that \
 relays a messaging platform through /ws/chat and receives proactive \
 messages (cron output, heartbeat alerts, the notify tool) on /ws/bridge. \
 It authenticates with its own token, which pairing never issues. Only the \
 token's SHA-256 hash is stored in the config.
 
 Examples:
-  zeroclaw gateway bridge add telegram --session main
-  zeroclaw gateway bridge add telegram --rotate
-  zeroclaw gateway bridge list
-  zeroclaw gateway bridge remove telegram")]
+  rei gateway bridge add telegram --session main
+  rei gateway bridge add telegram --rotate
+  rei gateway bridge list
+  rei gateway bridge remove telegram")]
     Bridge {
         #[command(subcommand)]
         bridge_command: BridgeCommands,
     },
 }
 
-/// Channel bridge subcommands (`zeroclaw gateway bridge ...`)
+/// Channel bridge subcommands (`rei gateway bridge ...`)
 #[derive(Subcommand, Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 pub enum BridgeCommands {
     /// Mint a bridge token, store its hash, and print the token once
@@ -291,7 +291,7 @@ configuration keys for that channel type.
 Supported types: telegram, webhook.
 
 Examples:
-  zeroclaw channel add telegram '{\"bot_token\":\"...\",\"name\":\"my-bot\"}'")]
+  rei channel add telegram '{\"bot_token\":\"...\",\"name\":\"my-bot\"}'")]
     Add {
         /// Channel type (telegram, webhook)
         channel_type: String,
@@ -318,9 +318,9 @@ Without it the identity is bound to the `default` alias and a \
 non-default agent will keep asking for approval.
 
 Examples:
-  zeroclaw channel bind-telegram zeroclaw_user
-  zeroclaw channel bind-telegram 123456789
-  zeroclaw channel bind-telegram 123456789 --alias alerts")]
+  rei channel bind-telegram rei_user
+  rei channel bind-telegram 123456789
+  rei channel bind-telegram 123456789 --alias alerts")]
     BindTelegram {
         /// Telegram identity to allow (username without '@' or numeric user ID)
         identity: String,
@@ -343,7 +343,7 @@ The --channel-id selects the channel by its config section name \
 platform-specific destination (e.g. a Telegram chat ID).
 
 Examples:
-  zeroclaw channel send 'Someone is near your device.' --channel-id telegram --recipient 123456789")]
+  rei channel send 'Someone is near your device.' --channel-id telegram --recipient 123456789")]
     Send {
         /// Message text to send
         message: String,
@@ -481,8 +481,8 @@ plus the canonical optional subdirs (scripts/, references/, assets/). \
 Name must be lowercase + hyphens; description is required (prompted on TTY if omitted).
 
 Examples:
-  zeroclaw skills add code-review --bundle official --description \"Review PRs.\"
-  zeroclaw skills add ops-runbook --description \"Triage prod incidents.\" --edit")]
+  rei skills add code-review --bundle official --description \"Review PRs.\"
+  rei skills add ops-runbook --description \"Triage prod incidents.\" --edit")]
     Add {
         /// Skill name (lowercase + hyphens only)
         name: String,
@@ -573,7 +573,7 @@ Examples:
     },
 }
 
-/// Skill bundle subcommands (`zeroclaw skills bundle <op>`)
+/// Skill bundle subcommands (`rei skills bundle <op>`)
 #[derive(Subcommand, Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 pub enum SkillBundleCommands {
     /// List configured skill bundles and their resolved directories
@@ -613,7 +613,7 @@ pub enum SkillBundleCommands {
 /// Migration subcommands
 #[derive(Subcommand, Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 pub enum MigrateCommands {
-    /// Import memory from an `OpenClaw` workspace into this `ZeroClaw` workspace
+    /// Import memory from an `OpenClaw` workspace into this `ReiClaw` workspace
     Openclaw {
         /// Optional path to `OpenClaw` workspace (defaults to ~/.openclaw/workspace)
         #[arg(long)]
@@ -644,9 +644,9 @@ When --tz is omitted, cron schedules use the runtime local timezone. \
 For user-facing schedules, pass --tz with an explicit IANA timezone.
 
 Examples:
-  zeroclaw cron add '0 9 * * 1-5' 'Good morning' --tz America/New_York --agent
-  zeroclaw cron add '*/30 * * * *' 'Check system health' --agent
-  zeroclaw cron add '*/5 * * * *' 'echo ok'")]
+  rei cron add '0 9 * * 1-5' 'Good morning' --tz America/New_York --agent
+  rei cron add '*/30 * * * *' 'Check system health' --agent
+  rei cron add '*/5 * * * *' 'echo ok'")]
     Add {
         /// Cron expression
         expression: String,
@@ -679,8 +679,8 @@ The timestamp must include an explicit Z or numeric offset \
 (e.g. 2025-01-15T14:00:00Z or 2025-01-15T09:00:00-05:00).
 
 Examples:
-  zeroclaw cron add-at --agent morning-shift 2025-01-15T14:00:00Z 'Send reminder'
-  zeroclaw cron add-at --agent morning-shift --prompt 2025-12-31T23:59:00Z 'Happy New Year!'")]
+  rei cron add-at --agent morning-shift 2025-01-15T14:00:00Z 'Send reminder'
+  rei cron add-at --agent morning-shift --prompt 2025-12-31T23:59:00Z 'Happy New Year!'")]
     AddAt {
         /// One-shot RFC3339 timestamp with explicit Z or offset
         at: String,
@@ -707,8 +707,8 @@ Add a task that repeats at a fixed interval.
 Interval is specified in milliseconds. For example, 60000 = 1 minute.
 
 Examples:
-  zeroclaw cron add-every --agent triage 60000 'Ping heartbeat'
-  zeroclaw cron add-every --agent triage 3600000 'Hourly report'")]
+  rei cron add-every --agent triage 60000 'Ping heartbeat'
+  rei cron add-every --agent triage 3600000 'Hourly report'")]
     AddEvery {
         /// Interval in milliseconds
         every_ms: u64,
@@ -736,8 +736,8 @@ Accepts human-readable durations: s (seconds), m (minutes), \
 h (hours), d (days).
 
 Examples:
-  zeroclaw cron once --agent ops-bot 30m 'Run backup in 30 minutes'
-  zeroclaw cron once --agent researcher --prompt 2h 'Follow up on deployment'")]
+  rei cron once --agent ops-bot 30m 'Run backup in 30 minutes'
+  rei cron once --agent researcher --prompt 2h 'Follow up on deployment'")]
     Once {
         /// Delay duration
         delay: String,
@@ -769,9 +769,9 @@ Update one or more fields of an existing scheduled task.
 Only the fields you specify are changed; others remain unchanged.
 
 Examples:
-  zeroclaw cron update TASK_ID --expression '0 8 * * *'
-  zeroclaw cron update TASK_ID --tz Europe/London --name 'Morning check'
-  zeroclaw cron update TASK_ID --command 'Updated message'")]
+  rei cron update TASK_ID --expression '0 8 * * *'
+  rei cron update TASK_ID --tz Europe/London --name 'Morning check'
+  rei cron update TASK_ID --command 'Updated message'")]
     Update {
         /// Task ID
         id: String,
@@ -849,7 +849,7 @@ pub enum MemoryCommands {
     },
     /// Rebuild backend indexes: FTS tables + any missing embedding vectors.
     ///
-    /// Run after `zeroclaw migrate openclaw` or other bulk writes that
+    /// Run after `rei migrate openclaw` or other bulk writes that
     /// land rows with `embedding = NULL`. Safe to re-run; only touches
     /// entries whose vector is missing. No-op for backends without a
     /// vector index.

@@ -20,7 +20,7 @@ const MUST_EXCLUDE: &[&str] = &[
     ".env",
     ".tmp_*",
     ".git/config",
-    "target/release/zeroclaw",
+    "target/release/rei",
     ".github/workflows/ci.yml",
 ];
 

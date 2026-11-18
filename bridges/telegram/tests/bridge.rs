@@ -12,13 +12,13 @@ use axum::Router;
 use axum::extract::{Json, Path, State};
 use axum::routing::post;
 use futures_util::{SinkExt, StreamExt};
+use reiclaw_bridge_telegram::{BridgeConfig, run};
 use reiclaw_gateway_client::ConnectOptions;
 use serde_json::{Value, json};
 use tokio::net::{TcpListener, TcpStream};
 use tokio::sync::mpsc;
 use tokio_tungstenite::WebSocketStream;
 use tokio_tungstenite::tungstenite::Message;
-use zeroclaw_bridge_telegram::{BridgeConfig, run};
 
 const OWNER: i64 = 42;
 const STRANGER: i64 = 7;
@@ -671,7 +671,7 @@ async fn questions_bind_owner_replies_and_wait_for_gateway_acceptance() {
     let reply = |from, reply_id, text| {
         json!({"message":{
             "message_id":1001, "from":{"id":from}, "chat":{"id":from,"type":"private"}, "text":text,
-            "reply_to_message":{"message_id":reply_id,"text":"[ZeroClaw question] fixture"}
+            "reply_to_message":{"message_id":reply_id,"text":"[ReiClaw question] fixture"}
         }})
     };
     FakeTelegram::push(&tg, reply(STRANGER, message_id, "intruder"));
@@ -686,11 +686,11 @@ async fn questions_bind_owner_replies_and_wait_for_gateway_acceptance() {
     assert_eq!(recv(&mut ws).await["content"], "reply to ordinary text");
     send(
         &mut ws,
-        json!({"type":"chunk", "content":"[ZeroClaw question] ordinary model text"}),
+        json!({"type":"chunk", "content":"[ReiClaw question] ordinary model text"}),
     )
     .await;
     let escaped = FakeTelegram::wait_for(&tg, "sendMessage", |b| {
-        b["text"] == "［ZeroClaw question] ordinary model text"
+        b["text"] == "［ReiClaw question] ordinary model text"
     })
     .await;
     let mut normal = reply(OWNER, 8888, "reply to reserved-looking ordinary text");
@@ -1302,7 +1302,7 @@ async fn an_overlong_final_reply_arrives_as_one_document() {
 
     let document = FakeTelegram::wait_for(&tg, "sendDocument", |b| b["chat_id"] == OWNER).await;
     assert_eq!(document["caption"], "(full reply attached)");
-    assert_eq!(document["filename"], "zeroclaw-reply.txt");
+    assert_eq!(document["filename"], "rei-reply.txt");
     assert!(
         document["bytes"].as_u64().unwrap() > (4096 * 5) as u64,
         "the document carries the complete reply"

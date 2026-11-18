@@ -11,7 +11,7 @@ url="https://github.com/kckylechen1/ReiClaw"
 license=('MIT' 'Apache-2.0')
 depends=('gcc-libs' 'openssl')
 makedepends=('cargo' 'git' 'nodejs' 'npm')
-provides=('zeroclaw' 'rei')
+provides=('rei')
 conflicts=('zeroclaw')
 source=("${pkgname}-${pkgver}.tar.gz::https://github.com/kckylechen1/ReiClaw/archive/refs/tags/v${pkgver}.tar.gz")
 sha256sums=('SKIP')
@@ -39,7 +39,7 @@ build() {
 
 package() {
   cd "${_reponame}-${pkgver}"
-  install -Dm0755 -t "${pkgdir}/usr/bin/" "target/dist/rei" "target/dist/zeroclaw"
+  install -Dm0755 -t "${pkgdir}/usr/bin/" "target/dist/rei"
 
   # Install web dashboard assets (served from filesystem at runtime)
   install -dm0755 "${pkgdir}/usr/share/${pkgname}/web/dist"

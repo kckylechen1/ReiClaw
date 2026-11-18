@@ -159,7 +159,7 @@ exit /b 97
         @{ Flags = @('--all', '--dry-run'); Mode = 'all' }
     )) {
         $output = Invoke-Setup $fork $true $case.Flags
-        Assert-Contains $output "Building ZeroClaw ($($case.Mode) "
+        Assert-Contains $output "Building ReiClaw ($($case.Mode) "
         Assert-Contains $output '[dry-run] Would run: cargo build --release --locked'
         Assert-Contains $output 'Dry run complete.'
     }
@@ -175,12 +175,12 @@ exit /b 97
 
     $output = Invoke-Setup $outside $false @('--dry-run')
     Assert-Contains $output 'Run this script from the fork repository root'
-    foreach ($origin in @('https://github.com/kckylechen1/ReiClaw', 'git@github.com:kckylechen1/ReiClaw', 'git@github.com:kckylechen1/ReiClaw.git', 'ssh://git@github.com/kckylechen1/ReiClaw', 'ssh://git@github.com/kckylechen1/ReiClaw.git', 'HTTPS://GITHUB.COM/KCKYLECHEN1/REICLAW.GIT', 'https://github.com/kckylechen1/zeroclaw', 'https://github.com/kckylechen1/zeroclaw.git', 'git@github.com:kckylechen1/zeroclaw', 'git@github.com:kckylechen1/zeroclaw.git', 'ssh://git@github.com/kckylechen1/zeroclaw', 'ssh://git@github.com/kckylechen1/zeroclaw.git', 'HTTPS://GITHUB.COM/KCKYLECHEN1/ZEROCLAW.GIT')) {
+    foreach ($origin in @('https://github.com/kckylechen1/ReiClaw', 'git@github.com:kckylechen1/ReiClaw', 'git@github.com:kckylechen1/ReiClaw.git', 'ssh://git@github.com/kckylechen1/ReiClaw', 'ssh://git@github.com/kckylechen1/ReiClaw.git', 'HTTPS://GITHUB.COM/KCKYLECHEN1/REICLAW.GIT')) {
         $null = Invoke-Git @('-C', $fork, 'remote', 'set-url', 'origin', $origin)
         $output = Invoke-Setup $fork $true @('--dry-run')
         Assert-Contains $output '[dry-run] Would run: cargo build --release --locked'
     }
-    foreach ($origin in @('https://github.com/kckylechen1/ReiClaw.git/extra', 'https://github.com/kckylechen1/ReiClaw.git ', "https://github.com/kckylechen1/ReiClaw.git`nhttps://example.invalid/extra", 'https://github.com/kckylechen1/zeroclaw.git/extra')) {
+    foreach ($origin in @('https://github.com/kckylechen1/ReiClaw.git/extra', 'https://github.com/kckylechen1/ReiClaw.git ', "https://github.com/kckylechen1/ReiClaw.git`nhttps://example.invalid/extra", 'https://github.com/kckylechen1/zeroclaw', 'https://github.com/kckylechen1/zeroclaw.git', 'https://github.com/kckylechen1/zeroclaw.git/extra')) {
         $null = Invoke-Git @('-C', $fork, 'remote', 'set-url', 'origin', $origin)
         $output = Invoke-Setup $fork $false @('--dry-run')
         Assert-Contains $output 'Source origin is not this fork'

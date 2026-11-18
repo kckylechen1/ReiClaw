@@ -2,12 +2,12 @@ use std::time::Duration;
 
 use anyhow::{Context, Result};
 use clap::Parser;
+use reiclaw_bridge_telegram::{BridgeConfig, run};
 use reiclaw_gateway_client::ConnectOptions;
-use zeroclaw_bridge_telegram::{BridgeConfig, run};
 
-/// Relay the owner's private Telegram chat to a ZeroClaw gateway session.
+/// Relay the owner's private Telegram chat to a ReiClaw gateway session.
 #[derive(Debug, Parser)]
-#[command(name = "zeroclaw-bridge-telegram", version)]
+#[command(name = "rei-bridge-telegram", version)]
 struct Args {
     /// Bot token from @BotFather
     #[arg(long, env = "TELEGRAM_BOT_TOKEN", hide_env_values = true)]
@@ -21,15 +21,15 @@ struct Args {
     #[arg(long, default_value = "ws://127.0.0.1:42617")]
     gateway: String,
 
-    /// Bridge token from `zeroclaw gateway bridge add` (opens the chat and control sockets)
-    #[arg(long, env = "ZEROCLAW_GATEWAY_TOKEN", hide_env_values = true)]
+    /// Bridge token from `rei gateway bridge add` (opens the chat and control sockets)
+    #[arg(long, env = "REI_GATEWAY_TOKEN", hide_env_values = true)]
     gateway_token: Option<String>,
 
     /// Agent alias to talk to (must match `[agents.<alias>]` on the gateway)
     #[arg(long)]
     agent: String,
 
-    /// Session the owner's chat maps to; shared with `zeroclaw chat -s <session>`
+    /// Session the owner's chat maps to; shared with `rei chat -s <session>`
     #[arg(long, default_value = "main")]
     session: String,
 

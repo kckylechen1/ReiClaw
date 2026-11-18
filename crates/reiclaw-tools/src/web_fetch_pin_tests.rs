@@ -233,7 +233,7 @@ fn configured_proxy_cannot_bypass_the_pin() {
 #[tokio::test]
 async fn redirect_rejection_suppresses_firecrawl_but_normal_fallback_still_works() {
     // Scope the fixture API key to a child, never mutate parallel test globals.
-    const KEY: &str = "ZEROCLAW_PIN_FIRECRAWL_FIXTURE";
+    const KEY: &str = "REI_PIN_FIRECRAWL_FIXTURE";
     if std::env::var_os(KEY).is_none() {
         let output = std::process::Command::new(std::env::current_exe().unwrap())
             .args(["--exact", "web_fetch::pin_contract::redirect_rejection_suppresses_firecrawl_but_normal_fallback_still_works", "--nocapture"])

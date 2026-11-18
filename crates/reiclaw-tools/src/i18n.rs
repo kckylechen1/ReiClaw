@@ -144,24 +144,29 @@ fn missing_tool_string(key: &str) -> String {
 }
 
 fn detect_locale() -> String {
-    if let Ok(custom) = std::env::var("ZEROCLAW_CONFIG_DIR") {
-        let trimmed = custom.trim();
-        if !trimmed.is_empty() {
-            let path = std::path::PathBuf::from(trimmed).join("config.toml");
-            if let Some(locale) = std::fs::read_to_string(path)
+    if let Some(custom) = std::env::var("REI_CONFIG_DIR")
+        .ok()
+        .filter(|s| !s.trim().is_empty())
+        .or_else(|| {
+            std::env::var("REICLAW_CONFIG_DIR")
                 .ok()
-                .and_then(|c| c.parse::<toml::Table>().ok())
-                .and_then(locale_from_table)
-            {
-                return locale;
-            }
+                .filter(|s| !s.trim().is_empty())
+        })
+    {
+        let path = std::path::PathBuf::from(custom.trim()).join("config.toml");
+        if let Some(locale) = std::fs::read_to_string(path)
+            .ok()
+            .and_then(|c| c.parse::<toml::Table>().ok())
+            .and_then(locale_from_table)
+        {
+            return locale;
         }
     }
 
     if let Some(base) = directories::BaseDirs::new() {
         let candidates = [
-            base.home_dir().join(".zeroclaw/config.toml"),
-            base.config_dir().join("zeroclaw/config.toml"),
+            base.home_dir().join(".rei/config.toml"),
+            base.config_dir().join("rei/config.toml"),
         ];
         for path in candidates {
             if let Some(locale) = std::fs::read_to_string(path)

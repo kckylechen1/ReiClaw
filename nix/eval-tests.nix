@@ -8,17 +8,17 @@ let
   lib = pkgs.lib;
 
   stubPackage =
-    pkgs.runCommand "zeroclaw-eval-stub"
+    pkgs.runCommand "reiclaw-eval-stub"
       {
-        meta.mainProgram = "zeroclaw";
+        meta.mainProgram = "rei";
       }
       ''
         mkdir -p $out/bin
-        cat > $out/bin/zeroclaw <<'EOF'
+        cat > $out/bin/rei <<'EOF'
         #!${pkgs.runtimeShell}
         exit 0
         EOF
-        chmod +x $out/bin/zeroclaw
+        chmod +x $out/bin/rei
       '';
 
   mkInstance =
@@ -44,7 +44,7 @@ let
           system.stateVersion = "26.05";
         }
         {
-          services.zeroclaw.instances = instances;
+          services.reiclaw.instances = instances;
         }
       ];
     }).config;
@@ -81,29 +81,29 @@ in
 {
   duplicateCreatedUsersFail = assertFailsWith "duplicate created users" "same `user` while also setting `createUser = true`" {
     first = mkInstance {
-      user = "zeroclaw-shared";
+      user = "reiclaw-shared";
     };
     second = mkInstance {
-      user = "zeroclaw-shared";
+      user = "reiclaw-shared";
     };
   };
 
   sharedUserWithSingleCreatorPasses = assertPasses "shared user with one creator" {
     owner = mkInstance { };
     shared = mkInstance {
-      user = "zeroclaw-owner";
-      group = "zeroclaw-owner";
+      user = "reiclaw-owner";
+      group = "reiclaw-owner";
       createUser = false;
-      dataDir = "/var/lib/zeroclaw-shared";
+      dataDir = "/var/lib/reiclaw-shared";
     };
   };
 
   distinctCreatedUsersMayShareGroup = assertPasses "distinct created users sharing group" {
     first = mkInstance {
-      group = "zeroclaw-shared-group";
+      group = "reiclaw-shared-group";
     };
     second = mkInstance {
-      group = "zeroclaw-shared-group";
+      group = "reiclaw-shared-group";
     };
   };
 }

@@ -96,9 +96,9 @@ fn test_state(config: Config) -> AppState {
 }
 
 fn run_cli_patch_output(config_dir: &std::path::Path, patch_doc: &[u8]) -> Output {
-    let bin = env!("CARGO_BIN_EXE_zeroclaw");
+    let bin = env!("CARGO_BIN_EXE_rei");
     Command::new(bin)
-        .env("ZEROCLAW_CONFIG_DIR", config_dir)
+        .env("REI_CONFIG_DIR", config_dir)
         .env("RUST_LOG", "off")
         .args(["config", "patch", "--json", "-"])
         .stdin(Stdio::piped())
@@ -122,9 +122,9 @@ fn run_cli_patch_output(config_dir: &std::path::Path, patch_doc: &[u8]) -> Outpu
 /// Run `zeroclaw config patch - ` **without** `--json`, exercising the
 /// human-readable failure branch of `config_patch_fail_json_or_human`.
 fn run_cli_patch_output_human(config_dir: &std::path::Path, patch_doc: &[u8]) -> Output {
-    let bin = env!("CARGO_BIN_EXE_zeroclaw");
+    let bin = env!("CARGO_BIN_EXE_rei");
     Command::new(bin)
-        .env("ZEROCLAW_CONFIG_DIR", config_dir)
+        .env("REI_CONFIG_DIR", config_dir)
         .env("RUST_LOG", "off")
         .args(["config", "patch", "-"])
         .stdin(Stdio::piped())
@@ -676,9 +676,9 @@ fn config_patch_replace_on_dotted_resource_id_does_not_plant_phantom_sibling() {
 }
 
 fn run_cli_init(config_dir: &std::path::Path, section: &str) -> serde_json::Value {
-    let bin = env!("CARGO_BIN_EXE_zeroclaw");
+    let bin = env!("CARGO_BIN_EXE_rei");
     let output = Command::new(bin)
-        .env("ZEROCLAW_CONFIG_DIR", config_dir)
+        .env("REI_CONFIG_DIR", config_dir)
         .env("RUST_LOG", "off")
         .args(["config", "init", section, "--json"])
         .stdout(Stdio::piped())
@@ -695,9 +695,9 @@ fn run_cli_init(config_dir: &std::path::Path, section: &str) -> serde_json::Valu
 }
 
 fn run_cli_get(config_dir: &std::path::Path, path: &str) -> serde_json::Value {
-    let bin = env!("CARGO_BIN_EXE_zeroclaw");
+    let bin = env!("CARGO_BIN_EXE_rei");
     let output = Command::new(bin)
-        .env("ZEROCLAW_CONFIG_DIR", config_dir)
+        .env("REI_CONFIG_DIR", config_dir)
         .env("RUST_LOG", "off")
         .args(["config", "get", path, "--json"])
         .stdout(Stdio::piped())
@@ -771,8 +771,8 @@ fn config_set_rejects_unsupported_schema_versions_without_rewriting_disk() {
     let raw = "schema_version = 3\n[gateway]\nport = 42618\n";
     std::fs::write(&path, raw).unwrap();
     for version in ["0", "1", "2", "4"] {
-        let output = Command::new(env!("CARGO_BIN_EXE_zeroclaw"))
-            .env("ZEROCLAW_CONFIG_DIR", config_dir.path())
+        let output = Command::new(env!("CARGO_BIN_EXE_rei"))
+            .env("REI_CONFIG_DIR", config_dir.path())
             .env("RUST_LOG", "off")
             .args([
                 "config",
@@ -802,8 +802,8 @@ fn config_validate_is_read_only_and_reports_malformed_current_sections() {
         ),
     ] {
         std::fs::write(&path, raw).unwrap();
-        let output = Command::new(env!("CARGO_BIN_EXE_zeroclaw"))
-            .env("ZEROCLAW_CONFIG_DIR", config_dir.path())
+        let output = Command::new(env!("CARGO_BIN_EXE_rei"))
+            .env("REI_CONFIG_DIR", config_dir.path())
             .env("RUST_LOG", "off")
             .args(["config", "validate", "--json"])
             .output()

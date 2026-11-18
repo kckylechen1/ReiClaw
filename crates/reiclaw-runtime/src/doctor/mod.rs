@@ -233,7 +233,7 @@ pub async fn run_structured(config: &Config) -> Vec<DiagResult> {
 pub async fn run(config: &Config) -> Result<()> {
     let results = run_structured(config).await;
 
-    println!("🩺 ZeroClaw Doctor (enhanced)");
+    println!("🩺 ReiClaw Doctor (enhanced)");
     println!();
 
     let mut current_cat = String::new();
@@ -267,7 +267,7 @@ pub async fn run(config: &Config) -> Result<()> {
     println!("  Summary: {oks} ok, {warns} warnings, {errors} errors");
 
     if errors > 0 {
-        println!("  💡 Fix the errors above, then run `zeroclaw doctor` again.");
+        println!("  💡 Fix the errors above, then run `rei doctor` again.");
     }
 
     Ok(())
@@ -378,11 +378,11 @@ pub async fn run_models(
 
     if targets.is_empty() {
         anyhow::bail!(
-            "No configured model_providers to probe — run `zeroclaw quickstart` to set one up first"
+            "No configured model_providers to probe — run `rei quickstart` to set one up first"
         );
     }
 
-    println!("🩺 ZeroClaw Doctor — Model Catalog Probe");
+    println!("🩺 ReiClaw Doctor — Model Catalog Probe");
     println!("  Providers to probe: {}", targets.len());
     println!();
 
@@ -740,15 +740,13 @@ pub async fn run_configured_models(
     let entries = configured_model_entries(config, provider_override);
 
     if entries.is_empty() {
-        anyhow::bail!(
-            "No configured model_providers — run `zeroclaw quickstart` to set one up first"
-        );
+        anyhow::bail!("No configured model_providers — run `rei quickstart` to set one up first");
     }
 
     if verify {
-        println!("🩺 ZeroClaw — Configured Models (--check)");
+        println!("🩺 ReiClaw — Configured Models (--check)");
     } else {
-        println!("🩺 ZeroClaw — Configured Models");
+        println!("🩺 ReiClaw — Configured Models");
     }
     println!();
 
@@ -898,7 +896,7 @@ pub fn run_traces(
     }
 
     println!();
-    println!("Use `zeroclaw doctor traces --id <trace-id>` to inspect a full event payload.");
+    println!("Use `rei doctor traces --id <trace-id>` to inspect a full event payload.");
     Ok(())
 }
 
@@ -1157,7 +1155,7 @@ fn check_config_semantics(config: &Config, items: &mut Vec<DiagItem>) {
     } else {
         items.push(DiagItem::warn(
             cat,
-            "no live channel configured — run `zeroclaw quickstart` to set one up",
+            "no live channel configured — run `rei quickstart` to set one up",
         ));
     }
     // Enabled bot channels with no token: a partial alias survives the

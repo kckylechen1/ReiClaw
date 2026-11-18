@@ -18,10 +18,10 @@ use reiclaw_runtime::i18n::{get_required_cli_string, get_required_cli_string_wit
 use std::path::PathBuf;
 use std::process::Command;
 
-const SYSTEMD_STATUS_ARGS: [&str; 3] = ["--user", "is-active", "zeroclaw.service"];
-const SYSTEMD_RESTART_ARGS: [&str; 3] = ["--user", "restart", "zeroclaw.service"];
-const OPENRC_STATUS_ARGS: [&str; 2] = ["zeroclaw", "status"];
-const OPENRC_RESTART_ARGS: [&str; 2] = ["zeroclaw", "restart"];
+const SYSTEMD_STATUS_ARGS: [&str; 3] = ["--user", "is-active", "rei.service"];
+const SYSTEMD_RESTART_ARGS: [&str; 3] = ["--user", "restart", "rei.service"];
+const OPENRC_STATUS_ARGS: [&str; 2] = ["rei", "status"];
+const OPENRC_RESTART_ARGS: [&str; 2] = ["rei", "restart"];
 
 pub async fn handle_command(command: crate::ChannelCommands, config: &Config) -> Result<()> {
     match command {
@@ -85,11 +85,11 @@ pub async fn handle_command(command: crate::ChannelCommands, config: &Config) ->
             config: _,
         } => {
             anyhow::bail!(
-                "Channel type '{channel_type}' — use `zeroclaw config set channels.{channel_type}.<alias>.<field>=<value>` to configure"
+                "Channel type '{channel_type}' — use `rei config set channels.{channel_type}.<alias>.<field>=<value>` to configure"
             );
         }
         crate::ChannelCommands::Remove { name } => {
-            anyhow::bail!("Remove channel '{name}' — edit ~/.zeroclaw/config.toml directly");
+            anyhow::bail!("Remove channel '{name}' — edit ~/.rei/config.toml directly");
         }
         crate::ChannelCommands::BindTelegram { identity, alias } => {
             Box::pin(bind_telegram_identity(config, &identity, &alias)).await
@@ -126,13 +126,13 @@ pub async fn bind_telegram_identity(config: &Config, identity: &str, alias: &str
         }
         Ok(false) => {
             println!(
-                "ℹ️ No managed daemon service detected. If `zeroclaw daemon`/`channel start` is already running, restart it to load the updated allowlist."
+                "ℹ️ No managed daemon service detected. If `rei daemon`/`channel start` is already running, restart it to load the updated allowlist."
             );
         }
         Err(e) => {
             eprintln!(
                 "⚠️ Allowlist saved, but failed to reload daemon service automatically: {e}\n\
-                 Restart service manually with `zeroclaw service stop && zeroclaw service start`."
+                 Restart service manually with `rei service stop && rei service start`."
             );
         }
     }
@@ -147,7 +147,7 @@ fn maybe_restart_managed_daemon_service() -> Result<bool> {
         let plist = home
             .join("Library")
             .join("LaunchAgents")
-            .join("com.zeroclaw.daemon.plist");
+            .join("com.reiclaw.daemon.plist");
         if !plist.exists() {
             return Ok(false);
         }
@@ -157,15 +157,15 @@ fn maybe_restart_managed_daemon_service() -> Result<bool> {
             .output()
             .context("Failed to query launchctl list")?;
         let listed = String::from_utf8_lossy(&list_output.stdout);
-        if !listed.contains("com.zeroclaw.daemon") {
+        if !listed.contains("com.reiclaw.daemon") {
             return Ok(false);
         }
 
         let _ = Command::new("launchctl")
-            .args(["stop", "com.zeroclaw.daemon"])
+            .args(["stop", "com.reiclaw.daemon"])
             .output();
         let start_output = Command::new("launchctl")
-            .args(["start", "com.zeroclaw.daemon"])
+            .args(["start", "com.reiclaw.daemon"])
             .output()
             .context("Failed to start launchd daemon service")?;
         if !start_output.status.success() {
@@ -178,7 +178,7 @@ fn maybe_restart_managed_daemon_service() -> Result<bool> {
 
     if cfg!(target_os = "linux") {
         // OpenRC (system-wide) takes precedence over systemd (user-level)
-        let openrc_init_script = PathBuf::from("/etc/init.d/zeroclaw");
+        let openrc_init_script = PathBuf::from("/etc/init.d/rei");
         if openrc_init_script.exists()
             && let Ok(status_output) = Command::new("rc-service").args(OPENRC_STATUS_ARGS).output()
             && status_output.status.success()
@@ -202,7 +202,7 @@ fn maybe_restart_managed_daemon_service() -> Result<bool> {
             .join(".config")
             .join("systemd")
             .join("user")
-            .join("zeroclaw.service");
+            .join("rei.service");
         if !unit_path.exists() {
             return Ok(false);
         }
@@ -298,7 +298,7 @@ pub async fn start_channels(
     #[cfg(feature = "agent-runtime")]
     reiclaw_runtime::health::mark_component_ok("channels");
     println!(
-        "In-process channels are retired; run `zeroclaw gateway` (or `zeroclaw daemon`) \
+        "In-process channels are retired; run `rei gateway` (or `rei daemon`) \
          and connect channel bridge processes over `/ws/chat` and `/ws/bridge`."
     );
     cancel.cancelled().await;
@@ -309,11 +309,11 @@ pub async fn start_channels(
 pub async fn doctor_channels(config: Config) -> Result<()> {
     if config.gateway.bridges.is_empty() {
         // i18n-exempt: moved from retired zeroclaw-channels orchestrator; compiles without agent-runtime Fluent catalog
-        println!("No gateway bridges configured. Run `zeroclaw quickstart` to set one up.");
+        println!("No gateway bridges configured. Run `rei quickstart` to set one up.");
         return Ok(());
     }
     // i18n-exempt: moved from retired zeroclaw-channels orchestrator; compiles without agent-runtime Fluent catalog
-    println!("🩺 ZeroClaw Channel Bridge Doctor");
+    println!("🩺 ReiClaw Channel Bridge Doctor");
     println!();
     for name in config.gateway.bridges.keys() {
         // i18n-exempt: moved from retired zeroclaw-channels orchestrator; compiles without agent-runtime Fluent catalog

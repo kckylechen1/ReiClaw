@@ -44,7 +44,7 @@ fn registry() -> Vec<Surface> {
         },
         Surface {
             name: "scoop",
-            file: "dist/scoop/zeroclaw.json",
+            file: "dist/scoop/reiclaw.json",
             render: |root, cur| packaging::render_scoop(root, cur),
         },
         Surface {

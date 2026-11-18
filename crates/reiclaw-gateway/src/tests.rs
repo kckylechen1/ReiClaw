@@ -127,7 +127,7 @@ fn gateway_timeout_uses_typed_config_default() {
 fn paircode_recovery_command_includes_alternate_port() {
     assert_eq!(
         format_paircode_recovery_command("127.0.0.1", 42617),
-        "zeroclaw gateway get-paircode --new --port 42617"
+        "rei gateway get-paircode --new --port 42617"
     );
 }
 
@@ -138,7 +138,7 @@ fn paircode_recovery_command_includes_specific_host_when_needed() {
     // The CLI is left to fall back to its loopback default.
     assert_eq!(
         format_paircode_recovery_command("192.168.1.20", 42617),
-        "zeroclaw gateway get-paircode --new --port 42617"
+        "rei gateway get-paircode --new --port 42617"
     );
 }
 
@@ -2809,8 +2809,8 @@ fn needs_quickstart_for_flags_empty_model() {
         "error must carry the needs_quickstart marker for callers to map to 503; got: {msg}"
     );
     assert!(
-        msg.contains("zeroclaw quickstart"),
-        "error must point the user at `zeroclaw quickstart`; got: {msg}"
+        msg.contains("rei quickstart"),
+        "error must point the user at `rei quickstart`; got: {msg}"
     );
 }
 

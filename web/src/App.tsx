@@ -53,7 +53,7 @@ export class ErrorBoundary extends Component<
   }
 
   componentDidCatch(error: Error, info: ErrorInfo) {
-    console.error("[ZeroClaw] Render error:", error, info.componentStack);
+    console.error("[ReiClaw] Render error:", error, info.componentStack);
     // Stale-chunk recovery: when Vite rebuilds, the loaded index.html
     // still references the previous chunk hashes. A dynamic import for
     // a lazy route then 404s with "error loading dynamically imported
@@ -62,9 +62,9 @@ export class ErrorBoundary extends Component<
     // loops if reload doesn't actually help.
     if (
       isChunkLoadError(error) &&
-      !sessionStorage.getItem("zeroclaw-chunk-reloaded")
+      !sessionStorage.getItem("reiclaw-chunk-reloaded")
     ) {
-      sessionStorage.setItem("zeroclaw-chunk-reloaded", "1");
+      sessionStorage.setItem("reiclaw-chunk-reloaded", "1");
       window.location.reload();
     }
   }
@@ -100,7 +100,7 @@ export class ErrorBoundary extends Component<
             </pre>
             <button
               onClick={() => {
-                sessionStorage.removeItem("zeroclaw-chunk-reloaded");
+                sessionStorage.removeItem("reiclaw-chunk-reloaded");
                 this.setState({ error: null });
               }}
               className="btn-electric mt-6 px-4 py-2 text-sm font-medium"
@@ -137,7 +137,7 @@ function PairingDialog({
   // Browser requests cannot read or mint owner pairing codes. The operator
   // obtains one on the gateway host and enters it in the existing form.
   const gatewayPort = window.location.port;
-  const cliRecoveryCommand = `zeroclaw gateway get-paircode --new${gatewayPort ? ` --port ${gatewayPort}` : ""}`;
+  const cliRecoveryCommand = `rei gateway get-paircode --new${gatewayPort ? ` --port ${gatewayPort}` : ""}`;
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -162,14 +162,14 @@ function PairingDialog({
         <div className="text-center mb-8">
           <img
             src={`${basePath}/_app/logo.png`}
-            alt="ZeroClaw"
+            alt="ReiClaw"
             className="h-20 w-20 rounded-2xl object-cover mx-auto mb-4 animate-float"
             onError={(e) => {
               e.currentTarget.style.display = "none";
             }}
           />
           <h1 className="text-2xl font-bold mb-2 text-gradient-blue">
-            ZeroClaw
+            ReiClaw
           </h1>
           <p className="text-sm" style={{ color: "var(--pc-text-muted)" }}>
             {t("auth.enter_code")}
@@ -242,8 +242,8 @@ function AppContent() {
 
   // Listen for 401 events to force logout
   useEffect(() => {
-    window.addEventListener("zeroclaw-unauthorized", logout);
-    return () => window.removeEventListener("zeroclaw-unauthorized", logout);
+    window.addEventListener("reiclaw-unauthorized", logout);
+    return () => window.removeEventListener("reiclaw-unauthorized", logout);
   }, [logout]);
 
   if (loading) {

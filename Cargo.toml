@@ -66,10 +66,6 @@ include = [
 ]
 
 [[bin]]
-name = "zeroclaw"
-path = "src/main.rs"
-
-[[bin]]
 name = "rei"
 path = "src/main.rs"
 
@@ -340,8 +336,8 @@ name = "agent_benchmarks"
 harness = false
 
 [[bin]]
-name = "zeroclaw-node-host"
-path = "src/bin/zeroclaw-node-host.rs"
+name = "rei-node-host"
+path = "src/bin/rei-node-host.rs"
 required-features = ["gateway", "nodes", "agent-runtime"]
 
 [[test]]

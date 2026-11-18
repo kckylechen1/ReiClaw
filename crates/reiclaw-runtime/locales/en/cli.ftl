@@ -1,6 +1,6 @@
-cli-about = The fastest, smallest AI assistant.
+cli-about = ReiClaw (rei) - Personal AI Controller
 cli-no-command-provided = No command provided.
-cli-try-quickstart = Try `zeroclaw quickstart` to create your first agent.
+cli-try-quickstart = Try `rei quickstart` to create your first agent.
 
 cli-quickstart-about = Create your first agent end-to-end
 cli-agent-about = Start the AI agent loop
@@ -32,11 +32,11 @@ cli-skills-about = Manage skills (user-defined capabilities)
 cli-migrate-about = Migrate data from other agent runtimes
 cli-auth-about = Manage provider subscription authentication profiles
 cli-memory-about = Manage agent memory entries
-cli-config-about = Manage ZeroClaw configuration
+cli-config-about = Manage ReiClaw configuration
 cli-update-about = Update this fork from source
 cli-self-test-about = Run diagnostic self-tests
 cli-completions-about = Generate shell completion scripts
-cli-desktop-about = Launch the ZeroClaw companion desktop app
+cli-desktop-about = Launch the ReiClaw companion desktop app
 
 cli-config-schema-about = Dump the full configuration JSON Schema to stdout
 cli-config-list-about = List all config properties with current values
@@ -96,28 +96,28 @@ cli-skills-removed-global = { "  " }{$status} Skill '{$name}' removed from the g
 cli-skills-install-tier-official = Installing {$name} v{$version} — Official (zeroclaw-labs maintained)
 cli-skills-install-tier-community =
     Installing {$name} v{$version} — Community submission
-    This skill is not audited by ZeroClaw. Review the skill content
-    and run `zeroclaw skills audit {$name}` before granting any
+    This skill is not audited by ReiClaw. Review the skill content
+    and run `rei skills audit {$name}` before granting any
     permissions or running it in production.
 
 cli-skills-add-scaffolded = Scaffolded skill {$target} at {$dir}
 
 cli-skills-bundle-add-prompt =
     To create skill-bundle '{$alias}' with directory '{$dir}', run:
-      zeroclaw config map-key skill-bundles {$alias}
-      zeroclaw config set skill-bundles.{$alias}.directory {$dir}
+      rei config map-key skill-bundles {$alias}
+      rei config set skill-bundles.{$alias}.directory {$dir}
 
-    (Direct bundle creation through `zeroclaw skills bundle add` would duplicate the config mutation surface.)
+    (Direct bundle creation through `rei skills bundle add` would duplicate the config mutation surface.)
 
 cli-skills-bundle-remove-prompt =
     To remove skill-bundle '{$alias}', run:
-      zeroclaw config map-key-delete skill-bundles {$alias}
+      rei config map-key-delete skill-bundles {$alias}
 
     (Removes the config entry; the bundle's directory on disk is left in place.)
 
 cli-skills-bundle-list-empty =
     No skill bundles configured.
-      Create one: zeroclaw config set skill-bundles.default.directory shared/skills/default
+      Create one: rei config set skill-bundles.default.directory shared/skills/default
 cli-skills-bundle-list-header = Skill bundles ({$count}):
 cli-skills-bundle-entry = {$alias} -> {$dir}
 cli-skills-bundle-include = include: {$values}
@@ -161,22 +161,22 @@ cli-doctor-models-about = Probe model catalogs across providers and report avail
 cli-doctor-traces-about = Query runtime trace events (tool diagnostics and model replies)
 cli-doctor-update-context-windows-about = Update context_window in config.toml from provider /models endpoints
 
-cli-migrate-openclaw-about = Import memory from an OpenClaw workspace into this ZeroClaw workspace
+cli-migrate-openclaw-about = Import memory from an OpenClaw workspace into this ReiClaw workspace
 
 cli-agent-long-about =
     Start the AI agent loop.
 
-    With --message, runs one turn locally and prints the reply. Without it, opens `zeroclaw chat` for this agent on this machine's gateway, so the conversation is shared with every other client.
+    With --message, runs one turn locally and prints the reply. Without it, opens `rei chat` for this agent on this machine's gateway, so the conversation is shared with every other client.
 
     Examples:
-      zeroclaw agent -a assistant                              # chat through the gateway
-      zeroclaw agent -a assistant -m "Summarize today's logs"  # single message
-      zeroclaw agent -a assistant -m "Hi" -p anthropic --model claude-sonnet-4-20250514
+      rei agent -a assistant                              # chat through the gateway
+      rei agent -a assistant -m "Summarize today's logs"  # single message
+      rei agent -a assistant -m "Hi" -p anthropic --model claude-sonnet-4-20250514
 
     --model-provider, --model, and --temperature apply only with --message; the interactive chat uses the agent's configured model.
 
 cli-agent-interactive-flags-need-message =
-    { $flags } only apply with -m/--message. Interactive `zeroclaw agent` opens `zeroclaw chat`, which uses the model configured for agent "{ $agent }". Add -m "<message>" for a one-off turn with these overrides, or change the agent's configuration.
+    { $flags } only apply with -m/--message. Interactive `rei agent` opens `rei chat`, which uses the model configured for agent "{ $agent }". Add -m "<message>" for a one-off turn with these overrides, or change the agent's configuration.
 
 cli-gateway-long-about =
     Manage the gateway server (webhooks, websockets).
@@ -184,9 +184,9 @@ cli-gateway-long-about =
     Start, restart, or inspect the HTTP/WebSocket gateway that accepts incoming webhook events and WebSocket connections.
 
     Examples:
-      zeroclaw gateway start              # start gateway
-      zeroclaw gateway restart            # restart gateway
-      zeroclaw gateway get-paircode       # show pairing code
+      rei gateway start              # start gateway
+      rei gateway restart            # restart gateway
+      rei gateway get-paircode       # show pairing code
 
 cli-acp-long-about =
     Start the ACP server (JSON-RPC 2.0 over stdio).
@@ -196,20 +196,20 @@ cli-acp-long-about =
     Methods: initialize, session/new, session/prompt, session/stop.
 
     Examples:
-      zeroclaw acp                        # start ACP server
-      zeroclaw acp --max-sessions 5       # limit concurrent sessions
+      rei acp                        # start ACP server
+      rei acp --max-sessions 5       # limit concurrent sessions
 
 cli-daemon-long-about =
     Start the long-running autonomous daemon.
 
-    Launches the full ZeroClaw runtime: gateway server, all configured channel surfaces (Telegram bridge, webhook ingress), heartbeat monitor, and the cron scheduler. This is the recommended way to run ZeroClaw in production or as an always-on assistant.
+    Launches the full ReiClaw runtime: gateway server, all configured channel surfaces (Telegram bridge, webhook ingress), heartbeat monitor, and the cron scheduler. This is the recommended way to run ReiClaw in production or as an always-on assistant.
 
-    Use 'zeroclaw service install' to register the daemon as an OS service (systemd/launchd) for auto-start on boot.
+    Use 'rei service install' to register the daemon as an OS service (systemd/launchd) for auto-start on boot.
 
     Examples:
-      zeroclaw daemon                   # use config defaults
-      zeroclaw daemon -p 9090           # gateway on port 9090
-      zeroclaw daemon --host 127.0.0.1  # localhost only
+      rei daemon                   # use config defaults
+      rei daemon -p 9090           # gateway on port 9090
+      rei daemon --host 127.0.0.1  # localhost only
 
 cli-cron-long-about =
     Configure and manage scheduled tasks.
@@ -219,28 +219,28 @@ cli-cron-long-about =
     Cron expressions use the standard 5-field format: 'min hour day month weekday'. Timezones default to UTC; override with --tz and an IANA timezone name.
 
     Examples:
-      zeroclaw cron list
-      zeroclaw cron add '0 9 * * 1-5' 'Good morning' --tz America/New_York --agent
-      zeroclaw cron add '*/30 * * * *' 'Check system health' --agent
-      zeroclaw cron add '*/5 * * * *' 'echo ok'
-      zeroclaw cron add-at 2025-01-15T14:00:00Z 'Send reminder' --agent
-      zeroclaw cron add-every 60000 'Ping heartbeat'
-      zeroclaw cron once 30m 'Run backup in 30 minutes' --agent
-      zeroclaw cron pause TASK_ID
-      zeroclaw cron update TASK_ID --expression '0 8 * * *' --tz Europe/London
+      rei cron list
+      rei cron add '0 9 * * 1-5' 'Good morning' --tz America/New_York --agent
+      rei cron add '*/30 * * * *' 'Check system health' --agent
+      rei cron add '*/5 * * * *' 'echo ok'
+      rei cron add-at 2025-01-15T14:00:00Z 'Send reminder' --agent
+      rei cron add-every 60000 'Ping heartbeat'
+      rei cron once 30m 'Run backup in 30 minutes' --agent
+      rei cron pause TASK_ID
+      rei cron update TASK_ID --expression '0 8 * * *' --tz Europe/London
 
 cli-channel-long-about =
     Manage communication channels.
 
-    Add, remove, list, send, and health-check channels that connect ZeroClaw to messaging platforms. Live channel types: telegram, webhook (other legacy sections are retired).
+    Add, remove, list, send, and health-check channels that connect ReiClaw to messaging platforms. Live channel types: telegram, webhook (other legacy sections are retired).
 
     Examples:
-      zeroclaw channel list
-      zeroclaw channel doctor
-      zeroclaw channel add telegram '{ "{" }"bot_token":"...","name":"my-bot"{ "}" }'
-      zeroclaw channel remove my-bot
-      zeroclaw channel bind-telegram zeroclaw_user
-      zeroclaw channel send 'Alert!' --channel-id telegram --recipient 123456789
+      rei channel list
+      rei channel doctor
+      rei channel add telegram '{ "{" }"bot_token":"...","name":"my-bot"{ "}" }'
+      rei channel remove my-bot
+      rei channel bind-telegram rei_user
+      rei channel send 'Alert!' --channel-id telegram --recipient 123456789
 
 cli-memory-long-about =
     Manage agent memory entries.
@@ -248,14 +248,14 @@ cli-memory-long-about =
     List, inspect, and clear memory entries stored by the agent. Supports filtering by category and session, pagination, and batch clearing with confirmation.
 
     Examples:
-      zeroclaw memory stats
-      zeroclaw memory list
-      zeroclaw memory list --category core --limit 10
-      zeroclaw memory get KEY
-      zeroclaw memory clear --category conversation --yes
+      rei memory stats
+      rei memory list
+      rei memory list --category core --limit 10
+      rei memory get KEY
+      rei memory clear --category conversation --yes
 
 cli-config-long-about =
-    Manage ZeroClaw configuration.
+    Manage ReiClaw configuration.
 
     View, set, or initialize config properties by dotted path. Use 'schema' to dump the full JSON Schema for the config file.
 
@@ -264,30 +264,30 @@ cli-config-long-about =
     Enum fields offer interactive selection when value is omitted.
 
     Examples:
-      zeroclaw config list                                  # list all properties
-      zeroclaw config list --secrets                        # list only secrets
-      zeroclaw config list --filter channels.matrix         # filter by prefix
-      zeroclaw config get channels.matrix.mention-only      # get a value
-      zeroclaw config set channels.matrix.mention-only true # set a value
-      zeroclaw config set channels.matrix.access-token      # secret: masked input
-      zeroclaw config set channels.matrix.stream-mode       # enum: interactive select
-      zeroclaw config init channels.matrix                  # init section with defaults
-      zeroclaw config schema                                # print JSON Schema to stdout
-      zeroclaw config schema > schema.json
+      rei config list                                  # list all properties
+      rei config list --secrets                        # list only secrets
+      rei config list --filter channels.matrix         # filter by prefix
+      rei config get channels.matrix.mention-only      # get a value
+      rei config set channels.matrix.mention-only true # set a value
+      rei config set channels.matrix.access-token      # secret: masked input
+      rei config set channels.matrix.stream-mode       # enum: interactive select
+      rei config init channels.matrix                  # init section with defaults
+      rei config schema                                # print JSON Schema to stdout
+      rei config schema > schema.json
 
-    Property path tab completion is included automatically in `zeroclaw completions <shell>`.
+    Property path tab completion is included automatically in `rei completions <shell>`.
 
 cli-update-long-about =
     This fork has no verified binary update channel. Update a checkout of https://github.com/kckylechen1/ReiClaw and run ./install.sh --source with your existing preset/features. Upstream releases cannot update this fork.
 
 cli-self-test-long-about =
-    Run diagnostic self-tests to verify the ZeroClaw installation.
+    Run diagnostic self-tests to verify the ReiClaw installation.
 
     By default, runs the full test suite including network checks (gateway health, memory round-trip). Use --quick to skip network checks for faster offline validation.
 
     Examples:
-      zeroclaw self-test             # full suite
-      zeroclaw self-test --quick     # quick checks only (no network)
+      rei self-test             # full suite
+      rei self-test --quick     # quick checks only (no network)
 
 cli-skills-install-suggestion =
     It looks like this request needs the `{$name}` skill, but it is not installed.
@@ -296,25 +296,25 @@ cli-skills-install-suggestion =
     Next: Run `{$install_command}` to install it.
 
 cli-completions-long-about =
-    Generate shell completion scripts for `zeroclaw`.
+    Generate shell completion scripts for `rei`.
 
     The script is printed to stdout so it can be sourced directly:
 
     Examples:
-      source <(zeroclaw completions bash)
-      zeroclaw completions zsh > ~/.zfunc/_zeroclaw
-      zeroclaw completions fish > ~/.config/fish/completions/zeroclaw.fish
+      source <(rei completions bash)
+      rei completions zsh > ~/.zfunc/_rei
+      rei completions fish > ~/.config/fish/completions/rei.fish
 
 cli-desktop-long-about =
-    Launch the ZeroClaw companion desktop app.
+    Launch the ReiClaw companion desktop app.
 
     The companion app is a lightweight menu bar / system tray application that connects to the same gateway as the CLI. It provides quick access to the dashboard, status monitoring, and device pairing.
 
     Use --install to download the pre-built companion app for your platform.
 
     Examples:
-      zeroclaw desktop              # launch the companion app
-      zeroclaw desktop --install    # download and install it
+      rei desktop              # launch the companion app
+      rei desktop --install    # download and install it
 
 # Channel-side reply emitted when chat dispatch refuses because the
 # gateway has no model configured. Used by the gateway crate channel
@@ -336,24 +336,24 @@ onboard-openai-auth-api-key = API key
 onboard-openai-auth-codex = Codex subscription
 onboard-openai-codex-followup =
     Codex subscription auth uses your ChatGPT account.
-    Run `zeroclaw auth login --model-provider openai-codex` to authenticate before starting your agent.
+    Run `rei auth login --model-provider openai-codex` to authenticate before starting your agent.
 
-# Diagnostics emitted by `zeroclaw doctor` and `zeroclaw self-test` for
+# Diagnostics emitted by `rei doctor` and `rei self-test` for
 # `gateway.web_dist_dir` values that rely on shell-style expansion the
 # gateway never performs (a leading `~` or any `$VAR` / `${VAR}`).
 # Issue #6079; companion runtime check in
-# `crates/zeroclaw-runtime/src/doctor/mod.rs` and `src/commands/self_test.rs`.
+# `crates/rei-runtime/src/doctor/mod.rs` and `src/commands/self_test.rs`.
 cli-web-dist-dir-reason-tilde = starts with `~` which is not expanded
 cli-web-dist-dir-reason-dollar = contains `$` which is not expanded
 cli-doctor-web-dist-dir-expansion-warning = gateway.web_dist_dir = "{$path}" — {$reason}; gateway.web_dist_dir is read verbatim, so expand the value yourself (e.g. an absolute path)
-# Diagnostics emitted by `zeroclaw doctor` cross-checking OpenAI Codex
+# Diagnostics emitted by `rei doctor` cross-checking OpenAI Codex
 # (OAuth/subscription) credentials against OpenAI provider slots that opt in
 # via `requires_openai_auth = true`. A signed-in credential with no slot — or a
 # slot with no credential — otherwise stays silent until the first model call,
 # where it surfaces as a confusing auth error. Companion runtime check in
-# `crates/zeroclaw-runtime/src/doctor/mod.rs`.
-cli-doctor-codex-auth-profile-no-slot = OpenAI Codex credentials are signed in but no model provider slot uses them. Set `requires_openai_auth = true` on an OpenAI provider slot and point an agent's `model_provider` at it, or run `zeroclaw quickstart`.
-cli-doctor-codex-auth-slot-no-profile = OpenAI slot(s) {$slots} set `requires_openai_auth = true` but no OpenAI Codex credentials are signed in. Run `zeroclaw auth login --provider openai-codex`.
+# `crates/rei-runtime/src/doctor/mod.rs`.
+cli-doctor-codex-auth-profile-no-slot = OpenAI Codex credentials are signed in but no model provider slot uses them. Set `requires_openai_auth = true` on an OpenAI provider slot and point an agent's `model_provider` at it, or run `rei quickstart`.
+cli-doctor-codex-auth-slot-no-profile = OpenAI slot(s) {$slots} set `requires_openai_auth = true` but no OpenAI Codex credentials are signed in. Run `rei auth login --provider openai-codex`.
 cli-doctor-codex-auth-ok = OpenAI Codex credentials are signed in and referenced by a model provider slot.
 cli-doctor-systemd-linger-enabled = systemd user lingering enabled
 cli-doctor-systemd-linger-disabled = systemd user lingering disabled; user service may stop after logout. Enable with: loginctl enable-linger {$user}
@@ -364,12 +364,12 @@ cli-self-test-web-dist-dir-pass-literal = {$path} (literal path)
 cli-self-test-web-dist-dir-fail-expansion = WARNING: {$path} — {$reason}; gateway.web_dist_dir is read verbatim, so expand the value yourself (e.g. an absolute path)
 
 # Service lifecycle warnings.
-cli-service-systemd-linger-disabled-warning = systemd user lingering is disabled. ZeroClaw's user service may stop after logout. Enable it with: loginctl enable-linger {$user}
+cli-service-systemd-linger-disabled-warning = systemd user lingering is disabled. ReiClaw's user service may stop after logout. Enable it with: loginctl enable-linger {$user}
 
-# ── skills (zeroclaw skills list) ──
+# ── skills (rei skills list) ──
 cli-skills-none-installed = No skills installed.
-cli-skills-create-hint = {"  "}Create one: zeroclaw skills add my-skill --bundle <alias>
-cli-skills-install-hint = {"  "}Or install: zeroclaw skills install <source>
+cli-skills-create-hint = {"  "}Create one: rei skills add my-skill --bundle <alias>
+cli-skills-install-hint = {"  "}Or install: rei skills install <source>
 cli-skills-installed-header = Installed skills ({$count}):
 cli-skills-list-group-bundle = bundle: {$alias}
 cli-skills-list-group-agent = loaded by agent '{$alias}'
@@ -381,9 +381,9 @@ cli-skills-multiple-locations-path = skill '{$name}' exists in multiple location
 cli-skills-tags = Tags:  {$tags}
 cli-skills-skipped-header = Skipped ({$count}):
 cli-skills-skipped-reason = {"    "}Reason: {$reason}
-cli-skills-skipped-scripts-hint = {"    "}Set `skills.allow_scripts = true` in your zeroclaw config to enable it.
+cli-skills-skipped-scripts-hint = {"    "}Set `skills.allow_scripts = true` in your rei config to enable it.
 
-# ── memory (zeroclaw memory) ──
+# ── memory (rei memory) ──
 cli-memory-reindexing = Reindexing memory backend...
 cli-memory-none = No memory entries found.
 cli-memory-none-at-offset = No entries at offset {$offset} (total: {$total}).
@@ -404,7 +404,7 @@ cli-memory-found-in-scope = Found {$count} entries in '{$scope}'.
 cli-memory-aborted = Aborted.
 cli-memory-deleted-key = Deleted key: {$key}
 
-# ── cron (zeroclaw cron) ──
+# ── cron (rei cron) ──
 cli-cron-none = No scheduled tasks yet.
 cron-shell-output-truncated = ...[output truncated]
 cron-shell-output-limit = Shell job stopped at its output limit; it will not be retried automatically.
@@ -441,7 +441,7 @@ cli-cron-every = {"  "}Every(ms): {$v}
 cli-no-command = No command provided.
 cli-press-enter = Press Enter to exit...
 cli-quickstart-title = Quickstart — create one working agent end-to-end.
-cli-quickstart-needs-tty = Quickstart is interactive and needs a terminal on stdin and stderr. Run it from an interactive shell, or use `zeroclaw config set <path> <value>` for headless configuration.
+cli-quickstart-needs-tty = Quickstart is interactive and needs a terminal on stdin and stderr. Run it from an interactive shell, or use `rei config set <path> <value>` for headless configuration.
 cli-quickstart-cancelled = Quickstart cancelled. No config written.
 cli-quickstart-incomplete = {"  "}Not all selectors are filled yet.
 cli-quickstart-create-agent = ── Create agent
@@ -463,7 +463,7 @@ cli-quickstart-summary-not-yet-named = not yet named
 cli-quickstart-summary-provider-fresh = {$name} (alias: {$alias}, model: {$model})
 cli-quickstart-summary-use-existing = use existing {$reference}
 cli-quickstart-summary-preset-fresh = preset: {$name}
-cli-quickstart-summary-channels-none = none (chat via `zeroclaw agent` only)
+cli-quickstart-summary-channels-none = none (chat via `rei agent` only)
 cli-quickstart-summary-agent = alias: {$alias}, system prompt: {$chars} chars, {$files} personality file(s)
 cli-quickstart-summary-peer-groups-none = none — channels accept no peers
 cli-quickstart-channel-remove-row = {"  "}{$reference} (remove)
@@ -472,17 +472,17 @@ cli-quickstart-provider-local-label = {$name} (local)
 cli-quickstart-provider-type-prompt = Provider type
 cli-quickstart-alias-for = Alias for {$name}
 cli-quickstart-openai-auth-mode-label = Authentication
-cli-quickstart-openai-auth-mode-help = Choose `codex` to use a ChatGPT/Codex subscription auth profile. If you already signed in with the Codex CLI, run `zeroclaw auth login --model-provider openai-codex --import ~/.codex/auth.json`; otherwise run `zeroclaw auth login --model-provider openai-codex`.
+cli-quickstart-openai-auth-mode-help = Choose `codex` to use a ChatGPT/Codex subscription auth profile. If you already signed in with the Codex CLI, run `rei auth login --model-provider openai-codex --import ~/.codex/auth.json`; otherwise run `rei auth login --model-provider openai-codex`.
 cli-quickstart-anthropic-auth-mode-label = Authentication
 cli-quickstart-anthropic-auth-mode-help = Choose `api_key` for an Anthropic Console key, or `setup_token` if you will run `claude setup-token` for Claude Max and paste the generated token.
 cli-quickstart-anthropic-api-key-help = Paste an Anthropic Console API key or the token generated by `claude setup-token`.
 cli-quickstart-auth-codex-prompt = Sign in to OpenAI Codex with your ChatGPT account now?
 cli-quickstart-auth-codex-import-prompt = Found an existing Codex login (~/.codex/auth.json) — import it now?
-cli-quickstart-auth-codex-skip-hint = {"  "}Finish later with: zeroclaw auth login --model-provider openai-codex
+cli-quickstart-auth-codex-skip-hint = {"  "}Finish later with: rei auth login --model-provider openai-codex
 cli-quickstart-auth-anthropic-prompt = Run `claude setup-token` for Anthropic provider `{$alias}` now?
 cli-quickstart-auth-anthropic-token-prompt = Paste the token from `claude setup-token`
 cli-quickstart-auth-anthropic-saved = {"  "}Saved Claude setup token for anthropic.{$alias}
-cli-quickstart-auth-anthropic-skip-hint = {"  "}Finish later with: claude setup-token, then zeroclaw config set providers.models.anthropic.{$alias}.api_key <token>
+cli-quickstart-auth-anthropic-skip-hint = {"  "}Finish later with: claude setup-token, then rei config set providers.models.anthropic.{$alias}.api_key <token>
 cli-quickstart-auth-failed = {"  "}Auth setup didn't complete: {$error}
 cli-quickstart-model-field-missing-warning = WARN: schema produced no `model` field for `{$provider}` — falling back to manual entry. Please report this.
 cli-quickstart-model-id-for = Model id for {$name}
@@ -492,7 +492,7 @@ cli-quickstart-add-channel = + Add a channel
 cli-quickstart-channels-done = Done (channels selector counts as visited)
 cli-quickstart-channels-prompt = Channels (optional, 0..N)
 cli-quickstart-channel-source-prompt = Channel source
-cli-quickstart-all-channels-bound = {"  "}Every configured channel is already bound to an agent. Free one with `zeroclaw config set agents.<alias>.channels ...` before reusing it here.
+cli-quickstart-all-channels-bound = {"  "}Every configured channel is already bound to an agent. Free one with `rei config set agents.<alias>.channels ...` before reusing it here.
 cli-quickstart-pick-configured-channel = Pick a configured channel
 cli-quickstart-channel-type-prompt = Channel type
 cli-quickstart-add-peer-group = + Add peer group
@@ -509,7 +509,7 @@ cli-quickstart-personality-skip = Skip
 cli-quickstart-esc-go-back = {" "}(Esc to go back)
 cli-quickstart-esc-return-checklist = {" "}(Esc to return to checklist)
 cli-quickstart-personality-file-prompt = {$filename}{$position} — what next?{$back_hint}
-cli-quickstart-next-agent-command = {"  "}zeroclaw agent -a {$alias}  # chat with this agent in your terminal
+cli-quickstart-next-agent-command = {"  "}rei agent -a {$alias}  # chat with this agent in your terminal
 cli-quickstart-fix-and-rerun = Your existing config is untouched. Fix the following and run quickstart again:
 cli-quickstart-could-not-finish = quickstart could not finish: {$count} problem(s) to fix
 cli-quickstart-pick-preset = Pick a preset
@@ -557,8 +557,8 @@ cli-no-channels-compiled = {"  "}No channel types are compiled into this binary.
 cli-quickstart-complete = Quickstart complete. Created agent `{$alias}`.
 cli-next-steps = Next steps:
 cli-agent-not-created = Your agent was not created — and nothing on disk was changed.
-cli-onboard-deprecated = `zeroclaw onboard` is deprecated — use `zeroclaw quickstart`.
-cli-otp-initialized = Initialized OTP secret for ZeroClaw.
+cli-onboard-deprecated = `rei onboard` is deprecated — use `rei quickstart`.
+cli-otp-initialized = Initialized OTP secret for ReiClaw.
 cli-otp-enrollment-uri = Enrollment URI: {$uri}
 cli-otp-received = {"  "}✓ OTP received
 cli-secret-captured = {"  "}● Value captured — press Enter to save
@@ -570,7 +570,7 @@ cli-pairing-restart = {"   "}Restart the gateway to generate a new pairing code.
 cli-pairing-disabled = ⚠️  Gateway pairing is disabled in config.
 cli-gateway-running-q = {"   "}Is the gateway running? Start it with:
 cli-bridge-added = Bridge "{$name}" saved in [gateway.bridges.{$name}].
-cli-bridge-token-once = Bridge token (shown only once; give it to the bridge, e.g. as ZEROCLAW_GATEWAY_TOKEN):
+cli-bridge-token-once = Bridge token (shown only once; give it to the bridge, e.g. as REI_GATEWAY_TOKEN):
 cli-bridge-scope = Chat sessions this token may open: {$scope}
 cli-bridge-scope-none = This token may open no chat session; add --session or --session-prefix to allow some.
 cli-bridge-apply = Restart the gateway (or POST /admin/reload) to apply.
@@ -578,11 +578,11 @@ cli-bridge-removed = Bridge "{$name}" removed; its token no longer works.
 cli-bridge-exists = Bridge "{$name}" already exists; pass --rotate to replace its token.
 cli-bridge-unknown = No bridge named "{$name}" is configured.
 cli-bridge-invalid-name = Invalid bridge name "{$name}": use letters, digits, '-' and '_'.
-cli-bridge-list-empty = No bridges configured. Add one with: zeroclaw gateway bridge add <name>
+cli-bridge-list-empty = No bridges configured. Add one with: rei gateway bridge add <name>
 cli-bridge-list-row = {$name}: sessions {$scope}
 cli-bridge-list-no-sessions = (none)
-cli-status-title = 🦀 ZeroClaw Status
-cli-security-status-title = ZeroClaw Security Status
+cli-status-title = 🦀 ReiClaw Status
+cli-security-status-title = ReiClaw Security Status
 cli-security-status-source = Source:      {$v}
 cli-security-status-agent = Agent:       {$v}
 cli-security-status-agent-enabled = Agent enabled: {$enabled}
@@ -613,10 +613,10 @@ cli-status-service-running = 🟢 Service:       running
 cli-status-service-stopped = 🔴 Service:       stopped
 cli-status-channels = Channels:
 cli-status-cli-always = {"  "}CLI:      ✅ always
-cli-desktop-download = Download the ZeroClaw companion app:
+cli-desktop-download = Download the ReiClaw companion app:
 cli-desktop-homebrew = Or install via Homebrew (coming soon):
 cli-desktop-linux-pkg = {"  "}Download the .deb or .AppImage for your architecture.
-cli-desktop-launching = Launching ZeroClaw companion app...
+cli-desktop-launching = Launching ReiClaw companion app...
 
 # ── status fields ──
 cli-status-version = Version:     {$v}
@@ -632,7 +632,7 @@ cli-status-runtime = ⚙️  Runtime:       {$v}
 cli-status-heartbeat = 💓 Heartbeat:      {$v}
 cli-status-heartbeat-every-minutes = every {$minutes}min
 heartbeat-delivery-missing-field = {$required} is required when {$configured} is set.
-heartbeat-delivery-bridge-required = {$field} names '{$bridge}', but no [gateway.bridges.{$bridge}] is configured. Heartbeat delivery requires an explicit gateway bridge and recipient; legacy [channels.*] entries no longer provide outbound delivery. Register the delivery bridge with zeroclaw gateway bridge add, then set the bridge name and recipient in [heartbeat].
+heartbeat-delivery-bridge-required = {$field} names '{$bridge}', but no [gateway.bridges.{$bridge}] is configured. Heartbeat delivery requires an explicit gateway bridge and recipient; legacy [channels.*] entries no longer provide outbound delivery. Register the delivery bridge with rei gateway bridge add, then set the bridge name and recipient in [heartbeat].
 heartbeat-delivery-scoped-bridge = {$field} names scoped bridge '{$bridge}', which cannot connect to /ws/bridge or receive outbox deliveries. Select a delivery bridge without a device or owner scope; keep the scoped credential's permissions unchanged.
 cli-status-memory = 🧠 Memory:         {$backend} (auto-save: {$auto_save})
 cli-status-companion-outbox-not-configured = Companion outbox: not configured
@@ -662,13 +662,13 @@ cli-status-channel-not-compiled = 🚫 configured, not compiled
 cli-status-channel-retired = ⚠️ section parses, nothing runs; remove it
 
 # ── desktop / config / estop / auth ──
-cli-desktop-not-installed = ZeroClaw companion app is not installed.
+cli-desktop-not-installed = ReiClaw companion app is not installed.
 cli-desktop-blurb1 = The companion app is a lightweight menu bar app that
 cli-desktop-blurb2 = connects to the same gateway as the CLI.
 cli-config-all-configured = All sections already configured.
 cli-config-valid = Config is valid.
 cli-config-applied-ops = Applied {$count} operation(s):
-cli-config-section-degraded = warning: config section `{$section}` in {$path} is malformed and was reset to defaults for this run. Values in that section are NOT in effect. Run `zeroclaw config validate` to see the parse error, then repair the file.
+cli-config-section-degraded = warning: config section `{$section}` in {$path} is malformed and was reset to defaults for this run. Values in that section are NOT in effect. Run `rei config validate` to see the parse error, then repair the file.
 cli-estop-resume-done = Estop resume completed.
 cli-estop-engaged = Estop engaged.
 cli-estop-status = Estop status:
@@ -685,7 +685,7 @@ cli-config-legend = Legend: 💉 env-overridden  🔒 secret
 cli-config-secret-set = {$path} is set (encrypted secret — value not displayed)
 cli-config-secret-unset = {$path} is not set (encrypted secret)
 cli-config-updated = {$path} updated.
-cli-config-review-hint = Run `zeroclaw config list` to review, then set required fields.
+cli-config-review-hint = Run `rei config list` to review, then set required fields.
 cli-estop-domains-none = {"  "}domain_blocks:  (none)
 cli-estop-domains = {"  "}domain_blocks:  {$v}
 cli-estop-tools-none = {"  "}tool_freeze:    (none)
@@ -700,7 +700,7 @@ cli-auth-oauth-visit = Visit: {$uri}
 cli-auth-oauth-code = Code:  {$code}
 cli-auth-oauth-fast-link = Fast link: {$uri}
 cli-auth-callback-capture-failed = Callback capture failed: {$error}
-cli-auth-run-paste-redirect = Run `zeroclaw auth paste-redirect --model-provider {$provider} --profile {$profile}`
+cli-auth-run-paste-redirect = Run `rei auth paste-redirect --model-provider {$provider} --profile {$profile}`
 cli-auth-paste-redirect-requires-input = paste-redirect requires the redirect URL or OAuth code
 
 # ── locales fetch ──
@@ -712,37 +712,37 @@ cli-locales-long-about =
     Choose en or zh-CN. Restore every catalogue by default, or select cli,tools with --catalog.
 
     Examples:
-      zeroclaw locales fetch zh-CN
-      zeroclaw locales fetch zh-CN --catalog tools
+      rei locales fetch zh-CN
+      rei locales fetch zh-CN --catalog tools
 cli-locales-fetch-about = Restore this build's translated FTL files without network access
 cli-locales-restored = {"  "}restored bundled {$name} -> {$path}
 cli-locales-missing-builtin = Catalogue {$name} for {$locale} is not included in this build
 cli-locales-none-selected = Select at least one catalogue: cli, tools
 cli-locales-installed = Installed {$count} catalogue(s) for '{$locale}' under {$dir}
 
-# ── browse (zeroclaw browse) ──
+# ── browse (rei browse) ──
 cli-browse-header = {$path} ({$count} entries)
 cli-browse-empty = (empty)
 cli-browse-file-bytes = {$name} ({$bytes} bytes)
 
-# ── update (zeroclaw update) ──
+# ── update (rei update) ──
 
-# ── self-test (zeroclaw self-test) ──
+# ── self-test (rei self-test) ──
 cli-selftest-all-passed = All {$total} checks passed.
 cli-selftest-some-failed = {$failed}/{$total} checks failed.
 cli-selftest-channel-config-uncompiled = {$compiled} compiled channel types, {$configured} compiled/configured; configured but not compiled: {$names}. Build from source with `./install.sh --source --preset full`, `--features channels-full`, or the specific `channel-*` feature.
 cli-selftest-channel-config-retired = {$compiled} channel types, {$configured} configured; configured sections of retired transports (nothing runs): {$names}. Remove those [channels.*] sections; live surfaces are the Telegram bridge and webhook ingress.
 
-# ── channels (zeroclaw channel list) ──
+# ── channels (rei channel list) ──
 cli-channels-header = Channels:
 cli-channels-cli-always = {"  "}✅ CLI (always available)
 cli-channels-notion = {"  "}{$status} Notion
 cli-channels-not-compiled-header = {"  "}Configured but not compiled in this binary:
 cli-channels-not-compiled-entry = {"  "}🚫 {$name} (configured, not compiled)
 cli-channels-build-hint = {"  "}Build from source with `./install.sh --source --preset full`, `--features channels-full`, or the specific `channel-*` feature.
-cli-channels-start-hint = To start channels: zeroclaw channel start
-cli-channels-doctor-hint = To check health:    zeroclaw channel doctor
-cli-channels-configure-hint = To configure:      zeroclaw config set channels.<name>.<field>=<value>
+cli-channels-start-hint = To start channels: rei channel start
+cli-channels-doctor-hint = To check health:    rei channel doctor
+cli-channels-configure-hint = To configure:      rei config set channels.<name>.<field>=<value>
 cli-channels-retired-header = {"  "}Configured sections of retired transports (no runner exists):
 cli-channels-retired-entry = {"  "}⚠️ {$name} (section parses, nothing runs; remove it)
 cli-channels-retired-hint = {"  "}Live surfaces: Telegram bridge, webhook ingress.
@@ -783,7 +783,7 @@ turn-tool-interrupted-before-result = [interrupted by user before this tool prod
 # tool-call protocol and the turn gives up retrying.
 channel-runtime-malformed-tool-output = I generated an internal tool-call format error and could not complete this request. Please try again.
 
-# ── Alias CRUD CLI — zeroclaw {agents,providers,channels} {create,list,rename,delete} (#7468 / #7175) ──
+# ── Alias CRUD CLI — rei {agents,providers,channels} {create,list,rename,delete} (#7468 / #7175) ──
 cli-alias-list-empty = (no entries under {$section})
 cli-alias-created = created {$section}.{$alias}
 cli-alias-exists = {$section}.{$alias} already exists (no change)
@@ -814,7 +814,7 @@ cli-alias-owned-state-unavailable = note: config references were updated, but th
 cli-bundle-not-configured = skill bundle '{$alias}' is not configured
 cli-bundle-rename-failed = rename failed: {$error}
 
-# ── Skill-bundle CLI — zeroclaw skills bundle {add,remove,rename} (#7468 / #7175) ──
+# ── Skill-bundle CLI — rei skills bundle {add,remove,rename} (#7468 / #7175) ──
 cli-bundle-exists = skill bundle '{$alias}' already exists (no change)
 cli-bundle-created = created skill_bundles.{$alias} (dir: {$dir})
 cli-bundle-created-warn = created skill_bundles.{$alias} (warning: dir resolve failed: {$error})
@@ -828,20 +828,20 @@ cli-bundle-renamed = renamed skill_bundles.{$from} → skill_bundles.{$to}
 
 # ── Web dashboard restart hints — RestartInfo.hint shown after an in-app upgrade (PR #8173) ──
 # The first four are shell command templates shown verbatim; they are not translated.
-cli-gateway-restart-hint-kubernetes = kubectl rollout restart deployment/zeroclaw
+cli-gateway-restart-hint-kubernetes = kubectl rollout restart deployment/rei
 cli-gateway-restart-hint-container = docker compose restart
-cli-gateway-restart-hint-systemd = systemctl restart zeroclaw
-cli-gateway-restart-hint-launchd = launchctl kickstart -k <your-zeroclaw-label>
-cli-gateway-restart-hint-process = restart the `zeroclaw daemon` process
+cli-gateway-restart-hint-systemd = systemctl restart rei
+cli-gateway-restart-hint-launchd = launchctl kickstart -k <your-rei-label>
+cli-gateway-restart-hint-process = restart the `rei daemon` process
 
-# ── daemon gateway bind pre-flight — zeroclaw daemon (#7895) ──
+# ── daemon gateway bind pre-flight — rei daemon (#7895) ──
 # Emitted by the daemon startup guard in src/main.rs when the configured gateway
 # address is already bound. The daemon supervises its own in-process gateway
 # (shared event bus / canvas / reload channel) and cannot adopt a separate
 # process, so it fails fast with an actionable message instead of degrading into
 # a supervisor retry loop. The two variants differ only by who holds the port.
-cli-daemon-gateway-already-running = A ZeroClaw gateway is already running on {$host}:{$port}. The daemon supervises its own gateway and will not start a second one on the same address. Stop that gateway (or point the daemon at a free port with `zeroclaw config set gateway.port <port>`), then run the daemon again.
-cli-daemon-gateway-port-occupied = Gateway address {$host}:{$port} is already in use by another process. Free the port or point the daemon at a free port (`zeroclaw config set gateway.port <port>`), then run the daemon again.
+cli-daemon-gateway-already-running = A ReiClaw gateway is already running on {$host}:{$port}. The daemon supervises its own gateway and will not start a second one on the same address. Stop that gateway (or point the daemon at a free port with `rei config set gateway.port <port>`), then run the daemon again.
+cli-daemon-gateway-port-occupied = Gateway address {$host}:{$port} is already in use by another process. Free the port or point the daemon at a free port (`rei config set gateway.port <port>`), then run the daemon again.
 
 # ── Context window (doctor update-context-windows, agent interactive) ──
 cli-doctor-context-window-ok = {$provider_ref}: context window: {$context_window} tokens
@@ -861,8 +861,8 @@ cli-doctor-ctxwin-none = No updates needed.
 cli-doctor-ctxwin-write-failed = {$provider_ref}: failed to write context_window: {$error}
 
 # ── Degraded config sections (doctor diagnose, #8835) ──
-cli-doctor-degraded-security = SECURITY-CRITICAL config section `{$path}` is invalid and was reset to its default so the daemon can boot; the running posture may be WEAKER than intended. Run `zeroclaw config validate` to see the parse error, then repair the file.
-cli-doctor-degraded-section = config section `{$path}` is malformed and was reset to defaults; values in that section are NOT in effect. Run `zeroclaw config validate` to see the parse error, then repair the file.
+cli-doctor-degraded-security = SECURITY-CRITICAL config section `{$path}` is invalid and was reset to its default so the daemon can boot; the running posture may be WEAKER than intended. Run `rei config validate` to see the parse error, then repair the file.
+cli-doctor-degraded-section = config section `{$path}` is malformed and was reset to defaults; values in that section are NOT in effect. Run `rei config validate` to see the parse error, then repair the file.
 
 # ── Personality file truncation (doctor diagnose, #310) ──
 cli-doctor-personality-file-truncated = {$alias}/{$filename}: personality cap {$cap} vs {$total} chars ({$discarded} would be discarded)
@@ -875,16 +875,16 @@ tool-runtime-command-docker-allowed-root = Failed to build runtime command: Fail
 # ── Telegram operator tooling ──
 cli-telegram-about = Compatibility diagnostics for retired Telegram operator tooling
 cli-telegram-long-about =
-    The in-process Telegram listener is retired. Telegram intake and cursor recovery belong to zeroclaw-bridge-telegram.
+    The in-process Telegram listener is retired. Telegram intake and cursor recovery belong to rei-bridge-telegram.
 
     skip-update remains parseable for compatibility and returns a migration error. It does not write a skip marker or advance the bridge cursor.
 cli-telegram-skip-update-about = Explain migration of the retired Telegram skip command
 cli-telegram-skip-update-long-about =
-    The in-process Telegram listener and its skip markers are retired. This compatibility command returns a migration error without writing a marker. Telegram intake and cursor recovery belong to zeroclaw-bridge-telegram; this command cannot skip a bridge update.
-telegram-skip-update-retired = The in-process Telegram listener and telegram skip-update are retired. No skip marker was written. Telegram intake and cursor recovery belong to zeroclaw-bridge-telegram; this command cannot skip a bridge update.
+    The in-process Telegram listener and its skip markers are retired. This compatibility command returns a migration error without writing a marker. Telegram intake and cursor recovery belong to rei-bridge-telegram; this command cannot skip a bridge update.
+telegram-skip-update-retired = The in-process Telegram listener and telegram skip-update are retired. No skip marker was written. Telegram intake and cursor recovery belong to rei-bridge-telegram; this command cannot skip a bridge update.
 
-# zeroclaw chat
-cli-chat-connect-failed = Could not attach to the gateway at {$gateway}: {$error}. Start it with `zeroclaw daemon` or `zeroclaw gateway start`, or pass --gateway.
+# rei chat
+cli-chat-connect-failed = Could not attach to the gateway at {$gateway}: {$error}. Start it with `rei daemon` or `rei gateway start`, or pass --gateway.
 cli-chat-connect-refused = The gateway at {$gateway} refused the chat: {$error}
 cli-chat-attached = Session {$session} with {$agent}, {$history} earlier messages. /quit leaves, /cancel or Ctrl+C stops a running turn.
 cli-chat-approval-prompt = Allow {$tool}? {$summary} [y]es / [a]lways / [N]o:
@@ -947,7 +947,7 @@ soul-check-col-flags = FLAGS
 soul-check-disagree-title = Targets two or more levels apart
 soul-check-summary = Summary: { $targets } targets, { $scenarios } scenarios, { $calls } model calls; { $off_by_two } off by two, { $floor_failed } floors failed, { $disagree } providers disagree, { $errors } errors.
 soul-check-caveat = The judge is a model: treat these results as a signal, not proof. Nothing is stored.
-cli-doctor-soul-check-hint = Agent { $alias } has a Soul. After changing its provider or model, run `zeroclaw soul check --agent { $alias }` to confirm it still behaves like itself.
+cli-doctor-soul-check-hint = Agent { $alias } has a Soul. After changing its provider or model, run `rei soul check --agent { $alias }` to confirm it still behaves like itself.
 
 # Scoped chat turn cancellation. Requested is not a completed cancellation.
 gateway-cancel-requested = Stop requested for that turn; it has not yet confirmed cancellation.

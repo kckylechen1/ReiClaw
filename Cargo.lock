@@ -2759,6 +2759,42 @@ dependencies = [
 ]
 
 [[package]]
+name = "reiclaw-bridge-acp"
+version = "0.8.3"
+dependencies = [
+ "futures-util",
+ "libc",
+ "reiclaw-config",
+ "reiclaw-log",
+ "reiclaw-spawn",
+ "serde",
+ "serde_json",
+ "tempfile",
+ "tokio",
+ "tokio-tungstenite",
+ "toml",
+ "uuid",
+]
+
+[[package]]
+name = "reiclaw-bridge-telegram"
+version = "0.8.3"
+dependencies = [
+ "anyhow",
+ "axum",
+ "clap",
+ "futures-util",
+ "reiclaw-gateway-client",
+ "reiclaw-log",
+ "reiclaw-spawn",
+ "reqwest",
+ "serde",
+ "serde_json",
+ "tokio",
+ "tokio-tungstenite",
+]
+
+[[package]]
 name = "reiclaw-config"
 version = "0.8.3"
 dependencies = [
@@ -4799,42 +4835,6 @@ dependencies = [
  "quote",
  "syn 2.0.119",
  "synstructure",
-]
-
-[[package]]
-name = "zeroclaw-bridge-acp"
-version = "0.8.3"
-dependencies = [
- "futures-util",
- "libc",
- "reiclaw-config",
- "reiclaw-log",
- "reiclaw-spawn",
- "serde",
- "serde_json",
- "tempfile",
- "tokio",
- "tokio-tungstenite",
- "toml",
- "uuid",
-]
-
-[[package]]
-name = "zeroclaw-bridge-telegram"
-version = "0.8.3"
-dependencies = [
- "anyhow",
- "axum",
- "clap",
- "futures-util",
- "reiclaw-gateway-client",
- "reiclaw-log",
- "reiclaw-spawn",
- "reqwest",
- "serde",
- "serde_json",
- "tokio",
- "tokio-tungstenite",
 ]
 
 [[package]]

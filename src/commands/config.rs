@@ -273,7 +273,7 @@ pub async fn handle(config_command: crate::ConfigCommands, config: &mut Config) 
             #[cfg(not(feature = "schema-export"))]
             {
                 let _ = path;
-                anyhow::bail!("zeroclaw was built without the 'schema-export' feature")
+                anyhow::bail!("rei was built without the 'schema-export' feature")
             }
         }
         crate::ConfigCommands::List { filter, secrets } => {
@@ -411,7 +411,7 @@ pub async fn handle(config_command: crate::ConfigCommands, config: &mut Config) 
                         "config set --no-interactive refused: positional value missing"
                     );
                     anyhow::Error::msg(format!(
-                        "Value required in --no-interactive mode. Usage: zeroclaw config set --no-interactive {path} <value>"
+                        "Value required in --no-interactive mode. Usage: rei config set --no-interactive {path} <value>"
                     ))
                 })?;
                 config.set_prop_persistent(&path, &val)?;
@@ -523,7 +523,7 @@ pub async fn handle(config_command: crate::ConfigCommands, config: &mut Config) 
                         .join(", ");
                     config.set_prop_persistent(&path, &val)?;
                 } else {
-                    anyhow::bail!("Value required. Usage: zeroclaw config set {path} <value>");
+                    anyhow::bail!("Value required. Usage: rei config set {path} <value>");
                 }
             }
             Box::pin(config.save_dirty()).await?;
@@ -593,7 +593,7 @@ pub async fn handle(config_command: crate::ConfigCommands, config: &mut Config) 
                     "\n{}",
                     t(
                         "cli-config-review-hint",
-                        "Run `zeroclaw config list` to review, then set required fields."
+                        "Run `rei config list` to review, then set required fields."
                     )
                 );
             }
@@ -972,13 +972,13 @@ pub async fn handle(config_command: crate::ConfigCommands, config: &mut Config) 
             Ok(())
         }
         crate::ConfigCommands::Generate { encrypt } => {
-            let zeroclaw_dir = config
+            let rei_dir = config
                 .config_path
                 .parent()
                 .map(std::path::Path::to_path_buf);
             let opts = crate::config::generate::GenerateOptions {
                 encrypt_secrets: encrypt,
-                secret_store_dir: zeroclaw_dir.as_deref(),
+                secret_store_dir: rei_dir.as_deref(),
             };
             let toml_out = crate::config::generate::generate(&opts)?;
             print!("{toml_out}");

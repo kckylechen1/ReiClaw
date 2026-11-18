@@ -1,4 +1,4 @@
-//! `zeroclaw status` — show system status.
+//! `rei status` — show system status.
 
 use anyhow::Result;
 
@@ -33,7 +33,7 @@ pub async fn handle(config: &Config, format: Option<String>) -> Result<()> {
             }
         }
     }
-    println!("{}", t("cli-status-title", "🦀 ZeroClaw Status"));
+    println!("{}", t("cli-status-title", "🦀 ReiClaw Status"));
     println!();
     println!(
         "{}",
@@ -447,7 +447,7 @@ pub async fn handle(config: &Config, format: Option<String>) -> Result<()> {
     Ok(())
 }
 
-/// Resolve the memory backend label printed by `zeroclaw status`.
+/// Resolve the memory backend label printed by `rei status`.
 ///
 /// Runtime construction reads `config.memory.backend` directly (`memorycore`,
 /// `markdown`, `none`); `Config::resolve_active_storage` returns

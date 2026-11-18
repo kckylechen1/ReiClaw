@@ -21,8 +21,8 @@ use tokio::io::{AsyncRead, AsyncReadExt};
 #[cfg(any(target_os = "macos", test))]
 use tokio::process::{Child, Command as TokioCommand};
 
-const SERVICE_LABEL: &str = "com.zeroclaw.daemon";
-const WINDOWS_TASK_NAME: &str = "ZeroClaw Daemon";
+const SERVICE_LABEL: &str = "com.reiclaw.daemon";
+const WINDOWS_TASK_NAME: &str = "ReiClaw Daemon";
 #[cfg(any(target_os = "macos", test))]
 const LAUNCHD_LOG_MAX_BYTES: u64 = 8 * 1024 * 1024;
 #[cfg(any(target_os = "macos", test))]
@@ -542,18 +542,18 @@ fn linux_service_base(config: &Config) -> String {
         .and_then(Path::file_name)
         .and_then(|name| name.to_str())
     else {
-        return "zeroclaw".to_string();
+        return "rei".to_string();
     };
     let base = dir_name.strip_prefix('.').unwrap_or(dir_name);
-    if base == "zeroclaw" {
+    if base == "rei" {
         return base.to_string();
     }
-    if let Some(suffix) = base.strip_prefix("zeroclaw-")
+    if let Some(suffix) = base.strip_prefix("rei-")
         && !suffix.is_empty()
     {
         return base.to_string();
     }
-    "zeroclaw".to_string()
+    "rei".to_string()
 }
 
 fn linux_systemd_unit(config: &Config) -> String {
@@ -566,7 +566,7 @@ fn linux_openrc_service(config: &Config) -> String {
 
 fn ensure_linux_default_install_scope(config: &Config, action: &str) -> Result<()> {
     let service = linux_service_base(config);
-    if service == "zeroclaw" {
+    if service == "rei" {
         return Ok(());
     }
 
@@ -576,7 +576,7 @@ fn ensure_linux_default_install_scope(config: &Config, action: &str) -> Result<(
         .map(|path| path.display().to_string())
         .unwrap_or_else(|| config.config_path.display().to_string());
     bail!(
-        "Linux service {action} only manages the default zeroclaw service. \
+        "Linux service {action} only manages the default rei service. \
          Config directory {config_dir} maps to named service {service}; \
          provide that unit manually, then use service status/start/stop/restart/logs to manage it."
     );
@@ -613,7 +613,7 @@ fn linux_openrc_log_dir(config: &Config) -> PathBuf {
     Path::new("/var/log").join(linux_openrc_service(config))
 }
 
-/// Returns whether the ZeroClaw daemon service is currently running.
+/// Returns whether the ReiClaw daemon service is currently running.
 pub fn is_running(config: &Config) -> bool {
     if cfg!(target_os = "macos") {
         run_capture(Command::new("launchctl").arg("list"))
@@ -1077,8 +1077,8 @@ pub fn uninstall(config: &Config, init_system: InitSystem) -> Result<()> {
             .parent()
             .map_or_else(|| PathBuf::from("."), PathBuf::from);
         for wrapper in [
-            base_dir.join("zeroclaw-daemon.cmd"),
-            base_dir.join("logs").join("zeroclaw-daemon.cmd"),
+            base_dir.join("rei-daemon.cmd"),
+            base_dir.join("logs").join("rei-daemon.cmd"),
         ] {
             if wrapper.exists() {
                 fs::remove_file(&wrapper).ok();
@@ -1103,20 +1103,20 @@ fn uninstall_linux(config: &Config, init_system: InitSystem) -> Result<()> {
             println!("✅ Service uninstalled ({})", file.display().to_string());
         }
         InitSystem::Openrc => {
-            let init_script = Path::new("/etc/init.d/zeroclaw");
+            let init_script = Path::new("/etc/init.d/rei");
             if init_script.exists() {
                 if let Err(err) =
-                    run_checked(Command::new("rc-update").args(["del", "zeroclaw", "default"]))
+                    run_checked(Command::new("rc-update").args(["del", "rei", "default"]))
                 {
                     eprintln!(
-                        "⚠️  Warning: Could not remove zeroclaw from OpenRC default runlevel: {err}"
+                        "⚠️  Warning: Could not remove rei from OpenRC default runlevel: {err}"
                     );
                 }
                 fs::remove_file(init_script).with_context(|| {
                     format!("Failed to remove {}", init_script.display().to_string())
                 })?;
             }
-            println!("✅ Service uninstalled (/etc/init.d/zeroclaw)");
+            println!("✅ Service uninstalled (/etc/init.d/rei)");
         }
         InitSystem::Auto => unreachable!("Auto should be resolved before this point"),
     }
@@ -1131,16 +1131,14 @@ pub fn homebrew_var_dir_from_exe(exe: &Path) -> Option<PathBuf> {
         .ancestors()
         .find(|path| path.file_name().is_some_and(|name| name == "Cellar"))
     {
-        return cellar
-            .parent()
-            .map(|prefix| prefix.join("var").join("zeroclaw"));
+        return cellar.parent().map(|prefix| prefix.join("var").join("rei"));
     }
 
     let prefix = exe.parent()?.parent()?;
     prefix
         .join("Cellar")
         .is_dir()
-        .then(|| prefix.join("var").join("zeroclaw"))
+        .then(|| prefix.join("var").join("rei"))
 }
 
 #[cfg(test)]
@@ -1149,21 +1147,21 @@ mod homebrew_tests {
 
     #[test]
     fn homebrew_var_dir_from_exe_detects_cellar_path() {
-        let exe = PathBuf::from("/opt/homebrew/Cellar/zeroclaw/1.2.3/bin/zeroclaw");
+        let exe = PathBuf::from("/opt/homebrew/Cellar/rei/1.2.3/bin/rei");
         let var_dir = homebrew_var_dir_from_exe(&exe);
-        assert_eq!(var_dir, Some(PathBuf::from("/opt/homebrew/var/zeroclaw")));
+        assert_eq!(var_dir, Some(PathBuf::from("/opt/homebrew/var/rei")));
     }
 
     #[test]
     fn homebrew_var_dir_from_exe_detects_intel_cellar_path() {
-        let exe = PathBuf::from("/usr/local/Cellar/zeroclaw/1.0.0/bin/zeroclaw");
+        let exe = PathBuf::from("/usr/local/Cellar/rei/1.0.0/bin/rei");
         let var_dir = homebrew_var_dir_from_exe(&exe);
-        assert_eq!(var_dir, Some(PathBuf::from("/usr/local/var/zeroclaw")));
+        assert_eq!(var_dir, Some(PathBuf::from("/usr/local/var/rei")));
     }
 
     #[test]
     fn homebrew_var_dir_from_exe_ignores_non_homebrew_path() {
-        let exe = PathBuf::from("/home/user/.cargo/bin/zeroclaw");
+        let exe = PathBuf::from("/home/user/.cargo/bin/rei");
         let var_dir = homebrew_var_dir_from_exe(&exe);
         assert_eq!(var_dir, None);
     }
@@ -1173,24 +1171,21 @@ mod homebrew_tests {
     fn homebrew_var_dir_from_exe_detects_opt_symlink_layout() {
         let temp = tempfile::tempdir().expect("tempdir");
         let prefix = temp.path().join("homebrew");
-        let cellar_bin = prefix.join("Cellar/zeroclaw/1.2.3/bin");
+        let cellar_bin = prefix.join("Cellar/rei/1.2.3/bin");
         std::fs::create_dir_all(&cellar_bin).expect("create Cellar binary dir");
-        let cellar_exe = cellar_bin.join("zeroclaw");
+        let cellar_exe = cellar_bin.join("rei");
         std::fs::write(&cellar_exe, "").expect("create fake executable");
 
         let opt_parent = prefix.join("opt");
         std::fs::create_dir_all(&opt_parent).expect("create opt dir");
-        std::os::unix::fs::symlink(
-            prefix.join("Cellar/zeroclaw/1.2.3"),
-            opt_parent.join("zeroclaw"),
-        )
-        .expect("create opt symlink");
+        std::os::unix::fs::symlink(prefix.join("Cellar/rei/1.2.3"), opt_parent.join("rei"))
+            .expect("create opt symlink");
 
         let expected_prefix = prefix
             .canonicalize()
             .expect("canonicalize fake Homebrew prefix");
-        let var_dir = homebrew_var_dir_from_exe(&prefix.join("opt/zeroclaw/bin/zeroclaw"));
-        assert_eq!(var_dir, Some(expected_prefix.join("var/zeroclaw")));
+        let var_dir = homebrew_var_dir_from_exe(&prefix.join("opt/rei/bin/rei"));
+        assert_eq!(var_dir, Some(expected_prefix.join("var/rei")));
     }
 }
 
@@ -1203,7 +1198,7 @@ fn install_macos(config: &Config) -> Result<()> {
     let exe = std::env::current_exe().context("Failed to resolve current executable")?;
 
     // When installed via Homebrew, use the Homebrew var directory for runtime
-    // data so that `brew services start zeroclaw` works out of the box.
+    // data so that `brew services start rei` works out of the box.
     let homebrew_var_dir = homebrew_var_dir_from_exe(&exe);
     if let Some(ref var_dir) = homebrew_var_dir {
         fs::create_dir_all(var_dir).with_context(|| {
@@ -1233,7 +1228,7 @@ fn install_macos(config: &Config) -> Result<()> {
     if let Some(ref var_dir) = homebrew_var_dir {
         println!("   Homebrew var: {}", var_dir.display());
     }
-    println!("   Start with: zeroclaw service start");
+    println!("   Start with: rei service start");
     Ok(())
 }
 
@@ -1304,7 +1299,7 @@ fn install_linux_systemd(config: &Config) -> Result<()> {
     let exe = std::env::current_exe().context("Failed to resolve current executable")?;
     let unit = format!(
         "[Unit]\n\
-         Description=ZeroClaw daemon\n\
+         Description=ReiClaw daemon\n\
          After=network.target\n\
          \n\
          [Service]\n\
@@ -1325,12 +1320,12 @@ fn install_linux_systemd(config: &Config) -> Result<()> {
 
     fs::write(&file, unit)?;
     let _ = run_checked(Command::new("systemctl").args(["--user", "daemon-reload"]));
-    let _ = run_checked(Command::new("systemctl").args(["--user", "enable", "zeroclaw.service"]));
+    let _ = run_checked(Command::new("systemctl").args(["--user", "enable", "rei.service"]));
     println!(
         "✅ Installed systemd user service: {}",
         file.display().to_string()
     );
-    println!("   Start with: zeroclaw service start");
+    println!("   Start with: rei service start");
     warn_if_systemd_user_linger_disabled();
     Ok(())
 }
@@ -1349,20 +1344,20 @@ fn is_root() -> bool {
     false
 }
 
-/// Check if the zeroclaw user exists and has expected properties.
+/// Check if the rei user exists and has expected properties.
 /// Returns Ok if user doesn't exist (OpenRC will handle creation or fail gracefully).
 /// Returns error if user exists but has unexpected properties.
-fn check_zeroclaw_user() -> Result<()> {
-    let output = Command::new("getent").args(["passwd", "zeroclaw"]).output();
+fn check_rei_user() -> Result<()> {
+    let output = Command::new("getent").args(["passwd", "rei"]).output();
     let is_alpine = Path::new("/etc/alpine-release").exists();
 
     let (del_cmd, add_cmd) = if is_alpine {
         (
-            "deluser zeroclaw && delgroup zeroclaw",
-            "addgroup -S zeroclaw && adduser -S -s /sbin/nologin -H -D -G zeroclaw zeroclaw",
+            "deluser rei && delgroup rei",
+            "addgroup -S rei && adduser -S -s /sbin/nologin -H -D -G rei rei",
         )
     } else {
-        ("userdel zeroclaw", "useradd -r -s /sbin/nologin zeroclaw")
+        ("userdel rei", "useradd -r -s /sbin/nologin rei")
     };
 
     match output {
@@ -1377,7 +1372,7 @@ fn check_zeroclaw_user() -> Result<()> {
 
                 if uid.parse::<u32>().unwrap_or(999) >= 1000 {
                     bail!(
-                        "User 'zeroclaw' exists but has unexpected UID {} (expected system UID < 1000).\n\
+                        "User 'rei' exists but has unexpected UID {} (expected system UID < 1000).\n\
                          Recreate with: sudo {} && sudo {}",
                         uid,
                         del_cmd,
@@ -1387,7 +1382,7 @@ fn check_zeroclaw_user() -> Result<()> {
 
                 if !shell.contains("nologin") && !shell.contains("false") {
                     bail!(
-                        "User 'zeroclaw' exists but has unexpected shell '{}'.\n\
+                        "User 'rei' exists but has unexpected shell '{}'.\n\
                          Expected nologin/false for security. Fix with: sudo {} && sudo {}",
                         shell,
                         del_cmd,
@@ -1395,9 +1390,9 @@ fn check_zeroclaw_user() -> Result<()> {
                     );
                 }
 
-                if home != "/var/lib/zeroclaw" && home != "/nonexistent" {
+                if home != "/var/lib/rei" && home != "/nonexistent" {
                     eprintln!(
-                        "⚠️  Warning: zeroclaw user has home directory '{}' (expected /var/lib/zeroclaw or /nonexistent)",
+                        "⚠️  Warning: rei user has home directory '{}' (expected /var/lib/rei or /nonexistent)",
                         home
                     );
                 }
@@ -1410,79 +1405,70 @@ fn check_zeroclaw_user() -> Result<()> {
     }
 }
 
-fn ensure_zeroclaw_user() -> Result<()> {
-    let output = Command::new("getent").args(["passwd", "zeroclaw"]).output();
+fn ensure_rei_user() -> Result<()> {
+    let output = Command::new("getent").args(["passwd", "rei"]).output();
     if let Ok(output) = output
         && output.status.success()
     {
-        return check_zeroclaw_user();
+        return check_rei_user();
     }
 
     let is_alpine = Path::new("/etc/alpine-release").exists();
 
     if is_alpine {
-        let group_output = Command::new("getent").args(["group", "zeroclaw"]).output();
+        let group_output = Command::new("getent").args(["group", "rei"]).output();
         let group_exists = group_output.map(|o| o.status.success()).unwrap_or(false);
 
         if !group_exists {
             let output = Command::new("addgroup")
-                .args(["-S", "zeroclaw"])
+                .args(["-S", "rei"])
                 .output()
-                .context("Failed to create zeroclaw group")?;
+                .context("Failed to create rei group")?;
 
             if !output.status.success() {
                 let stderr = String::from_utf8_lossy(&output.stderr);
-                bail!("Failed to create zeroclaw group: {}", stderr.trim());
+                bail!("Failed to create rei group: {}", stderr.trim());
             }
-            println!("✅ Created system group: zeroclaw");
+            println!("✅ Created system group: rei");
         }
 
         let output = Command::new("adduser")
-            .args([
-                "-S",
-                "-s",
-                "/sbin/nologin",
-                "-H",
-                "-D",
-                "-G",
-                "zeroclaw",
-                "zeroclaw",
-            ])
+            .args(["-S", "-s", "/sbin/nologin", "-H", "-D", "-G", "rei", "rei"])
             .output()
-            .context("Failed to create zeroclaw user")?;
+            .context("Failed to create rei user")?;
 
         if !output.status.success() {
             let stderr = String::from_utf8_lossy(&output.stderr);
-            bail!("Failed to create zeroclaw user: {}", stderr.trim());
+            bail!("Failed to create rei user: {}", stderr.trim());
         }
     } else {
         let output = Command::new("useradd")
-            .args(["-r", "-s", "/sbin/nologin", "zeroclaw"])
+            .args(["-r", "-s", "/sbin/nologin", "rei"])
             .output()
-            .context("Failed to create zeroclaw user")?;
+            .context("Failed to create rei user")?;
 
         if !output.status.success() {
             let stderr = String::from_utf8_lossy(&output.stderr);
-            bail!("Failed to create zeroclaw user: {}", stderr.trim());
+            bail!("Failed to create rei user: {}", stderr.trim());
         }
     }
 
-    println!("✅ Created system user: zeroclaw");
+    println!("✅ Created system user: rei");
     Ok(())
 }
 
-/// Change ownership of a path to zeroclaw:zeroclaw
+/// Change ownership of a path to rei:rei
 #[cfg(unix)]
-fn chown_to_zeroclaw(path: &Path) -> Result<()> {
+fn chown_to_rei(path: &Path) -> Result<()> {
     let output = Command::new("chown")
-        .args(["zeroclaw:zeroclaw", &path.to_string_lossy()])
+        .args(["rei:rei", &path.to_string_lossy()])
         .output()
         .context("Failed to run chown")?;
 
     if !output.status.success() {
         let stderr = String::from_utf8_lossy(&output.stderr);
         bail!(
-            "Failed to change ownership of {} to zeroclaw:zeroclaw: {}",
+            "Failed to change ownership of {} to rei:rei: {}",
             path.display().to_string(),
             stderr.trim(),
         );
@@ -1491,21 +1477,21 @@ fn chown_to_zeroclaw(path: &Path) -> Result<()> {
 }
 
 #[cfg(not(unix))]
-fn chown_to_zeroclaw(_path: &Path) -> Result<()> {
+fn chown_to_rei(_path: &Path) -> Result<()> {
     Ok(())
 }
 
 #[cfg(unix)]
-fn chown_recursive_to_zeroclaw(path: &Path) -> Result<()> {
+fn chown_recursive_to_rei(path: &Path) -> Result<()> {
     let output = Command::new("chown")
-        .args(["-R", "zeroclaw:zeroclaw", &path.to_string_lossy()])
+        .args(["-R", "rei:rei", &path.to_string_lossy()])
         .output()
         .context("Failed to run recursive chown")?;
 
     if !output.status.success() {
         let stderr = String::from_utf8_lossy(&output.stderr);
         bail!(
-            "Failed to recursively change ownership of {} to zeroclaw:zeroclaw: {}",
+            "Failed to recursively change ownership of {} to rei:rei: {}",
             path.display().to_string(),
             stderr.trim(),
         );
@@ -1515,7 +1501,7 @@ fn chown_recursive_to_zeroclaw(path: &Path) -> Result<()> {
 }
 
 #[cfg(not(unix))]
-fn chown_recursive_to_zeroclaw(_path: &Path) -> Result<()> {
+fn chown_recursive_to_rei(_path: &Path) -> Result<()> {
     Ok(())
 }
 
@@ -1569,14 +1555,14 @@ fn resolve_invoking_user_config_dir() -> Option<PathBuf> {
         let entry = String::from_utf8_lossy(&output.stdout);
         let fields: Vec<&str> = entry.trim().split(':').collect();
         if fields.len() >= 6 {
-            return Some(PathBuf::from(fields[5]).join(".zeroclaw"));
+            return Some(PathBuf::from(fields[5]).join(".rei"));
         }
     }
 
     std::env::var("HOME")
         .ok()
         .map(PathBuf::from)
-        .map(|home| home.join(".zeroclaw"))
+        .map(|home| home.join(".rei"))
 }
 
 fn migrate_openrc_runtime_state_if_needed(config_dir: &Path) -> Result<()> {
@@ -1620,7 +1606,7 @@ fn build_openrc_writability_probe_command(path: &Path, has_runuser: bool) -> (St
             "runuser".to_string(),
             vec![
                 "-u".to_string(),
-                "zeroclaw".to_string(),
+                "rei".to_string(),
                 "--".to_string(),
                 "sh".to_string(),
                 "-c".to_string(),
@@ -1635,7 +1621,7 @@ fn build_openrc_writability_probe_command(path: &Path, has_runuser: bool) -> (St
                 "/bin/sh".to_string(),
                 "-c".to_string(),
                 probe,
-                "zeroclaw".to_string(),
+                "rei".to_string(),
             ],
         )
     }
@@ -1663,8 +1649,8 @@ fn ensure_openrc_runtime_path_writable(path: &Path) -> Result<()> {
             stderr.trim()
         };
         bail!(
-            "OpenRC runtime user 'zeroclaw' cannot write {} ({details}). \
-             Re-run `sudo zeroclaw service install` and ensure ownership is zeroclaw:zeroclaw.",
+            "OpenRC runtime user 'rei' cannot write {} ({details}). \
+             Re-run `sudo rei service install` and ensure ownership is rei:rei.",
             path.display().to_string(),
         );
     }
@@ -1700,7 +1686,7 @@ fn warn_if_binary_in_home(exe_path: &Path) {
         eprintln!(
             "⚠️  Warning: Binary path '{}' appears to be in a user home directory.\n\
              For system-wide OpenRC service, consider installing to /usr/local/bin:\n\
-             sudo cp '{}' /usr/local/bin/zeroclaw",
+             sudo cp '{}' /usr/local/bin/rei",
             exe_path.display().to_string(),
             exe_path.display()
         );
@@ -1712,21 +1698,21 @@ fn generate_openrc_script(exe_path: &Path, config_dir: &Path) -> String {
     format!(
         r#"#!/sbin/openrc-run
 
-name="zeroclaw"
-description="ZeroClaw daemon"
+name="rei"
+description="ReiClaw daemon"
 
 command="{exe}"
 command_args="--config-dir {config_dir} daemon"
 command_background="yes"
-command_user="zeroclaw:zeroclaw"
+command_user="rei:rei"
 pidfile="/run/${{RC_SVCNAME}}.pid"
 umask 027
-output_log="/var/log/zeroclaw/access.log"
-error_log="/var/log/zeroclaw/error.log"
+output_log="/var/log/rei/access.log"
+error_log="/var/log/rei/error.log"
 
 # Provide HOME so headless browsers can create profile/cache directories.
 # Without this, Chromium/Firefox fail with sandbox or profile errors.
-export HOME="/var/lib/zeroclaw"
+export HOME="/var/lib/rei"
 
 depend() {{
     need net
@@ -1734,7 +1720,7 @@ depend() {{
 }}
 
 start_pre() {{
-    checkpath --directory --owner zeroclaw:zeroclaw --mode 0750 /var/lib/zeroclaw
+    checkpath --directory --owner rei:rei --mode 0750 /var/lib/rei
 }}
 "#,
         exe = exe_path.display().to_string(),
@@ -1743,7 +1729,7 @@ start_pre() {{
 }
 
 fn resolve_openrc_executable() -> Result<PathBuf> {
-    let preferred = Path::new("/usr/local/bin/zeroclaw");
+    let preferred = Path::new("/usr/local/bin/rei");
     if preferred.exists() {
         return Ok(preferred.to_path_buf());
     }
@@ -1756,18 +1742,18 @@ fn install_linux_openrc(config: &Config) -> Result<()> {
     if !is_root() {
         bail!(
             "OpenRC service installation requires root privileges.\n\
-             Please run with sudo: sudo zeroclaw service install"
+             Please run with sudo: sudo rei service install"
         );
     }
 
-    ensure_zeroclaw_user()?;
+    ensure_rei_user()?;
 
     let exe = resolve_openrc_executable()?;
     warn_if_binary_in_home(&exe);
 
-    let config_dir = Path::new("/etc/zeroclaw");
+    let config_dir = Path::new("/etc/rei");
     let workspace_dir = config_dir.join("workspace");
-    let log_dir = Path::new("/var/log/zeroclaw");
+    let log_dir = Path::new("/var/log/rei");
 
     if !config_dir.exists() {
         fs::create_dir_all(config_dir)
@@ -1804,9 +1790,9 @@ fn install_linux_openrc(config: &Config) -> Result<()> {
                 },
             )?;
         }
-        chown_to_zeroclaw(&workspace_dir)?;
+        chown_to_rei(&workspace_dir)?;
         println!(
-            "✅ Created directory: {} (owned by zeroclaw:zeroclaw)",
+            "✅ Created directory: {} (owned by rei:rei)",
             workspace_dir.display()
         );
     }
@@ -1857,7 +1843,7 @@ fn install_linux_openrc(config: &Config) -> Result<()> {
         }
     }
 
-    chown_recursive_to_zeroclaw(config_dir)?;
+    chown_recursive_to_rei(config_dir)?;
 
     let created_log_dir = !log_dir.exists();
     if created_log_dir {
@@ -1875,19 +1861,19 @@ fn install_linux_openrc(config: &Config) -> Result<()> {
         }
     }
 
-    chown_to_zeroclaw(log_dir)?;
+    chown_to_rei(log_dir)?;
 
     ensure_openrc_runtime_dirs_writable(config_dir, &workspace_dir, log_dir)?;
 
     if created_log_dir {
         println!(
-            "✅ Created directory: {} (owned by zeroclaw:zeroclaw)",
+            "✅ Created directory: {} (owned by rei:rei)",
             log_dir.display()
         );
     }
 
     let init_script = generate_openrc_script(&exe, config_dir);
-    let init_path = Path::new("/etc/init.d/zeroclaw");
+    let init_path = Path::new("/etc/init.d/rei");
     fs::write(init_path, init_script)
         .with_context(|| format!("Failed to write {}", init_path.display().to_string()))?;
 
@@ -1902,10 +1888,10 @@ fn install_linux_openrc(config: &Config) -> Result<()> {
         })?;
     }
 
-    run_checked(Command::new("rc-update").args(["add", "zeroclaw", "default"]))?;
-    println!("✅ Installed OpenRC service: /etc/init.d/zeroclaw");
-    println!("   Config path: /etc/zeroclaw/config.toml");
-    println!("   Start with: sudo zeroclaw service start");
+    run_checked(Command::new("rc-update").args(["add", "rei", "default"]))?;
+    println!("✅ Installed OpenRC service: /etc/init.d/rei");
+    println!("   Config path: /etc/rei/config.toml");
+    println!("   Start with: sudo rei service start");
     let _ = config;
     Ok(())
 }
@@ -1923,7 +1909,7 @@ fn install_windows(config: &Config) -> Result<()> {
     // the config dir root so the logs dir holds only `.log` files. (Previously
     // it landed in logs/, where a `.cmd` next to the daemon's log files reads
     // as misplaced.)
-    let wrapper = base_dir.join("zeroclaw-daemon.cmd");
+    let wrapper = base_dir.join("rei-daemon.cmd");
     let stdout_log = logs_dir.join("daemon.stdout.log");
     let stderr_log = logs_dir.join("daemon.stderr.log");
 
@@ -1958,7 +1944,7 @@ fn install_windows(config: &Config) -> Result<()> {
     println!("✅ Installed Windows scheduled task: {}", task_name);
     println!("   Wrapper: {}", wrapper.display().to_string());
     println!("   Logs: {}", logs_dir.display().to_string());
-    println!("   Start with: zeroclaw service start");
+    println!("   Start with: rei service start");
     Ok(())
 }
 
@@ -1983,7 +1969,7 @@ fn linux_service_file(config: &Config) -> Result<PathBuf> {
         .join(".config")
         .join("systemd")
         .join("user")
-        .join("zeroclaw.service"))
+        .join("rei.service"))
 }
 
 fn linux_systemd_unit_file(config: &Config) -> Result<PathBuf> {
@@ -2101,7 +2087,7 @@ fn warn_if_systemd_user_linger_disabled() {
 }
 
 // Plain `#[cfg(test)]` is intentional: these pure renderer tests have no
-// integration dependencies and should run in every zeroclaw-runtime test build.
+// integration dependencies and should run in every reiclaw-runtime test build.
 #[cfg(test)]
 mod macos_plist_tests {
     use super::*;
@@ -2109,9 +2095,9 @@ mod macos_plist_tests {
     #[test]
     fn macos_plist_renderer_uses_plain_xml_quotes() {
         let plist = render_macos_launch_agent_plist(
-            Path::new("/opt/homebrew/bin/zeroclaw"),
-            Path::new("/opt/homebrew/var/zeroclaw"),
-            Some(Path::new("/opt/homebrew/var/zeroclaw")),
+            Path::new("/opt/homebrew/bin/rei"),
+            Path::new("/opt/homebrew/var/rei"),
+            Some(Path::new("/opt/homebrew/var/rei")),
         );
 
         assert!(!plist.contains(r#"\""#));
@@ -2126,13 +2112,13 @@ mod macos_plist_tests {
     #[test]
     fn macos_plist_renderer_escapes_paths_and_omits_homebrew_section_when_absent() {
         let plist = render_macos_launch_agent_plist(
-            Path::new("/tmp/Zero<&>\"'Claw/bin/zeroclaw"),
-            Path::new("/tmp/Zero<&>\"'Claw"),
+            Path::new("/tmp/Rei<&>\"'Claw/bin/rei"),
+            Path::new("/tmp/Rei<&>\"'Claw"),
             None,
         );
 
-        assert!(plist.contains("/tmp/Zero&lt;&amp;&gt;&quot;&apos;Claw/bin/zeroclaw"));
-        assert!(plist.contains("/tmp/Zero&lt;&amp;&gt;&quot;&apos;Claw"));
+        assert!(plist.contains("/tmp/Rei&lt;&amp;&gt;&quot;&apos;Claw/bin/rei"));
+        assert!(plist.contains("/tmp/Rei&lt;&amp;&gt;&quot;&apos;Claw"));
         assert!(!plist.contains("<key>EnvironmentVariables</key>"));
         assert!(!plist.contains("<key>WorkingDirectory</key>"));
     }
@@ -2140,13 +2126,13 @@ mod macos_plist_tests {
     #[test]
     fn macos_plist_routes_only_launchd_through_bounded_capture() {
         let plist = render_macos_launch_agent_plist(
-            Path::new("/usr/local/bin/zeroclaw"),
-            Path::new("/Users/test/.zeroclaw"),
+            Path::new("/usr/local/bin/rei"),
+            Path::new("/Users/test/.rei"),
             None,
         );
 
         assert!(plist.contains("<string>--config-dir</string>"));
-        assert!(plist.contains("<string>/Users/test/.zeroclaw</string>"));
+        assert!(plist.contains("<string>/Users/test/.rei</string>"));
         assert!(plist.contains("<string>service</string>"));
         assert!(plist.contains("<string>run-launchd-daemon</string>"));
         assert!(plist.contains("<key>KeepAlive</key>"));
@@ -2158,13 +2144,13 @@ mod macos_plist_tests {
     #[test]
     fn macos_plist_renderer_emits_plutil_parseable_xml() {
         let plist = render_macos_launch_agent_plist(
-            Path::new("/tmp/Zero<&>\"'Claw/bin/zeroclaw"),
-            Path::new("/tmp/Zero<&>\"'Claw/var/zeroclaw"),
-            Some(Path::new("/tmp/Zero<&>\"'Claw/var/zeroclaw")),
+            Path::new("/tmp/Rei<&>\"'Claw/bin/rei"),
+            Path::new("/tmp/Rei<&>\"'Claw/var/rei"),
+            Some(Path::new("/tmp/Rei<&>\"'Claw/var/rei")),
         );
 
         let file = std::env::temp_dir().join(format!(
-            "zeroclaw-launch-agent-plist-{}.plist",
+            "rei-launch-agent-plist-{}.plist",
             std::process::id()
         ));
         fs::write(&file, plist).expect("write plist fixture");
@@ -2346,55 +2332,55 @@ mod linux_service_tests {
     #[test]
     fn linux_service_base_derives_named_instance_from_config_dir() {
         assert_eq!(
-            linux_service_base(&config_at("/home/user/.zeroclaw-p100-104/config.toml")),
-            "zeroclaw-p100-104"
+            linux_service_base(&config_at("/home/user/.rei-p100-104/config.toml")),
+            "rei-p100-104"
         );
         assert_eq!(
-            linux_service_base(&config_at("/home/user/zeroclaw-prod/config.toml")),
-            "zeroclaw-prod"
+            linux_service_base(&config_at("/home/user/rei-prod/config.toml")),
+            "rei-prod"
         );
     }
 
     #[test]
     fn linux_service_base_falls_back_for_default_and_unrelated_dirs() {
         assert_eq!(
-            linux_service_base(&config_at("/home/user/.zeroclaw/config.toml")),
-            "zeroclaw"
+            linux_service_base(&config_at("/home/user/.rei/config.toml")),
+            "rei"
         );
         assert_eq!(
             linux_service_base(&config_at("/tmp/scratch/config.toml")),
-            "zeroclaw"
+            "rei"
         );
         assert_eq!(
-            linux_service_base(&config_at("/home/user/.zeroclaw-/config.toml")),
-            "zeroclaw"
+            linux_service_base(&config_at("/home/user/.rei-/config.toml")),
+            "rei"
         );
-        assert_eq!(linux_service_base(&config_at("config.toml")), "zeroclaw");
+        assert_eq!(linux_service_base(&config_at("config.toml")), "rei");
     }
 
     #[test]
     fn linux_service_control_args_use_named_instance() {
-        let config = config_at("/home/user/.zeroclaw-p100-104/config.toml");
+        let config = config_at("/home/user/.rei-p100-104/config.toml");
 
         assert_eq!(
             linux_systemd_action_args(&config, "start"),
-            ["--user", "start", "zeroclaw-p100-104.service"]
+            ["--user", "start", "rei-p100-104.service"]
         );
         assert_eq!(
             linux_openrc_action_args(&config, "status"),
-            ["zeroclaw-p100-104", "status"]
+            ["rei-p100-104", "status"]
         );
     }
 
     #[test]
     fn linux_openrc_log_dir_uses_named_instance() {
         assert_eq!(
-            linux_openrc_log_dir(&config_at("/home/user/.zeroclaw/config.toml")),
-            PathBuf::from("/var/log/zeroclaw")
+            linux_openrc_log_dir(&config_at("/home/user/.rei/config.toml")),
+            PathBuf::from("/var/log/rei")
         );
         assert_eq!(
-            linux_openrc_log_dir(&config_at("/home/user/.zeroclaw-p100-104/config.toml")),
-            PathBuf::from("/var/log/zeroclaw-p100-104")
+            linux_openrc_log_dir(&config_at("/home/user/.rei-p100-104/config.toml")),
+            PathBuf::from("/var/log/rei-p100-104")
         );
     }
 
@@ -2402,32 +2388,32 @@ mod linux_service_tests {
     fn linux_install_scope_rejects_named_instances() {
         assert!(
             ensure_linux_default_install_scope(
-                &config_at("/home/user/.zeroclaw/config.toml"),
+                &config_at("/home/user/.rei/config.toml"),
                 "install"
             )
             .is_ok()
         );
 
         let err = ensure_linux_default_install_scope(
-            &config_at("/home/user/.zeroclaw-p100-104/config.toml"),
+            &config_at("/home/user/.rei-p100-104/config.toml"),
             "install",
         )
         .unwrap_err()
         .to_string();
-        assert!(err.contains("only manages the default zeroclaw service"));
-        assert!(err.contains("zeroclaw-p100-104"));
+        assert!(err.contains("only manages the default rei service"));
+        assert!(err.contains("rei-p100-104"));
     }
 
     #[test]
     fn linux_journalctl_args_use_named_instance() {
-        let config = config_at("/home/user/.zeroclaw-p100-104/config.toml");
+        let config = config_at("/home/user/.rei-p100-104/config.toml");
 
         assert_eq!(
             linux_journalctl_args(&config, 50, true),
             [
                 "--user",
                 "-u",
-                "zeroclaw-p100-104.service",
+                "rei-p100-104.service",
                 "-n",
                 "50",
                 "--no-pager",
@@ -2492,10 +2478,9 @@ mod linux_service_tests {
     #[cfg(not(target_os = "windows"))]
     #[test]
     fn linux_service_file_stays_default_for_install_path() {
-        let file =
-            linux_service_file(&config_at("/home/user/.zeroclaw-p100-104/config.toml")).unwrap();
+        let file = linux_service_file(&config_at("/home/user/.rei-p100-104/config.toml")).unwrap();
         let path = file.to_string_lossy();
-        assert!(path.ends_with(".config/systemd/user/zeroclaw.service"));
+        assert!(path.ends_with(".config/systemd/user/rei.service"));
     }
 }
 
@@ -2538,12 +2523,12 @@ mod service_helper_tests {
     fn linux_service_file_has_expected_suffix() {
         let file = linux_service_file(&Config::default()).unwrap();
         let path = file.to_string_lossy();
-        assert!(path.ends_with(".config/systemd/user/zeroclaw.service"));
+        assert!(path.ends_with(".config/systemd/user/rei.service"));
     }
 
     #[test]
     fn windows_task_name_is_constant() {
-        assert_eq!(windows_task_name(), "ZeroClaw Daemon");
+        assert_eq!(windows_task_name(), "ReiClaw Daemon");
     }
 
     #[cfg(target_os = "windows")]
@@ -2600,22 +2585,22 @@ mod service_helper_tests {
     fn generate_openrc_script_contains_required_directives() {
         use std::path::PathBuf;
 
-        let exe_path = PathBuf::from("/usr/local/bin/zeroclaw");
-        let script = generate_openrc_script(&exe_path, Path::new("/etc/zeroclaw"));
+        let exe_path = PathBuf::from("/usr/local/bin/rei");
+        let script = generate_openrc_script(&exe_path, Path::new("/etc/rei"));
 
         assert!(script.starts_with("#!/sbin/openrc-run"));
-        assert!(script.contains("name=\"zeroclaw\""));
-        assert!(script.contains("description=\"ZeroClaw daemon\""));
-        assert!(script.contains("command=\"/usr/local/bin/zeroclaw\""));
-        assert!(script.contains("command_args=\"--config-dir /etc/zeroclaw daemon\""));
-        assert!(!script.contains("env ZEROCLAW_CONFIG_DIR"));
-        assert!(!script.contains("env ZEROCLAW_WORKSPACE"));
+        assert!(script.contains("name=\"rei\""));
+        assert!(script.contains("description=\"ReiClaw daemon\""));
+        assert!(script.contains("command=\"/usr/local/bin/rei\""));
+        assert!(script.contains("command_args=\"--config-dir /etc/rei daemon\""));
+        assert!(!script.contains("env REI_CONFIG_DIR"));
+        assert!(!script.contains("env REI_WORKSPACE"));
         assert!(script.contains("command_background=\"yes\""));
-        assert!(script.contains("command_user=\"zeroclaw:zeroclaw\""));
+        assert!(script.contains("command_user=\"rei:rei\""));
         assert!(script.contains("pidfile=\"/run/${RC_SVCNAME}.pid\""));
         assert!(script.contains("umask 027"));
-        assert!(script.contains("output_log=\"/var/log/zeroclaw/access.log\""));
-        assert!(script.contains("error_log=\"/var/log/zeroclaw/error.log\""));
+        assert!(script.contains("output_log=\"/var/log/rei/access.log\""));
+        assert!(script.contains("error_log=\"/var/log/rei/error.log\""));
         assert!(script.contains("depend()"));
         assert!(script.contains("need net"));
         assert!(script.contains("after firewall"));
@@ -2625,11 +2610,11 @@ mod service_helper_tests {
     fn generate_openrc_script_sets_home_for_browser() {
         use std::path::PathBuf;
 
-        let exe_path = PathBuf::from("/usr/local/bin/zeroclaw");
-        let script = generate_openrc_script(&exe_path, Path::new("/etc/zeroclaw"));
+        let exe_path = PathBuf::from("/usr/local/bin/rei");
+        let script = generate_openrc_script(&exe_path, Path::new("/etc/rei"));
 
         assert!(
-            script.contains("export HOME=\"/var/lib/zeroclaw\""),
+            script.contains("export HOME=\"/var/lib/rei\""),
             "OpenRC script must set HOME for headless browser support"
         );
     }
@@ -2638,16 +2623,16 @@ mod service_helper_tests {
     fn generate_openrc_script_creates_home_directory() {
         use std::path::PathBuf;
 
-        let exe_path = PathBuf::from("/usr/local/bin/zeroclaw");
-        let script = generate_openrc_script(&exe_path, Path::new("/etc/zeroclaw"));
+        let exe_path = PathBuf::from("/usr/local/bin/rei");
+        let script = generate_openrc_script(&exe_path, Path::new("/etc/rei"));
 
         assert!(
             script.contains("start_pre()"),
             "OpenRC script must have start_pre to create HOME dir"
         );
         assert!(
-            script.contains("checkpath --directory --owner zeroclaw:zeroclaw"),
-            "start_pre must ensure /var/lib/zeroclaw exists with correct ownership"
+            script.contains("checkpath --directory --owner rei:rei"),
+            "start_pre must ensure /var/lib/rei exists with correct ownership"
         );
     }
 
@@ -2663,18 +2648,17 @@ mod service_helper_tests {
     #[cfg(unix)]
     #[test]
     fn openrc_writability_probe_prefers_runuser_when_available() {
-        let (program, args) =
-            build_openrc_writability_probe_command(Path::new("/etc/zeroclaw"), true);
+        let (program, args) = build_openrc_writability_probe_command(Path::new("/etc/rei"), true);
         assert_eq!(program, "runuser");
         assert_eq!(
             args,
             vec![
                 "-u".to_string(),
-                "zeroclaw".to_string(),
+                "rei".to_string(),
                 "--".to_string(),
                 "sh".to_string(),
                 "-c".to_string(),
-                "test -w '/etc/zeroclaw'".to_string()
+                "test -w '/etc/rei'".to_string()
             ]
         );
     }
@@ -2683,7 +2667,7 @@ mod service_helper_tests {
     #[test]
     fn openrc_writability_probe_falls_back_to_su() {
         let (program, args) =
-            build_openrc_writability_probe_command(Path::new("/etc/zeroclaw/workspace"), false);
+            build_openrc_writability_probe_command(Path::new("/etc/rei/workspace"), false);
         assert_eq!(program, "su");
         assert_eq!(
             args,
@@ -2691,8 +2675,8 @@ mod service_helper_tests {
                 "-s".to_string(),
                 "/bin/sh".to_string(),
                 "-c".to_string(),
-                "test -w '/etc/zeroclaw/workspace'".to_string(),
-                "zeroclaw".to_string()
+                "test -w '/etc/rei/workspace'".to_string(),
+                "rei".to_string()
             ]
         );
     }
@@ -2700,7 +2684,7 @@ mod service_helper_tests {
     #[cfg(not(target_os = "windows"))]
     #[test]
     fn tail_file_errors_on_missing_file() {
-        let missing = Path::new("/tmp/zeroclaw-test-nonexistent-log-file.log");
+        let missing = Path::new("/tmp/rei-test-nonexistent-log-file.log");
         let result = tail_file(missing, 10, false);
         assert!(result.is_err(), "tail on missing file should fail");
     }

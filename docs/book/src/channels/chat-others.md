@@ -9,7 +9,7 @@ Leftover sections tombstone at load with a structured warning.
 
 ## Live chat surfaces
 
-- **Telegram**; the gateway bridge (`zeroclaw-bridge-telegram`); see
+- **Telegram**; the gateway bridge (`rei-bridge-telegram`); see
   [Channels overview](./overview.md). Long polling is the default; no public
   URL required. Streaming draft edits are supported but capped by Telegram's
   rate limit; tune `draft_update_interval_ms` if you see "Too Many Requests".

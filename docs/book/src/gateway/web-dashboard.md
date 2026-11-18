@@ -63,16 +63,16 @@ contains `index.html`:
 |---|-----------|-----------------|
 | 1 | `./web/dist` (relative to CWD) | Running `cargo run` from the repo root in dev |
 | 2 | `<dir-of-binary>/web/dist` | The packaged binary ships `web/dist` next to itself |
-| 3 | `/zeroclaw-data/web/dist` | Standard Docker / packaged-volume layout |
-| 4 | `/usr/share/zeroclawlabs/web/dist` | AUR / system package install |
-| 5 | `${XDG_DATA_HOME:-~/.local/share}/zeroclaw/web/dist` | Prebuilt-binary installer (per-user) |
+| 3 | `/reiclaw-data/web/dist` | Standard Docker / packaged-volume layout |
+| 4 | `/usr/share/reiclaw/web/dist` | AUR / system package install |
+| 5 | `${XDG_DATA_HOME:-~/.local/share}/reiclaw/web/dist` | Prebuilt-binary installer (per-user) |
 
 If you're on one of those distributions and the dashboard "just works", you
 don't need to set `gateway.web_dist_dir` at all, the auto-detect found it.
 
 ## How to obtain a `web/dist`
 
-You have three options. Pick whichever matches how you installed ZeroClaw.
+You have three options. Pick whichever matches how you installed ReiClaw.
 
 ### A) Source checkout (developers / packagers)
 
@@ -81,8 +81,8 @@ You have three options. Pick whichever matches how you installed ZeroClaw.
 #### sh
 
 ```sh
-git clone https://github.com/zeroclaw-labs/zeroclaw.git
-cd zeroclaw
+git clone https://github.com/kckylechen1/ReiClaw.git
+cd ReiClaw
 cargo web build           # alias for `cargo run -p xtask --bin web -- build`
                           # auto-runs `npm install` on first run
 ```
@@ -98,14 +98,14 @@ documented in [Building the web dashboard](../developing/web.md).
 
 ### B) Pre-built release artifact
 
-Release archives on the [Releases page](https://github.com/zeroclaw-labs/zeroclaw/releases)
+Release archives on the [Releases page](https://github.com/kckylechen1/ReiClaw/releases)
 ship the daemon with `web/dist/` already populated alongside the binary.
 Auto-detect candidate 2 finds it; no `gateway.web_dist_dir` configuration
 needed.
 
 ### C) Docker image
 
-The official Docker image places the bundle at `/zeroclaw-data/web/dist`
+The official Docker image places the bundle at `/reiclaw-data/web/dist`
 (auto-detect candidate 3). It works out of the box; you only need to set
 `web_dist_dir` if you mount your own volume over that path.
 

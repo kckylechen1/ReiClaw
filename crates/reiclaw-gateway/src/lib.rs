@@ -734,7 +734,7 @@ pub async fn run_gateway(
                             .with_outcome(::reiclaw_log::EventOutcome::Unknown)
                             .with_attrs(::serde_json::json!({"display_addr": display_addr})),
                         &format!(
-                            "Gateway booting without a configured model. Run `zeroclaw quickstart` or configure a model at http://{display_addr}/config, then POST /admin/reload. Chat endpoints will return 503 needs_quickstart until at least one [providers.models.<type>.<alias>] model = \"...\" is set."
+                            "Gateway booting without a configured model. Run `rei quickstart` or configure a model at http://{display_addr}/config, then POST /admin/reload. Chat endpoints will return 503 needs_quickstart until at least one [providers.models.<type>.<alias>] model = \"...\" is set."
                         )
                     );
                     String::new()
@@ -883,7 +883,7 @@ pub async fn run_gateway(
                 ::reiclaw_log::Event::new(module_path!(), ::reiclaw_log::Action::Note)
                     .with_attrs(::serde_json::json!({"display_addr": display_addr})),
                 &format!(
-                    "Gateway: no [agents.<alias>] configured — booting with empty tools registry. Run `zeroclaw quickstart` or add one at http://{display_addr}/config."
+                    "Gateway: no [agents.<alias>] configured — booting with empty tools registry. Run `rei quickstart` or add one at http://{display_addr}/config."
                 )
             );
             Vec::new()
@@ -1126,14 +1126,13 @@ pub async fn run_gateway(
                 .and_then(|p| p.parent().map(|d| d.join("web/dist")))
                 .unwrap_or_default(),
             // Docker / packaged layout
-            std::path::PathBuf::from("/zeroclaw-data/web/dist"),
+            std::path::PathBuf::from("/reiclaw-data/web/dist"),
             // AUR / system package
             std::path::PathBuf::from("/usr/share/reiclaw/web/dist"),
-            std::path::PathBuf::from("/usr/share/zeroclawlabs/web/dist"),
         ];
         // XDG data home (prebuilt binary installer)
         if let Some(data_dir) = dirs_data_local() {
-            candidates.push(data_dir.join("zeroclaw/web/dist"));
+            candidates.push(data_dir.join("reiclaw/web/dist"));
         }
         candidates
             .into_iter()
@@ -1188,7 +1187,7 @@ pub async fn run_gateway(
     }
 
     let pfx = path_prefix.unwrap_or("");
-    println!("🦀 ZeroClaw Gateway listening on http://{display_addr}{pfx}");
+    println!("🦀 ReiClaw Gateway listening on http://{display_addr}{pfx}");
     if let Some(ref url) = tunnel_url {
         println!("  🌐 Public URL: {url}");
     }
@@ -1796,7 +1795,7 @@ pub async fn run_gateway(
                     });
                 }
                 _ = shutdown_signal.changed() => {
-                    ::reiclaw_log::record!(INFO, ::reiclaw_log::Event::new(module_path!(), ::reiclaw_log::Action::Note), "ZeroClaw Gateway shutting down");
+                    ::reiclaw_log::record!(INFO, ::reiclaw_log::Event::new(module_path!(), ::reiclaw_log::Action::Note), "ReiClaw Gateway shutting down");
                     break;
                 }
             }
@@ -1812,7 +1811,7 @@ pub async fn run_gateway(
             ::reiclaw_log::record!(
                 INFO,
                 ::reiclaw_log::Event::new(module_path!(), ::reiclaw_log::Action::Note),
-                "ZeroClaw Gateway shutting down"
+                "ReiClaw Gateway shutting down"
             );
         })
         .await?;
@@ -1847,7 +1846,7 @@ pub async fn run_gateway(
 }
 
 fn format_paircode_recovery_command(_host: &str, port: u16) -> String {
-    format!("zeroclaw gateway get-paircode --new --port {port}")
+    format!("rei gateway get-paircode --new --port {port}")
 }
 
 fn already_paired_pairing_notice(
@@ -2151,7 +2150,7 @@ impl ModelProvider for UnconfiguredModelProvider {
     ) -> anyhow::Result<String> {
         anyhow::bail!(
             "needs_quickstart: gateway booted without a working model_provider. \
-             Run `zeroclaw quickstart`, or fix \
+             Run `rei quickstart`, or fix \
              [providers.models.<type>.<alias>] and POST /admin/reload."
         )
     }
@@ -2178,7 +2177,7 @@ fn needs_quickstart_for(model: &str) -> Option<anyhow::Error> {
         );
         Some(anyhow::Error::msg(
             "needs_quickstart: gateway has no model configured. Run \
-             `zeroclaw quickstart`, or set [providers.models.<type>.<alias>] \
+             `rei quickstart`, or set [providers.models.<type>.<alias>] \
              model = \"...\" before sending messages.",
         ))
     } else {
@@ -2528,7 +2527,7 @@ async fn handle_webhook(
                     ::reiclaw_log::Event::new(module_path!(), ::reiclaw_log::Action::Note)
                         .with_outcome(::reiclaw_log::EventOutcome::Unknown),
                     "Webhook chat refused: gateway has no model configured; \
-                     run `zeroclaw quickstart`"
+                     run `rei quickstart`"
                 );
                 let body = serde_json::json!({
                     "error": "needs_quickstart",
@@ -2598,7 +2597,7 @@ fn require_gateway_admin_token(
             StatusCode::FORBIDDEN,
             Json(serde_json::json!({
                 "error": "Pairing-code admin requests need this gateway's admin token. \
-                          Run `zeroclaw gateway get-paircode` on the gateway host, as the \
+                          Run `rei gateway get-paircode` on the gateway host, as the \
                           user that runs the gateway."
             })),
         ))

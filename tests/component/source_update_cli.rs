@@ -17,7 +17,7 @@ async fn source_only_update_rejects_legacy_modes_before_network_or_binary_mutati
     let proxy = TcpListener::bind(("127.0.0.1", 0)).expect("loopback proxy sentinel");
     proxy.set_nonblocking(true).expect("nonblocking proxy");
     let proxy_url = format!("http://{}", proxy.local_addr().expect("proxy address"));
-    let binary = env!("CARGO_BIN_EXE_zeroclaw");
+    let binary = env!("CARGO_BIN_EXE_rei");
     let before = std::fs::metadata(binary).expect("binary metadata");
 
     for args in [
@@ -30,7 +30,7 @@ async fn source_only_update_rejects_legacy_modes_before_network_or_binary_mutati
         let mut command = Command::new(binary);
         command
             .kill_on_drop(true)
-            .env("ZEROCLAW_CONFIG_DIR", config.path())
+            .env("REI_CONFIG_DIR", config.path())
             .env("RUST_LOG", "off")
             .env("HTTP_PROXY", &proxy_url)
             .env("HTTPS_PROXY", &proxy_url)

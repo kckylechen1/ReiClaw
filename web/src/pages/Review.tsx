@@ -597,7 +597,7 @@ export default function Review() {
     {needsPair ? pairingEnabled !== true ? <section className="space-y-4 border-t border-pc-border pt-6">
         <h2 className="text-lg font-medium">{t('review.owner_access')}</h2>
         <p>{t(pairingEnabled === false ? 'review.pair_disabled' : 'review.pair_checking')}</p>
-        {pairingEnabled === false && <code className="block break-words">zeroclaw gateway get-paircode --new</code>}
+        {pairingEnabled === false && <code className="block break-words">rei gateway get-paircode --new</code>}
         <Button variant="ghost" onClick={() => setVersion(v => v + 1)}>{t('review.check_pairing')}</Button>
         </section> : <form className="space-y-4 border-t border-pc-border pt-6" onSubmit={e => { e.preventDefault(); void perform(async () => { await pair(code.trim()); setCode(''); }, false); }}>
         <h2 className="text-lg font-medium">{t('review.pair')}</h2>

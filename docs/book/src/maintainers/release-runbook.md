@@ -62,9 +62,9 @@ Bump `workspace.package.version` in the workspace `Cargo.toml`, then run the two
 This updates README badges and workflow description
 examples, then regenerates every spec-driven install surface via
 `cargo generate installers`: setup.bat, `dist/aur/PKGBUILD`,
-`dist/scoop/zeroclaw.json`, and `flake.nix`. Those surfaces derive their version and
+`dist/scoop/reiclaw.json`, and `flake.nix`. Those surfaces derive their version and
 feature lists from the canonical install spec (`Cargo.toml` plus
-`[package.metadata.zeroclaw]`), so the bump keeps them in step automatically;
+`[package.metadata.reiclaw]`), so the bump keeps them in step automatically;
 never hand-edit a generated region. This script also refreshes the Nix git
 dependency hashes (`nix/hashes.json`) via `scripts/dev/refresh-nix-hashes.sh`.
 

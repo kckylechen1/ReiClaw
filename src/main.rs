@@ -117,8 +117,8 @@ fn parse_temperature(s: &str) -> std::result::Result<f64, String> {
     config::schema::validate_temperature(t)
 }
 
-/// Flags of `zeroclaw agent` that only take effect with `-m`. Interactive
-/// `zeroclaw agent` hands off to `zeroclaw chat`, whose turns run on the
+/// Flags of `rei agent` that only take effect with `-m`. Interactive
+/// `rei agent` hands off to `rei chat`, whose turns run on the
 /// gateway with the agent's configured model, so these would be ignored.
 /// Returns the flags that were given, in the order they appear in `--help`.
 #[cfg_attr(not(feature = "agent-runtime"), allow(dead_code))]
@@ -153,7 +153,7 @@ fn print_no_command_help(cmd: clap::Command) -> Result<()> {
             "{}",
             crate::i18n::get_cli_string("cli-try-quickstart")
                 .as_deref()
-                .unwrap_or("Try `zeroclaw quickstart` to create your first agent.")
+                .unwrap_or("Try `rei quickstart` to create your first agent.")
         );
     }
     #[cfg(not(feature = "agent-runtime"))]
@@ -163,7 +163,7 @@ fn print_no_command_help(cmd: clap::Command) -> Result<()> {
             "{}",
             t(
                 "cli-try-quickstart",
-                "Try `zeroclaw quickstart` to create your first agent."
+                "Try `rei quickstart` to create your first agent."
             )
         );
     }
@@ -184,7 +184,7 @@ fn pause_after_no_command_help() {
     println!();
     print!("{}", t("cli-press-enter", "Press Enter to exit..."));
     let _ = std::io::stdout().flush();
-    // Cap the read so a piped-in flood (e.g. `dir | zeroclaw` with no
+    // Cap the read so a piped-in flood (e.g. `dir | rei` with no
     // command) cannot blow up RSS in this trivial one-Enter prompt.
     // See module-level `STDIN_LINE_CAP` for rationale.
     let mut line = String::new();
@@ -308,7 +308,7 @@ enum EstopLevelArg {
 
 /// `ReiClaw` (`rei`) - personal agent controller, originally forked from `zeroclaw-labs/zeroclaw`.
 #[derive(Parser, Debug)]
-#[command(name = "zeroclaw")]
+#[command(name = "rei")]
 #[command(author = "theonlyhennygod")]
 #[command(version)]
 #[command(long_version = concat!(
@@ -316,7 +316,7 @@ enum EstopLevelArg {
     "\nReiClaw (rei) - personal agent controller\nOriginally forked from zeroclaw-labs/zeroclaw"
 ))]
 // i18n-exempt: clap derive help — framework requires a compile-time literal
-#[command(about = "The fastest, smallest AI assistant.", long_about = None)]
+#[command(about = "ReiClaw (rei) - Personal AI Controller", long_about = None)]
 struct Cli {
     #[arg(long, global = true)]
     config_dir: Option<String>,
@@ -362,7 +362,7 @@ impl LogLevel {
     }
 }
 
-/// Subcommands for `zeroclaw telegram`.
+/// Subcommands for `rei telegram`.
 #[cfg(all(feature = "agent-runtime", feature = "channel-telegram"))]
 #[derive(Subcommand, Debug)]
 enum TelegramCommands {
@@ -371,7 +371,7 @@ enum TelegramCommands {
     #[command(long_about = "\
 The in-process Telegram listener and its skip markers are retired. \
 This compatibility command returns a migration error without writing a marker. \
-Telegram intake and cursor recovery belong to zeroclaw-bridge-telegram; \
+Telegram intake and cursor recovery belong to rei-bridge-telegram; \
 this command cannot skip a bridge update.")]
     SkipUpdate {
         /// Legacy bot alias (accepted for compatibility)
@@ -388,7 +388,7 @@ this command cannot skip a bridge update.")]
     },
 }
 
-/// Subcommands for `zeroclaw soul`.
+/// Subcommands for `rei soul`.
 #[cfg(feature = "agent-runtime")]
 #[derive(Subcommand, Debug)]
 enum SoulCommands {
@@ -438,7 +438,7 @@ enum Commands {
         agent: Option<String>,
     },
 
-    /// Deprecated. Use `zeroclaw quickstart`. Any flags error.
+    /// Deprecated. Use `rei quickstart`. Any flags error.
     Onboard {
         /// Configure a specific section only. Omit to run the full flow.
         #[command(subcommand)]
@@ -501,13 +501,13 @@ enum Commands {
 Start the AI agent loop.
 
 With --message, runs one turn locally and prints the reply. Without it, \
-opens `zeroclaw chat` for this agent on this machine's gateway, so the \
+opens `rei chat` for this agent on this machine's gateway, so the \
 conversation is shared with every other client.
 
 Examples:
-  zeroclaw agent -a assistant                                          # chat through the gateway
-  zeroclaw agent -a assistant -m \"Summarize today's logs\"              # single message
-  zeroclaw agent -a assistant -m \"Hi\" -p anthropic --model claude-sonnet-4-20250514")]
+  rei agent -a assistant                                          # chat through the gateway
+  rei agent -a assistant -m \"Summarize today's logs\"              # single message
+  rei agent -a assistant -m \"Hi\" -p anthropic --model claude-sonnet-4-20250514")]
     Agent {
         /// Configured agent alias to run as (must match `[agents.<alias>]`).
         /// Required — there is no default agent.
@@ -537,16 +537,16 @@ Examples:
     #[command(long_about = "\
 Chat with an agent through the gateway.
 
-Attaches to a session on a running gateway (`zeroclaw daemon` or \
-`zeroclaw gateway start`). Every client on the same session, including the \
+Attaches to a session on a running gateway (`rei daemon` or \
+`rei gateway start`). Every client on the same session, including the \
 web dashboard, shares one conversation. Closing the chat leaves a running \
 turn going; Ctrl+C or /cancel stops it.
 
 Examples:
-  zeroclaw chat -a assistant                          # session \"main\" on this machine's gateway
-  zeroclaw chat -a assistant -s work                  # another session
-  zeroclaw chat -a assistant -m \"What's on today?\"    # one message, then exit
-  zeroclaw chat -a assistant --gateway wss://home.example:42617")]
+  rei chat -a assistant                          # session \"main\" on this machine's gateway
+  rei chat -a assistant -s work                  # another session
+  rei chat -a assistant -m \"What's on today?\"    # one message, then exit
+  rei chat -a assistant --gateway wss://home.example:42617")]
     Chat {
         /// Agent alias to talk to (must match `[agents.<alias>]` on the gateway)
         #[arg(short = 'a', long)]
@@ -574,9 +574,9 @@ Start, restart, or inspect the HTTP/WebSocket gateway that accepts \
 incoming webhook events and WebSocket connections.
 
 Examples:
-  zeroclaw gateway start              # start gateway
-  zeroclaw gateway restart            # restart gateway
-  zeroclaw gateway get-paircode       # show pairing code")]
+  rei gateway start              # start gateway
+  rei gateway restart            # restart gateway
+  rei gateway get-paircode       # show pairing code")]
     Gateway {
         #[command(subcommand)]
         gateway_command: Option<reiclaw::GatewayCommands>,
@@ -594,8 +594,8 @@ responses as notifications.
 Methods: initialize, session/new, session/prompt, session/stop.
 
 Examples:
-  zeroclaw acp                        # start ACP server
-  zeroclaw acp --max-sessions 5       # limit concurrent sessions")]
+  rei acp                        # start ACP server
+  rei acp --max-sessions 5       # limit concurrent sessions")]
     Acp {
         /// Maximum concurrent sessions (default: 10)
         #[arg(long)]
@@ -611,18 +611,18 @@ Examples:
     #[command(long_about = "\
 Start the long-running autonomous daemon.
 
-Launches the full ZeroClaw runtime: gateway server, all configured \
+Launches the full ReiClaw runtime: gateway server, all configured \
 channel surfaces (Telegram bridge, webhook ingress), heartbeat monitor, and \
-the cron scheduler. This is the recommended way to run ZeroClaw in \
+the cron scheduler. This is the recommended way to run ReiClaw in \
 production or as an always-on assistant.
 
-Use 'zeroclaw service install' to register the daemon as an OS \
+Use 'rei service install' to register the daemon as an OS \
 service (systemd/launchd) for auto-start on boot.
 
 Examples:
-  zeroclaw daemon                   # use config defaults
-  zeroclaw daemon -p 9090           # gateway on port 9090
-  zeroclaw daemon --host 127.0.0.1  # localhost only")]
+  rei daemon                   # use config defaults
+  rei daemon -p 9090           # gateway on port 9090
+  rei daemon --host 127.0.0.1  # localhost only")]
     Daemon {
         /// Port to listen on (use 0 for random available port); defaults to config gateway.port
         #[arg(short, long)]
@@ -674,7 +674,7 @@ Examples:
         #[command(subcommand)]
         estop_command: Option<EstopSubcommands>,
 
-        /// Level used when engaging estop from `zeroclaw estop`.
+        /// Level used when engaging estop from `rei estop`.
         #[arg(long, value_enum)]
         level: Option<EstopLevelArg>,
 
@@ -702,15 +702,15 @@ the runtime local timezone. For user-facing schedules, pass --tz with \
 an explicit IANA timezone.
 
 Examples:
-  zeroclaw cron list
-  zeroclaw cron add '0 9 * * 1-5' 'Good morning' --tz America/New_York --agent
-  zeroclaw cron add '*/30 * * * *' 'Check system health' --agent
-  zeroclaw cron add '*/5 * * * *' 'echo ok'
-  zeroclaw cron add-at 2025-01-15T14:00:00Z 'Send reminder' --agent
-  zeroclaw cron add-every 60000 'Ping heartbeat'
-  zeroclaw cron once 30m 'Run backup in 30 minutes' --agent
-  zeroclaw cron pause TASK_ID
-  zeroclaw cron update TASK_ID --expression '0 8 * * *' --tz Europe/London")]
+  rei cron list
+  rei cron add '0 9 * * 1-5' 'Good morning' --tz America/New_York --agent
+  rei cron add '*/30 * * * *' 'Check system health' --agent
+  rei cron add '*/5 * * * *' 'echo ok'
+  rei cron add-at 2025-01-15T14:00:00Z 'Send reminder' --agent
+  rei cron add-every 60000 'Ping heartbeat'
+  rei cron once 30m 'Run backup in 30 minutes' --agent
+  rei cron pause TASK_ID
+  rei cron update TASK_ID --expression '0 8 * * *' --tz Europe/London")]
     Cron {
         #[command(subcommand)]
         cron_command: CronCommands,
@@ -732,17 +732,17 @@ Examples:
     #[command(long_about = "\
 Manage communication channels.
 
-Add, remove, list, send, and health-check channels that connect ZeroClaw \
+Add, remove, list, send, and health-check channels that connect ReiClaw \
 to messaging surfaces. Live channel types: telegram, \
 webhook (other legacy sections are retired; see the channels book page).
 
 Examples:
-  zeroclaw channel list
-  zeroclaw channel doctor
-  zeroclaw channel add telegram '{\"bot_token\":\"...\",\"name\":\"my-bot\"}'
-  zeroclaw channel remove my-bot
-  zeroclaw channel bind-telegram zeroclaw_user
-  zeroclaw channel send 'Alert!' --channel-id telegram --recipient 123456789")]
+  rei channel list
+  rei channel doctor
+  rei channel add telegram '{\"bot_token\":\"...\",\"name\":\"my-bot\"}'
+  rei channel remove my-bot
+  rei channel bind-telegram rei_user
+  rei channel send 'Alert!' --channel-id telegram --recipient 123456789")]
     Channel {
         #[command(subcommand)]
         channel_command: ChannelCommands,
@@ -782,9 +782,9 @@ rejected. Used by the dashboard's skill-bundle directory picker and by \
 operators who want to inspect what's installed.
 
 Examples:
-  zeroclaw browse                  # list shared/ root
-  zeroclaw browse skills           # list shared/skills/
-  zeroclaw browse skills/coding    # list shared/skills/coding/")]
+  rei browse                  # list shared/ root
+  rei browse skills           # list shared/skills/
+  rei browse skills/coding    # list shared/skills/coding/")]
     Browse {
         /// Path relative to `<install>/shared/`. Empty = root.
         #[arg(default_value = "")]
@@ -813,11 +813,11 @@ Supports filtering by category and session, pagination, and \
 batch clearing with confirmation.
 
 Examples:
-  zeroclaw memory stats
-  zeroclaw memory list
-  zeroclaw memory list --category core --limit 10
-  zeroclaw memory get KEY
-  zeroclaw memory clear --category conversation --yes")]
+  rei memory stats
+  rei memory list
+  rei memory list --category core --limit 10
+  rei memory get KEY
+  rei memory clear --category conversation --yes")]
     Memory {
         #[command(subcommand)]
         memory_command: MemoryCommands,
@@ -826,7 +826,7 @@ Examples:
     /// Manage configuration
     // i18n-exempt: clap derive help — framework requires a compile-time literal
     #[command(long_about = "\
-Manage ZeroClaw configuration.
+Manage ReiClaw configuration.
 
 View, set, or initialize config properties by dotted path. \
 Use 'schema' to dump the full JSON Schema for the config file.
@@ -836,19 +836,19 @@ Secret fields (API keys, tokens) automatically use masked input.
 Enum fields offer interactive selection when value is omitted.
 
 Examples:
-  zeroclaw config list                                  # list all properties
-  zeroclaw config list --secrets                        # list only secrets
-  zeroclaw config list --filter channels.matrix         # filter by prefix
-  zeroclaw config get channels.matrix.mention-only      # get a value
-  zeroclaw config set channels.matrix.mention-only true # set a value
-  zeroclaw config set channels.matrix.access-token      # secret: masked input
-  zeroclaw config set channels.matrix.stream-mode       # enum: interactive select
-  zeroclaw config init channels.matrix                  # init section with defaults
-  zeroclaw config init risk_profiles.strict             # create a new dynamic-map alias
-  zeroclaw config schema                                # print JSON Schema to stdout
-  zeroclaw config schema > schema.json
+  rei config list                                  # list all properties
+  rei config list --secrets                        # list only secrets
+  rei config list --filter channels.matrix         # filter by prefix
+  rei config get channels.matrix.mention-only      # get a value
+  rei config set channels.matrix.mention-only true # set a value
+  rei config set channels.matrix.access-token      # secret: masked input
+  rei config set channels.matrix.stream-mode       # enum: interactive select
+  rei config init channels.matrix                  # init section with defaults
+  rei config init risk_profiles.strict             # create a new dynamic-map alias
+  rei config schema                                # print JSON Schema to stdout
+  rei config schema > schema.json
 
-Property path tab completion is included automatically in `zeroclaw completions <shell>`.")]
+Property path tab completion is included automatically in `rei completions <shell>`.")]
     Config {
         #[command(subcommand)]
         config_command: ConfigCommands,
@@ -882,15 +882,15 @@ but this command refuses every binary update without network access.")]
     /// Run diagnostic self-tests
     // i18n-exempt: clap derive help — framework requires a compile-time literal
     #[command(long_about = "\
-Run diagnostic self-tests to verify the ZeroClaw installation.
+Run diagnostic self-tests to verify the ReiClaw installation.
 
 By default, runs the full test suite including network checks \
 (gateway health, memory round-trip). Use --quick to skip network \
 checks for faster offline validation.
 
 Examples:
-  zeroclaw self-test             # full suite
-  zeroclaw self-test --quick     # quick checks only (no network)")]
+  rei self-test             # full suite
+  rei self-test --quick     # quick checks only (no network)")]
     SelfTest {
         /// Run quick checks only (no network)
         #[arg(long)]
@@ -915,9 +915,9 @@ reply). The judge is a model: its scores are a signal, not proof. Nothing is \
 stored. Findings do not change the exit status; only setup errors do.
 
 Examples:
-  zeroclaw soul check --agent default
-  zeroclaw soul check --agent default --target anthropic.work --target openai.work:gpt-5
-  zeroclaw soul check --agent default --judge anthropic.work --format json")]
+  rei soul check --agent default
+  rei soul check --agent default --target anthropic.work --target openai.work:gpt-5
+  rei soul check --agent default --judge anthropic.work --format json")]
     Soul {
         #[command(subcommand)]
         soul_command: SoulCommands,
@@ -928,7 +928,7 @@ Examples:
     // i18n-exempt: clap derive help — framework requires a compile-time literal
     #[command(long_about = "\
 The in-process Telegram listener is retired. Telegram intake and cursor \
-recovery belong to zeroclaw-bridge-telegram.
+recovery belong to rei-bridge-telegram.
 
 skip-update remains parseable for compatibility and returns a migration \
 error. It does not write a skip marker or advance the bridge cursor.")]
@@ -940,18 +940,18 @@ error. It does not write a skip marker or advance the bridge cursor.")]
     /// Generate shell completion script to stdout
     // i18n-exempt: clap derive help — framework requires a compile-time literal
     #[command(long_about = "\
-Generate shell completion scripts for `zeroclaw`.
+Generate shell completion scripts for `rei`.
 
 The script is printed to stdout so it can be sourced directly:
 
 Examples (Unix shells):
-  source <(zeroclaw completions bash)
-  zeroclaw completions zsh > ~/.zfunc/_zeroclaw
-  zeroclaw completions fish > ~/.config/fish/completions/zeroclaw.fish
+  source <(rei completions bash)
+  rei completions zsh > ~/.zfunc/_rei
+  rei completions fish > ~/.config/fish/completions/rei.fish
 
 Examples (Windows PowerShell):
-  zeroclaw completions powershell | Out-String | Invoke-Expression
-  zeroclaw completions powershell > $PROFILE.CurrentUserAllHosts")]
+  rei completions powershell | Out-String | Invoke-Expression
+  rei completions powershell > $PROFILE.CurrentUserAllHosts")]
     Completions {
         /// Target shell
         #[arg(value_enum)]
@@ -966,7 +966,7 @@ Examples (Windows PowerShell):
     #[command(hide = true)]
     MarkdownSchema,
 
-    /// Deprecated: use `zeroclaw config` instead
+    /// Deprecated: use `rei config` instead
     #[command(hide = true)]
     Props {
         #[command(subcommand)]
@@ -984,8 +984,8 @@ Pass en or zh-CN. By default every catalogue is restored; restrict with \
 --catalog (comma-separated): cli, tools.
 
 Examples:
-  zeroclaw locales fetch zh-CN
-  zeroclaw locales fetch zh-CN --catalog cli,tools")]
+  rei locales fetch zh-CN
+  rei locales fetch zh-CN --catalog cli,tools")]
     Locales {
         #[command(subcommand)]
         locales_command: LocalesCommands,
@@ -1007,7 +1007,7 @@ enum LocalesCommands {
 }
 
 /// Stub enum that mirrors the old `props` subcommands so clap can still parse
-/// `zeroclaw props <anything>` and print a deprecation message.
+/// `rei props <anything>` and print a deprecation message.
 #[derive(Subcommand, Debug)]
 enum DeprecatedPropsCommands {
     #[command(external_subcommand)]
@@ -1017,10 +1017,8 @@ enum DeprecatedPropsCommands {
 #[cfg(feature = "agent-runtime")]
 fn runtime_dir_env_is_explicit(name: &str, value: &str) -> bool {
     match name {
-        "REI_CONFIG_DIR" | "REICLAW_CONFIG_DIR" | "ZEROCLAW_CONFIG_DIR" | "ZEROCLAW_DATA_DIR" => {
-            !value.trim().is_empty()
-        }
-        "ZEROCLAW_WORKSPACE" => !value.is_empty(),
+        "REI_CONFIG_DIR" | "REICLAW_CONFIG_DIR" | "REI_DATA_DIR" => !value.trim().is_empty(),
+        "REI_WORKSPACE" => !value.is_empty(),
         _ => false,
     }
 }
@@ -1033,9 +1031,8 @@ fn resolve_homebrew_onboard_config_dir(
     let explicit_runtime_dir = [
         "REI_CONFIG_DIR",
         "REICLAW_CONFIG_DIR",
-        "ZEROCLAW_CONFIG_DIR",
-        "ZEROCLAW_DATA_DIR",
-        "ZEROCLAW_WORKSPACE",
+        "REI_DATA_DIR",
+        "REI_WORKSPACE",
     ]
     .iter()
     .any(|name| env_lookup(name).is_some_and(|value| runtime_dir_env_is_explicit(name, &value)));
@@ -1054,7 +1051,7 @@ fn apply_homebrew_onboard_config_dir_with(
     mut set_env: impl FnMut(&'static str, &Path),
 ) -> Option<PathBuf> {
     let config_dir = resolve_homebrew_onboard_config_dir(exe, env_lookup)?;
-    set_env("ZEROCLAW_CONFIG_DIR", &config_dir);
+    set_env("REI_CONFIG_DIR", &config_dir);
     Some(config_dir)
 }
 
@@ -1576,7 +1573,6 @@ fn main() -> Result<()> {
         // therefore its worker threads) is constructed.
         unsafe {
             std::env::set_var("REI_CONFIG_DIR", &config_dir);
-            std::env::set_var("ZEROCLAW_CONFIG_DIR", &config_dir);
         }
     }
 
@@ -1692,7 +1688,7 @@ async fn async_main(command: clap::Command) -> Result<()> {
                 return Ok(());
             }
             #[cfg(not(feature = "schema-export"))]
-            anyhow::bail!("zeroclaw was built without the 'schema-export' feature");
+            anyhow::bail!("rei was built without the 'schema-export' feature");
         }
         _ => {}
     }
@@ -1755,8 +1751,8 @@ async fn async_main(command: clap::Command) -> Result<()> {
             || *tunnel_only;
         if any_legacy_flag {
             eprintln!(
-                "error: `zeroclaw onboard` is deprecated and its flags no longer apply. \
-                 Use `zeroclaw quickstart` to create a new agent, or `zeroclaw config set <path>=<value>` \
+                "error: `rei onboard` is deprecated and its flags no longer apply. \
+                 Use `rei quickstart` to create a new agent, or `rei config set <path>=<value>` \
                  for headless updates."
             );
             std::process::exit(2);
@@ -1765,7 +1761,7 @@ async fn async_main(command: clap::Command) -> Result<()> {
             "{}",
             t(
                 "cli-onboard-deprecated",
-                "`zeroclaw onboard` is deprecated — use `zeroclaw quickstart`."
+                "`rei onboard` is deprecated — use `rei quickstart`."
             )
         );
         return Ok(());
@@ -1802,7 +1798,7 @@ async fn async_main(command: clap::Command) -> Result<()> {
                 ],
                 "warning: config section is malformed and was reset to defaults \
                  for this run. Values in that section are NOT in effect. Run \
-                 `zeroclaw config validate` to see the parse error, then repair \
+                 `rei config validate` to see the parse error, then repair \
                  the file."
             )
         );
@@ -1811,7 +1807,7 @@ async fn async_main(command: clap::Command) -> Result<()> {
     observability::runtime_trace::init_from_config(&config.observability, &config.data_dir);
     // Note: the persisted [proxy] config (including its process-env
     // broadcast) was applied in the synchronous `main()` bootstrap. The
-    // load above can carry ZEROCLAW_PROXY_* env-var overrides the raw
+    // load above can carry REI_PROXY_* env-var overrides the raw
     // bootstrap read could not see, so refresh the runtime global from
     // the fully-loaded config; live-env application stays restart-only.
     config::set_runtime_proxy_config(config.proxy.clone());
@@ -1833,10 +1829,7 @@ async fn async_main(command: clap::Command) -> Result<()> {
         if let Some(uri) = enrollment_uri {
             println!(
                 "{}",
-                t(
-                    "cli-otp-initialized",
-                    "Initialized OTP secret for ZeroClaw."
-                )
+                t("cli-otp-initialized", "Initialized OTP secret for ReiClaw.")
             );
             println!(
                 "{}",
@@ -1859,7 +1852,7 @@ async fn async_main(command: clap::Command) -> Result<()> {
             } => {
                 if config.agent(&agent_alias).is_none() {
                     anyhow::bail!(
-                        "`zeroclaw agent --agent {agent_alias}` is not configured (no [agents.{agent_alias}] entry)"
+                        "`rei agent --agent {agent_alias}` is not configured (no [agents.{agent_alias}] entry)"
                     );
                 }
                 let agent_entry = config.model_provider_for_agent(&agent_alias);
@@ -1886,7 +1879,7 @@ async fn async_main(command: clap::Command) -> Result<()> {
                             );
                             anyhow::Error::msg(format!(
                                 "Unknown model_provider family: {type_key}. \
-                             Configure a provider via `zeroclaw quickstart` or the /config editor."
+                             Configure a provider via `rei quickstart` or the /config editor."
                             ))
                         })?;
                     if let Some(m) = &model {
@@ -1900,7 +1893,7 @@ async fn async_main(command: clap::Command) -> Result<()> {
                 } else if config.model_provider_for_agent(&agent_alias).is_none() {
                     anyhow::bail!(
                         "No model model_provider configured for agent {agent_alias}. \
-                         Pass --model-provider <type> or run `zeroclaw quickstart` to configure one."
+                         Pass --model-provider <type> or run `rei quickstart` to configure one."
                     );
                 }
 
@@ -2056,7 +2049,7 @@ async fn async_main(command: clap::Command) -> Result<()> {
             // catches typos before any subsystem spins up.
             if config.agent(&agent_alias).is_none() {
                 anyhow::bail!(
-                    "`zeroclaw agent --agent {agent_alias}` is not configured (no [agents.{agent_alias}] entry)"
+                    "`rei agent --agent {agent_alias}` is not configured (no [agents.{agent_alias}] entry)"
                 );
             }
 
@@ -2083,8 +2076,8 @@ async fn async_main(command: clap::Command) -> Result<()> {
         } => {
             let _ = (max_sessions, session_timeout);
             anyhow::bail!(
-                "Legacy in-process `zeroclaw acp` has been retired; use `zeroclaw acp-gateway` \
-                 (or the `zeroclaw-acp-bridge` binary) to connect ACP clients to the gateway."
+                "Legacy in-process `rei acp` has been retired; use `rei acp-gateway` \
+                 (or the `rei-acp-bridge` binary) to connect ACP clients to the gateway."
             )
         }
 
@@ -2102,7 +2095,7 @@ async fn async_main(command: clap::Command) -> Result<()> {
                         INFO,
                         ::reiclaw_log::Event::new(module_path!(), ::reiclaw_log::Action::Note)
                             .with_attrs(::serde_json::json!({"addr": addr})),
-                        "🔄 Restarting ZeroClaw Gateway on"
+                        "🔄 Restarting ReiClaw Gateway on"
                     );
 
                     // Try to gracefully shutdown existing gateway via admin endpoint
@@ -2251,7 +2244,7 @@ async fn async_main(command: clap::Command) -> Result<()> {
                                     "   Is the gateway running? Start it with:"
                                 )
                             );
-                            println!("     zeroclaw gateway start"); // i18n-exempt: literal command/identifier example
+                            println!("     rei gateway start"); // i18n-exempt: literal command/identifier example
                         }
                     }
                     Ok(())
@@ -2271,7 +2264,7 @@ async fn async_main(command: clap::Command) -> Result<()> {
                     Box::pin(run_gateway_if_enabled(&host, port, config, None)).await
                 }
                 None => {
-                    // Bare `zeroclaw gateway` has no flag, so degraded security
+                    // Bare `rei gateway` has no flag, so degraded security
                     // is never auto-allowed here — fail closed.
                     let _nag = gate_security_posture(&config, false)?;
                     let port = config.gateway.port;
@@ -2300,7 +2293,7 @@ async fn async_main(command: clap::Command) -> Result<()> {
                     .is_some_and(|home| exe.starts_with(&home));
                 if under_home {
                     let install_hint = if cfg!(windows) {
-                        "Consider installing to a system-wide location (e.g. C:\\Program Files\\ZeroClaw) for service use."
+                        "Consider installing to a system-wide location (e.g. C:\\Program Files\\ReiClaw) for service use."
                     } else if cfg!(target_os = "macos") {
                         "Consider installing to /usr/local/bin or /opt/homebrew/bin for system-wide service."
                     } else {
@@ -2324,14 +2317,14 @@ async fn async_main(command: clap::Command) -> Result<()> {
                     INFO,
                     ::reiclaw_log::Event::new(module_path!(), ::reiclaw_log::Action::Note)
                         .with_attrs(::serde_json::json!({"host": host})),
-                    "🧠 Starting ZeroClaw Daemon on (random port)"
+                    "🧠 Starting ReiClaw Daemon on (random port)"
                 );
             } else {
                 ::reiclaw_log::record!(
                     INFO,
                     ::reiclaw_log::Event::new(module_path!(), ::reiclaw_log::Action::Note)
                         .with_attrs(::serde_json::json!({"host": host, "port": port})),
-                    "🧠 Starting ZeroClaw Daemon on"
+                    "🧠 Starting ReiClaw Daemon on"
                 );
             }
 
@@ -2733,7 +2726,7 @@ async fn async_main(command: clap::Command) -> Result<()> {
 
         Commands::Props { .. } => {
             anyhow::bail!(
-                "`zeroclaw props` has been renamed to `zeroclaw config`. \
+                "`rei props` has been renamed to `rei config`. \
                  Replace `props` with `config` in your command and try again."
             );
         }
@@ -2791,10 +2784,7 @@ fn handle_estop_command(
                 if let Some(uri) = enrollment_uri {
                     println!(
                         "{}",
-                        t(
-                            "cli-otp-initialized",
-                            "Initialized OTP secret for ZeroClaw."
-                        )
+                        t("cli-otp-initialized", "Initialized OTP secret for ReiClaw.")
                     );
                     println!(
                         "{}",
@@ -2953,22 +2943,22 @@ fn write_shell_completion<W: Write>(shell: CompletionShell, writer: &mut W) -> R
     match shell {
         CompletionShell::Bash => {
             generate(shells::Bash, &mut cmd, bin_name.clone(), writer);
-            // Wrap clap's _zeroclaw to inject dynamic config path completion
+            // Wrap clap's _rei to inject dynamic config path completion
             writeln!(
                 writer,
                 r#"
-# Dynamic completion for zeroclaw config get/set paths
-if type _zeroclaw &>/dev/null; then
+# Dynamic completion for rei config get/set paths
+if type _rei &>/dev/null; then
     # Capture the original clap-generated function body so the wrapper
     # can fall back to it without entering an infinite recursion loop.
-    eval "$(declare -f _zeroclaw | sed '1s/_zeroclaw/_zeroclaw_clap_orig/')"
-    _zeroclaw() {{
+    eval "$(declare -f _rei | sed '1s/_rei/_rei_clap_orig/')"
+    _rei() {{
         local cur="${{COMP_WORDS[COMP_CWORD]}}"
         if [[ "${{COMP_WORDS[*]}}" =~ "config "(get|set)" " ]]; then
-            COMPREPLY=($(compgen -W "$(zeroclaw config complete "$cur" 2>/dev/null)" -- "$cur"))
+            COMPREPLY=($(compgen -W "$(rei config complete "$cur" 2>/dev/null)" -- "$cur"))
             return
         fi
-        _zeroclaw_clap_orig "$@"
+        _rei_clap_orig "$@"
     }}
 fi"#
             )?;
@@ -2978,28 +2968,28 @@ fi"#
             writeln!(
                 writer,
                 r#"
-# Dynamic completion for zeroclaw config get/set paths
-complete -c zeroclaw -n '__fish_seen_subcommand_from config; and __fish_seen_subcommand_from get set' \
-    -a '(zeroclaw config complete (commandline -ct) 2>/dev/null)' -f"#
+# Dynamic completion for rei config get/set paths
+complete -c rei -n '__fish_seen_subcommand_from config; and __fish_seen_subcommand_from get set' \
+    -a '(rei config complete (commandline -ct) 2>/dev/null)' -f"#
             )?;
         }
         CompletionShell::Zsh => {
             generate(shells::Zsh, &mut cmd, bin_name.clone(), writer);
-            // Wrap clap's _zeroclaw to inject dynamic config path completion
+            // Wrap clap's _rei to inject dynamic config path completion
             writeln!(
                 writer,
                 r#"
-# Dynamic completion for zeroclaw config get/set paths
-if (( $+functions[_zeroclaw] )); then
-    functions[_zeroclaw_clap_orig]=$functions[_zeroclaw]
-    _zeroclaw() {{
+# Dynamic completion for rei config get/set paths
+if (( $+functions[_rei] )); then
+    functions[_rei_clap_orig]=$functions[_rei]
+    _rei() {{
         if [[ "${{words[*]}}" == *"config "(get|set)* ]] && (( CURRENT > 3 )); then
             local -a props
-            props=(${{(f)"$(zeroclaw config complete "$words[CURRENT]" 2>/dev/null)"}})
+            props=(${{(f)"$(rei config complete "$words[CURRENT]" 2>/dev/null)"}})
             compadd -a props
             return
         fi
-        _zeroclaw_clap_orig "$@"
+        _rei_clap_orig "$@"
     }}
 fi"#
             )?;
@@ -3082,7 +3072,7 @@ fn gate_security_posture(
             "Config contains malformed security-critical sections ({sections}); \
              they were reset to defaults, so the running posture may be weaker \
              than intended. Refusing to serve with a degraded security posture. \
-             Repair these sections in {} and restart — run `zeroclaw config \
+             Repair these sections in {} and restart — run `rei config \
              validate` to see the precise error. To boot anyway (e.g. to reach \
              the gateway config editor and repair from there), re-run with \
              `--allow-degraded-security`.",
@@ -3103,7 +3093,7 @@ fn gate_security_posture(
                     "Running with DEGRADED security: sections ({sections}) were reset to \
                      defaults and `--allow-degraded-security` was set. The posture may be \
                      weaker than intended — repair {config_path} and reload \
-                     (SIGUSR1 / `zeroclaw admin reload`) as soon as possible."
+                     (SIGUSR1 / `rei admin reload`) as soon as possible."
                 )
             );
         }
@@ -3252,7 +3242,7 @@ fn gateway_addr_in_use_message(
     let mut lines = vec![
         format!("Port {port} is already in use, so the gateway could not start."),
         String::new(),
-        "A ZeroClaw daemon or another service may already be running on this port.".to_string(),
+        "A ReiClaw daemon or another service may already be running on this port.".to_string(),
         "Try one of:".to_string(),
         String::new(),
     ];
@@ -3283,7 +3273,7 @@ fn gateway_addr_in_use_message(
 }
 
 fn gateway_restart_recovery_command(host: &str, port: u16, default_host: &str) -> String {
-    let mut command = format!("    zeroclaw gateway start --port {port}");
+    let mut command = format!("    rei gateway start --port {port}");
     if host != default_host {
         write!(command, " --host {host}").expect("writing to String cannot fail");
     }
@@ -3297,10 +3287,10 @@ fn gateway_paircode_recovery_command(
     default_port: u16,
 ) -> String {
     if host == default_host && port == default_port {
-        return "    zeroclaw gateway get-paircode".to_string();
+        return "    rei gateway get-paircode".to_string();
     }
 
-    let mut command = format!("    zeroclaw gateway get-paircode --port {port}");
+    let mut command = format!("    rei gateway get-paircode --port {port}");
     if host != default_host {
         write!(command, " --host {host}").expect("writing to String cannot fail");
     }
@@ -3337,9 +3327,7 @@ async fn handle_models_set(config: &mut Config, model: &str) -> Result<()> {
             .iter_entries()
             .find(|(_, _, entry)| entry.model.as_ref().map_or(false, |m| !m.trim().is_empty()))
             .ok_or_else(|| {
-                anyhow::Error::msg(
-                    "No model provider configured. Run `zeroclaw config init` first.",
-                )
+                anyhow::Error::msg("No model provider configured. Run `rei config init` first.")
             })?;
         (entry.0, entry.1.to_string())
     };

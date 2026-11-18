@@ -1,4 +1,4 @@
-//! `zeroclaw browse [path]` — CLI adapter over
+//! `rei browse [path]` — CLI adapter over
 //! `reiclaw_runtime::browse::list_directory`. Thin print formatter; the
 //! walking + containment rule lives in the runtime crate so the gateway
 //! and the CLI share one implementation.

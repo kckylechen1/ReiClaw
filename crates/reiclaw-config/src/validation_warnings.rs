@@ -20,13 +20,13 @@ use serde::{Deserialize, Serialize};
 ///   `collect_context_compression_ignored_warnings` in `schema.rs`).
 /// - `otp_action_gating_unsupported`: a `[security.otp]` action-gating knob
 ///   (`gated_actions`, `gated_domains`, `gated_domain_categories`, or
-///   `challenge_max_attempts`) is set to a non-default value but ZeroClaw
+///   `challenge_max_attempts`) is set to a non-default value but ReiClaw
 ///   has no OTP action-gating, so it is parsed for compatibility and never
 ///   enforced (see `collect_deprecated_otp_action_gating_warnings` in
 ///   `schema.rs`); live OTP authentication (`enabled`, `token_ttl_secs`,
 ///   `cache_valid_secs`) is unaffected.
 /// - `gateway_pairing_dashboard_removed`: the `[gateway.pairing_dashboard]`
-///   config section was removed from the schema; a `ZEROCLAW_gateway__
+///   config section was removed from the schema; a `REI_gateway__
 ///   pairing_dashboard__*` env override (ignored by the env-override
 ///   tombstone before the unknown-path rejection) or a leftover
 ///   `[gateway.pairing_dashboard]` file section is ignored and reported via
@@ -46,7 +46,7 @@ use serde::{Deserialize, Serialize};
 ///   configured the daemon's JSON-RPC-over-WSS listener for remote TUI
 ///   clients; that listener and the local `daemon.sock` RPC socket were
 ///   retired (no in-repo client remained; the web dashboard and
-///   `zeroclaw chat` use the gateway HTTP API and `/ws/chat`), so the
+///   `rei chat` use the gateway HTTP API and `/ws/chat`), so the
 ///   section is ignored (see `RETIRED_CONFIG_SURFACES`).
 /// - `a2a_server_removed`: an `[a2a]` section or an
 ///   `[agents.<alias>.a2a]` block is still present. The fork delegates all

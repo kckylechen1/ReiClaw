@@ -1,8 +1,8 @@
 <?xml version="1.0" encoding="UTF-8"?>
 <rss version="2.0" xmlns:atom="http://www.w3.org/2005/Atom">
   <channel>
-    <title>ZeroClaw Blog</title>
-    <description>Updates from ZeroClaw Labs</description>
+    <title>ReiClaw Blog</title>
+    <description>Updates from ReiClaw</description>
     <link>https://www.zeroclawlabs.ai/blog</link>
     <atom:link href="https://www.zeroclawlabs.ai/blog/rss.xml" rel="self" type="application/rss+xml" />
     <language>en-us</language>

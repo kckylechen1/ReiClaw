@@ -16,9 +16,9 @@ async fn retired_skip_update_rejects_without_writing_markers_in_both_locales() {
         let skip_dir = config.path().join("data/telegram_skip");
         let marker = skip_dir.join("work.json");
 
-        let mut help = Command::new(env!("CARGO_BIN_EXE_zeroclaw"));
+        let mut help = Command::new(env!("CARGO_BIN_EXE_rei"));
         help.kill_on_drop(true)
-            .env("ZEROCLAW_CONFIG_DIR", config.path())
+            .env("REI_CONFIG_DIR", config.path())
             .env("RUST_LOG", "off")
             .args(["telegram", "skip-update", "--help"]);
         let output = tokio::time::timeout(Duration::from_secs(5), help.output())
@@ -28,7 +28,7 @@ async fn retired_skip_update_rejects_without_writing_markers_in_both_locales() {
         let stdout = String::from_utf8_lossy(&output.stdout);
         assert!(output.status.success(), "help failed: {stdout}");
         assert!(
-            stdout.contains(diagnostic) && stdout.contains("zeroclaw-bridge-telegram"),
+            stdout.contains(diagnostic) && stdout.contains("rei-bridge-telegram"),
             "{locale} help must describe retirement: {stdout}"
         );
 
@@ -41,10 +41,10 @@ async fn retired_skip_update_rejects_without_writing_markers_in_both_locales() {
                 std::fs::create_dir_all(&skip_dir).expect("legacy marker directory");
                 std::fs::write(&marker, previous).expect("legacy marker");
             }
-            let mut command = Command::new(env!("CARGO_BIN_EXE_zeroclaw"));
+            let mut command = Command::new(env!("CARGO_BIN_EXE_rei"));
             command
                 .kill_on_drop(true)
-                .env("ZEROCLAW_CONFIG_DIR", config.path())
+                .env("REI_CONFIG_DIR", config.path())
                 .env("RUST_LOG", "off")
                 .args([
                     "telegram",
@@ -66,7 +66,7 @@ async fn retired_skip_update_rejects_without_writing_markers_in_both_locales() {
                 "retired command succeeded: {stderr}"
             );
             assert!(
-                stderr.contains(diagnostic) && stderr.contains("zeroclaw-bridge-telegram"),
+                stderr.contains(diagnostic) && stderr.contains("rei-bridge-telegram"),
                 "{locale} must explain the migration: {stderr}"
             );
             if existing_marker {

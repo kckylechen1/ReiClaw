@@ -5,7 +5,7 @@ use anyhow::{Context, Result};
 use std::collections::{HashMap, HashSet};
 use std::sync::LazyLock;
 
-const PREFIX: &str = "ZEROCLAW_";
+const PREFIX: &str = "REI_";
 const SEP: &str = "__";
 
 /// Retired config surfaces recognized by exact env-form prefix BEFORE the
@@ -94,7 +94,7 @@ pub struct AppliedOverrides {
     pub tombstone_warnings: Vec<crate::validation_warnings::ValidationWarning>,
 }
 
-/// Apply every `ZEROCLAW_<lowercase>` env var to `config`. Returns the set of
+/// Apply every `REI_<lowercase>` env var to `config`. Returns the set of
 /// dotted prop-paths that were overridden plus the pre-override raw values
 /// for each. Hard-errors on any env var that doesn't resolve to a known
 /// schema path or whose alias fails validation.
@@ -373,9 +373,9 @@ mod tests {
     async fn walker_rejects_retired_sop_config_without_applying_it() {
         let _guard = super::env_test_lock().await;
         for name in [
-            "ZEROCLAW_sop",
-            "ZEROCLAW_sop__approval__groups__private_group__members",
-            "ZEROCLAW_sop__untrusted_input_guard",
+            "REI_sop",
+            "REI_sop__approval__groups__private_group__members",
+            "REI_sop__untrusted_input_guard",
         ] {
             let _value = EnvVarGuard::set(name, "private-test-value");
             let mut config = Config::default();
@@ -391,9 +391,9 @@ mod tests {
     async fn walker_preserves_sop_path_and_case_boundaries() {
         let _guard = super::env_test_lock().await;
         // Uppercase tails remain outside the existing lowercase override grammar.
-        let _uppercase = EnvVarGuard::set("ZEROCLAW_SOP__approval_mode", "ignored-uppercase");
+        let _uppercase = EnvVarGuard::set("REI_SOP__approval_mode", "ignored-uppercase");
         let _alias = EnvVarGuard::set(
-            "ZEROCLAW_providers__models__openai__sop__api_key",
+            "REI_providers__models__openai__sop__api_key",
             "retained-alias-token",
         );
         let mut config = Config::default();
@@ -413,7 +413,7 @@ mod tests {
         );
         assert!(applied.tombstone_warnings.is_empty());
 
-        let _adjacent = EnvVarGuard::set("ZEROCLAW_sop_extra__enabled", "true");
+        let _adjacent = EnvVarGuard::set("REI_sop_extra__enabled", "true");
         let error = apply_env_overrides(&mut config).unwrap_err().to_string();
         assert!(
             error.contains("did not resolve to a schema path"),
@@ -426,12 +426,12 @@ mod tests {
     async fn walker_rejects_retired_model_provider_credentials_without_applying_them() {
         let _guard = super::env_test_lock().await;
         for name in [
-            "ZEROCLAW_providers__models__bedrock__private_alias__api_key",
-            "ZEROCLAW_providers__models__azure__private_alias__api_key",
-            "ZEROCLAW_providers__models__azure_openai__private_alias__api_key",
-            "ZEROCLAW_providers__models__telnyx__private_alias__api_key",
-            "ZEROCLAW_providers__models__gemini_cli__private_alias__binary_path",
-            "ZEROCLAW_providers__models__kilocli__private_alias__binary_path",
+            "REI_providers__models__bedrock__private_alias__api_key",
+            "REI_providers__models__azure__private_alias__api_key",
+            "REI_providers__models__azure_openai__private_alias__api_key",
+            "REI_providers__models__telnyx__private_alias__api_key",
+            "REI_providers__models__gemini_cli__private_alias__binary_path",
+            "REI_providers__models__kilocli__private_alias__binary_path",
         ] {
             let _value = EnvVarGuard::set(name, "private-test-value");
             let mut config = Config::default();
@@ -442,7 +442,7 @@ mod tests {
             assert!(config.providers.models.iter_entries().next().is_none());
         }
         let _value = EnvVarGuard::set(
-            "ZEROCLAW_providers__models__gemini__gemini_cli__oauth_project",
+            "REI_providers__models__gemini__gemini_cli__oauth_project",
             "retained-project",
         );
         let mut config = Config::default();
@@ -460,22 +460,22 @@ mod tests {
         let _guard = super::env_test_lock().await;
         for (name, family, base_url) in [
             (
-                "ZEROCLAW_providers__models__deepseek__private_alias__api_key",
+                "REI_providers__models__deepseek__private_alias__api_key",
                 "deepseek",
                 "https://api.deepseek.com",
             ),
             (
-                "ZEROCLAW_providers__models__github_models__private_alias__api_key",
+                "REI_providers__models__github_models__private_alias__api_key",
                 "github_models",
                 "https://models.github.ai/inference",
             ),
             (
-                "ZEROCLAW_providers__models__xai__private_alias__api_key",
+                "REI_providers__models__xai__private_alias__api_key",
                 "xai",
                 "https://api.x.ai/v1",
             ),
             (
-                "ZEROCLAW_providers__models__moonshot__private_alias__api_key",
+                "REI_providers__models__moonshot__private_alias__api_key",
                 "moonshot",
                 "https://api.moonshot.ai/v1",
             ),
@@ -499,7 +499,7 @@ mod tests {
     async fn walker_resolves_typed_family_alias_default() {
         let _guard = super::env_test_lock().await;
         let _v = EnvVarGuard::set(
-            "ZEROCLAW_providers__models__anthropic__default__api_key",
+            "REI_providers__models__anthropic__default__api_key",
             "sk-ant-fixture",
         );
 
@@ -529,11 +529,11 @@ mod tests {
     async fn walker_accepts_alias_with_underscore() {
         let _guard = super::env_test_lock().await;
         let _v1 = EnvVarGuard::set(
-            "ZEROCLAW_providers__models__anthropic__prod_v2__api_key",
+            "REI_providers__models__anthropic__prod_v2__api_key",
             "sk-ant-fixture",
         );
         let _v2 = EnvVarGuard::set(
-            "ZEROCLAW_providers__models__anthropic__prod_v2__model",
+            "REI_providers__models__anthropic__prod_v2__model",
             "claude-sonnet-4-6",
         );
 
@@ -563,7 +563,7 @@ mod tests {
     #[tokio::test]
     async fn walker_resolves_non_map_gateway_path() {
         let _guard = super::env_test_lock().await;
-        let _v = EnvVarGuard::set("ZEROCLAW_gateway__request_timeout_secs", "120");
+        let _v = EnvVarGuard::set("REI_gateway__request_timeout_secs", "120");
 
         let mut config = Config::default();
         let applied = apply_env_overrides(&mut config).expect("apply succeeds");
@@ -575,13 +575,13 @@ mod tests {
     #[tokio::test]
     async fn walker_rejects_unknown_path() {
         let _guard = super::env_test_lock().await;
-        let _v = EnvVarGuard::set("ZEROCLAW_no__such__field", "x");
+        let _v = EnvVarGuard::set("REI_no__such__field", "x");
 
         let mut config = Config::default();
         let err = apply_env_overrides(&mut config).expect_err("must hard-error");
         let msg = format!("{err:#}");
         assert!(
-            msg.contains("ZEROCLAW_no__such__field") && msg.contains("did not resolve"),
+            msg.contains("REI_no__such__field") && msg.contains("did not resolve"),
             "error must name the env var and the failure: {msg}",
         );
     }
@@ -595,7 +595,7 @@ mod tests {
         // removal); deployments setting it must keep booting with a
         // structured deprecation warning instead.
         let _guard = super::env_test_lock().await;
-        let _v = EnvVarGuard::set("ZEROCLAW_gateway__pairing_dashboard__anything", "1");
+        let _v = EnvVarGuard::set("REI_gateway__pairing_dashboard__anything", "1");
 
         let mut config = Config::default();
         let applied =
@@ -617,7 +617,7 @@ mod tests {
         assert!(
             warning
                 .message
-                .contains("ZEROCLAW_gateway__pairing_dashboard__anything"),
+                .contains("REI_gateway__pairing_dashboard__anything"),
             "warning must name the env var: {}",
             warning.message
         );
@@ -647,13 +647,13 @@ mod tests {
         // exact retired prefix is carved out; adjacent unknown paths under
         // `gateway` keep hard-erroring.
         let _guard = super::env_test_lock().await;
-        let _v = EnvVarGuard::set("ZEROCLAW_gateway__anything_else__foo", "1");
+        let _v = EnvVarGuard::set("REI_gateway__anything_else__foo", "1");
 
         let mut config = Config::default();
         let err = apply_env_overrides(&mut config).expect_err("must hard-error");
         let msg = format!("{err:#}");
         assert!(
-            msg.contains("ZEROCLAW_gateway__anything_else__foo") && msg.contains("did not resolve"),
+            msg.contains("REI_gateway__anything_else__foo") && msg.contains("did not resolve"),
             "error must name the env var and the failure: {msg}",
         );
     }
@@ -666,7 +666,7 @@ mod tests {
         // `__`-terminated prefix, so it cannot swallow longer section
         // names that merely start with the same words.
         let _guard = super::env_test_lock().await;
-        let _v = EnvVarGuard::set("ZEROCLAW_gateway__pairing_dashboard_something__x", "1");
+        let _v = EnvVarGuard::set("REI_gateway__pairing_dashboard_something__x", "1");
 
         let mut config = Config::default();
         let err = apply_env_overrides(&mut config).expect_err("must hard-error");
@@ -683,9 +683,9 @@ mod tests {
         // and every former real sub-key of the retired section; each hit
         // warns once and none is applied.
         let _guard = super::env_test_lock().await;
-        let _v1 = EnvVarGuard::set("ZEROCLAW_gateway__pairing_dashboard__", "1");
-        let _v2 = EnvVarGuard::set("ZEROCLAW_gateway__pairing_dashboard__code_length", "9");
-        let _v3 = EnvVarGuard::set("ZEROCLAW_gateway__pairing_dashboard__nested__deep", "7");
+        let _v1 = EnvVarGuard::set("REI_gateway__pairing_dashboard__", "1");
+        let _v2 = EnvVarGuard::set("REI_gateway__pairing_dashboard__code_length", "9");
+        let _v3 = EnvVarGuard::set("REI_gateway__pairing_dashboard__nested__deep", "7");
 
         let mut config = Config::default();
         let applied = apply_env_overrides(&mut config).expect("all hits ignored, not fatal");
@@ -714,22 +714,22 @@ mod tests {
         let _guard = super::env_test_lock().await;
         for (name, value, path) in [
             (
-                "ZEROCLAW_channels__voice_duplex__legacy__enabled",
+                "REI_channels__voice_duplex__legacy__enabled",
                 "true",
                 "channels.voice_duplex",
             ),
             (
-                "ZEROCLAW_channels__voice_duplex__legacy__excluded_tools",
+                "REI_channels__voice_duplex__legacy__excluded_tools",
                 "[\"shell\",\"file_write\"]",
                 "channels.voice_duplex",
             ),
             (
-                "ZEROCLAW_channels_config__voice_duplex__enabled",
+                "REI_channels_config__voice_duplex__enabled",
                 "true",
                 "channels_config.voice_duplex",
             ),
             (
-                "ZEROCLAW_channels_config__voice_duplex__excluded_tools",
+                "REI_channels_config__voice_duplex__excluded_tools",
                 "[\"shell\",\"file_write\"]",
                 "channels_config.voice_duplex",
             ),
@@ -752,8 +752,7 @@ mod tests {
 
         // A retained channel may still use that spelling as its alias. Only
         // the retired type prefix is ignored; no new voice permission is made.
-        let _retained =
-            EnvVarGuard::set("ZEROCLAW_channels__webhook__voice_duplex__enabled", "true");
+        let _retained = EnvVarGuard::set("REI_channels__webhook__voice_duplex__enabled", "true");
         let mut config = Config::default();
         let applied = apply_env_overrides(&mut config).unwrap();
         assert!(config.channels.webhook["voice_duplex"].enabled);
@@ -765,8 +764,8 @@ mod tests {
     async fn walker_refuses_retired_email_and_discord_channel_overrides() {
         let _guard = super::env_test_lock().await;
         for (name, kind) in [
-            ("ZEROCLAW_channels__email__default__enabled", "email"),
-            ("ZEROCLAW_channels__discord__default__bot_token", "discord"),
+            ("REI_channels__email__default__enabled", "email"),
+            ("REI_channels__discord__default__bot_token", "discord"),
         ] {
             let _value = EnvVarGuard::set(name, "private-test-value");
             let mut config = Config::default();
@@ -787,14 +786,11 @@ mod tests {
         // must not hard-error as an unknown path. The wildcard matches the
         // actual alias segment; the warning path records it verbatim.
         let _guard = super::env_test_lock().await;
-        let _v1 = EnvVarGuard::set("ZEROCLAW_agents__lead__delegates", "peer");
-        let _v2 = EnvVarGuard::set("ZEROCLAW_agents__lead__delegate_same_risk_profile", "true");
+        let _v1 = EnvVarGuard::set("REI_agents__lead__delegates", "peer");
+        let _v2 = EnvVarGuard::set("REI_agents__lead__delegate_same_risk_profile", "true");
         // A child key under the retired field is ignored by the same
         // prefix semantics as the section lane, not a hard error.
-        let _v3 = EnvVarGuard::set(
-            "ZEROCLAW_risk_profiles__ops__delegation_policy__mode",
-            "allow",
-        );
+        let _v3 = EnvVarGuard::set("REI_risk_profiles__ops__delegation_policy__mode", "allow");
 
         let mut config = Config::default();
         let applied = apply_env_overrides(&mut config).expect("field hits ignored, not fatal");
@@ -835,24 +831,16 @@ mod tests {
     #[tokio::test]
     async fn walker_tombstones_native_ollama_options_without_hiding_live_aliases() {
         let _guard = super::env_test_lock().await;
-        let _ctx = EnvVarGuard::set(
-            "ZEROCLAW_providers__models__ollama__local__num_ctx",
-            "16384",
-        );
-        let _predict = EnvVarGuard::set(
-            "ZEROCLAW_providers__models__ollama__local__num_predict",
-            "4096",
-        );
+        let _ctx = EnvVarGuard::set("REI_providers__models__ollama__local__num_ctx", "16384");
+        let _predict =
+            EnvVarGuard::set("REI_providers__models__ollama__local__num_predict", "4096");
         let _temperature = EnvVarGuard::set(
-            "ZEROCLAW_providers__models__ollama__retired_only__temperature_override",
+            "REI_providers__models__ollama__retired_only__temperature_override",
             "0.5",
         );
-        let _model = EnvVarGuard::set("ZEROCLAW_providers__models__ollama__local__model", "qwen3");
+        let _model = EnvVarGuard::set("REI_providers__models__ollama__local__model", "qwen3");
         // A retired leaf's spelling must not retire an alias with that name.
-        let _alias = EnvVarGuard::set(
-            "ZEROCLAW_providers__models__ollama__num_ctx__model",
-            "llama3.1",
-        );
+        let _alias = EnvVarGuard::set("REI_providers__models__ollama__num_ctx__model", "llama3.1");
 
         let mut config = Config::default();
         let applied = apply_env_overrides(&mut config).unwrap();
@@ -885,11 +873,11 @@ mod tests {
     async fn walker_tombstones_cost_selector_under_runtime_profile() {
         let _guard = super::env_test_lock().await;
         let _retired = EnvVarGuard::set(
-            "ZEROCLAW_runtime_profiles__fast__auto_classify__cost_optimized_hint",
+            "REI_runtime_profiles__fast__auto_classify__cost_optimized_hint",
             "legacy-cost-selector",
         );
         let _live = EnvVarGuard::set(
-            "ZEROCLAW_runtime_profiles__fast__auto_classify__simple_hint",
+            "REI_runtime_profiles__fast__auto_classify__simple_hint",
             "cost-optimized",
         );
         let mut config = Config::default();
@@ -925,10 +913,7 @@ mod tests {
         // The walker's tail filter accepts `[a-z0-9_]+` so this gets past
         // the prefilter, and the failure must surface as the validator's
         // specific message — not a generic "Unknown property".
-        let _v = EnvVarGuard::set(
-            "ZEROCLAW_providers__models__anthropic___invalid__api_key",
-            "x",
-        );
+        let _v = EnvVarGuard::set("REI_providers__models__anthropic___invalid__api_key", "x");
 
         let mut config = Config::default();
         let err = apply_env_overrides(&mut config).expect_err("must hard-error");
@@ -942,7 +927,7 @@ mod tests {
     #[tokio::test]
     async fn mask_restores_pre_override_snapshot_for_non_secret() {
         let _guard = super::env_test_lock().await;
-        let _v = EnvVarGuard::set("ZEROCLAW_gateway__request_timeout_secs", "999");
+        let _v = EnvVarGuard::set("REI_gateway__request_timeout_secs", "999");
 
         let mut config = Config::default();
         let original_timeout = config.gateway.request_timeout_secs;
@@ -964,7 +949,7 @@ mod tests {
     async fn mask_restores_pre_override_plaintext_for_secret() {
         let _guard = super::env_test_lock().await;
         let _v = EnvVarGuard::set(
-            "ZEROCLAW_providers__models__anthropic__default__api_key",
+            "REI_providers__models__anthropic__default__api_key",
             "sk-ant-from-env",
         );
 
@@ -1025,7 +1010,7 @@ mod tests {
     #[tokio::test]
     async fn schema_version_override_rejected() {
         let _guard = super::env_test_lock().await;
-        let _v = EnvVarGuard::set("ZEROCLAW_schema_version", "99");
+        let _v = EnvVarGuard::set("REI_schema_version", "99");
 
         let mut config = Config::default();
         let err = apply_env_overrides(&mut config).expect_err("must hard-error");

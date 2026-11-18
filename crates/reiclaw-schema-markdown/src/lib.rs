@@ -269,15 +269,15 @@ pub fn field_table(
         let secret_mark = if is_secret { " 🔑" } else { "" };
         let full_path = format!("{prefix}.{key}");
         let set_cmd = if is_secret {
-            format!("zeroclaw config set {full_path}    # masked input, stored encrypted")
+            format!("rei config set {full_path}    # masked input, stored encrypted")
         } else {
-            format!("zeroclaw config set {full_path} <value>")
+            format!("rei config set {full_path} <value>")
         };
-        // Env-var override form: `ZEROCLAW_` + dotted path with `.` -> `__`,
+        // Env-var override form: `REI_` + dotted path with `.` -> `__`,
         // lowercase tail (config-tree override). Mirrors the runtime resolver in
         // `reiclaw_config::env_overrides`, so the rendered example and the value the
         // runtime accepts cannot disagree.
-        let env_var = format!("ZEROCLAW_{}", full_path.replace('.', "__"));
+        let env_var = format!("REI_{}", full_path.replace('.', "__"));
         let full_desc = resolved
             .get("description")
             .and_then(Value::as_str)

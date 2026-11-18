@@ -362,20 +362,10 @@ fn config_candidates_with_home(
 ) -> Vec<std::path::PathBuf> {
     let mut candidates = Vec::new();
     if let Some(home) = home {
-        let rei_dir = home.join(".rei");
-        let zeroclaw_dir = home.join(".zeroclaw");
-        if rei_dir.exists() {
-            candidates.push(rei_dir.join("config.toml"));
-        } else if zeroclaw_dir.exists() {
-            candidates.push(zeroclaw_dir.join("config.toml"));
-        } else {
-            candidates.push(rei_dir.join("config.toml"));
-            candidates.push(zeroclaw_dir.join("config.toml"));
-        }
+        candidates.push(home.join(".rei/config.toml"));
     }
     if let Some(config_dir) = xdg_config {
         candidates.push(config_dir.join("rei/config.toml"));
-        candidates.push(config_dir.join("zeroclaw/config.toml"));
     }
     candidates
 }
@@ -728,7 +718,7 @@ mod tests {
                     "example-skill",
                     "1.2.3",
                     "Community submission",
-                    "zeroclaw skills audit example-skill",
+                    "rei skills audit example-skill",
                 ],
             ),
         ];
@@ -765,7 +755,7 @@ mod tests {
                     "example-skill",
                     "1.2.3",
                     "社区提交",
-                    "zeroclaw skills audit example-skill",
+                    "rei skills audit example-skill",
                 ],
             ),
         ];
@@ -808,7 +798,7 @@ mod tests {
             format_ftl_message(en, "en", "cli-daemon-gateway-already-running", args)
                 .expect("cli-daemon-gateway-already-running should format");
         assert!(already_running.contains("127.0.0.1:9090"));
-        assert!(already_running.contains("ZeroClaw gateway is already running"));
+        assert!(already_running.contains("ReiClaw gateway is already running"));
         assert!(already_running.contains("gateway.port"));
 
         let port_occupied = format_ftl_message(en, "en", "cli-daemon-gateway-port-occupied", args)
@@ -1008,45 +998,15 @@ mod tests {
     }
 
     #[test]
-    fn config_candidates_prefer_rei_and_fallback_to_existing_zeroclaw() {
+    fn config_candidates_use_rei_home_and_xdg_dirs() {
         let tmp = tempfile::tempdir().expect("tempdir");
         let home = tmp.path();
         let xdg = home.join(".config");
 
-        // Fresh home: checks ~/.rei before ~/.zeroclaw, then XDG dirs.
-        let fresh = config_candidates_with_home(Some(home), Some(&xdg));
+        let candidates = config_candidates_with_home(Some(home), Some(&xdg));
         assert_eq!(
-            fresh,
-            vec![
-                home.join(".rei/config.toml"),
-                home.join(".zeroclaw/config.toml"),
-                xdg.join("rei/config.toml"),
-                xdg.join("zeroclaw/config.toml"),
-            ]
-        );
-
-        // Legacy install: only ~/.zeroclaw exists -> falls back cleanly to ~/.zeroclaw.
-        std::fs::create_dir_all(home.join(".zeroclaw")).expect("create .zeroclaw");
-        let legacy = config_candidates_with_home(Some(home), Some(&xdg));
-        assert_eq!(
-            legacy,
-            vec![
-                home.join(".zeroclaw/config.toml"),
-                xdg.join("rei/config.toml"),
-                xdg.join("zeroclaw/config.toml"),
-            ]
-        );
-
-        // Both exist: ~/.rei takes precedence over ~/.zeroclaw.
-        std::fs::create_dir_all(home.join(".rei")).expect("create .rei");
-        let migrated = config_candidates_with_home(Some(home), Some(&xdg));
-        assert_eq!(
-            migrated,
-            vec![
-                home.join(".rei/config.toml"),
-                xdg.join("rei/config.toml"),
-                xdg.join("zeroclaw/config.toml"),
-            ]
+            candidates,
+            vec![home.join(".rei/config.toml"), xdg.join("rei/config.toml"),]
         );
     }
 }

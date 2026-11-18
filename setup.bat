@@ -2,8 +2,8 @@
 setlocal enabledelayedexpansion
 
 :: ============================================================================
-:: ZeroClaw Windows Setup Script
-:: Simplifies building and installing ZeroClaw on Windows.
+:: ReiClaw Windows Setup Script
+:: Simplifies building and installing ReiClaw on Windows.
 :: Usage: setup.bat [--source | --minimal | --dist | --default | --all | --dry-run | --help]
 :: ============================================================================
 
@@ -67,7 +67,7 @@ goto :error_exit
 :start
 echo.
 echo %BOLD%%BLUE%=========================================%RESET%
-echo %BOLD%%BLUE%  ZeroClaw Windows Setup  v%VERSION%%RESET%
+echo %BOLD%%BLUE%  ReiClaw Windows Setup  v%VERSION%%RESET%
 echo %BOLD%%BLUE%=========================================%RESET%
 echo.
 
@@ -76,7 +76,7 @@ echo.
 if not exist "Cargo.toml" (
     echo   %RED%ERROR: Run this script from the fork repository root.%RESET%
     echo   git clone %REPO%.git
-    echo   cd zeroclaw
+    echo   cd ReiClaw
     echo   setup.bat --source
     goto :error_exit
 )
@@ -89,7 +89,7 @@ if errorlevel 1 (
 :: Read Git output as data: exact one-line membership must not depend on the
 :: byte-level LF/CRLF behavior of Git's stdout and FINDSTR /X. PowerShell's
 :: default string membership is case-insensitive, matching the former /I policy.
-powershell -NoProfile -NonInteractive -Command "$origin = @(git remote get-url origin 2>$null); if ($LASTEXITCODE -ne 0 -or $origin.Count -ne 1) { exit 1 }; $allowed = @('%REPO%', '%REPO%.git', 'git@github.com:kckylechen1/ReiClaw', 'git@github.com:kckylechen1/ReiClaw.git', 'ssh://git@github.com/kckylechen1/ReiClaw', 'ssh://git@github.com/kckylechen1/ReiClaw.git', 'https://github.com/kckylechen1/zeroclaw', 'https://github.com/kckylechen1/zeroclaw.git', 'git@github.com:kckylechen1/zeroclaw', 'git@github.com:kckylechen1/zeroclaw.git', 'ssh://git@github.com/kckylechen1/zeroclaw', 'ssh://git@github.com/kckylechen1/zeroclaw.git'); if ($allowed -notcontains $origin[0]) { exit 1 }; exit 0" >nul 2>nul
+powershell -NoProfile -NonInteractive -Command "$origin = @(git remote get-url origin 2>$null); if ($LASTEXITCODE -ne 0 -or $origin.Count -ne 1) { exit 1 }; $allowed = @('%REPO%', '%REPO%.git', 'git@github.com:kckylechen1/ReiClaw', 'git@github.com:kckylechen1/ReiClaw.git', 'ssh://git@github.com/kckylechen1/ReiClaw', 'ssh://git@github.com/kckylechen1/ReiClaw.git'); if ($allowed -notcontains $origin[0]) { exit 1 }; exit 0" >nul 2>nul
 if errorlevel 1 (
     echo   %RED%ERROR: Source origin is not this fork or could not be verified.%RESET%
     echo   Clone %REPO%.git into a new directory and run setup.bat --source there.
@@ -207,14 +207,14 @@ goto :do_build
 :: ---- Build from source ----
 :do_build
 echo.
-echo %BOLD%[3/5] Building ZeroClaw (%BUILD_DESC%)...%RESET%
+echo %BOLD%[3/5] Building ReiClaw (%BUILD_DESC%)...%RESET%
 echo   Target: %TARGET%
 
 if "%DRY_RUN%"=="true" (
     echo   [dry-run] Would run: cargo build --release --locked %FEATURES% --target %TARGET%
-    echo   [dry-run] Would install to %USERPROFILE%\.zeroclaw\bin
-    echo   [dry-run] Would build web dashboard ^(cargo web build^) and install to %LOCALAPPDATA%\zeroclaw\web\dist
-    echo   [dry-run] Would add %USERPROFILE%\.zeroclaw\bin to PATH
+    echo   [dry-run] Would install to %USERPROFILE%\.rei\bin
+    echo   [dry-run] Would build web dashboard ^(cargo web build^) and install to %LOCALAPPDATA%\reiclaw\web\dist
+    echo   [dry-run] Would add %USERPROFILE%\.rei\bin to PATH
     goto :dry_run_done
 )
 
@@ -241,29 +241,29 @@ echo   %GREEN%OK%RESET% Build succeeded.
 :: Copy binary to a convenient location
 echo.
 echo %BOLD%[4/5] Installing binary...%RESET%
-mkdir "%USERPROFILE%\.zeroclaw\bin" 2>nul
-copy /Y "target\%TARGET%\release\zeroclaw.exe" "%USERPROFILE%\.zeroclaw\bin\zeroclaw.exe" >nul
-set "BIN_PATH=%USERPROFILE%\.zeroclaw\bin\zeroclaw.exe"
+mkdir "%USERPROFILE%\.rei\bin" 2>nul
+copy /Y "target\%TARGET%\release\rei.exe" "%USERPROFILE%\.rei\bin\rei.exe" >nul
+set "BIN_PATH=%USERPROFILE%\.rei\bin\rei.exe"
 for /f %%S in ('powershell -NoProfile -Command "[math]::Round(((Get-Item -LiteralPath ''%BIN_PATH%'').Length / 1MB), 2)"') do (
     set "BINARY_MB=%%S"
 )
 if defined BINARY_MB (
-    echo   %GREEN%OK%RESET% Installed to %USERPROFILE%\.zeroclaw\bin\zeroclaw.exe ^(%BINARY_MB% MB^)
+    echo   %GREEN%OK%RESET% Installed to %USERPROFILE%\.rei\bin\rei.exe ^(%BINARY_MB% MB^)
 ) else (
-    echo   %GREEN%OK%RESET% Installed to %USERPROFILE%\.zeroclaw\bin\zeroclaw.exe ^(size unavailable^)
+    echo   %GREEN%OK%RESET% Installed to %USERPROFILE%\.rei\bin\rei.exe ^(size unavailable^)
 )
 
 :: Add to PATH if not already there
-echo %PATH% | findstr /I /C:".zeroclaw\bin" >nul 2>&1
+echo %PATH% | findstr /I /C:".rei\bin" >nul 2>&1
 if %ERRORLEVEL% NEQ 0 (
-    setx PATH "%PATH%;%USERPROFILE%\.zeroclaw\bin" >nul 2>&1
-    set "PATH=%PATH%;%USERPROFILE%\.zeroclaw\bin"
+    setx PATH "%PATH%;%USERPROFILE%\.rei\bin" >nul 2>&1
+    set "PATH=%PATH%;%USERPROFILE%\.rei\bin"
     echo   %GREEN%OK%RESET% Added to PATH
 )
 
 :: Build and install the web dashboard so the gateway serves it. Mirrors
 :: install.sh: assets must land where the gateway auto-detects them
-:: (%LOCALAPPDATA%\zeroclaw\web\dist) so a service-launched daemon finds
+:: (%LOCALAPPDATA%\reiclaw\web\dist) so a service-launched daemon finds
 :: them regardless of working directory.
 where npm >nul 2>&1
 if %ERRORLEVEL% EQU 0 (
@@ -271,9 +271,9 @@ if %ERRORLEVEL% EQU 0 (
     cargo web build
     if %ERRORLEVEL% EQU 0 (
         if exist "web\dist\index.html" (
-            mkdir "%LOCALAPPDATA%\zeroclaw\web\dist" 2>nul
-            robocopy "web\dist" "%LOCALAPPDATA%\zeroclaw\web\dist" /MIR /NFL /NDL /NJH /NJS >nul
-            echo   %GREEN%OK%RESET% Web dashboard installed to %LOCALAPPDATA%\zeroclaw\web\dist
+            mkdir "%LOCALAPPDATA%\reiclaw\web\dist" 2>nul
+            robocopy "web\dist" "%LOCALAPPDATA%\reiclaw\web\dist" /MIR /NFL /NDL /NJH /NJS >nul
+            echo   %GREEN%OK%RESET% Web dashboard installed to %LOCALAPPDATA%\reiclaw\web\dist
         )
     ) else (
         echo   %YELLOW%WARNING: dashboard build failed; gateway runs in API-only mode.%RESET%
@@ -292,15 +292,15 @@ goto verify
 echo.
 echo %BOLD%[5/5] Verifying installation...%RESET%
 
-"%USERPROFILE%\.zeroclaw\bin\zeroclaw.exe" --version >nul 2>&1
+"%USERPROFILE%\.rei\bin\rei.exe" --version >nul 2>&1
 if %ERRORLEVEL% EQU 0 (
-    for /f "tokens=*" %%v in ('"%USERPROFILE%\.zeroclaw\bin\zeroclaw.exe" --version 2^>nul') do (
+    for /f "tokens=*" %%v in ('"%USERPROFILE%\.rei\bin\rei.exe" --version 2^>nul') do (
         echo   %GREEN%OK%RESET% %%v
     )
 ) else (
-    zeroclaw --version >nul 2>&1
+    rei --version >nul 2>&1
     if %ERRORLEVEL% EQU 0 (
-        for /f "tokens=*" %%v in ('zeroclaw --version 2^>nul') do (
+        for /f "tokens=*" %%v in ('rei --version 2^>nul') do (
             echo   %GREEN%OK%RESET% %%v
         )
     ) else (
@@ -310,19 +310,19 @@ if %ERRORLEVEL% EQU 0 (
 
 echo.
 echo %BOLD%%GREEN%=========================================%RESET%
-echo %BOLD%%GREEN%  ZeroClaw setup complete!%RESET%
+echo %BOLD%%GREEN%  ReiClaw setup complete!%RESET%
 echo %BOLD%%GREEN%=========================================%RESET%
 echo.
 echo   Next steps:
 echo     1. Restart your terminal (for PATH changes)
 if /I "%MODE%"=="minimal" (
-echo     2. Minimal build excludes quickstart ^(zeroclaw quickstart is unavailable^)
-echo     3. Configure model providers manually in %%USERPROFILE%%\.zeroclaw\config.toml
-echo     4. Use reduced CLI path: zeroclaw agent --message "Hello"
+echo     2. Minimal build excludes quickstart ^(rei quickstart is unavailable^)
+echo     3. Configure model providers manually in %%USERPROFILE%%\.rei\config.toml
+echo     4. Use reduced CLI path: rei agent --message "Hello"
 ) else (
-echo     2. Run: zeroclaw quickstart
-echo     3. Configure your API key in %%USERPROFILE%%\.zeroclaw\config.toml
-echo     4. Start chatting: zeroclaw agent
+echo     2. Run: rei quickstart
+echo     3. Configure your API key in %%USERPROFILE%%\.rei\config.toml
+echo     4. Start chatting: rei agent
 )
 echo.
 echo   Documentation: %REPO%
@@ -332,7 +332,7 @@ goto :end
 :: ---- Help ----
 :show_help
 echo.
-echo ZeroClaw Windows Setup Script
+echo ReiClaw Windows Setup Script
 echo.
 echo Usage: setup.bat [OPTIONS]
 echo.

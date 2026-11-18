@@ -206,9 +206,9 @@ pub struct ListEntry {
     pub value: Option<serde_json::Value>,
     pub populated: bool,
     pub is_secret: bool,
-    /// Whether this field was populated by a `ZEROCLAW_*` env-var override
+    /// Whether this field was populated by a `REI_*` env-var override
     /// at load time. The dashboard renders the 💉 badge and a persistent
-    /// warning *"Edits here won't take effect — overridden by ZEROCLAW_..."*
+    /// warning *"Edits here won't take effect — overridden by REI_..."*
     /// when this is `true`.
     #[serde(default, skip_serializing_if = "is_false")]
     pub is_env_overridden: bool,
@@ -696,7 +696,7 @@ pub async fn compute_drift(in_memory: &reiclaw_config::schema::Config) -> Vec<Dr
         if is_gateway_managed_field(name) {
             continue;
         }
-        // Env overrides (`ZEROCLAW_<path>`) apply in memory but never persist to
+        // Env overrides (`REI_<path>`) apply in memory but never persist to
         // disk, so a disk comparison always reports drift the operator can't fix.
         if in_memory.prop_is_env_overridden(name) {
             continue;

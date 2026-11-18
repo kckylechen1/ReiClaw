@@ -456,7 +456,7 @@ fn assert_capture(records: &[Value], capture: bool, truncated: bool, cap: usize)
 async fn canonical_loop_enforces_tool_log_policy_on_broadcast_and_disk() {
     // This integration binary owns its subscriber, so it can test the same
     // INFO recording floor used by the daemon without other tests changing it.
-    let debug_child = std::env::var("ZEROCLAW_AUDIT_LOG_DEBUG").as_deref() == Ok("1");
+    let debug_child = std::env::var("REI_AUDIT_LOG_DEBUG").as_deref() == Ok("1");
     let filter = if debug_child { "debug" } else { "info" };
     reiclaw_log::install_global_subscriber(Some(filter), filter, false);
     let mut rx = reiclaw_log::subscribe_or_install();
@@ -566,7 +566,7 @@ async fn canonical_loop_enforces_tool_log_policy_on_broadcast_and_disk() {
         command
             .arg("--exact")
             .arg("canonical_loop_enforces_tool_log_policy_on_broadcast_and_disk")
-            .env("ZEROCLAW_AUDIT_LOG_DEBUG", "1")
+            .env("REI_AUDIT_LOG_DEBUG", "1")
             .kill_on_drop(true);
         let output = tokio::time::timeout(std::time::Duration::from_secs(60), command.output())
             .await
