@@ -9,6 +9,10 @@
 //!                                      → RunResult (full result.md, at most 64 KiB)
 //! cancel(dispatch_id, revision)      → tachi_staff(action=cancel, expected_status_revision)
 //!                                      → CancelReceipt, or CancelUnsupported for CLI runs
+//! continue_run(dispatch_id, rev, task) → tachi_staff(action=continue, expected_status_revision, task)
+//!                                      → ContinueReceipt
+//! finish_run(dispatch_id, rev)       → tachi_staff(action=finish, expected_status_revision)
+//!                                      → FinishReceipt
 //! ```
 //!
 //! Rules this client keeps:
@@ -434,6 +438,117 @@ impl TachiStaffClient {
         })
     }
 
+    /// Continue an `INPUT_REQUIRED` run with a follow-up `task` instruction,
+    /// quoting `expected_status_revision` from the last canonical [`Self::status`]
+    /// read.
+    ///
+    /// # Errors
+    /// Empty `dispatch_id` or `task` is refused before Tachi is contacted.
+    /// After transmission, a missing/dropped/unreadable receipt returns
+    /// [`TachiStaffError::SubmissionUnknown`] and is never replayed automatically.
+    /// Stale revision refusals map to [`TachiStaffError::StaleRevision`];
+    /// unsupported operations and invalid-state refusals map to
+    /// [`TachiStaffError::Refused`].
+    pub async fn continue_run(
+        &self,
+        dispatch_id: &str,
+        expected_status_revision: u64,
+        task: &str,
+    ) -> Result<ContinueReceipt, TachiStaffError> {
+        let dispatch_id = dispatch_id.trim();
+        if dispatch_id.is_empty() {
+            return Err(TachiStaffError::Refused(
+                "dispatch_id must not be empty".to_string(),
+            ));
+        }
+        let task = task.trim();
+        if task.is_empty() {
+            return Err(TachiStaffError::Refused(
+                "task must not be empty".to_string(),
+            ));
+        }
+        let args = json!({
+            "action": "continue",
+            "dispatch_id": dispatch_id,
+            "expected_status_revision": expected_status_revision,
+            "task": task,
+        });
+        self.call_revisioned_mutation(
+            "continue",
+            dispatch_id,
+            expected_status_revision,
+            args,
+            |receipt: &ContinueReceipt| receipt.dispatch_id.as_str(),
+        )
+        .await
+    }
+
+    /// Finish a supervised run at an `INPUT_REQUIRED` boundary, quoting
+    /// `expected_status_revision` from the last canonical [`Self::status`] read.
+    ///
+    /// # Errors
+    /// Empty `dispatch_id` is refused before Tachi is contacted.
+    /// After transmission, a missing/dropped/unreadable receipt returns
+    /// [`TachiStaffError::SubmissionUnknown`] and is never replayed automatically.
+    /// Stale revision refusals map to [`TachiStaffError::StaleRevision`];
+    /// unsupported operations and invalid-state refusals map to
+    /// [`TachiStaffError::Refused`].
+    pub async fn finish_run(
+        &self,
+        dispatch_id: &str,
+        expected_status_revision: u64,
+    ) -> Result<FinishReceipt, TachiStaffError> {
+        let dispatch_id = dispatch_id.trim();
+        if dispatch_id.is_empty() {
+            return Err(TachiStaffError::Refused(
+                "dispatch_id must not be empty".to_string(),
+            ));
+        }
+        let args = json!({
+            "action": "finish",
+            "dispatch_id": dispatch_id,
+            "expected_status_revision": expected_status_revision,
+        });
+        self.call_revisioned_mutation(
+            "finish",
+            dispatch_id,
+            expected_status_revision,
+            args,
+            |receipt: &FinishReceipt| receipt.dispatch_id.as_str(),
+        )
+        .await
+    }
+
+    async fn call_revisioned_mutation<T: serde::de::DeserializeOwned>(
+        &self,
+        op: &str,
+        dispatch_id: &str,
+        expected_status_revision: u64,
+        args: Value,
+        get_dispatch_id: impl FnOnce(&T) -> &str,
+    ) -> Result<T, TachiStaffError> {
+        let payload = match self.call(op, TACHI_STAFF_TOOL, args).await {
+            Ok(payload) => payload,
+            Err(TachiStaffError::Refused(detail)) => {
+                let mapped = map_revisioned_refusal(expected_status_revision, detail);
+                if matches!(mapped, TachiStaffError::StaleRevision { .. }) {
+                    log_failure(op, &mapped);
+                }
+                return Err(mapped);
+            }
+            Err(error) => return Err(error),
+        };
+        check_revisioned_payload_refusal(op, expected_status_revision, &payload)?;
+        let receipt: T = decode(op, payload)
+            .map_err(|error| TachiStaffError::SubmissionUnknown(error.to_string()))?;
+        if get_dispatch_id(&receipt) != dispatch_id {
+            let error = TachiStaffError::Protocol(format!("{op} dispatch mismatch"));
+            log_failure(op, &error);
+            return Err(error);
+        }
+        Ok(receipt)
+    }
+
     /// Poll [`Self::status`] every [`Self::poll_interval`] until the run is
     /// terminal or `max_wait` has passed; returns the last status read.
     ///
@@ -775,10 +890,10 @@ impl TachiStaffClient {
                     reopened = true;
                 }
                 Ok(Exchange::StaleSession) => {
-                    let error = if op == "start" {
-                        TachiStaffError::SubmissionUnknown(
-                            "MCP session expired after start POST".to_string(),
-                        )
+                    let error = if is_mutating_op(op) {
+                        TachiStaffError::SubmissionUnknown(format!(
+                            "MCP session expired after {op} POST"
+                        ))
                     } else {
                         TachiStaffError::Unavailable("MCP session expired".to_string())
                     };
@@ -786,11 +901,12 @@ impl TachiStaffClient {
                     return Err(error);
                 }
                 Err(error) => {
-                    let error = if op == "start" && !matches!(error, TachiStaffError::Refused(_)) {
-                        TachiStaffError::SubmissionUnknown(error.to_string())
-                    } else {
-                        error
-                    };
+                    let error =
+                        if is_mutating_op(op) && !matches!(error, TachiStaffError::Refused(_)) {
+                            TachiStaffError::SubmissionUnknown(error.to_string())
+                        } else {
+                            error
+                        };
                     // A refusal leaves the session healthy; anything else
                     // drops it so the next call starts clean.
                     if matches!(error, TachiStaffError::Refused(_)) {
@@ -802,6 +918,90 @@ impl TachiStaffClient {
             }
         }
     }
+}
+
+fn is_mutating_op(op: &str) -> bool {
+    matches!(op, "start" | "continue" | "finish")
+}
+
+fn extract_observed_revision_from_value(value: &Value) -> Option<u64> {
+    value
+        .get("observed_status_revision")
+        .and_then(Value::as_u64)
+        .or_else(|| value.get("observed").and_then(Value::as_u64))
+        .or_else(|| value.get("status_revision").and_then(Value::as_u64))
+}
+
+fn extract_observed_revision_from_text(detail: &str) -> Option<u64> {
+    let lower = detail.to_ascii_lowercase();
+    for key in ["observed_status_revision", "status_revision", "observed"] {
+        if let Some(pos) = lower.find(key) {
+            let rest = &lower[pos + key.len()..];
+            let trimmed =
+                rest.trim_start_matches(|c: char| c == ':' || c == '=' || c.is_whitespace());
+            let digits: String = trimmed.chars().take_while(char::is_ascii_digit).collect();
+            if !digits.is_empty()
+                && let Ok(rev) = digits.parse::<u64>()
+            {
+                return Some(rev);
+            }
+        }
+    }
+    None
+}
+
+fn map_revisioned_refusal(expected_status_revision: u64, detail: String) -> TachiStaffError {
+    if let Ok(value) = serde_json::from_str::<Value>(&detail) {
+        let reason = value
+            .get("reason")
+            .and_then(Value::as_str)
+            .or_else(|| value.get("error").and_then(Value::as_str))
+            .or_else(|| value.get("code").and_then(Value::as_str));
+        if reason.is_some_and(|r| r.eq_ignore_ascii_case("stale_status_revision")) {
+            return TachiStaffError::StaleRevision {
+                expected: expected_status_revision,
+                observed: extract_observed_revision_from_value(&value),
+            };
+        }
+    }
+    let lower = detail.to_ascii_lowercase();
+    if lower.contains("stale_status_revision") || lower.contains("stale status revision") {
+        return TachiStaffError::StaleRevision {
+            expected: expected_status_revision,
+            observed: extract_observed_revision_from_text(&detail),
+        };
+    }
+    TachiStaffError::Refused(detail)
+}
+
+fn check_revisioned_payload_refusal(
+    op: &str,
+    expected_status_revision: u64,
+    payload: &Value,
+) -> Result<(), TachiStaffError> {
+    let reason = payload
+        .get("reason")
+        .and_then(Value::as_str)
+        .or_else(|| payload.get("error").and_then(Value::as_str));
+    let receipt_tag = payload.get("receipt").and_then(Value::as_str);
+    if reason.is_some_and(|r| r.eq_ignore_ascii_case("stale_status_revision")) {
+        let error = TachiStaffError::StaleRevision {
+            expected: expected_status_revision,
+            observed: extract_observed_revision_from_value(payload),
+        };
+        log_failure(op, &error);
+        return Err(error);
+    }
+    if receipt_tag
+        .is_some_and(|tag| tag.ends_with("_unavailable") || tag == "refused" || tag == "rejected")
+        || (reason.is_some() && payload.get("state").is_none_or(Value::is_null))
+    {
+        let detail = reason.or(receipt_tag).unwrap_or("unspecified");
+        let error = TachiStaffError::Refused(format!("{op} unavailable: {detail}"));
+        log_failure(op, &error);
+        return Err(error);
+    }
+    Ok(())
 }
 
 fn decode<T: serde::de::DeserializeOwned>(op: &str, payload: Value) -> Result<T, TachiStaffError> {

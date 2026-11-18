@@ -220,6 +220,30 @@ pub struct CancelReceipt {
     pub state: Option<RunState>,
 }
 
+/// Tachi's receipt for an accepted `continue` action on an `INPUT_REQUIRED` run.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct ContinueReceipt {
+    /// Canonical run id.
+    pub dispatch_id: String,
+    /// Run state after accepting the continuation.
+    pub state: RunState,
+    /// Updated receipt revision, when Tachi reports one.
+    #[serde(default)]
+    pub status_revision: Option<u64>,
+}
+
+/// Tachi's receipt for an accepted `finish` action on a supervised run.
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct FinishReceipt {
+    /// Canonical run id.
+    pub dispatch_id: String,
+    /// Run state after finishing.
+    pub state: RunState,
+    /// Updated receipt revision, when Tachi reports one.
+    #[serde(default)]
+    pub status_revision: Option<u64>,
+}
+
 /// Every way a `tachi_staff` call can fail.
 #[derive(Debug, Clone, PartialEq, Eq, thiserror::Error)]
 pub enum TachiStaffError {

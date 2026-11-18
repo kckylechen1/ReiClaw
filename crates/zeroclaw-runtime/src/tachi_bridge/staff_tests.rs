@@ -14,11 +14,13 @@ use serde_json::{Value, json};
 use zeroclaw_config::tachi::TachiConfig;
 
 use super::staff::{
-    CancelOutcome, HEADER_AGENT_IDENTITY, HEADER_CLIENT, HEADER_PROFILE, HEADER_PROJECT,
-    MIRROR_EXECUTION_ORIGIN, MIRROR_HARNESS, MIRROR_LIFECYCLE_OWNER, RunState, RunStatus,
-    StaffReceipt, StaffRefs, StaffingReason, TACHI_AGENT_EVAL_TOOL, TACHI_STAFF_TOOL,
-    TACHI_TASK_TOOL, TachiStaffClient, TachiStaffError, mirror_observe_args, mirror_register_args,
-    mirror_terminal_outcome,
+    CancelOutcome, ContinueReceipt, FinishReceipt, HEADER_AGENT_IDENTITY, HEADER_CLIENT,
+    HEADER_PROFILE, HEADER_PROJECT, MAX_PROXY_CONTINUATIONS_PER_DISPATCH,
+    MAX_TASK_CONTEXT_BRIEF_BYTES, MIRROR_EXECUTION_ORIGIN, MIRROR_HARNESS, MIRROR_LIFECYCLE_OWNER,
+    ProxyContinuationError, ProxyContinuationGate, RunState, RunStatus, StaffReceipt, StaffRefs,
+    StaffingReason, TACHI_AGENT_EVAL_TOOL, TACHI_STAFF_TOOL, TACHI_TASK_TOOL, TachiStaffClient,
+    TachiStaffError, TaskBriefError, format_redacted_task_with_brief, mirror_observe_args,
+    mirror_register_args, mirror_terminal_outcome, validate_proxy_continuation,
 };
 
 /// Tachi's golden external-staffing contract (copied verbatim from
@@ -2593,6 +2595,351 @@ async fn mirror_watch_timeout_while_running_does_not_observe() {
     assert!(watch.success, "{:?}", watch.error);
     assert_eq!(watch.output.data().unwrap()["terminal"], false);
     assert_eq!(observed.load(Ordering::SeqCst), 0);
+}
+
+// ─────────────────────────────────────────────────────────────────────────
+// ADR-025 §8: continue_run, finish_run, proxy-continuation gates, and briefs
+// ─────────────────────────────────────────────────────────────────────────
+
+#[tokio::test]
+async fn continue_run_sends_tachi_staff_params_and_maps_receipt() {
+    let (fake, endpoint) = serve(|tool, args| {
+        assert_eq!(tool, TACHI_STAFF_TOOL);
+        assert_eq!(args["action"], "continue");
+        Reply::Ok(json!({
+            "dispatch_id": args["dispatch_id"],
+            "state": "TASK_STATE_WORKING",
+            "status_revision": 8,
+            "extra_future_field": true
+        }))
+    })
+    .await;
+    let client = client(&endpoint);
+
+    let receipt = client
+        .continue_run("d-cont", 7, "  Proceed with option A  ")
+        .await
+        .expect("continue accepted");
+    assert_eq!(
+        receipt,
+        ContinueReceipt {
+            dispatch_id: "d-cont".to_string(),
+            state: RunState::Working,
+            status_revision: Some(8),
+        }
+    );
+
+    let calls = fake.staff_calls();
+    assert_eq!(calls.len(), 1);
+    let args = &calls[0].1;
+    assert_eq!(
+        args,
+        &json!({
+            "action": "continue",
+            "dispatch_id": "d-cont",
+            "expected_status_revision": 7,
+            "task": "Proceed with option A"
+        })
+    );
+    for key in args.as_object().expect("object args").keys() {
+        assert!(
+            TACHI_STAFF_PARAM_FIELDS.contains(&key.as_str()),
+            "`{key}` is not a TachiStaffParams field"
+        );
+    }
+}
+
+#[tokio::test]
+async fn continue_and_finish_reject_empty_inputs_before_contacting_tachi() {
+    let (fake, endpoint) = serve(|_, _| panic!("empty inputs must never reach Tachi")).await;
+    let client = client(&endpoint);
+
+    for bad_id in ["", "   \n\t "] {
+        assert!(matches!(
+            client.continue_run(bad_id, 1, "answer").await.unwrap_err(),
+            TachiStaffError::Refused(_)
+        ));
+        assert!(matches!(
+            client.finish_run(bad_id, 1).await.unwrap_err(),
+            TachiStaffError::Refused(_)
+        ));
+    }
+    for bad_task in ["", "   \n\t "] {
+        assert!(matches!(
+            client.continue_run("d-1", 1, bad_task).await.unwrap_err(),
+            TachiStaffError::Refused(_)
+        ));
+    }
+
+    assert!(fake.calls().is_empty());
+    assert_eq!(fake.sessions_opened.load(Ordering::SeqCst), 0);
+}
+
+#[tokio::test]
+async fn continue_and_finish_map_stale_revision_and_unsupported_refusals() {
+    let (fake, endpoint) = serve(|_, args| match args["action"].as_str() {
+        Some("continue") if args["expected_status_revision"] == 2 => Reply::Ok(json!({
+            "receipt": "continue_unavailable",
+            "reason": "stale_status_revision",
+            "observed_status_revision": 5,
+            "state": null
+        })),
+        Some("continue") if args["expected_status_revision"] == 3 => Reply::ToolError(
+            r#"{"reason":"stale_status_revision","observed_status_revision":6}"#.into(),
+        ),
+        Some("continue") => Reply::ToolError("tachi_staff: unsupported action 'continue'".into()),
+        Some("finish") if args["expected_status_revision"] == 4 => Reply::Ok(json!({
+            "receipt": "finish_unavailable",
+            "reason": "stale_status_revision",
+            "observed_status_revision": 9
+        })),
+        Some("finish") => Reply::ToolError("tachi_staff: unsupported action 'finish'".into()),
+        _ => panic!("unexpected call {args}"),
+    })
+    .await;
+    let client = client(&endpoint);
+
+    assert_eq!(
+        client.continue_run("d-1", 2, "ok").await.unwrap_err(),
+        TachiStaffError::StaleRevision {
+            expected: 2,
+            observed: Some(5)
+        }
+    );
+    assert_eq!(
+        client.continue_run("d-1", 3, "ok").await.unwrap_err(),
+        TachiStaffError::StaleRevision {
+            expected: 3,
+            observed: Some(6)
+        }
+    );
+    assert!(matches!(
+        client.continue_run("d-1", 1, "ok").await.unwrap_err(),
+        TachiStaffError::Refused(msg) if msg.contains("unsupported action 'continue'")
+    ));
+    assert_eq!(
+        client.finish_run("d-1", 4).await.unwrap_err(),
+        TachiStaffError::StaleRevision {
+            expected: 4,
+            observed: Some(9)
+        }
+    );
+    assert!(matches!(
+        client.finish_run("d-1", 1).await.unwrap_err(),
+        TachiStaffError::Refused(msg) if msg.contains("unsupported action 'finish'")
+    ));
+    assert_eq!(fake.staff_calls().len(), 5);
+}
+
+#[tokio::test]
+async fn continue_and_finish_return_submission_unknown_on_post_send_drop_without_retry() {
+    let (fake, endpoint) = serve(|_, args| match args["dispatch_id"].as_str() {
+        Some("drop-500") => Reply::Http(StatusCode::INTERNAL_SERVER_ERROR),
+        Some("drop-404") => Reply::Http(StatusCode::NOT_FOUND),
+        Some("bad-json") => Reply::Text("truncated".to_string()),
+        _ => Reply::Ok(json!({"dispatch_id": "missing-state"})),
+    })
+    .await;
+    let client = client(&endpoint);
+
+    for case in ["drop-500", "drop-404", "bad-json", "missing-state"] {
+        let calls_before = fake.calls().len();
+        let cont_err = client.continue_run(case, 1, "answer").await.unwrap_err();
+        assert!(
+            matches!(cont_err, TachiStaffError::SubmissionUnknown(_)),
+            "continue {case}: {cont_err:?}"
+        );
+        assert_eq!(
+            fake.calls().len() - calls_before,
+            1,
+            "continue {case} must never retry after transmission"
+        );
+
+        let calls_before = fake.calls().len();
+        let fin_err = client.finish_run(case, 1).await.unwrap_err();
+        assert!(
+            matches!(fin_err, TachiStaffError::SubmissionUnknown(_)),
+            "finish {case}: {fin_err:?}"
+        );
+        assert_eq!(
+            fake.calls().len() - calls_before,
+            1,
+            "finish {case} must never retry after transmission"
+        );
+    }
+}
+
+#[tokio::test]
+async fn finish_run_sends_tachi_staff_params_and_maps_receipt() {
+    let (fake, endpoint) = serve(|tool, args| {
+        assert_eq!(tool, TACHI_STAFF_TOOL);
+        assert_eq!(args["action"], "finish");
+        Reply::Ok(json!({
+            "dispatch_id": args["dispatch_id"],
+            "state": "TASK_STATE_COMPLETED",
+            "status_revision": 12
+        }))
+    })
+    .await;
+    let client = client(&endpoint);
+
+    let receipt = client
+        .finish_run("d-fin", 11)
+        .await
+        .expect("finish accepted");
+    assert_eq!(
+        receipt,
+        FinishReceipt {
+            dispatch_id: "d-fin".to_string(),
+            state: RunState::Completed,
+            status_revision: Some(12),
+        }
+    );
+
+    let calls = fake.staff_calls();
+    assert_eq!(calls.len(), 1);
+    let args = &calls[0].1;
+    assert_eq!(
+        args,
+        &json!({
+            "action": "finish",
+            "dispatch_id": "d-fin",
+            "expected_status_revision": 11
+        })
+    );
+    for key in args.as_object().expect("object args").keys() {
+        assert!(
+            TACHI_STAFF_PARAM_FIELDS.contains(&key.as_str()),
+            "`{key}` is not a TachiStaffParams field"
+        );
+    }
+}
+
+#[tokio::test]
+async fn proxy_continuation_gate_enforces_cap_and_refuses_auth_required_and_partial() {
+    let round = Arc::new(AtomicUsize::new(0));
+    let round_counter = round.clone();
+    let (fake, endpoint) = serve(move |_, args| {
+        assert_eq!(args["action"], "continue");
+        let n = round_counter.fetch_add(1, Ordering::SeqCst) + 1;
+        Reply::Ok(json!({
+            "dispatch_id": args["dispatch_id"],
+            "state": "TASK_STATE_WORKING",
+            "status_revision": n as u64 + 10
+        }))
+    })
+    .await;
+    let client = client(&endpoint);
+    let mut gate = ProxyContinuationGate::new("d-gate");
+
+    let auth_status = RunStatus {
+        dispatch_id: "d-gate".to_string(),
+        state: RunState::Other("TASK_STATE_AUTH_REQUIRED".to_string()),
+        revision: Some(10),
+        closure_kind: None,
+        result_written: None,
+        updated_at: None,
+        read_projection: None,
+    };
+    assert_eq!(
+        gate.continue_run(&client, &auth_status, "approved")
+            .await
+            .unwrap_err(),
+        ProxyContinuationError::AuthRequired
+    );
+
+    let partial_status = RunStatus {
+        dispatch_id: "d-gate".to_string(),
+        state: RunState::InputRequired,
+        revision: Some(10),
+        closure_kind: Some("partial".to_string()),
+        result_written: None,
+        updated_at: None,
+        read_projection: None,
+    };
+    assert_eq!(
+        gate.continue_run(&client, &partial_status, "proceed")
+            .await
+            .unwrap_err(),
+        ProxyContinuationError::PartialClosure
+    );
+    assert!(
+        fake.calls().is_empty(),
+        "refused gates must not contact Tachi"
+    );
+
+    for rev in 0..u64::from(MAX_PROXY_CONTINUATIONS_PER_DISPATCH) {
+        let ready = RunStatus {
+            dispatch_id: "d-gate".to_string(),
+            state: RunState::InputRequired,
+            revision: Some(10 + rev),
+            closure_kind: None,
+            result_written: None,
+            updated_at: None,
+            read_projection: None,
+        };
+        let receipt = gate
+            .continue_run(&client, &ready, &format!("Grounded answer {rev}"))
+            .await
+            .expect("admitted continuation");
+        assert_eq!(receipt.state, RunState::Working);
+    }
+    assert_eq!(
+        gate.prior_auto_continuations(),
+        MAX_PROXY_CONTINUATIONS_PER_DISPATCH
+    );
+    assert_eq!(gate.remaining_auto_continuations(), 0);
+
+    let fourth = RunStatus {
+        dispatch_id: "d-gate".to_string(),
+        state: RunState::InputRequired,
+        revision: Some(20),
+        closure_kind: None,
+        result_written: None,
+        updated_at: None,
+        read_projection: None,
+    };
+    assert_eq!(
+        gate.continue_run(&client, &fourth, "Fourth round")
+            .await
+            .unwrap_err(),
+        ProxyContinuationError::CapExceeded {
+            prior: MAX_PROXY_CONTINUATIONS_PER_DISPATCH,
+            max: MAX_PROXY_CONTINUATIONS_PER_DISPATCH,
+        }
+    );
+    assert_eq!(
+        fake.staff_calls().len(),
+        usize::from(MAX_PROXY_CONTINUATIONS_PER_DISPATCH)
+    );
+    assert!(
+        validate_proxy_continuation(&fourth, MAX_PROXY_CONTINUATIONS_PER_DISPATCH, "ok").is_err()
+    );
+}
+
+#[test]
+fn redacted_task_brief_formatting_enforces_size_markers_and_task_intent_guards() {
+    let ok = format_redacted_task_with_brief(
+        "Check migration parity in zeroclaw-infra",
+        Some("Established decision: keep sessions.db append-only."),
+    )
+    .expect("valid redacted brief");
+    assert!(ok.starts_with("[Task Context]\n"));
+    assert!(ok.ends_with("Check migration parity in zeroclaw-infra"));
+
+    let over = "x".repeat(MAX_TASK_CONTEXT_BRIEF_BYTES + 1);
+    assert!(matches!(
+        format_redacted_task_with_brief("Check parity", Some(&over)).unwrap_err(),
+        TaskBriefError::BriefTooLarge { .. }
+    ));
+    assert!(matches!(
+        format_redacted_task_with_brief("Check parity", Some("soul::identity")).unwrap_err(),
+        TaskBriefError::ProtectedIdentityMarker { .. }
+    ));
+    assert!(matches!(
+        format_redacted_task_with_brief("Check parity", Some("use --full-auto")).unwrap_err(),
+        TaskBriefError::Admission(_)
+    ));
 }
 
 #[test]
