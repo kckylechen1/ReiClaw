@@ -782,3 +782,5 @@ turn-repeated-failure-exhausted = 恢复重试仍返回相同的失败结果，�
 turn-repeated-failure-retry-skipped = 已跳过本批次中额外的相同调用；恢复阶段只允许一次重试。
 
 cli-update-source-only = 此 Fork 尚无经过验证的二进制更新渠道。请更新 https://github.com/kckylechen1/zeroclaw 的源码检出，并使用原有 preset/features 运行 ./install.sh --source。上游发行包不能用于更新此 Fork。
+delegation-proxy-continued-notice = 委派任务 {$request}（调度 {$dispatch}）请求补充输入，已自动续接（第 {$round}/{$max} 轮）。
+delegation-input-required-notice = 委派任务 {$request}（调度 {$dispatch}）需要您的输入或确认（{$reason}）。

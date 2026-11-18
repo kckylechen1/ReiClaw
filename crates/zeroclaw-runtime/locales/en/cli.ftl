@@ -982,3 +982,5 @@ turn-repeated-failure-exhausted = The recovery retry failed with the same result
 turn-repeated-failure-retry-skipped = Skipped an additional identical call in this recovery batch. Only one recovery retry is available.
 
 cli-update-source-only = This fork has no verified binary update channel. Update a checkout of https://github.com/kckylechen1/zeroclaw and run ./install.sh --source with your existing preset/features. Upstream releases cannot update this fork.
+delegation-proxy-continued-notice = Delegated task {$request} (dispatch {$dispatch}) requested input and was automatically continued (round {$round}/{$max}).
+delegation-input-required-notice = Delegated task {$request} (dispatch {$dispatch}) requires your input or confirmation ({$reason}).

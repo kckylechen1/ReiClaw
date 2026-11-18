@@ -2942,6 +2942,77 @@ fn redacted_task_brief_formatting_enforces_size_markers_and_task_intent_guards()
     ));
 }
 
+#[tokio::test]
+async fn tachi_start_with_context_brief_redacts_secrets_excludes_soul_and_rejects_without_claim_mutation()
+ {
+    let (fake, endpoint) = serve(|tool, args| {
+        assert_eq!(tool, TACHI_STAFF_TOOL);
+        assert_eq!(args["action"], "start");
+        Reply::Ok(working_receipt("d-brief"))
+    })
+    .await;
+    let temp = tempfile::TempDir::new().unwrap();
+    let cfg = production_config(&temp, &endpoint);
+    zeroclaw_memory::companion::SoulProfileStore::shared(&cfg.data_dir)
+        .unwrap()
+        .ensure_seeded("home", "protected-soul-fixture-bytes", 1)
+        .unwrap();
+    zeroclaw_memory::companion::UserModelStore::shared(&cfg.data_dir)
+        .unwrap()
+        .record_owner_statement(
+            zeroclaw_memory::companion::UserModelKind::Preference,
+            "protected-user-model-fixture-bytes",
+            "privacy.fixture",
+            "global",
+            1,
+        )
+        .unwrap();
+    let tools = production_tools(&cfg, Arc::new(parking_lot::RwLock::new(cfg.clone())));
+
+    // Oversized, credential-marked, and Soul/UserModel briefs must reject cleanly
+    // BEFORE mutating session_delegations admission claims.
+    let over_brief = "a".repeat(MAX_TASK_CONTEXT_BRIEF_BYTES + 1);
+    for (req_id, bad_brief, expected_code) in [
+        ("req-over", over_brief.as_str(), "invalid_arguments"),
+        ("req-cred", "api_key=raw-secret-123", "forbidden_content"),
+        ("req-soul", "Check soul.db persona", "forbidden_content"),
+        ("req-um", "Read user_model.db", "forbidden_content"),
+    ] {
+        let mut args = start_args(req_id);
+        args["context_brief"] = json!(bad_brief);
+        let rejected = invoke(&tools, "tachi_start", args).await;
+        assert!(!rejected.success);
+        assert_eq!(rejected.output.data().unwrap()["code"], expected_code);
+    }
+    assert!(fake.calls().is_empty(), "rejected briefs never reach Tachi");
+    let conn = rusqlite::Connection::open(cfg.data_dir.join("sessions/sessions.db")).unwrap();
+    let claim_count: i64 = conn
+        .query_row("SELECT COUNT(*) FROM session_delegations", [], |row| {
+            row.get(0)
+        })
+        .unwrap();
+    assert_eq!(claim_count, 0, "rejected briefs must not mutate claims");
+
+    // Valid technical brief with a scrubbable token pattern redacts cleanly and
+    // omits all Soul / User Model bytes from the outbound task.
+    let mut ok_args = start_args("req-brief-ok");
+    ok_args["context_brief"] = json!(
+        "Decision: preserve existing sessions table; callback https://example.test/hook?token=secret99; old key sk-ant-secret42."
+    );
+    let accepted = invoke(&tools, "tachi_start", ok_args).await;
+    assert!(accepted.success, "{:?}", accepted.error);
+    let sent_calls = fake.staff_calls();
+    assert_eq!(sent_calls.len(), 1);
+    let sent_task = sent_calls[0].1["task"].as_str().unwrap();
+    assert!(sent_task.starts_with("[Task Context]\n"));
+    assert!(sent_task.contains("Decision: preserve existing sessions table"));
+    assert!(sent_task.contains("[REDACTED]"));
+    assert!(!sent_task.contains("secret99"));
+    assert!(!sent_task.contains("sk-ant-secret42"));
+    assert!(!sent_task.contains("protected-soul-fixture-bytes"));
+    assert!(!sent_task.contains("protected-user-model-fixture-bytes"));
+}
+
 #[test]
 fn module_source_scans_hold() {
     // Row 12 structural halves + TB-23 item 4:
