@@ -93,7 +93,7 @@ mod registry_tests {
         assert!(!is_registry_source("/abs/path"));
         assert!(!is_registry_source("skills/auto-coder"));
         assert!(!is_registry_source("some\\path"));
-        assert!(!is_registry_source("~/.zeroclaw/skills/foo"));
+        assert!(!is_registry_source("~/.rei/skills/foo"));
     }
 
     #[test]

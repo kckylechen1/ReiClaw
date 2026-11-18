@@ -112,7 +112,7 @@ impl std::fmt::Debug for PersonalRootRef {
 /// Reserved root-local namespace that holds deleted/replaced content.
 /// Invisible to ordinary listing, unreachable as a user path component,
 /// and excluded from every user-addressable operation.
-pub const TRASH_NAMESPACE: &str = ".zeroclaw-trash";
+pub const TRASH_NAMESPACE: &str = ".reiclaw-trash";
 
 /// A path relative to an admitted root, safe by construction.
 ///

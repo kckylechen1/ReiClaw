@@ -19,8 +19,7 @@ use std::collections::{HashMap, HashSet};
 use std::path::PathBuf;
 
 const DEFAULT_CODEX_RESPONSES_URL: &str = "https://chatgpt.com/backend-api/codex/responses";
-const DEFAULT_CODEX_INSTRUCTIONS: &str =
-    "You are ZeroClaw, a concise and helpful coding assistant.";
+const DEFAULT_CODEX_INSTRUCTIONS: &str = "You are ReiClaw, a concise and helpful coding assistant.";
 /// OpenAI Codex speaks the "responses" wire protocol, not chat_completions.
 const WIRE_API: &str = "responses";
 const RESPONSES_HISTORY_PROVIDER: &str = "openai_codex";
@@ -128,7 +127,7 @@ impl OpenAiCodexModelProvider {
         let state_dir = options
             .zeroclaw_dir
             .clone()
-            .unwrap_or_else(default_zeroclaw_dir);
+            .unwrap_or_else(default_reiclaw_dir);
         let auth = AuthService::new(&state_dir, options.secrets_encrypt);
         let responses_url = resolve_responses_url(options)?;
 
@@ -149,10 +148,10 @@ impl OpenAiCodexModelProvider {
     }
 }
 
-fn default_zeroclaw_dir() -> PathBuf {
+fn default_reiclaw_dir() -> PathBuf {
     directories::UserDirs::new().map_or_else(
-        || PathBuf::from(".zeroclaw"),
-        |dirs| dirs.home_dir().join(".zeroclaw"),
+        || PathBuf::from(".reiclaw"),
+        |dirs| dirs.home_dir().join(".reiclaw"),
     )
 }
 
@@ -1254,7 +1253,7 @@ impl OpenAiCodexModelProvider {
                         "openai_codex: auth profile present but no usable access token"
                     );
                     anyhow::Error::msg(
-                        "OpenAI Codex credentials are present but expired or could not be refreshed. Re-run `zeroclaw auth login --model-provider openai-codex` to sign in again.",
+                        "OpenAI Codex credentials are present but expired or could not be refreshed. Re-run `rei auth login --model-provider openai-codex` to sign in again.",
                     )
                 } else {
                     ::reiclaw_log::record!(
@@ -1268,7 +1267,7 @@ impl OpenAiCodexModelProvider {
                         "openai_codex: no auth profile found"
                     );
                     anyhow::Error::msg(
-                        "No OpenAI Codex credentials found. Run `zeroclaw auth login --model-provider openai-codex` to sign in.",
+                        "No OpenAI Codex credentials found. Run `rei auth login --model-provider openai-codex` to sign in.",
                     )
                 }
             })?)
@@ -1286,7 +1285,7 @@ impl OpenAiCodexModelProvider {
                     "openai_codex: account_id not found in profile/token"
                 );
                 anyhow::Error::msg(
-                    "OpenAI Codex account id not found in auth profile/token. Run `zeroclaw auth login --model-provider openai-codex` again.",
+                    "OpenAI Codex account id not found in auth profile/token. Run `rei auth login --model-provider openai-codex` again.",
                 )
             })?)
         };
@@ -1976,7 +1975,7 @@ mod tests {
 
     #[test]
     fn default_state_dir_is_non_empty() {
-        let path = default_zeroclaw_dir();
+        let path = default_reiclaw_dir();
         assert!(!path.as_os_str().is_empty());
     }
 

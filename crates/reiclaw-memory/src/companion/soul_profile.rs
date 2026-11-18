@@ -71,11 +71,7 @@ pub const DEFAULT_PRINCIPLES: &[&str] = &[
 /// "You are default.".
 #[must_use]
 pub fn seed_name_for_agent(agent: &str) -> &str {
-    if agent == "default" {
-        "ZeroClaw"
-    } else {
-        agent
-    }
+    if agent == "default" { "ReiClaw" } else { agent }
 }
 
 /// Which Soul layer a revision belongs to.
@@ -2727,7 +2723,7 @@ mod tests {
 
     #[test]
     fn default_alias_seeds_the_product_name() {
-        assert_eq!(seed_name_for_agent("default"), "ZeroClaw");
+        assert_eq!(seed_name_for_agent("default"), "ReiClaw");
         assert_eq!(seed_name_for_agent("nova"), "nova");
     }
 

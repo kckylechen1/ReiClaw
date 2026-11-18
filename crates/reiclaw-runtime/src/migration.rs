@@ -38,7 +38,7 @@ pub async fn migrate_openclaw_memory(
     }
 
     if paths_equal(&source_workspace, &config.data_dir) {
-        bail!("Source workspace matches current ZeroClaw workspace; refusing self-migration");
+        bail!("Source workspace matches current ReiClaw workspace; refusing self-migration");
     }
 
     let mut stats = MigrationStats::default();
@@ -108,7 +108,7 @@ pub async fn migrate_openclaw_memory(
     if reindex {
         // The import above deliberately goes through a NoopEmbedding-backed
         // handle for speed, so reindex through a second handle with the
-        // configured embedder wired in - the same construction `zeroclaw
+        // configured embedder wired in - the same construction `rei
         // memory reindex` uses - otherwise the backfill could never compute
         // an embedding regardless of the operator's embedding config.
         drop(memory);
@@ -125,7 +125,7 @@ fn target_memory_backend(config: &Config) -> Result<Box<dyn Memory>> {
 }
 
 /// Memory handle for the post-import `--reindex` pass, with the configured
-/// embedder resolved and wired in. Mirrors `zeroclaw memory reindex`
+/// embedder resolved and wired in. Mirrors `rei memory reindex`
 /// (`create_memory_with_embedder` in the CLI): same storage resolution, same
 /// embedding-route handling, so `migrate openclaw --reindex` is equivalent to
 /// running the standalone reindex command right after the import.

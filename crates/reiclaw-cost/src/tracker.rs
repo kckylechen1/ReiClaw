@@ -485,37 +485,7 @@ impl CostTracker {
 }
 
 fn resolve_storage_path(workspace_dir: &Path) -> Result<PathBuf> {
-    let storage_path = workspace_dir.join("state").join("costs.jsonl");
-    let legacy_path = workspace_dir.join(".zeroclaw").join("costs.db");
-
-    if !storage_path.exists() && legacy_path.exists() {
-        if let Some(parent) = storage_path.parent() {
-            fs::create_dir_all(parent)
-                .with_context(|| format!("Failed to create directory {}", parent.display()))?;
-        }
-
-        if let Err(error) = fs::rename(&legacy_path, &storage_path) {
-            ::reiclaw_log::record!(
-                WARN,
-                ::reiclaw_log::Event::new(module_path!(), ::reiclaw_log::Action::Note)
-                    .with_outcome(::reiclaw_log::EventOutcome::Unknown),
-                &format!(
-                    "Failed to move legacy cost storage from {} to {}: {error}; falling back to copy",
-                    legacy_path.display(),
-                    storage_path.display()
-                )
-            );
-            fs::copy(&legacy_path, &storage_path).with_context(|| {
-                format!(
-                    "Failed to copy legacy cost storage from {} to {}",
-                    legacy_path.display(),
-                    storage_path.display()
-                )
-            })?;
-        }
-    }
-
-    Ok(storage_path)
+    Ok(workspace_dir.join("state").join("costs.jsonl"))
 }
 
 fn build_model_stats<'a, I>(records: I) -> HashMap<String, ModelStats>

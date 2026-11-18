@@ -9,7 +9,7 @@ use crate::skills::Skill;
 /// Maximum characters per injected workspace file (matches `OpenClaw` default).
 pub const BOOTSTRAP_MAX_CHARS: usize = 20_000;
 /// Per-file cap applied to every injected workspace bootstrap file while
-/// compact context is on. Shared by the turn paths and `zeroclaw doctor`
+/// compact context is on. Shared by the turn paths and `rei doctor`
 /// so both report the same budget.
 pub const COMPACT_BOOTSTRAP_MAX_CHARS: usize = 6_000;
 pub const NO_TOOLS_TASK_FRAMING: &str = "No tools are available for this turn";
@@ -561,7 +561,7 @@ pub fn build_system_prompt_with_persona(
     }
 
     if prompt.is_empty() {
-        "You are ZeroClaw, a fast and efficient AI assistant built in Rust. Be helpful, concise, and direct."
+        "You are ReiClaw, a fast and efficient AI assistant built in Rust. Be helpful, concise, and direct."
             .to_string()
     } else {
         prompt
@@ -580,7 +580,7 @@ const MAX_TRUNCATION_WARN_KEYS: usize = 4096;
 /// Emit the operator-facing truncation WARN once per file per process
 /// generation. The turn paths inject bootstrap files on every turn; warning once
 /// keeps the signal discoverable in logs (`agent.bootstrap_file_truncated`)
-/// without spamming every turn. `zeroclaw doctor` re-checks offline.
+/// without spamming every turn. `rei doctor` re-checks offline.
 fn warn_bootstrap_truncation_once(
     workspace_dir: &std::path::Path,
     filename: &str,

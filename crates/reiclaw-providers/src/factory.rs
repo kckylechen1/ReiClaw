@@ -235,7 +235,7 @@ pub fn dispatch_family_factory(
                     );
                     Err(anyhow::Error::msg(format!(
                         "Unknown model_provider family: {family}. After the V2 to typed-family migration, \
-                         only canonical family names are valid. Run `zeroclaw quickstart` to reconfigure, \
+                         only canonical family names are valid. Run `rei quickstart` to reconfigure, \
                          or set `[providers.models.custom.<alias>] uri = \"https://your-api.com\"` for \
                          OpenAI-compatible custom endpoints."
                     )))
@@ -513,8 +513,8 @@ impl FamilyProviderFactory for GeminiModelProviderConfig {
     ) -> Result<Box<dyn ModelProvider>> {
         let state_dir = opts.zeroclaw_dir.clone().unwrap_or_else(|| {
             directories::UserDirs::new().map_or_else(
-                || std::path::PathBuf::from(".zeroclaw"),
-                |dirs| dirs.home_dir().join(".zeroclaw"),
+                || std::path::PathBuf::from(".reiclaw"),
+                |dirs| dirs.home_dir().join(".reiclaw"),
             )
         });
         let auth_service = crate::auth::AuthService::new(&state_dir, opts.secrets_encrypt);

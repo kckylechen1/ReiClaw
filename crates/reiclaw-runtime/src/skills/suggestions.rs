@@ -32,7 +32,7 @@ impl InstallSuggestion {
         let (message_key, install_command) = match self.install_kind {
             InstallKind::Skill => (
                 "cli-skills-install-suggestion",
-                format!("zeroclaw skills install {}", self.source),
+                format!("rei skills install {}", self.source),
             ),
         };
         crate::i18n::get_required_cli_string_with_args(
@@ -460,7 +460,7 @@ mod tests {
         assert!(
             suggestion
                 .render_user_message()
-                .contains("zeroclaw skills install calendar")
+                .contains("rei skills install calendar")
         );
     }
 
@@ -537,7 +537,7 @@ tags = ["scheduling"]
         )
         .expect("cached registry metadata should render a suggestion");
         assert!(suggestion.contains("calendar"));
-        assert!(suggestion.contains("zeroclaw skills install calendar"));
+        assert!(suggestion.contains("rei skills install calendar"));
         assert!(!suggestion.contains("body-only secret phrase"));
         assert!(!dir.path().join("skills").exists());
     }
@@ -638,7 +638,7 @@ aliases = ["team calendar"]
         assert!(
             suggestion
                 .render_user_message()
-                .contains("zeroclaw skills install registry:acme/team-calendar")
+                .contains("rei skills install registry:acme/team-calendar")
         );
     }
 

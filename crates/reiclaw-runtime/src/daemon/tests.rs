@@ -58,7 +58,7 @@ async fn try_recv_log_event(
 #[tokio::test]
 async fn log_event_matcher_ignores_foreign_same_message_and_missing_gateway() {
     let (tx, mut rx) = tokio::sync::broadcast::channel(8);
-    let message = "ZeroClaw daemon started";
+    let message = "ReiClaw daemon started";
     let gateway = "http://daemon-fixture.invalid:1";
     tx.send(serde_json::json!({
         "message": message,
@@ -180,7 +180,7 @@ async fn daemon_startup_diagnostics_are_logged_as_structured_event() {
         while rx.try_recv().is_ok() {}
         record_daemon_started(&config, host, 1);
         if let Some(found) =
-            try_recv_log_event(&mut rx, "ZeroClaw daemon started", &expected_gateway).await
+            try_recv_log_event(&mut rx, "ReiClaw daemon started", &expected_gateway).await
         {
             value = Some(found);
             break;

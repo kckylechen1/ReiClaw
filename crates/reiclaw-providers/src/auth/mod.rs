@@ -856,7 +856,7 @@ impl AuthProviderFlow for OpenaiCodexFlow {
             Err(e) => {
                 println!("Callback capture failed: {e}");
                 println!(
-                    "Run `zeroclaw auth paste-redirect --model-provider openai-codex --profile {profile}`"
+                    "Run `rei auth paste-redirect --model-provider openai-codex --profile {profile}`"
                 );
                 return Ok(());
             }
@@ -892,7 +892,7 @@ impl AuthProviderFlow for OpenaiCodexFlow {
                 "auth: no pending OpenAI login"
             );
             anyhow::Error::msg(
-                "No pending OpenAI login found. Run `zeroclaw auth login --model-provider openai-codex` first.",
+                "No pending OpenAI login found. Run `rei auth login --model-provider openai-codex` first.",
             )
         })?;
         if pending.profile != profile {
@@ -1104,7 +1104,7 @@ impl AuthProviderFlow for GeminiFlow {
             Err(e) => {
                 println!("Callback capture failed: {e}");
                 println!(
-                    "Run `zeroclaw auth paste-redirect --model-provider gemini --profile {profile}`",
+                    "Run `rei auth paste-redirect --model-provider gemini --profile {profile}`",
                 );
                 return Ok(());
             }
@@ -1149,7 +1149,7 @@ impl AuthProviderFlow for GeminiFlow {
                 "auth: no pending Gemini login"
             );
             anyhow::Error::msg(
-                "No pending Gemini login found. Run `zeroclaw auth login --model-provider gemini` first.",
+                "No pending Gemini login found. Run `rei auth login --model-provider gemini` first.",
             )
         })?;
         if pending.profile != profile {

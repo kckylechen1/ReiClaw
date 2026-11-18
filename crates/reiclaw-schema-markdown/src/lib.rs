@@ -295,7 +295,7 @@ pub fn field_table(
                 "<div class=\"os-tabs-src\">\n\n",
                 "#### Gateway dashboard\n\n",
                 "Open [`/config/{section}`](http://127.0.0.1:42617/config/{section}) and set the `{full_path}` field.\n\n",
-                "#### zeroclaw config\n\n",
+                "#### rei config\n\n",
                 "```sh\n{set_cmd}\n```\n\n",
                 "#### Environment variable\n\n",
                 "Export the override (POSIX shells; drop into `~/.bashrc`, `~/.zshrc`, `.env`, or a Dockerfile). Replace `<alias>` with the literal alias:\n\n",
@@ -394,7 +394,7 @@ pub fn generate(root: &Value) -> String {
     let mut out = String::new();
     out.push_str("# Config Reference\n\n");
     out.push_str(
-        "ZeroClaw is configured via a TOML file. All fields are optional unless noted.\n\n",
+        "ReiClaw is configured via a TOML file. All fields are optional unless noted.\n\n",
     );
 
     let Some(props) = root.get("properties").and_then(Value::as_object) else {

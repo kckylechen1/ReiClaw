@@ -794,7 +794,7 @@ async fn trash_is_hidden_from_ordinary_listing_and_search() {
         ))
     ));
     assert!(matches!(
-        PersonalRelativePath::parse("x/.zeroclaw-trash/y"),
+        PersonalRelativePath::parse("x/.reiclaw-trash/y"),
         Err(PersonalFileError::Refused(
             PersonalFileRefusal::ReservedNamespace { .. }
         ))
