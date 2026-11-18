@@ -2,6 +2,7 @@ use super::*;
 use axum::routing::post;
 use std::sync::Arc;
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
+use zeroclaw_api::memory_traits::DailyDigest;
 use zeroclaw_api::model_provider::ModelProvider;
 use zeroclaw_memory::companion::reflection::{OwnerMessages, reflect};
 use zeroclaw_memory::companion::{SoulStory, StoryKind, UserModelKind};
@@ -354,4 +355,274 @@ async fn note_owner_correction_enters_http_inbox_and_only_operator_acceptance_ap
     let heads = user.active_heads(None).unwrap();
     assert_eq!(heads.len(), 1);
     assert_eq!(heads[0].scope, "session:session-a");
+}
+
+#[derive(Default)]
+struct InMemoryDigestMemory {
+    digests: parking_lot::Mutex<Vec<DailyDigest>>,
+}
+
+impl zeroclaw_api::attribution::Attributable for InMemoryDigestMemory {
+    fn role(&self) -> zeroclaw_api::attribution::Role {
+        zeroclaw_api::attribution::Role::Memory(zeroclaw_api::attribution::MemoryKind::InMemory)
+    }
+    fn alias(&self) -> &str {
+        "in-memory-digest"
+    }
+}
+
+#[async_trait::async_trait]
+impl zeroclaw_api::memory_traits::Memory for InMemoryDigestMemory {
+    fn name(&self) -> &str {
+        "tachi"
+    }
+    async fn store(
+        &self,
+        _key: &str,
+        _content: &str,
+        _category: zeroclaw_api::memory_traits::MemoryCategory,
+        _session_id: Option<&str>,
+    ) -> anyhow::Result<()> {
+        Ok(())
+    }
+    async fn recall(
+        &self,
+        _query: &str,
+        _limit: usize,
+        _session_id: Option<&str>,
+        _since: Option<&str>,
+        _until: Option<&str>,
+    ) -> anyhow::Result<Vec<zeroclaw_api::memory_traits::MemoryEntry>> {
+        Ok(Vec::new())
+    }
+    async fn get(
+        &self,
+        _key: &str,
+    ) -> anyhow::Result<Option<zeroclaw_api::memory_traits::MemoryEntry>> {
+        Ok(None)
+    }
+    async fn list(
+        &self,
+        _category: Option<&zeroclaw_api::memory_traits::MemoryCategory>,
+        _session_id: Option<&str>,
+    ) -> anyhow::Result<Vec<zeroclaw_api::memory_traits::MemoryEntry>> {
+        Ok(Vec::new())
+    }
+    async fn forget(&self, _key: &str) -> anyhow::Result<bool> {
+        Ok(false)
+    }
+    async fn forget_for_agent(&self, _key: &str, _agent_id: &str) -> anyhow::Result<bool> {
+        Ok(false)
+    }
+    async fn count(&self) -> anyhow::Result<usize> {
+        Ok(0)
+    }
+    async fn health_check(&self) -> bool {
+        true
+    }
+    async fn store_with_agent(
+        &self,
+        _key: &str,
+        _content: &str,
+        _category: zeroclaw_api::memory_traits::MemoryCategory,
+        _session_id: Option<&str>,
+        _namespace: Option<&str>,
+        _importance: Option<f64>,
+        _agent_id: Option<&str>,
+    ) -> anyhow::Result<()> {
+        Ok(())
+    }
+    async fn recall_for_agents(
+        &self,
+        _allowed_agent_ids: &[&str],
+        _query: &str,
+        _limit: usize,
+        _session_id: Option<&str>,
+        _since: Option<&str>,
+        _until: Option<&str>,
+    ) -> anyhow::Result<Vec<zeroclaw_api::memory_traits::MemoryEntry>> {
+        Ok(Vec::new())
+    }
+    async fn publish_daily_digest(&self, digest: &DailyDigest) -> anyhow::Result<String> {
+        digest.validate()?;
+        let mut guard = self.digests.lock();
+        if let Some(existing) = guard
+            .iter_mut()
+            .find(|d| d.agent_id == digest.agent_id && d.day_key == digest.day_key)
+        {
+            *existing = digest.clone();
+        } else {
+            guard.push(digest.clone());
+        }
+        Ok(format!("daily:{}:{}", digest.agent_id, digest.day_key))
+    }
+    async fn load_daily_digests(
+        &self,
+        agent_id: &str,
+        limit: usize,
+    ) -> anyhow::Result<Vec<DailyDigest>> {
+        let mut out: Vec<DailyDigest> = self
+            .digests
+            .lock()
+            .iter()
+            .filter(|d| d.agent_id == agent_id)
+            .cloned()
+            .collect();
+        out.reverse();
+        out.truncate(limit);
+        Ok(out)
+    }
+}
+
+#[tokio::test]
+async fn daily_digest_and_action_candidate_routes_are_operator_gated_and_roundtrip() {
+    use zeroclaw_api::memory_traits::Memory as _;
+    let (_dir, mut state) = fixture();
+    let mem = Arc::new(InMemoryDigestMemory::default());
+    let mut decisions = std::collections::BTreeMap::new();
+    decisions.insert(
+        "Schedule weekly backup".to_string(),
+        ActionCandidateStatus::Pending,
+    );
+    decisions.insert(
+        "Archive old logs".to_string(),
+        ActionCandidateStatus::Pending,
+    );
+    mem.publish_daily_digest(&DailyDigest {
+        day_key: "2026-11-18".into(),
+        agent_id: "nova".into(),
+        window_start: "2026-11-17T04:00:00Z".into(),
+        window_end: "2026-11-18T04:00:00Z".into(),
+        narrative: "Initial machine narrative".into(),
+        settled_decisions: vec!["Use TachiMemory".into()],
+        why_and_tradeoffs: vec!["Single SQLite store avoids drift".into()],
+        latent_insights: vec!["Backups can run weekly".into()],
+        action_candidates: vec!["Schedule weekly backup".into(), "Archive old logs".into()],
+        entities: vec!["zeroclaw".into()],
+        created_at: "2026-11-18T04:05:00Z".into(),
+        owner_edited: false,
+        action_decisions: decisions,
+    })
+    .await
+    .unwrap();
+    state.mem = mem.clone();
+
+    let (_server, address) = server(state).await;
+
+    // Operator auth gate on write endpoints.
+    for token in [None, Some("node-token"), Some("bridge-token")] {
+        assert_eq!(
+            request(
+                address,
+                "PUT",
+                "/api/review/daily-digest/nova/2026-11-18",
+                token,
+                Some(serde_json::json!({"narrative": "hijack"})),
+            )
+            .await
+            .0,
+            StatusCode::UNAUTHORIZED
+        );
+        assert_eq!(
+            request(
+                address,
+                "POST",
+                "/api/review/action-candidates/nova/2026-11-18/resolve",
+                token,
+                Some(serde_json::json!({"candidate": "Schedule weekly backup", "decision": "approved"})),
+            )
+            .await
+            .0,
+            StatusCode::UNAUTHORIZED
+        );
+    }
+
+    // Inbox returns 2 pending sleep_action_candidate items + 1 daily_digest item.
+    let (status, inbox) = request(address, "GET", "/api/review/inbox", OPERATOR, None).await;
+    assert_eq!(status, StatusCode::OK);
+    let items = inbox["items"].as_array().unwrap();
+    assert_eq!(
+        items
+            .iter()
+            .filter(|i| i["kind"] == "sleep_action_candidate")
+            .count(),
+        2
+    );
+    let digest_item = items.iter().find(|i| i["kind"] == "daily_digest").unwrap();
+    assert_eq!(digest_item["item"]["owner_edited"], false);
+    assert_eq!(
+        digest_item["edit_url"],
+        "/api/review/daily-digest/nova/2026-11-18"
+    );
+
+    // Owner edits DailyDigest -> sets owner_edited = true.
+    let (status, updated) = request(
+        address,
+        "PUT",
+        "/api/review/daily-digest/nova/2026-11-18",
+        OPERATOR,
+        Some(serde_json::json!({
+            "narrative": "Owner refined narrative",
+            "settled_decisions": ["Use TachiMemory", "Keep single DB"],
+            "why_and_tradeoffs": ["Single SQLite store avoids drift"],
+            "latent_insights": ["Weekly backup cadence confirmed"],
+        })),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK);
+    assert_eq!(updated["digest"]["owner_edited"], true);
+    assert_eq!(updated["digest"]["narrative"], "Owner refined narrative");
+
+    // Resolve both action candidates (1 approved, 1 dismissed).
+    let (status, resolved1) = request(
+        address,
+        "POST",
+        "/api/review/action-candidates/nova/2026-11-18/resolve",
+        OPERATOR,
+        Some(serde_json::json!({
+            "candidate": "Schedule weekly backup",
+            "decision": "approved",
+        })),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK);
+    assert_eq!(resolved1["status"], "approved");
+
+    let (status, resolved2) = request(
+        address,
+        "POST",
+        "/api/review/action-candidates/nova/2026-11-18/resolve",
+        OPERATOR,
+        Some(serde_json::json!({
+            "candidate": "Archive old logs",
+            "decision": "dismissed",
+        })),
+    )
+    .await;
+    assert_eq!(status, StatusCode::OK);
+    assert_eq!(resolved2["status"], "dismissed");
+
+    // Pending action candidates are now resolved; daily_digest remains with owner_edited = true.
+    let (_, after) = request(address, "GET", "/api/review/inbox", OPERATOR, None).await;
+    let after_items = after["items"].as_array().unwrap();
+    assert_eq!(
+        after_items
+            .iter()
+            .filter(|i| i["kind"] == "sleep_action_candidate")
+            .count(),
+        0
+    );
+    let stored = mem.load_daily_digests("nova", 5).await.unwrap();
+    assert!(stored[0].owner_edited);
+    assert_eq!(
+        stored[0]
+            .action_decisions
+            .get("Schedule weekly backup")
+            .copied(),
+        Some(ActionCandidateStatus::Approved)
+    );
+    assert_eq!(
+        stored[0].action_decisions.get("Archive old logs").copied(),
+        Some(ActionCandidateStatus::Dismissed)
+    );
 }

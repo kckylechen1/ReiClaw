@@ -1,5 +1,5 @@
 #![allow(clippy::to_string_in_format_args)]
-//! Memory subsystem: backends, embeddings, consolidation, retrieval.
+//! Memory subsystem: backends, embeddings, retrieval.
 
 /// Opening delimiter for recalled memory injected into provider context.
 pub const MEMORY_CONTEXT_OPEN: &str = "[Memory context]";
@@ -14,10 +14,8 @@ pub mod agent_scoped_markdown;
 pub mod audit;
 pub mod backend;
 pub mod chunker;
-pub mod classify;
 pub mod companion;
 pub mod conflict;
-pub mod consolidation;
 pub mod decay;
 pub mod dedup;
 pub mod embeddings;

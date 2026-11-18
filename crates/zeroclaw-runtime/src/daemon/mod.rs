@@ -425,6 +425,21 @@ pub async fn run(
                 async move { crate::agent::soul_reflection::run_worker(cfg, cancel).await }
             },
         ));
+
+        // Confined sleep-time compactor & 04:00 Auto Dream worker (ADR-025).
+        let sleep_cfg = config.clone();
+        let sleep_cancel = channels_cancel.clone();
+        handles.push(spawn_component_supervisor(
+            "sleep_compactor",
+            initial_backoff,
+            max_backoff,
+            channels_cancel.clone(),
+            move || {
+                let cfg = sleep_cfg.clone();
+                let cancel = sleep_cancel.clone();
+                async move { crate::agent::sleep_compactor::run_worker(cfg, cancel).await }
+            },
+        ));
     }
 
     record_daemon_started(&config, &host, port);

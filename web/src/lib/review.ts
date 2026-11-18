@@ -96,6 +96,34 @@ export interface Receipt {
     outcome: string;
     drift?: SoulDrift | null;
 }
+export type ActionCandidateStatus = 'pending' | 'approved' | 'dismissed';
+export interface DailyDigest {
+    day_key: string;
+    agent_id: string;
+    window_start: string;
+    window_end: string;
+    narrative: string;
+    settled_decisions: string[];
+    why_and_tradeoffs: string[];
+    latent_insights: string[];
+    action_candidates: string[];
+    entities: string[];
+    created_at: string;
+    owner_edited?: boolean;
+    action_decisions?: Record<string, ActionCandidateStatus>;
+}
+export interface SleepActionCandidate {
+    day_key: string;
+    agent_id: string;
+    candidate: string;
+    status: ActionCandidateStatus;
+}
+export interface DailyDigestDraft {
+    narrative: string;
+    settled_decisions: string[];
+    why_and_tradeoffs: string[];
+    latent_insights: string[];
+}
 export type InboxItem = {
     id: string;
     kind: 'soul_proposal';
@@ -110,6 +138,20 @@ export type InboxItem = {
     kind: 'reflection_receipt';
     agent: string;
     item: Receipt;
+} | {
+    id: string;
+    kind: 'daily_digest';
+    agent: string;
+    created_at_unix?: number;
+    item: DailyDigest;
+    edit_url?: string;
+} | {
+    id: string;
+    kind: 'sleep_action_candidate';
+    agent: string;
+    created_at_unix?: number;
+    item: SleepActionCandidate;
+    review_url?: string;
 };
 export interface Inbox {
     items: InboxItem[];
@@ -311,8 +353,13 @@ export function decisionRequest(item: InboxItem, decision: Decision, text: strin
     path: string;
     body: unknown;
 } {
-    if (item.kind === 'reflection_receipt')
-        throw new Error('Receipt has no review action');
+    if (item.kind === 'reflection_receipt' || item.kind === 'daily_digest')
+        throw new Error('Item has no proposal review action');
+    if (item.kind === 'sleep_action_candidate') {
+        if (decision !== 'accept' && decision !== 'dismiss')
+            throw new Error('Sleep action candidate only supports accept or dismiss');
+        return actionCandidateResolveRequest(item.agent, item.item.day_key, item.item.candidate, decision === 'accept' ? 'approved' : 'dismissed');
+    }
     if (decision === 'reword' && (!canReword(item) || !text.trim()))
         throw new Error('Invalid reword');
     if (decision === 'narrow' && (item.kind !== 'user_model_candidate' || !validNarrowScope(item.item, scope)))
@@ -320,6 +367,38 @@ export function decisionRequest(item: InboxItem, decision: Decision, text: strin
     if (item.kind === 'soul_proposal')
         return { path: `/api/soul/proposals/${item.item.id}/resolve`, body: { agent: item.agent, resolution: decision === 'dismiss' ? 'dismissed' : 'accepted', ...(decision === 'reword' ? { final_text: text.trim() } : {}) } };
     return { path: `/api/user-model/candidates/${encodeURIComponent(item.item.id)}/review`, body: { ...(decision === 'dismiss' ? {} : { expected_head: { id: displayedHead(item.item, heads)?.id ?? null } }), action: decision === 'dismiss' ? 'reject' : decision === 'reword' ? 'accept' : decision, ...(decision === 'reword' ? { final_text: text.trim() } : {}), ...(decision === 'narrow' ? { narrowed_scope: scope } : {}) } };
+}
+export function dailyDigestUpdateRequest(agent: string, dayKey: string, draft: DailyDigestDraft): {
+    path: string;
+    method: 'PUT';
+    body: DailyDigestDraft;
+} {
+    const narrative = draft.narrative.trim();
+    if (!narrative)
+        throw new Error('DailyDigest narrative must not be empty');
+    const clean = (lines: readonly string[]) => lines.map(line => line.trim()).filter(Boolean);
+    return {
+        path: `/api/review/daily-digest/${encodeURIComponent(agent)}/${encodeURIComponent(dayKey)}`,
+        method: 'PUT',
+        body: {
+            narrative,
+            settled_decisions: clean(draft.settled_decisions),
+            why_and_tradeoffs: clean(draft.why_and_tradeoffs),
+            latent_insights: clean(draft.latent_insights),
+        },
+    };
+}
+export function actionCandidateResolveRequest(agent: string, dayKey: string, candidate: string, decision: 'approved' | 'dismissed'): {
+    path: string;
+    body: { candidate: string; decision: 'approved' | 'dismissed' };
+} {
+    const trimmed = candidate.trim();
+    if (!trimmed)
+        throw new Error('Action candidate must not be empty');
+    return {
+        path: `/api/review/action-candidates/${encodeURIComponent(agent)}/${encodeURIComponent(dayKey)}/resolve`,
+        body: { candidate: trimmed, decision },
+    };
 }
 
 export function reflectionOutcome(outcome: string): { key: string; detail: string } {

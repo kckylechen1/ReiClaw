@@ -3,7 +3,7 @@ import { useLocation, useNavigate, useSearchParams } from 'react-router-dom';
 import { Button, ConfirmDialog } from '@/components/ui';
 import { useAuth } from '@/hooks/useAuth';
 import { t } from '@/lib/i18n';
-import { reflectionOutcome, validationMessage, EXEMPLAR_FIELDS, EXEMPLAR_MAX_BYTES, MAX_EXEMPLARS, exemplarBytes, exemplarProblem, exemplarsRequest, exemplarsSavable, readExemplarDraftState, readExemplars, type ExemplarField, type ToneExemplar, displayedHead, canNarrow, validNarrowScope, canReword, decisionRequest, reviewFetch, loadCandidatePage, appendCandidatePage, ReviewError, anchorRequest, driftIsEmpty, readDrift, signedSteps, type Candidate, type CandidatePage, type CandidateHistory, type Decision, type Head, type Inbox, type InboxItem, type Layer, type Revision, type Soul, type SoulDrift } from '@/lib/review';
+import { reflectionOutcome, validationMessage, EXEMPLAR_FIELDS, EXEMPLAR_MAX_BYTES, MAX_EXEMPLARS, exemplarBytes, exemplarProblem, exemplarsRequest, exemplarsSavable, readExemplarDraftState, readExemplars, type ExemplarField, type ToneExemplar, displayedHead, canNarrow, validNarrowScope, canReword, decisionRequest, dailyDigestUpdateRequest, actionCandidateResolveRequest, reviewFetch, loadCandidatePage, appendCandidatePage, ReviewError, anchorRequest, driftIsEmpty, readDrift, signedSteps, type Candidate, type CandidatePage, type CandidateHistory, type DailyDigest, type Decision, type Head, type Inbox, type InboxItem, type Layer, type Revision, type Soul, type SoulDrift } from '@/lib/review';
 const field = 'w-full min-h-11 rounded-md border border-pc-border bg-pc-base p-3 text-pc-text focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--pc-focus)]';
 const date = (value: number) => new Date(value * 1000).toLocaleString();
 const layers: Layer[] = ['identity', 'principles', 'tone', 'story'];
@@ -113,13 +113,118 @@ function ExemplarEditor({ drafts, prefilled, busy, onChange, onAdd, onRemove, on
     </div>
     </form>;
 }
-function ProposalCard({ item, act, busy, heads, headsAvailable, canApproveUserModel, stale = false, rejectedOnly = false }: {
+function DailyDigestCard({ item, busy, onSave, onResolveAction }: {
+    item: Extract<InboxItem, { kind: 'daily_digest' }>;
+    busy: boolean;
+    onSave: (agent: string, dayKey: string, draft: {
+        narrative: string;
+        settled_decisions: string[];
+        why_and_tradeoffs: string[];
+        latent_insights: string[];
+    }) => void;
+    onResolveAction: (agent: string, dayKey: string, candidate: string, decision: 'approved' | 'dismissed') => void;
+}) {
+    const digest: DailyDigest = item.item;
+    const [editing, setEditing] = useState(false);
+    const [narrative, setNarrative] = useState(digest.narrative);
+    const [settledText, setSettledText] = useState(digest.settled_decisions.join('\n'));
+    const [whyText, setWhyText] = useState(digest.why_and_tradeoffs.join('\n'));
+    const [insightsText, setInsightsText] = useState(digest.latent_insights.join('\n'));
+    useEffect(() => {
+        setNarrative(digest.narrative);
+        setSettledText(digest.settled_decisions.join('\n'));
+        setWhyText(digest.why_and_tradeoffs.join('\n'));
+        setInsightsText(digest.latent_insights.join('\n'));
+        setEditing(false);
+    }, [digest.narrative, digest.settled_decisions, digest.why_and_tradeoffs, digest.latent_insights, digest.day_key]);
+    const splitLines = (raw: string) => raw.split(/\r?\n/).map(s => s.trim()).filter(Boolean);
+    return <article className="py-6 border-b border-pc-border space-y-4">
+    <div className="flex flex-wrap items-center justify-between gap-2">
+        <div className="flex flex-wrap gap-2 text-xs text-pc-text-muted">
+            <span>{t('review.daily_digest')}</span>
+            <span>{item.agent}</span>
+            <span>{digest.day_key}</span>
+            {digest.owner_edited && <span className="font-medium text-pc-text">{t('review.owner_edited')}</span>}
+        </div>
+        {!editing && <Button variant="ghost" disabled={busy} onClick={() => setEditing(true)}>{t('review.daily_digest_edit')}</Button>}
+    </div>
+    {editing ? <form className="space-y-4" onSubmit={e => {
+        e.preventDefault();
+        if (!busy && narrative.trim()) onSave(item.agent, digest.day_key, {
+            narrative,
+            settled_decisions: splitLines(settledText),
+            why_and_tradeoffs: splitLines(whyText),
+            latent_insights: splitLines(insightsText),
+        });
+    }}>
+        <label className="block space-y-1">
+            <span className="text-sm font-medium">{t('review.narrative')}</span>
+            <textarea className={field} rows={4} value={narrative} onChange={e => setNarrative(e.target.value)}/>
+        </label>
+        <label className="block space-y-1">
+            <span className="text-sm font-medium">{t('review.settled_decisions')} · <span className="text-pc-text-muted font-normal">{t('review.lines_hint')}</span></span>
+            <textarea className={field} rows={3} value={settledText} onChange={e => setSettledText(e.target.value)}/>
+        </label>
+        <label className="block space-y-1">
+            <span className="text-sm font-medium">{t('review.why_and_tradeoffs')} · <span className="text-pc-text-muted font-normal">{t('review.lines_hint')}</span></span>
+            <textarea className={field} rows={3} value={whyText} onChange={e => setWhyText(e.target.value)}/>
+        </label>
+        <label className="block space-y-1">
+            <span className="text-sm font-medium">{t('review.latent_insights')} · <span className="text-pc-text-muted font-normal">{t('review.lines_hint')}</span></span>
+            <textarea className={field} rows={3} value={insightsText} onChange={e => setInsightsText(e.target.value)}/>
+        </label>
+        <div className="flex flex-wrap gap-2">
+            <Button type="submit" disabled={busy || !narrative.trim()}>{t('review.daily_digest_save')}</Button>
+            <Button type="button" variant="ghost" disabled={busy} onClick={() => setEditing(false)}>{t('common.cancel')}</Button>
+        </div>
+    </form> : <>
+        <p className="whitespace-pre-wrap break-words [overflow-wrap:anywhere]">{digest.narrative}</p>
+        {digest.settled_decisions.length > 0 && <div className="space-y-1 text-sm">
+            <h4 className="font-medium">{t('review.settled_decisions')}</h4>
+            <ul className="list-disc pl-5 space-y-1">{digest.settled_decisions.map((decision, idx) => <li key={idx}>{decision}</li>)}</ul>
+        </div>}
+        {digest.why_and_tradeoffs.length > 0 && <div className="space-y-1 text-sm">
+            <h4 className="font-medium">{t('review.why_and_tradeoffs')}</h4>
+            <ul className="list-disc pl-5 space-y-1">{digest.why_and_tradeoffs.map((why, idx) => <li key={idx}>{why}</li>)}</ul>
+        </div>}
+        {digest.latent_insights.length > 0 && <div className="space-y-1 text-sm">
+            <h4 className="font-medium">{t('review.latent_insights')}</h4>
+            <ul className="list-disc pl-5 space-y-1">{digest.latent_insights.map((insight, idx) => <li key={idx}>{insight}</li>)}</ul>
+        </div>}
+        {digest.entities.length > 0 && <p className="text-xs text-pc-text-muted">{t('review.entities')}: {digest.entities.join(', ')}</p>}
+        {digest.action_candidates.length > 0 && <div className="space-y-2 text-sm">
+            <h4 className="font-medium">{t('review.action_candidates')}</h4>
+            <ul className="space-y-2">{digest.action_candidates.map((cand, idx) => {
+                const status = digest.action_decisions?.[cand] ?? 'pending';
+                return <li key={idx} className="rounded-md border border-pc-border p-3 space-y-2">
+                    <div className="flex flex-wrap items-center justify-between gap-2">
+                        <span className="break-words [overflow-wrap:anywhere]">{cand}</span>
+                        <span className="text-xs text-pc-text-muted">{t(`review.status_${status}`)}</span>
+                    </div>
+                    {status === 'pending' && <div className="flex flex-wrap gap-2">
+                        <Button disabled={busy} onClick={() => onResolveAction(item.agent, digest.day_key, cand, 'approved')}>{t('review.confirm_action')}</Button>
+                        <Button variant="ghost" disabled={busy} onClick={() => onResolveAction(item.agent, digest.day_key, cand, 'dismissed')}>{t('review.dismiss_action')}</Button>
+                    </div>}
+                </li>;
+            })}</ul>
+        </div>}
+    </>}
+    </article>;
+}
+function ProposalCard({ item, act, busy, heads, headsAvailable, canApproveUserModel, onSaveDigest, onResolveAction, stale = false, rejectedOnly = false }: {
     item: InboxItem;
     act: (item: InboxItem, decision: Decision, text: string, scope: string) => void;
     busy: boolean;
     heads: Head[];
     headsAvailable: boolean;
     canApproveUserModel: boolean;
+    onSaveDigest?: (agent: string, dayKey: string, draft: {
+        narrative: string;
+        settled_decisions: string[];
+        why_and_tradeoffs: string[];
+        latent_insights: string[];
+    }) => void;
+    onResolveAction?: (agent: string, dayKey: string, candidate: string, decision: 'approved' | 'dismissed') => void;
     stale?: boolean;
     rejectedOnly?: boolean;
 }) {
@@ -128,6 +233,24 @@ function ProposalCard({ item, act, busy, heads, headsAvailable, canApproveUserMo
     const [session, setSession] = useState(item.kind === 'user_model_candidate' && item.item.scope.startsWith('session:') ? item.item.scope.slice(8) : '');
     const editor = useRef<HTMLTextAreaElement | HTMLInputElement | null>(null);
     useEffect(() => { if (mode) editor.current?.focus(); }, [mode]);
+    if (item.kind === 'daily_digest') {
+        return <DailyDigestCard item={item} busy={busy} onSave={(a, d, draft) => onSaveDigest?.(a, d, draft)} onResolveAction={(a, d, c, dec) => onResolveAction?.(a, d, c, dec)}/>;
+    }
+    if (item.kind === 'sleep_action_candidate') {
+        return <article className="py-6 border-b border-pc-border space-y-4">
+        <div className="flex flex-wrap gap-2 text-xs text-pc-text-muted">
+        <span>{t('review.sleep_action_candidate')}</span>
+        <span>{item.agent}</span>
+        <span>{item.item.day_key}</span>
+        <span>{t(`review.status_${item.item.status}`)}</span>
+        </div>
+        <h3 className="text-lg leading-relaxed whitespace-pre-wrap break-words [overflow-wrap:anywhere]">{item.item.candidate}</h3>
+        <div className="flex flex-wrap gap-2">
+        <Button disabled={busy} onClick={() => act(item, 'accept', '', '')}>{t('review.confirm_action')}</Button>
+        <Button variant="ghost" disabled={busy} onClick={() => act(item, 'dismiss', '', '')}>{t('review.dismiss_action')}</Button>
+        </div>
+        </article>;
+    }
     if (item.kind === 'reflection_receipt') {
         const outcome = reflectionOutcome(item.item.outcome);
         return <article className="py-5 border-b border-pc-border">
@@ -409,6 +532,19 @@ export default function Review() {
     const act = (item: InboxItem, decision: Decision, text: string, scope: string) => void perform(() => { if (item.kind === 'user_model_candidate' && decision !== 'dismiss' && !canApproveUserModel) throw new Error('Head guard unavailable'); const request = decisionRequest(item, decision, text, scope, heads); return reviewFetch(request.path, undefined, request.body); }, true, err => {
         if (err instanceof ReviewError && err.code === 'proposal_stale') setStaleProposals(previous => new Set([...previous, item.id]));
     });
+    const saveDailyDigest = (targetAgent: string, dayKey: string, draft: {
+        narrative: string;
+        settled_decisions: string[];
+        why_and_tradeoffs: string[];
+        latent_insights: string[];
+    }) => {
+        const request = dailyDigestUpdateRequest(targetAgent, dayKey, draft);
+        void perform(() => reviewFetch(request.path, undefined, request.body, request.method), true, undefined, 'review.daily_digest_saved');
+    };
+    const resolveActionCandidate = (targetAgent: string, dayKey: string, candidateText: string, decision: 'approved' | 'dismissed') => {
+        const request = actionCandidateResolveRequest(targetAgent, dayKey, candidateText, decision);
+        void perform(() => reviewFetch(request.path, undefined, request.body));
+    };
     const inspect = async (path: string, apply: (value: unknown) => void) => {
         const request = generation.current;
         const read = ++readSequence.current;
@@ -483,7 +619,7 @@ export default function Review() {
       {loading && <p role="status">{t('review.loading')}</p>}
       {(tab === 'inbox' || tab === 'profile') && driftRead?.agent === agent && <DriftCard drift={driftRead.drift} busy={busy} onKeep={() => { const request = anchorRequest(driftRead.soul, 'keep'); void perform(() => reviewFetch(request.path, undefined, request.body)); }} onRollback={() => setAnchorRollback(true)}/>}
       {tab === 'inbox' && inbox && <section>
-            <p className="text-sm text-pc-text-muted">{t('review.shared_hint')}</p>{inbox.items.length === 0 && <p className="py-10 text-pc-text-secondary">{t('review.empty')}</p>}{inbox.items.map(item => <ProposalCard key={item.id} item={item} heads={heads} headsAvailable={headRead !== null} canApproveUserModel={canApproveUserModel} busy={busy} act={act} stale={staleProposals.has(item.id)}/>)}{inbox.next_offset !== null && <Button variant="ghost" disabled={busy} onClick={() => void inspect(`/api/review/inbox?limit=100&offset=${inbox.next_offset}${agent ? `&agent=${encodeURIComponent(agent)}` : ''}`, value => setInbox(value as Inbox))}>{t('review.next')}</Button>}</section>}
+            <p className="text-sm text-pc-text-muted">{t('review.shared_hint')}</p>{inbox.items.length === 0 && <p className="py-10 text-pc-text-secondary">{t('review.empty')}</p>}{inbox.items.map(item => <ProposalCard key={item.id} item={item} heads={heads} headsAvailable={headRead !== null} canApproveUserModel={canApproveUserModel} busy={busy} act={act} onSaveDigest={saveDailyDigest} onResolveAction={resolveActionCandidate} stale={staleProposals.has(item.id)}/>)}{inbox.next_offset !== null && <Button variant="ghost" disabled={busy} onClick={() => void inspect(`/api/review/inbox?limit=100&offset=${inbox.next_offset}${agent ? `&agent=${encodeURIComponent(agent)}` : ''}`, value => setInbox(value as Inbox))}>{t('review.next')}</Button>}</section>}
       {tab === 'profile' && soul && <section className="space-y-8">{layers.map(layer => {
                     const head = layer === 'tone' ? soul.tone.stored : soul[layer];
                     return <article key={layer} className="border-t border-pc-border pt-5 space-y-4">

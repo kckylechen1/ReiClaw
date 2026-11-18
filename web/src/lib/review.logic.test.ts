@@ -231,3 +231,56 @@ for (const status of [401, 429, 503]) {
     await assert.rejects(loadCandidatePage(null, controller.signal), (error: unknown) => error instanceof ReviewError && error.status === status);
 }
 console.log('candidate page contract, bounded response, cursor progress and dedup passed');
+
+const { dailyDigestUpdateRequest, actionCandidateResolveRequest } = await import('./review');
+assert.deepEqual(
+    dailyDigestUpdateRequest('nova', '2026-11-18', {
+        narrative: '  Owner edited narrative  ',
+        settled_decisions: ['  Keep single DB  ', ''],
+        why_and_tradeoffs: ['Avoid drift'],
+        latent_insights: ['  '],
+    }),
+    {
+        path: '/api/review/daily-digest/nova/2026-11-18',
+        method: 'PUT',
+        body: {
+            narrative: 'Owner edited narrative',
+            settled_decisions: ['Keep single DB'],
+            why_and_tradeoffs: ['Avoid drift'],
+            latent_insights: [],
+        },
+    }
+);
+assert.throws(() => dailyDigestUpdateRequest('nova', '2026-11-18', {
+    narrative: '   ',
+    settled_decisions: [],
+    why_and_tradeoffs: [],
+    latent_insights: [],
+}));
+assert.deepEqual(
+    actionCandidateResolveRequest('nova', '2026-11-18', '  Schedule weekly backup  ', 'approved'),
+    {
+        path: '/api/review/action-candidates/nova/2026-11-18/resolve',
+        body: { candidate: 'Schedule weekly backup', decision: 'approved' },
+    }
+);
+const sleepActionItem = {
+    id: 'sleep_action:nova:2026-11-18:0',
+    kind: 'sleep_action_candidate' as const,
+    agent: 'nova',
+    item: {
+        day_key: '2026-11-18',
+        agent_id: 'nova',
+        candidate: 'Schedule weekly backup',
+        status: 'pending' as const,
+    },
+};
+assert.deepEqual(decisionRequest(sleepActionItem, 'accept', '', '', []).body, {
+    candidate: 'Schedule weekly backup',
+    decision: 'approved',
+});
+assert.deepEqual(decisionRequest(sleepActionItem, 'dismiss', '', '', []).body, {
+    candidate: 'Schedule weekly backup',
+    decision: 'dismissed',
+});
+console.log('daily digest edit and action candidate resolution contracts passed');

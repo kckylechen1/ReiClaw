@@ -1,19 +1,37 @@
 //! Unified owner review view. Soul and User Model stores remain canonical;
 //! review actions use their existing operator-gated endpoints.
+//! Collaborative DailyDigest edits and sleep action-candidate confirmations
+//! persist to `tachi.db` via the gateway's `Memory` handle.
 
 use crate::AppState;
 use axum::{
     Router,
-    extract::{ConnectInfo, State},
+    body::Bytes,
+    extract::{ConnectInfo, Path, State},
     http::{HeaderMap, StatusCode, Uri},
     response::{IntoResponse, Response},
-    routing::get,
+    routing::{get, post, put},
 };
 use std::net::SocketAddr;
+use zeroclaw_api::memory_traits::{
+    ActionCandidateStatus, validate_agent_id, validate_non_soul_key,
+};
 use zeroclaw_memory::companion::{SoulProfileStore, UserModelStore};
 
+const DAILY_DIGEST_INBOX_LIMIT: usize = 14;
+const DAILY_DIGEST_LOOKUP_LIMIT: usize = 60;
+
 pub(crate) fn routes() -> Router<AppState> {
-    Router::new().route("/api/review/inbox", get(inbox))
+    Router::new()
+        .route("/api/review/inbox", get(inbox))
+        .route(
+            "/api/review/daily-digest/{agent}/{day_key}",
+            put(update_daily_digest),
+        )
+        .route(
+            "/api/review/action-candidates/{agent}/{day_key}/resolve",
+            post(resolve_action_candidate),
+        )
 }
 
 #[derive(serde::Deserialize)]
@@ -35,6 +53,20 @@ fn error(status: StatusCode, code: &str, message: &str) -> Response {
         axum::Json(serde_json::json!({"code": code, "error": message})),
     )
         .into_response()
+}
+
+fn rfc3339_to_unix(ts: &str) -> u64 {
+    zeroclaw_api::time::parse_rfc3339(ts)
+        .map(|t| u64::try_from(t.as_second().max(0)).unwrap_or(0))
+        .unwrap_or(0)
+}
+
+fn clean_string_list(items: Vec<String>) -> Vec<String> {
+    items
+        .into_iter()
+        .map(|s| s.trim().to_string())
+        .filter(|s| !s.is_empty())
+        .collect()
 }
 
 pub async fn inbox(
@@ -69,6 +101,8 @@ pub async fn inbox(
         (config.data_dir.clone(), agents)
     };
     agents.sort();
+
+    let agents_for_digests = agents.clone();
     let result = tokio::task::spawn_blocking(move || -> anyhow::Result<_> {
         let soul = SoulProfileStore::shared(&data_dir)?;
         let user = UserModelStore::shared(&data_dir)?;
@@ -91,27 +125,308 @@ pub async fn inbox(
         for candidate in user.list_pending_candidates()? {
             pending.push(serde_json::json!({"id": format!("user_model:{}", candidate.id), "kind": "user_model_candidate", "created_at_unix": candidate.created_at_unix, "item": candidate, "review_url": format!("/api/user-model/candidates/{}/review", candidate.id)}));
         }
-        pending.sort_by(|a, b| (a["created_at_unix"].as_u64(), a["id"].as_str()).cmp(&(b["created_at_unix"].as_u64(), b["id"].as_str())));
-        receipts.sort_by(|a, b| (b["created_at_unix"].as_u64(), b["id"].as_str()).cmp(&(a["created_at_unix"].as_u64(), a["id"].as_str())));
-        pending.extend(receipts);
-        let total = pending.len();
-        let items: Vec<_> = pending.into_iter().skip(query.offset).take(query.limit).collect();
-        let next = query.offset.saturating_add(items.len());
-        Ok(serde_json::json!({"items": items, "total": total, "next_offset": if next < total { Some(next) } else { None }}))
-    }).await;
-    match result {
-        Ok(Ok(body)) => (StatusCode::OK, axum::Json(body)).into_response(),
-        Ok(Err(err)) => error(
+        Ok((pending, receipts))
+    })
+    .await;
+
+    let (mut pending, mut receipts) = match result {
+        Ok(Ok(pair)) => pair,
+        Ok(Err(err)) => {
+            return error(
+                StatusCode::SERVICE_UNAVAILABLE,
+                "store_unavailable",
+                &err.to_string(),
+            );
+        }
+        Err(_) => {
+            return error(
+                StatusCode::INTERNAL_SERVER_ERROR,
+                "task_failed",
+                "store task failed",
+            );
+        }
+    };
+
+    for agent in agents_for_digests {
+        let digests = match state
+            .mem
+            .load_daily_digests(&agent, DAILY_DIGEST_INBOX_LIMIT)
+            .await
+        {
+            Ok(d) => d,
+            Err(err) => {
+                return error(
+                    StatusCode::SERVICE_UNAVAILABLE,
+                    "store_unavailable",
+                    &err.to_string(),
+                );
+            }
+        };
+        for digest in digests {
+            let created_at_unix = rfc3339_to_unix(&digest.created_at);
+            for (idx, candidate) in digest.action_candidates.iter().enumerate() {
+                let status = digest
+                    .action_decisions
+                    .get(candidate)
+                    .copied()
+                    .unwrap_or_default();
+                if status == ActionCandidateStatus::Pending {
+                    pending.push(serde_json::json!({
+                        "id": format!("sleep_action:{agent}:{}:{idx}", digest.day_key),
+                        "kind": "sleep_action_candidate",
+                        "agent": agent,
+                        "created_at_unix": created_at_unix,
+                        "item": {
+                            "day_key": digest.day_key,
+                            "agent_id": digest.agent_id,
+                            "candidate": candidate,
+                            "status": status,
+                        },
+                        "review_url": format!("/api/review/action-candidates/{agent}/{}/resolve", digest.day_key),
+                    }));
+                }
+            }
+            receipts.push(serde_json::json!({
+                "id": format!("daily_digest:{agent}:{}", digest.day_key),
+                "kind": "daily_digest",
+                "agent": agent,
+                "created_at_unix": created_at_unix,
+                "item": digest,
+                "edit_url": format!("/api/review/daily-digest/{agent}/{}", digest.day_key),
+            }));
+        }
+    }
+
+    pending.sort_by(|a, b| {
+        (a["created_at_unix"].as_u64(), a["id"].as_str())
+            .cmp(&(b["created_at_unix"].as_u64(), b["id"].as_str()))
+    });
+    receipts.sort_by(|a, b| {
+        (b["created_at_unix"].as_u64(), b["id"].as_str())
+            .cmp(&(a["created_at_unix"].as_u64(), a["id"].as_str()))
+    });
+    pending.extend(receipts);
+    let total = pending.len();
+    let items: Vec<_> = pending
+        .into_iter()
+        .skip(query.offset)
+        .take(query.limit)
+        .collect();
+    let next = query.offset.saturating_add(items.len());
+    (
+        StatusCode::OK,
+        axum::Json(serde_json::json!({
+            "items": items,
+            "total": total,
+            "next_offset": if next < total { Some(next) } else { None },
+        })),
+    )
+        .into_response()
+}
+
+#[derive(serde::Deserialize)]
+#[serde(deny_unknown_fields)]
+struct UpdateDailyDigestRequest {
+    narrative: String,
+    #[serde(default)]
+    settled_decisions: Option<Vec<String>>,
+    #[serde(default)]
+    why_and_tradeoffs: Option<Vec<String>>,
+    #[serde(default)]
+    latent_insights: Option<Vec<String>>,
+}
+
+pub async fn update_daily_digest(
+    State(state): State<AppState>,
+    ConnectInfo(peer): ConnectInfo<SocketAddr>,
+    headers: HeaderMap,
+    Path((agent, day_key)): Path<(String, String)>,
+    body: Bytes,
+) -> Response {
+    if let Some(err) = crate::operator_auth::gate_operator_identity(&state, peer, &headers) {
+        return err;
+    }
+    if state.config.read().agent(&agent).is_none() {
+        return error(
+            StatusCode::NOT_FOUND,
+            "unknown_agent",
+            "unknown configured agent",
+        );
+    }
+    if let Err(err) = validate_agent_id(&agent) {
+        return error(StatusCode::BAD_REQUEST, "invalid", &err.to_string());
+    }
+    if let Err(err) = validate_non_soul_key(&day_key, "day_key") {
+        return error(StatusCode::BAD_REQUEST, "invalid", &err.to_string());
+    }
+    let req: UpdateDailyDigestRequest = match serde_json::from_slice(&body) {
+        Ok(v) => v,
+        Err(err) => return error(StatusCode::BAD_REQUEST, "invalid", &err.to_string()),
+    };
+    let narrative = req.narrative.trim();
+    if narrative.is_empty() {
+        return error(
+            StatusCode::BAD_REQUEST,
+            "invalid",
+            "narrative must not be empty",
+        );
+    }
+
+    let digests = match state
+        .mem
+        .load_daily_digests(&agent, DAILY_DIGEST_LOOKUP_LIMIT)
+        .await
+    {
+        Ok(d) => d,
+        Err(err) => {
+            return error(
+                StatusCode::SERVICE_UNAVAILABLE,
+                "store_unavailable",
+                &err.to_string(),
+            );
+        }
+    };
+    let Some(mut digest) = digests.into_iter().find(|d| d.day_key == day_key) else {
+        return error(
+            StatusCode::NOT_FOUND,
+            "daily_digest_not_found",
+            "daily digest not found",
+        );
+    };
+
+    digest.narrative = narrative.to_string();
+    if let Some(settled) = req.settled_decisions {
+        digest.settled_decisions = clean_string_list(settled);
+    }
+    if let Some(why) = req.why_and_tradeoffs {
+        digest.why_and_tradeoffs = clean_string_list(why);
+    }
+    if let Some(insights) = req.latent_insights {
+        digest.latent_insights = clean_string_list(insights);
+    }
+    digest.owner_edited = true;
+
+    if let Err(err) = state.mem.publish_daily_digest(&digest).await {
+        return error(
             StatusCode::SERVICE_UNAVAILABLE,
             "store_unavailable",
             &err.to_string(),
-        ),
-        Err(_) => error(
-            StatusCode::INTERNAL_SERVER_ERROR,
-            "task_failed",
-            "store task failed",
-        ),
+        );
     }
+
+    (
+        StatusCode::OK,
+        axum::Json(serde_json::json!({ "digest": digest })),
+    )
+        .into_response()
+}
+
+#[derive(serde::Deserialize)]
+#[serde(deny_unknown_fields)]
+struct ResolveActionCandidateRequest {
+    candidate: String,
+    decision: ActionCandidateStatus,
+}
+
+pub async fn resolve_action_candidate(
+    State(state): State<AppState>,
+    ConnectInfo(peer): ConnectInfo<SocketAddr>,
+    headers: HeaderMap,
+    Path((agent, day_key)): Path<(String, String)>,
+    body: Bytes,
+) -> Response {
+    if let Some(err) = crate::operator_auth::gate_operator_identity(&state, peer, &headers) {
+        return err;
+    }
+    if state.config.read().agent(&agent).is_none() {
+        return error(
+            StatusCode::NOT_FOUND,
+            "unknown_agent",
+            "unknown configured agent",
+        );
+    }
+    if let Err(err) = validate_agent_id(&agent) {
+        return error(StatusCode::BAD_REQUEST, "invalid", &err.to_string());
+    }
+    if let Err(err) = validate_non_soul_key(&day_key, "day_key") {
+        return error(StatusCode::BAD_REQUEST, "invalid", &err.to_string());
+    }
+    let req: ResolveActionCandidateRequest = match serde_json::from_slice(&body) {
+        Ok(v) => v,
+        Err(err) => return error(StatusCode::BAD_REQUEST, "invalid", &err.to_string()),
+    };
+    let candidate = req.candidate.trim();
+    if candidate.is_empty() {
+        return error(
+            StatusCode::BAD_REQUEST,
+            "invalid",
+            "candidate must not be empty",
+        );
+    }
+    if req.decision == ActionCandidateStatus::Pending {
+        return error(
+            StatusCode::BAD_REQUEST,
+            "invalid",
+            "decision must be approved or dismissed",
+        );
+    }
+
+    let digests = match state
+        .mem
+        .load_daily_digests(&agent, DAILY_DIGEST_LOOKUP_LIMIT)
+        .await
+    {
+        Ok(d) => d,
+        Err(err) => {
+            return error(
+                StatusCode::SERVICE_UNAVAILABLE,
+                "store_unavailable",
+                &err.to_string(),
+            );
+        }
+    };
+    let Some(mut digest) = digests.into_iter().find(|d| d.day_key == day_key) else {
+        return error(
+            StatusCode::NOT_FOUND,
+            "daily_digest_not_found",
+            "daily digest not found",
+        );
+    };
+
+    let Some(canonical_candidate) = digest
+        .action_candidates
+        .iter()
+        .find(|c| c.as_str() == candidate)
+        .cloned()
+    else {
+        return error(
+            StatusCode::NOT_FOUND,
+            "action_candidate_not_found",
+            "action candidate not found in daily digest",
+        );
+    };
+
+    digest
+        .action_decisions
+        .insert(canonical_candidate.clone(), req.decision);
+
+    if let Err(err) = state.mem.publish_daily_digest(&digest).await {
+        return error(
+            StatusCode::SERVICE_UNAVAILABLE,
+            "store_unavailable",
+            &err.to_string(),
+        );
+    }
+
+    (
+        StatusCode::OK,
+        axum::Json(serde_json::json!({
+            "digest": digest,
+            "candidate": canonical_candidate,
+            "status": req.decision,
+        })),
+    )
+        .into_response()
 }
 
 #[cfg(test)]
