@@ -71,6 +71,54 @@ pub struct TimestampedMessage {
     pub ingress: Option<zeroclaw_api::review::UserMessageIngress>,
 }
 
+/// Slot in the double-buffered L1 checkpoint store (ADR-025).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum CheckpointSlot {
+    Active,
+    Staged,
+}
+
+impl CheckpointSlot {
+    /// Canonical database string representation for this slot.
+    pub const fn as_str(self) -> &'static str {
+        match self {
+            Self::Active => "active",
+            Self::Staged => "staged",
+        }
+    }
+}
+
+/// Persisted L1 rolling session checkpoint bound to a monotonic `sessions.id` watermark.
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+pub struct SessionCheckpoint {
+    pub session_key: String,
+    pub slot: CheckpointSlot,
+    pub up_to_message_id: i64,
+    pub digest: String,
+    pub created_at: jiff::Timestamp,
+    pub updated_at: jiff::Timestamp,
+}
+
+/// Atomic snapshot of a session's double-buffered checkpoints and post-watermark delta messages.
+#[derive(Debug, Clone)]
+pub struct SessionWindow {
+    pub active_checkpoint: Option<SessionCheckpoint>,
+    pub staged_checkpoint: Option<SessionCheckpoint>,
+    pub delta_messages: Vec<(i64, TimestampedMessage)>,
+}
+
+/// Scoped FTS5 match over persisted session transcript rows.
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+pub struct SessionFtsHit {
+    pub session_key: String,
+    pub message_id: i64,
+    pub role: String,
+    pub content: String,
+    pub created_at: Option<jiff::Timestamp>,
+    pub snippet: Option<String>,
+}
+
 /// Trait for session persistence backends.
 /// Implementations must be `Send + Sync` for sharing across async tasks.
 pub trait SessionBackend: Send + Sync {
@@ -337,6 +385,61 @@ pub trait SessionBackend: Send + Sync {
             std::io::ErrorKind::Unsupported,
             "durable bridge intake is unsupported",
         ))
+    }
+
+    /// Stage a rolling L1 checkpoint for `session_key` up to `up_to_message_id`.
+    /// Backends without checkpoint support fail closed with `Unsupported`.
+    fn stage_checkpoint(
+        &self,
+        _session_key: &str,
+        _up_to_message_id: i64,
+        _digest: &str,
+    ) -> std::io::Result<SessionCheckpoint> {
+        Err(std::io::Error::new(
+            std::io::ErrorKind::Unsupported,
+            "session checkpoints are unsupported",
+        ))
+    }
+
+    /// Atomically promote a staged checkpoint to `active` if its watermark is
+    /// monotonic with any existing `active` checkpoint.
+    fn promote_staged_checkpoint(
+        &self,
+        _session_key: &str,
+    ) -> std::io::Result<Option<SessionCheckpoint>> {
+        Err(std::io::Error::new(
+            std::io::ErrorKind::Unsupported,
+            "session checkpoints are unsupported",
+        ))
+    }
+
+    /// Atomically read active/staged checkpoints and delta messages after the
+    /// active watermark. Backends without checkpoints return raw timestamped history.
+    fn load_session_window(&self, session_key: &str) -> std::io::Result<SessionWindow> {
+        let delta_messages = self
+            .load_with_timestamps(session_key)
+            .into_iter()
+            .enumerate()
+            .map(|(idx, msg)| {
+                let synthetic_id = i64::try_from(idx).unwrap_or(i64::MAX - 1).saturating_add(1);
+                (synthetic_id, msg)
+            })
+            .collect();
+        Ok(SessionWindow {
+            active_checkpoint: None,
+            staged_checkpoint: None,
+            delta_messages,
+        })
+    }
+
+    /// Scoped FTS5 search restricted to `allowed_session_keys` before `LIMIT`.
+    fn search_session_fts(
+        &self,
+        _allowed_session_keys: &[&str],
+        _query: &str,
+        _limit: usize,
+    ) -> std::io::Result<Vec<SessionFtsHit>> {
+        Ok(Vec::new())
     }
 }
 
