@@ -55,6 +55,7 @@
     - [ADR-022: One small Node, many devices](./architecture/decisions/ADR-022-one-small-node-many-devices.md)
     - [ADR-023: Realtime voice carrier with delegation to the body](./architecture/decisions/ADR-023-realtime-voice-carrier-with-body-delegation.md)
     - [ADR-024: Bounded Tachi provider broker for inference](./architecture/decisions/ADR-024-bounded-tachi-provider-broker.md)
+    - [ADR-025: Long-context stack, sleep-time memory, and delegation continuity](./architecture/decisions/ADR-025-long-context-sleep-memory-and-delegation-continuity.md)
   - [Logging](./architecture/logging.md)
   - [Runtime state and persistence](./architecture/runtime-state-and-persistence.md)
   - [Memory and payload lifecycle](./architecture/memory-payload-lifecycle.md)
