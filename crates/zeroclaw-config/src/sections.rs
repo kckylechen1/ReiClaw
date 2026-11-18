@@ -490,11 +490,7 @@ pub fn section_for_path(path: &str) -> Option<Section> {
 pub fn section_has_signal(cfg: &crate::schema::Config, section: Section) -> bool {
     match section {
         Section::ModelProviders => !cfg.providers.models.is_empty(),
-        Section::Channels => cfg.prop_fields().iter().any(|f| {
-            f.name
-                .strip_prefix("channels.")
-                .is_some_and(|rest| rest.contains('.'))
-        }),
+        Section::Channels => cfg.channels.iter_aliases().next().is_some(),
         Section::McpServers => !cfg.mcp.servers.is_empty(),
         // Routes' existence in the Vec is the signal, same as McpServers.
         Section::ModelRoutes => !cfg.model_routes.is_empty(),

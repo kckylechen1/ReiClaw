@@ -1,6 +1,6 @@
 //! Property helpers used by the `Configurable` derive macro and the `zeroclaw config` CLI.
 
-use crate::traits::{ConfigTab, CredentialSurfaceClass, PropFieldInfo, PropKind};
+use crate::traits::{ConfigTab, PropFieldInfo, PropFieldSpec, PropKind};
 
 pub fn route_hashmap_path<'a, 'k, I>(
     name: &'a str,
@@ -221,22 +221,18 @@ pub fn enum_variants<T: schemars::JsonSchema>() -> String {
 #[allow(clippy::too_many_arguments)]
 pub fn make_prop_field(
     table: Option<&toml::Table>,
-    name: &str,
+    spec: PropFieldSpec,
     serde_name: &str,
     category: &'static str,
     type_hint: &'static str,
-    kind: PropKind,
-    is_secret: bool,
     enum_variants: Option<fn() -> Vec<String>>,
     description: &'static str,
-    derived_from_secret: bool,
-    credential_class: Option<CredentialSurfaceClass>,
     tab: ConfigTab,
     display_secret_terminals: &[&str],
     alias_source: Option<crate::traits::AliasSource>,
     multiline: bool,
 ) -> PropFieldInfo {
-    let display_value = if is_secret || derived_from_secret {
+    let display_value = if spec.is_secret || spec.derived_from_secret {
         match table.and_then(|t| t.get(serde_name)) {
             Some(toml::Value::String(s)) if !s.is_empty() => "****".to_string(),
             Some(toml::Value::Array(arr)) if !arr.is_empty() => {
@@ -247,21 +243,21 @@ pub fn make_prop_field(
     } else {
         toml_value_to_display_for_kind(
             table.and_then(|t| t.get(serde_name)),
-            kind,
+            spec.kind,
             display_secret_terminals,
         )
     };
     PropFieldInfo {
-        name: name.to_string(),
+        name: spec.name,
         category,
         display_value,
         type_hint,
-        kind,
-        is_secret,
+        kind: spec.kind,
+        is_secret: spec.is_secret,
         enum_variants,
         description,
-        derived_from_secret,
-        credential_class,
+        derived_from_secret: spec.derived_from_secret,
+        credential_class: spec.credential_class,
         tab,
         alias_source,
         multiline,

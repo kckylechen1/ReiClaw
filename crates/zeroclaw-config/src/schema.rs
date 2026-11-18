@@ -3266,30 +3266,44 @@ impl Config {
     /// `PropKind::AliasRef` pickers and validation.
     #[must_use]
     pub fn resolve_alias_source(&self, source: crate::traits::AliasSource) -> Vec<String> {
-        let section = source.section_path();
-        if source.is_two_tier() {
-            let prefix = format!("{section}.");
-            let mut out: Vec<String> = Vec::new();
-            for f in self.prop_fields() {
-                if let Some(rest) = f.name.strip_prefix(&prefix) {
-                    let mut parts = rest.splitn(3, '.');
-                    if let (Some(ty), Some(alias), Some(_)) =
-                        (parts.next(), parts.next(), parts.next())
-                    {
-                        let dotted = format!("{ty}.{alias}");
-                        if !out.contains(&dotted) {
-                            out.push(dotted);
-                        }
-                    }
-                }
+        use crate::traits::AliasSource;
+        let mut out: Vec<String> = match source {
+            AliasSource::ModelProviders => self
+                .providers
+                .models
+                .iter_entries()
+                .map(|(kind, alias, _)| format!("{kind}.{alias}"))
+                .collect(),
+            AliasSource::TtsProviders => self
+                .providers
+                .tts
+                .iter_entries()
+                .map(|(kind, alias, _)| format!("{kind}.{alias}"))
+                .collect(),
+            AliasSource::TranscriptionProviders => self
+                .providers
+                .transcription
+                .iter_aliases()
+                .map(|(kind, alias)| format!("{kind}.{alias}"))
+                .collect(),
+            AliasSource::Channels => self
+                .channels
+                .iter_aliases()
+                .filter(|(kind, _, _)| !is_retired_transport(kind))
+                .map(|(kind, alias, _)| format!("{kind}.{alias}"))
+                .collect(),
+            AliasSource::RiskProfiles
+            | AliasSource::RuntimeProfiles
+            | AliasSource::Personas
+            | AliasSource::Cards
+            | AliasSource::Agents
+            | AliasSource::SkillBundles
+            | AliasSource::McpBundles => {
+                self.get_map_keys(source.section_path()).unwrap_or_default()
             }
-            out.sort();
-            out
-        } else {
-            let mut out = self.get_map_keys(section).unwrap_or_default();
-            out.sort();
-            out
-        }
+        };
+        out.sort();
+        out
     }
 
     /// Return the first concrete `model` string available for use as a
@@ -3777,11 +3791,8 @@ impl Config {
             .map_or_else(|| self.data_dir.clone(), |a| self.agent_workspace_dir(a))
     }
 
-    /// Schema-walk: every populated `[channels.<type>.<alias>]` block.
-    /// Type names come from the `prop_fields()` enumeration (kebab as the
-    /// macro emits them) so adding a new channel type via the macro
-    /// surfaces here without touching this code. Alias keys are HashMap
-    /// keys; not kebab-converted.
+    /// Every populated `[channels.<type>.<alias>]` block, read from typed maps.
+    /// Alias keys remain intact, including dots, and `enabled` is read as a bool.
     ///
     /// Retired transports (`RETIRED_TRANSPORT_KINDS`) are excluded: every
     /// consumer of this walk is a presentation surface (dashboard channel
@@ -3790,32 +3801,23 @@ impl Config {
     /// alias (#584).
     #[must_use]
     pub fn channels_by_alias(&self) -> Vec<ChannelAliasInfo> {
-        use std::collections::BTreeMap;
-        let mut seen: BTreeMap<(String, String), bool> = BTreeMap::new();
-        for field in self.prop_fields() {
-            let parts: Vec<&str> = field.name.split('.').collect();
-            if parts.len() < 4 || parts[0] != "channels" {
-                continue;
-            }
-            let key = (parts[1].to_string(), parts[2].to_string());
-            let entry = seen.entry(key).or_insert(false);
-            if parts.len() == 4 && parts[3] == "enabled" {
-                *entry = field.display_value == "true";
-            }
-        }
-        seen.into_iter()
-            .filter(|((channel_type, _), _)| !is_retired_transport(channel_type))
-            .map(|((channel_type, alias), enabled)| {
+        let mut aliases: Vec<_> = self
+            .channels
+            .iter_aliases()
+            .filter(|(channel_type, _, _)| !is_retired_transport(channel_type))
+            .map(|(channel_type, alias, enabled)| {
                 let composite = format!("{channel_type}.{alias}");
                 let owning_agent = self.agent_for_channel(&composite).map(str::to_string);
                 ChannelAliasInfo {
-                    channel_type,
-                    alias,
+                    channel_type: channel_type.to_string(),
+                    alias: alias.to_string(),
                     owning_agent,
                     enabled,
                 }
             })
-            .collect()
+            .collect();
+        aliases.sort_by(|a, b| (&a.channel_type, &a.alias).cmp(&(&b.channel_type, &b.alias)));
+        aliases
     }
 
     /// Reverse-lookup the agent alias that owns a declaratively-configured
@@ -9780,6 +9782,29 @@ where
 }
 
 impl ChannelsConfig {
+    /// Every configured typed channel entry, preserving the complete alias key.
+    /// Presentation metadata and formatted values are not needed by this walk.
+    pub fn iter_aliases(&self) -> impl Iterator<Item = (&'static str, &str, bool)> {
+        self.telegram
+            .iter()
+            .map(|(alias, config)| ("telegram", alias.as_str(), config.enabled))
+            .chain(
+                self.discord
+                    .iter()
+                    .map(|(alias, config)| ("discord", alias.as_str(), config.enabled)),
+            )
+            .chain(
+                self.webhook
+                    .iter()
+                    .map(|(alias, config)| ("webhook", alias.as_str(), config.enabled)),
+            )
+            .chain(
+                self.email
+                    .iter()
+                    .map(|(alias, config)| ("email", alias.as_str(), config.enabled)),
+            )
+    }
+
     /// Returns metadata and configuration status for every known channel type.
     ///
     /// Always returns the full set of channel types regardless of compile-time
@@ -9835,10 +9860,7 @@ impl ChannelsConfig {
     /// entries (e.g. partially-configured or disabled bots) must not start the
     /// supervisor, otherwise it exits immediately and restarts in a tight loop.
     pub fn has_any_enabled(&self) -> bool {
-        self.telegram.values().any(|c| c.enabled)
-            || self.discord.values().any(|c| c.enabled)
-            || self.webhook.values().any(|c| c.enabled)
-            || self.email.values().any(|c| c.enabled)
+        self.iter_aliases().any(|(_, _, enabled)| enabled)
     }
 
     /// One `(canonical_name, configured, deliverable, retired)` row per

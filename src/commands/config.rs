@@ -29,7 +29,7 @@ pub(crate) fn config_patch_prop_kind(
     path: &str,
 ) -> Option<zeroclaw_api::config_metadata::PropKind> {
     config
-        .prop_fields()
+        .prop_schema()
         .into_iter()
         .find(|f| f.name == path)
         .map(|f| f.kind)
@@ -176,9 +176,9 @@ pub(crate) fn init_map_alias(config: &mut Config, section_arg: &str) -> Result<O
 fn mark_new_map_alias_dirty(config: &mut Config, alias_path: &str) {
     let prefix = format!("{alias_path}.");
     let leaf_paths: Vec<String> = config
-        .prop_fields()
+        .prop_paths()
         .into_iter()
-        .filter_map(|field| field.name.starts_with(&prefix).then_some(field.name))
+        .filter(|path| path.starts_with(&prefix))
         .collect();
 
     if leaf_paths.is_empty() {
@@ -317,8 +317,7 @@ pub async fn handle(config_command: crate::ConfigCommands, config: &mut Config) 
             Ok(())
         }
         crate::ConfigCommands::Get { path, json } => {
-            let known_paths: Vec<String> =
-                config.prop_fields().into_iter().map(|f| f.name).collect();
+            let known_paths = config.prop_paths();
             let path = zeroclaw_config::helpers::resolve_field_path(&known_paths, &path);
             if Config::prop_is_secret(&path) {
                 let entries = config.prop_fields();
@@ -396,12 +395,10 @@ pub async fn handle(config_command: crate::ConfigCommands, config: &mut Config) 
             json,
         } => {
             crate::config::current::ensure_disk_at_current_version(&config.config_path)?;
-            let known_paths: Vec<String> =
-                config.prop_fields().into_iter().map(|f| f.name).collect();
+            let known_paths = config.prop_paths();
             let mut path = zeroclaw_config::helpers::resolve_field_path(&known_paths, &path);
             if ensure_map_key_for_prop_path(config, &path)? {
-                let known_paths: Vec<String> =
-                    config.prop_fields().into_iter().map(|f| f.name).collect();
+                let known_paths = config.prop_paths();
                 path = zeroclaw_config::helpers::resolve_field_path(&known_paths, &path);
             }
             if no_interactive {
@@ -967,9 +964,9 @@ pub async fn handle(config_command: crate::ConfigCommands, config: &mut Config) 
         }
         crate::ConfigCommands::Complete { partial } => {
             let prefix = partial.as_deref().unwrap_or("");
-            for entry in config.prop_fields() {
-                if entry.name.starts_with(prefix) {
-                    println!("{}", entry.name);
+            for path in config.prop_paths() {
+                if path.starts_with(prefix) {
+                    println!("{path}");
                 }
             }
             Ok(())

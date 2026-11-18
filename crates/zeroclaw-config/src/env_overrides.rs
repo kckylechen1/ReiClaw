@@ -236,7 +236,7 @@ pub fn apply_env_overrides(config: &mut Config) -> Result<AppliedOverrides> {
 
 /// Walk an env-var tail against the schema. Map-keyed positions consume one
 /// `__`-delimited alias token (which may contain single `_` per the alias
-/// validator); everything else resolves via `prop_fields()` lookup.
+/// validator); everything else resolves via `prop_paths()` lookup.
 fn resolve_path(tail: &str, config: &mut Config) -> Result<String> {
     let mut sections = Config::map_key_sections();
     sections.sort_by_key(|s| std::cmp::Reverse(s.path.len()));
@@ -290,13 +290,12 @@ fn resolve_path(tail: &str, config: &mut Config) -> Result<String> {
         return Ok(path);
     }
 
-    // Non-map path: prop_fields() entries are dotted snake-case field
+    // Non-map path: prop_paths() entries are dotted snake-case field
     // names. Convert to env-form (`.` → `__`) and compare.
     config
-        .prop_fields()
+        .prop_paths()
         .into_iter()
-        .find(|f| f.name.replace('.', SEP) == tail)
-        .map(|f| f.name)
+        .find(|path| path.replace('.', SEP) == tail)
         .ok_or_else(|| {
             ::zeroclaw_log::record!(
                 WARN,

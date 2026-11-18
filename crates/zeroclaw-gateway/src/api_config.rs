@@ -314,8 +314,33 @@ fn map_prop_error(err: anyhow::Error, path: &str) -> ConfigApiError {
 // against the declared PropKind" contract.
 use zeroclaw_config::typed_value::coerce_for_set_prop as json_to_setprop_string;
 
-/// Look up the prop_field metadata for a path. Used by the per-prop GET / PUT
-/// handlers to decide whether the field is a secret.
+fn unconfigured_secret_spec(path: &str) -> Option<zeroclaw_config::traits::PropFieldSpec> {
+    zeroclaw_config::schema::Config::prop_is_secret(path).then(|| {
+        zeroclaw_config::traits::PropFieldSpec {
+            name: path.to_string(),
+            kind: zeroclaw_api::config_metadata::PropKind::String,
+            is_secret: true,
+            derived_from_secret: false,
+            credential_class: Some(
+                zeroclaw_api::config_metadata::CredentialSurfaceClass::EncryptedSecret,
+            ),
+        }
+    })
+}
+
+/// Writes need type and secret annotations, without serializing display values.
+fn lookup_prop_spec(
+    config: &zeroclaw_config::schema::Config,
+    path: &str,
+) -> Option<zeroclaw_config::traits::PropFieldSpec> {
+    config
+        .prop_schema()
+        .into_iter()
+        .find(|spec| spec.name == path)
+        .or_else(|| unconfigured_secret_spec(path))
+}
+
+/// Reads and OPTIONS retain the display metadata and secret population status.
 fn lookup_prop_field(
     config: &zeroclaw_config::schema::Config,
     path: &str,
@@ -325,24 +350,20 @@ fn lookup_prop_field(
         .into_iter()
         .find(|info| info.name == path)
         .or_else(|| {
-            zeroclaw_config::schema::Config::prop_is_secret(path).then(|| {
-                zeroclaw_config::traits::PropFieldInfo {
-                    name: path.to_string(),
-                    category: "Secrets",
-                    display_value: zeroclaw_config::traits::UNSET_DISPLAY.to_string(),
-                    type_hint: "String",
-                    kind: zeroclaw_api::config_metadata::PropKind::String,
-                    is_secret: true,
-                    enum_variants: None,
-                    description: "",
-                    derived_from_secret: false,
-                    credential_class: Some(
-                        zeroclaw_api::config_metadata::CredentialSurfaceClass::EncryptedSecret,
-                    ),
-                    tab: zeroclaw_api::config_metadata::ConfigTab::None,
-                    alias_source: None,
-                    multiline: false,
-                }
+            unconfigured_secret_spec(path).map(|spec| {
+                zeroclaw_config::helpers::make_prop_field(
+                    None,
+                    spec,
+                    "",
+                    "Secrets",
+                    "String",
+                    None,
+                    "",
+                    zeroclaw_api::config_metadata::ConfigTab::None,
+                    &[],
+                    None,
+                    false,
+                )
             })
         })
 }
@@ -791,7 +812,7 @@ pub async fn handle_prop_put(
             .with_path(&body.path),
         );
     }
-    let info = match lookup_prop_field(&new_config, &body.path) {
+    let info = match lookup_prop_spec(&new_config, &body.path) {
         Some(info) => info,
         None => return error_response(ConfigApiError::path_not_found(&body.path)),
     };
@@ -882,7 +903,7 @@ pub async fn handle_prop_delete(
 
     let _cfg_guard = Arc::clone(&state.config_write_lock).lock_owned().await;
     let mut new_config = state.config.read().clone();
-    let info = match lookup_prop_field(&new_config, &q.path) {
+    let info = match lookup_prop_spec(&new_config, &q.path) {
         Some(info) => info,
         None => return error_response(ConfigApiError::path_not_found(&q.path)),
     };
@@ -2147,7 +2168,7 @@ pub async fn handle_patch(
                 .with_op_index(idx),
             );
         }
-        let info = lookup_prop_field(&working, &path);
+        let info = lookup_prop_spec(&working, &path);
         let is_sensitive = info
             .as_ref()
             .map(|i| i.is_secret || i.derived_from_secret)
@@ -4591,6 +4612,11 @@ mod tests {
         assert_eq!(
             field.credential_class,
             Some(zeroclaw_api::config_metadata::CredentialSurfaceClass::EncryptedSecret)
+        );
+        assert_eq!(
+            lookup_prop_spec(&cfg, "http_request.secrets.api_token"),
+            Some(field.spec()),
+            "write-side classification must match the read-side secret metadata"
         );
     }
 

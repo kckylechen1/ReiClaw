@@ -59,6 +59,7 @@ pub use schema::{
 };
 pub use traits::HasPropKind;
 pub use traits::PropFieldInfo;
+pub use traits::PropFieldSpec;
 pub use traits::PropKind;
 pub use traits::SecretFieldInfo;
 

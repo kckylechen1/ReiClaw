@@ -1058,7 +1058,7 @@ fn config_set_materializes_missing_typed_provider_alias() {
         Some("deepseek-chat")
     );
 
-    let known_paths: Vec<String> = config.prop_fields().into_iter().map(|f| f.name).collect();
+    let known_paths: Vec<String> = config.prop_paths();
     let api_key_path = zeroclaw_config::helpers::resolve_field_path(
         &known_paths,
         "providers.models.deepseek.default.api-key",
@@ -1125,12 +1125,12 @@ fn config_set_materializes_missing_transcription_provider_alias() {
 
     // Mirror the CLI `config set` path exactly: resolve, materialize the
     // map key, then re-resolve so the now-present alias field is found.
-    let known: Vec<String> = config.prop_fields().into_iter().map(|f| f.name).collect();
+    let known: Vec<String> = config.prop_paths();
     let mut path = zeroclaw_config::helpers::resolve_field_path(&known, raw);
     let created = commands::config::ensure_map_key_for_prop_path(&mut config, &path)
         .expect("known typed transcription provider path should be materialized");
     assert!(created, "missing transcription alias should be created");
-    let known: Vec<String> = config.prop_fields().into_iter().map(|f| f.name).collect();
+    let known: Vec<String> = config.prop_paths();
     path = zeroclaw_config::helpers::resolve_field_path(&known, &path);
 
     config
@@ -1222,13 +1222,13 @@ fn config_set_materializes_agent_workspace_path() {
     let mut config = Config::default();
     let raw = "agents.assistant.workspace.path";
 
-    let known: Vec<String> = config.prop_fields().into_iter().map(|f| f.name).collect();
+    let known: Vec<String> = config.prop_paths();
     let mut path = zeroclaw_config::helpers::resolve_field_path(&known, raw);
     let created = commands::config::ensure_map_key_for_prop_path(&mut config, &path)
         .expect("agent alias and workspace path should materialize");
     assert!(created, "missing agent alias should be created");
 
-    let known: Vec<String> = config.prop_fields().into_iter().map(|f| f.name).collect();
+    let known: Vec<String> = config.prop_paths();
     path = zeroclaw_config::helpers::resolve_field_path(&known, &path);
     config
         .set_prop_persistent(&path, "/srv/zeroclaw/assistant")

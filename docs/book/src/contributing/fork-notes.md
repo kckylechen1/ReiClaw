@@ -55,6 +55,22 @@ provider shape, including the Ollama endpoint in `uri` instead of a credential
 field, while preserving this fork's policy and runtime settings. This choice
 does not freeze deliberate upstream ports or retire metadata consumers.
 
+### Config discovery without display values (#647)
+
+`Configurable` now derives `prop_schema()` from the existing field annotations.
+Its shared `PropFieldSpec` carries paths, kinds and security classification;
+`prop_paths()` is the path-only projection. Env lookup, config writes and
+credential reports use this core view. The existing `prop_fields()` adapter
+still owns formatted values, redaction and form presentation. Alias and channel
+discovery reads typed maps and booleans, preserving complete stored alias keys.
+
+Upstream comparison `cda933e6b9937deacbcc0d4d2cd7f1ae5bb4500e` still uses
+value-bearing `prop_fields()` for these walks, including alias path splitting
+and display-string channel state. There is no upstream core-view implementation
+to port; this fork extends its existing derive and typed provider iterators.
+The change removes that consumer coupling without adding another schema
+registry or claiming a measured build/runtime speedup.
+
 ### Desktop backend continuity
 
 Compared with upstream `zeroclaw-labs/zeroclaw#11523`, merged as
