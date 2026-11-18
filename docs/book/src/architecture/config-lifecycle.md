@@ -214,6 +214,13 @@ full rewrite. `save_dirty()` writes only changed dotted paths, preserves
 non-dirty entries and comments where possible, stamps the current
 `schema_version`, and writes through an atomic temp-file replacement.
 
+Full and incremental saves share private env masking, external-reference
+restoration and encrypted serialization in `save.rs`. Each path still checks
+its existing-file admission before that preparation and publishes tracking
+changes only after a successful write. Full saves prune default values and
+synchronize the document; incremental saves patch dirty paths and retain
+unrelated ciphertext, comments and unknown sections.
+
 That path is also responsible for map-key sections. Creating an alias such as a
 model provider, MCP server, or skill bundle must dirty the
 right section so the alias survives a save and reload. A config edit that only
