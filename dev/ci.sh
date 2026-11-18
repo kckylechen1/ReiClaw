@@ -73,7 +73,7 @@ case "$1" in
     # and reporting behavior (nextest runs each test binary in its own
     # process and emits per-binary JUnit reports; cargo test uses the test
     # harness's default process model).
-    run_in_ci "cargo test --locked --workspace --features zeroclaw-runtime/heavy-tests --verbose"
+    run_in_ci "cargo test --locked --workspace --features reiclaw-runtime/heavy-tests --verbose"
     ;;
 
   test-component)
@@ -116,7 +116,7 @@ case "$1" in
     # for why this differs from required CI. If you change the runner here,
     # update that comment in lockstep.
     run_in_ci "./scripts/ci/rust_quality_gate.sh"
-    run_in_ci "cargo test --locked --workspace --features zeroclaw-runtime/heavy-tests --verbose"
+    run_in_ci "cargo test --locked --workspace --features reiclaw-runtime/heavy-tests --verbose"
     run_in_ci "bash tests/manual/test_dockerignore.sh"
     run_in_ci "cargo build --release --locked --verbose"
     run_in_ci "cargo deny check licenses sources"
