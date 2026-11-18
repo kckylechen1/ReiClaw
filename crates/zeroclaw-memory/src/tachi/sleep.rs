@@ -1061,6 +1061,8 @@ mod tests {
             action_candidates: vec![],
             entities: vec![],
             created_at: "2026-11-18T04:00:00Z".to_string(),
+            owner_edited: false,
+            action_decisions: std::collections::BTreeMap::new(),
         };
         assert!(mem.publish_daily_digest(&soul_daily).await.is_err());
         assert!(
@@ -1288,6 +1290,8 @@ mod tests {
             action_candidates: vec!["review benchmark metrics".to_string()],
             entities: vec!["zeroclaw_project".to_string()],
             created_at: "2026-11-17T04:01:00Z".to_string(),
+            owner_edited: false,
+            action_decisions: std::collections::BTreeMap::new(),
         };
         let d2 = DailyDigest {
             day_key: "2026-11-18".to_string(),
@@ -1301,6 +1305,8 @@ mod tests {
             action_candidates: vec![],
             entities: vec!["zeroclaw_runtime".to_string()],
             created_at: "2026-11-18T04:01:00Z".to_string(),
+            owner_edited: false,
+            action_decisions: std::collections::BTreeMap::new(),
         };
         let other = DailyDigest {
             day_key: "2026-11-18".to_string(),
@@ -1314,6 +1320,8 @@ mod tests {
             action_candidates: vec![],
             entities: vec![],
             created_at: "2026-11-18T04:02:00Z".to_string(),
+            owner_edited: false,
+            action_decisions: std::collections::BTreeMap::new(),
         };
 
         // Publish out of chronological order to verify newest-first ordering.

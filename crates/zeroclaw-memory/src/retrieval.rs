@@ -24,7 +24,8 @@
 //! documented limitation of the opt-in cache.
 
 use super::traits::{
-    ExportFilter, Memory, MemoryCategory, MemoryEntry, MemoryStats, ProceduralMessage, StoreOptions,
+    DailyDigest, EpisodeRecord, ExportFilter, Memory, MemoryCategory, MemoryEntry, MemoryStats,
+    PinnedDigest, ProceduralMessage, StoreOptions,
 };
 use async_trait::async_trait;
 use parking_lot::Mutex;
@@ -591,6 +592,65 @@ impl Memory for RetrievalPipeline {
 
     async fn ensure_agent_uuid(&self, alias: &str) -> anyhow::Result<String> {
         self.memory.ensure_agent_uuid(alias).await
+    }
+
+    async fn commit_episode(&self, episode: &EpisodeRecord) -> anyhow::Result<String> {
+        let result = self.memory.commit_episode(episode).await;
+        self.invalidate_cache();
+        result
+    }
+
+    async fn read_episodes_in_window(
+        &self,
+        agent_id: &str,
+        since: Option<&str>,
+        until: Option<&str>,
+        session_id: Option<&str>,
+        limit: usize,
+    ) -> anyhow::Result<Vec<EpisodeRecord>> {
+        self.memory
+            .read_episodes_in_window(agent_id, since, until, session_id, limit)
+            .await
+    }
+
+    async fn supersede_fact(
+        &self,
+        agent_id: &str,
+        old_key: &str,
+        new_key: &str,
+        new_content: &str,
+        namespace: Option<&str>,
+    ) -> anyhow::Result<String> {
+        let result = self
+            .memory
+            .supersede_fact(agent_id, old_key, new_key, new_content, namespace)
+            .await;
+        self.invalidate_cache();
+        result
+    }
+
+    async fn publish_pinned_digest(&self, digest: &PinnedDigest) -> anyhow::Result<String> {
+        let result = self.memory.publish_pinned_digest(digest).await;
+        self.invalidate_cache();
+        result
+    }
+
+    async fn load_pinned_digest(&self, agent_id: &str) -> anyhow::Result<Option<PinnedDigest>> {
+        self.memory.load_pinned_digest(agent_id).await
+    }
+
+    async fn publish_daily_digest(&self, digest: &DailyDigest) -> anyhow::Result<String> {
+        let result = self.memory.publish_daily_digest(digest).await;
+        self.invalidate_cache();
+        result
+    }
+
+    async fn load_daily_digests(
+        &self,
+        agent_id: &str,
+        limit: usize,
+    ) -> anyhow::Result<Vec<DailyDigest>> {
+        self.memory.load_daily_digests(agent_id, limit).await
     }
 }
 
@@ -1530,5 +1590,86 @@ mod tests {
             0,
             "a failed mutation must still invalidate the cache"
         );
+    }
+
+    #[tokio::test]
+    async fn sleep_writes_invalidate_hot_cache_even_on_backend_error() {
+        use crate::traits::EpisodeSourceKind;
+        use std::collections::BTreeMap;
+
+        let inner = Arc::new(StatefulMemory::new(vec![entry(
+            "k1",
+            "v1",
+            0.9,
+            MemoryCategory::Core,
+            None,
+        )]));
+        let pipeline = RetrievalPipeline::new(inner, cached_config());
+        let cache_key = RetrievalPipeline::cache_key("q", 5, None, None, None, None);
+
+        let ep = EpisodeRecord {
+            episode_id: "ep-1".into(),
+            agent_id: "agent_a".into(),
+            session_key: "sess-1".into(),
+            started_at: "2026-11-18T00:00:00Z".into(),
+            ended_at: "2026-11-18T01:00:00Z".into(),
+            up_to_message_id: None,
+            summary: "summary".into(),
+            why_and_tradeoffs: vec![],
+            settled_decisions: vec![],
+            rejected_options: vec![],
+            entities: vec![],
+            source_kind: EpisodeSourceKind::Dialogue,
+        };
+        let pinned = PinnedDigest {
+            agent_id: "agent_a".into(),
+            rendered_index: "idx".into(),
+            updated_at: "2026-11-18T01:00:00Z".into(),
+            source_day_key: None,
+        };
+        let daily = DailyDigest {
+            day_key: "2026-11-18".into(),
+            agent_id: "agent_a".into(),
+            window_start: "2026-11-17T04:00:00Z".into(),
+            window_end: "2026-11-18T04:00:00Z".into(),
+            narrative: "narrative".into(),
+            settled_decisions: vec![],
+            why_and_tradeoffs: vec![],
+            latent_insights: vec![],
+            action_candidates: vec![],
+            entities: vec![],
+            created_at: "2026-11-18T04:01:00Z".into(),
+            owner_edited: false,
+            action_decisions: BTreeMap::new(),
+        };
+
+        pipeline.store_in_cache(cache_key.clone(), vec![]);
+        let gen0 = pipeline.generation();
+        assert!(pipeline.commit_episode(&ep).await.is_err());
+        assert_eq!(pipeline.cache_size(), 0);
+        assert!(pipeline.generation() > gen0);
+
+        pipeline.store_in_cache(cache_key.clone(), vec![]);
+        let gen1 = pipeline.generation();
+        assert!(
+            pipeline
+                .supersede_fact("agent_a", "old", "new", "content", None)
+                .await
+                .is_err()
+        );
+        assert_eq!(pipeline.cache_size(), 0);
+        assert!(pipeline.generation() > gen1);
+
+        pipeline.store_in_cache(cache_key.clone(), vec![]);
+        let gen2 = pipeline.generation();
+        assert!(pipeline.publish_pinned_digest(&pinned).await.is_err());
+        assert_eq!(pipeline.cache_size(), 0);
+        assert!(pipeline.generation() > gen2);
+
+        pipeline.store_in_cache(cache_key, vec![]);
+        let gen3 = pipeline.generation();
+        assert!(pipeline.publish_daily_digest(&daily).await.is_err());
+        assert_eq!(pipeline.cache_size(), 0);
+        assert!(pipeline.generation() > gen3);
     }
 }

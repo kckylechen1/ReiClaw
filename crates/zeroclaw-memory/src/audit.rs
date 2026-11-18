@@ -1,8 +1,8 @@
 //! Audit trail for memory operations.
 
 use super::traits::{
-    ExportFilter, Memory, MemoryCategory, MemoryEntry, MemoryStats, ProceduralMessage,
-    RecallEntryPredicate, StoreOptions,
+    DailyDigest, EpisodeRecord, ExportFilter, Memory, MemoryCategory, MemoryEntry, MemoryStats,
+    PinnedDigest, ProceduralMessage, RecallEntryPredicate, StoreOptions,
 };
 use async_trait::async_trait;
 use parking_lot::Mutex;
@@ -662,6 +662,92 @@ impl<M: Memory> Memory for AuditedMemory<M> {
                 filter,
             )
             .await
+    }
+
+    async fn commit_episode(&self, episode: &EpisodeRecord) -> anyhow::Result<String> {
+        self.log_audit(
+            AuditOp::Store,
+            Some(&episode.episode_id),
+            Some("sleep_episode"),
+            Some(&episode.session_key),
+            Some(&format!("agent_id={}; op=commit_episode", episode.agent_id)),
+        );
+        self.inner.commit_episode(episode).await
+    }
+
+    async fn read_episodes_in_window(
+        &self,
+        agent_id: &str,
+        since: Option<&str>,
+        until: Option<&str>,
+        session_id: Option<&str>,
+        limit: usize,
+    ) -> anyhow::Result<Vec<EpisodeRecord>> {
+        self.inner
+            .read_episodes_in_window(agent_id, since, until, session_id, limit)
+            .await
+    }
+
+    async fn supersede_fact(
+        &self,
+        agent_id: &str,
+        old_key: &str,
+        new_key: &str,
+        new_content: &str,
+        namespace: Option<&str>,
+    ) -> anyhow::Result<String> {
+        self.log_audit(
+            AuditOp::Store,
+            Some(new_key),
+            namespace,
+            None,
+            Some(&format!(
+                "agent_id={agent_id}; op=supersede_fact; old_key={old_key}"
+            )),
+        );
+        self.inner
+            .supersede_fact(agent_id, old_key, new_key, new_content, namespace)
+            .await
+    }
+
+    async fn publish_pinned_digest(&self, digest: &PinnedDigest) -> anyhow::Result<String> {
+        self.log_audit(
+            AuditOp::Store,
+            Some("sleep:pinned_digest"),
+            Some("sleep_pinned_digest"),
+            None,
+            Some(&format!(
+                "agent_id={}; op=publish_pinned_digest",
+                digest.agent_id
+            )),
+        );
+        self.inner.publish_pinned_digest(digest).await
+    }
+
+    async fn load_pinned_digest(&self, agent_id: &str) -> anyhow::Result<Option<PinnedDigest>> {
+        self.inner.load_pinned_digest(agent_id).await
+    }
+
+    async fn publish_daily_digest(&self, digest: &DailyDigest) -> anyhow::Result<String> {
+        self.log_audit(
+            AuditOp::Store,
+            Some(&digest.day_key),
+            Some("sleep_daily_digest"),
+            None,
+            Some(&format!(
+                "agent_id={}; op=publish_daily_digest",
+                digest.agent_id
+            )),
+        );
+        self.inner.publish_daily_digest(digest).await
+    }
+
+    async fn load_daily_digests(
+        &self,
+        agent_id: &str,
+        limit: usize,
+    ) -> anyhow::Result<Vec<DailyDigest>> {
+        self.inner.load_daily_digests(agent_id, limit).await
     }
 }
 
