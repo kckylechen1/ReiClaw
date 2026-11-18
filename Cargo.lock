@@ -4739,7 +4739,7 @@ dependencies = [
  "zeroclaw-http",
  "zeroclaw-infra",
  "zeroclaw-log",
- "zeroclaw-providers",
+ "zeroclaw-provider-dispatch",
  "zeroclaw-spawn",
 ]
 
@@ -4769,6 +4769,19 @@ dependencies = [
  "uuid",
  "zeroclaw-api",
  "zeroclaw-config",
+ "zeroclaw-log",
+]
+
+[[package]]
+name = "zeroclaw-provider-dispatch"
+version = "0.8.3"
+dependencies = [
+ "anyhow",
+ "async-trait",
+ "futures-util",
+ "serde_json",
+ "tokio",
+ "zeroclaw-api",
  "zeroclaw-log",
 ]
 
@@ -4805,6 +4818,7 @@ dependencies = [
  "zeroclaw-http",
  "zeroclaw-log",
  "zeroclaw-platform",
+ "zeroclaw-provider-dispatch",
  "zeroclaw-spawn",
 ]
 

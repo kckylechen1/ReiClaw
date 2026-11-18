@@ -26,6 +26,7 @@
       "zeroclaw-memory",
       "zeroclaw-platform",
       "zeroclaw-policy",
+      "zeroclaw-provider-dispatch",
       "zeroclaw-providers",
       "zeroclaw-schema-markdown",
       "zeroclaw-spawn",
