@@ -8,7 +8,7 @@ use serde_json::json;
 use std::process::Command;
 use std::sync::Arc;
 
-const CHILD_MODE: &str = "ZEROCLAW_TEST_LANDLOCK_UNAVAILABLE_ERRNO";
+const CHILD_MODE: &str = "REI_TEST_LANDLOCK_UNAVAILABLE_ERRNO";
 const CHILD_COMPLETE: &str = "landlock unavailable fixture completed";
 
 #[test]

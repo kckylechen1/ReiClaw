@@ -1,5 +1,5 @@
 import assert from 'node:assert/strict';
-const values = new Map([['zeroclaw_session_id.web', 'shared']]);
+const values = new Map([['reiclaw_session_id.web', 'shared']]);
 const urls: string[] = [];
 const protocolOffers: (string | string[] | undefined)[] = [];
 type SentFrame = Record<string, unknown>;
@@ -47,7 +47,7 @@ console.log('web chat advertises its surface on each attachment');
 // S2 (#549): negotiation frames, pre-negotiation queueing, epoch-bound flush,
 // and scoped cancel/resume framing.
 // ---------------------------------------------------------------------------
-values.set('zeroclaw_token', 'synthetic-owner');
+values.set('reiclaw_token', 'synthetic-owner');
 const s2 = new WebSocketClient({ agentAlias: 'web', autoReconnect: false });
 s2.onMessage = () => {
   // no-op: the assertions below inspect the transport's outbound frames.

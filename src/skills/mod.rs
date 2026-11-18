@@ -1447,7 +1447,7 @@ mod install_location_tests {
             .insert("default".to_string(), agent_with_bundles(&["official"]));
 
         // Run the actual bin handler — no flags, so it resolves to the default
-        // agent's single assigned bundle, exactly like `zeroclaw skills install`.
+        // agent's single assigned bundle, exactly like `rei skills install`.
         handle_command(
             crate::SkillCommands::Install {
                 source: source.to_string_lossy().into_owned(),

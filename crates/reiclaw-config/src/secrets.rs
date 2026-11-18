@@ -169,7 +169,7 @@ impl SecretStore {
             .map_err(|e| {
                 ::reiclaw_log::record!(ERROR, ::reiclaw_log::Event::new(module_path!(), ::reiclaw_log::Action::Fail).with_outcome(::reiclaw_log::EventOutcome::Failure).with_attrs(::serde_json::json!({"key_path": self.key_path.display().to_string(), "error": format!("{e}")})), "enc2: decryption failed. `.secret_key` is missing or does not match the key used to encrypt this value. \
                      Common cause: volume wipe, container migration, or backup-restore where `.secret_key` was not preserved alongside `config.toml`. \
-                     Restore the original `.secret_key` from backup, or re-encrypt the affected secrets via `zeroclaw quickstart`.");
+                     Restore the original `.secret_key` from backup, or re-encrypt the affected secrets via `rei quickstart`.");
                 anyhow::Error::msg(format!(
                     "enc2: decryption failed (wrong `.secret_key` or tampered ciphertext): {e}"
                 ))
@@ -423,7 +423,7 @@ fn validate_tachi_vault_ref(reference: &str) -> Result<&str> {
 }
 
 const MAX_TACHI_VAULT_PIPE_BYTES: u64 = 64 * 1024;
-const TACHI_VAULT_LEASE_ENV: &str = "ZEROCLAW_VAULT_SECRET";
+const TACHI_VAULT_LEASE_ENV: &str = "REI_VAULT_SECRET";
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum TachiVaultStatus {
@@ -969,7 +969,7 @@ exit 98
         write_fake_tachi(
             tmp.path(),
             r#"{"initialized":true,"locked":false,"secure_store":{"auto_unlock_available":false}}"#,
-            r#"{"leased":true,"env":{"ZEROCLAW_VAULT_SECRET":"synthetic-leased-secret\r\n"}}"#,
+            r#"{"leased":true,"env":{"REI_VAULT_SECRET":"synthetic-leased-secret\r\n"}}"#,
             0,
             "",
             1,
@@ -981,7 +981,7 @@ exit 98
         assert!(migrated.is_none());
         assert_eq!(
             fs::read_to_string(&calls).unwrap(),
-            "vault status\nvault lease OPENAI_OFFICIAL_API_KEY --env-name ZEROCLAW_VAULT_SECRET --stdin-password --json\n"
+            "vault status\nvault lease OPENAI_OFFICIAL_API_KEY --env-name REI_VAULT_SECRET --stdin-password --json\n"
         );
 
         // 2. Unlocked daemon WITH Keychain falls back to `vault get --keychain` for non-api_key entries.
@@ -1001,7 +1001,7 @@ exit 98
         );
         assert_eq!(
             fs::read_to_string(&calls).unwrap(),
-            "vault status\nvault lease BOT_TOKEN --env-name ZEROCLAW_VAULT_SECRET --stdin-password --json\nvault get BOT_TOKEN --reveal --json --keychain\n"
+            "vault status\nvault lease BOT_TOKEN --env-name REI_VAULT_SECRET --stdin-password --json\nvault get BOT_TOKEN --reveal --json --keychain\n"
         );
 
         // 3. Locked daemon WITH Keychain resolves directly via `vault get --keychain`.
@@ -1058,7 +1058,7 @@ exit 98
         write_fake_tachi(
             tmp.path(),
             r#"{"initialized":true,"locked":false,"secure_store":{"auto_unlock_available":false}}"#,
-            r#"{"leased":true,"env":{"ZEROCLAW_VAULT_SECRET":""}}"#,
+            r#"{"leased":true,"env":{"REI_VAULT_SECRET":""}}"#,
             0,
             "",
             1,
@@ -1224,7 +1224,7 @@ exit 98
             ),
             (
                 unlocked_no_keychain,
-                r#"{"leased":true,"env":{"ZEROCLAW_VAULT_SECRET":""}}"#,
+                r#"{"leased":true,"env":{"REI_VAULT_SECRET":""}}"#,
                 0,
                 "",
                 1,

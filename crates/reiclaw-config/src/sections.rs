@@ -388,7 +388,7 @@ sections! {
         key:   "channels",
         shape: TypedFamilyMap,
         group: Foundation,
-        help:  "Pick which chat platforms ZeroClaw should listen on. Global \
+        help:  "Pick which chat platforms ReiClaw should listen on. Global \
                 channel settings live on `[channels]`; each configured platform \
                 still gets its own alias.",
     },

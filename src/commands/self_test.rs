@@ -479,7 +479,7 @@ async fn check_websocket_handshake(config: &crate::config::Config) -> CheckResul
             "websocket",
             format!(
                 "pairing required but no bearer token available for self-test \
-                 (set ZEROCLAW_GATEWAY_TOKEN or keep a plaintext zc_* entry in \
+                 (set REI_GATEWAY_TOKEN or keep a plaintext zc_* entry in \
                  gateway.paired_tokens): {display_url}"
             ),
         );
@@ -541,11 +541,11 @@ fn build_websocket_probe_url(
 }
 
 /// Resolve a plaintext gateway bearer token for local clients (self-test,
-/// `zeroclaw chat`). Precedence: `ZEROCLAW_GATEWAY_TOKEN`, then
-/// `ZEROCLAW_ACP_BRIDGE_TOKEN`, then the first plaintext (`zc_*`) entry in
+/// `rei chat`). Precedence: `REI_GATEWAY_TOKEN`, then
+/// `REI_ACP_BRIDGE_TOKEN`, then the first plaintext (`zc_*`) entry in
 /// `gateway.paired_tokens`.
 pub(crate) fn resolve_gateway_bearer_token(config: &crate::config::Config) -> Option<String> {
-    for key in ["ZEROCLAW_GATEWAY_TOKEN", "ZEROCLAW_ACP_BRIDGE_TOKEN"] {
+    for key in ["REI_GATEWAY_TOKEN", "REI_ACP_BRIDGE_TOKEN"] {
         if let Ok(value) = std::env::var(key) {
             let trimmed = value.trim();
             if !trimmed.is_empty() {
@@ -631,7 +631,7 @@ mod tests {
             Some("cli-web-dist-dir-reason-dollar")
         );
         // Absolute and relative literal paths must NOT be flagged.
-        assert!(web_dist_dir_expansion_reason_key("/srv/zeroclaw/web-dist").is_none());
+        assert!(web_dist_dir_expansion_reason_key("/srv/reiclaw/web-dist").is_none());
         assert!(web_dist_dir_expansion_reason_key("./dist").is_none());
     }
 
@@ -662,14 +662,14 @@ mod tests {
     #[test]
     fn check_web_dist_dir_emits_localized_pass_for_literal() {
         let mut config = crate::config::Config::default();
-        config.gateway.web_dist_dir = Some("/srv/zeroclaw/web-dist".to_string());
+        config.gateway.web_dist_dir = Some("/srv/reiclaw/web-dist".to_string());
 
         let result = super::check_web_dist_dir(&config);
         assert!(result.passed);
 
         let expected_detail = reiclaw_runtime::i18n::get_required_cli_string_with_args(
             "cli-self-test-web-dist-dir-pass-literal",
-            &[("path", "/srv/zeroclaw/web-dist")],
+            &[("path", "/srv/reiclaw/web-dist")],
         );
         assert_eq!(result.detail, expected_detail);
     }

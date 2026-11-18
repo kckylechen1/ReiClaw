@@ -1,4 +1,4 @@
-//! `zeroclaw auth` — manage model-provider subscription authentication profiles.
+//! `rei auth` — manage model-provider subscription authentication profiles.
 
 use anyhow::{Context, Result, bail};
 use dialoguer::Password;
@@ -119,7 +119,7 @@ pub(crate) async fn run_inline_provider_auth(auth: InlineProviderAuth, config: &
             },
             t(
                 "cli-quickstart-auth-codex-skip-hint",
-                "  Finish later with: zeroclaw auth login --model-provider openai-codex",
+                "  Finish later with: rei auth login --model-provider openai-codex",
             ),
         ),
         InlineProviderAuth::AnthropicSetupToken { alias } => (
@@ -362,7 +362,7 @@ pub async fn handle_auth_command(auth_command: AuthCommands, config: &Config) ->
                 }
                 auth::RefreshStatus::NoProfile => {
                     bail!(
-                        "No auth profile found. Run `zeroclaw auth login --model-provider <provider>` first.",
+                        "No auth profile found. Run `rei auth login --model-provider <provider>` first.",
                     )
                 }
             }

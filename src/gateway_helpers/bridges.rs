@@ -1,4 +1,4 @@
-//! `zeroclaw gateway bridge add|remove|list`: operator management of
+//! `rei gateway bridge add|remove|list`: operator management of
 //! `[gateway.bridges.<name>]`. A bridge token is minted here and printed
 //! once; only its SHA-256 hash is written to the config.
 

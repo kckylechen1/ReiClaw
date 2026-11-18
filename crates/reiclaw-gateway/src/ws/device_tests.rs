@@ -920,10 +920,10 @@ async fn owner_bridge_keeps_agent_workspace_and_auxiliary_surfaces_closed() {
 /// the production Conversation/approval path and a deterministic HTTP provider.
 #[cfg(unix)]
 #[tokio::test(flavor = "multi_thread")]
-#[ignore = "manual desktop acceptance; requires ZEROCLAW_ACP_ACCEPTANCE_DIR"]
+#[ignore = "manual desktop acceptance; requires REI_ACP_ACCEPTANCE_DIR"]
 async fn acp_desktop_gateway_fixture() {
     use std::os::unix::fs::PermissionsExt;
-    let directory = PathBuf::from(std::env::var_os("ZEROCLAW_ACP_ACCEPTANCE_DIR").expect("explicit output directory"));
+    let directory = PathBuf::from(std::env::var_os("REI_ACP_ACCEPTANCE_DIR").expect("explicit output directory"));
     assert!(directory.is_absolute() && directory.is_dir());
     let address = std::fs::read_to_string(directory.join("bind-address")).unwrap_or_else(|_| "127.0.0.1:0".into()).trim().parse().unwrap();
     let fixture = DeviceFixture::with_address(&["chat", "cancel"], true, address).await;

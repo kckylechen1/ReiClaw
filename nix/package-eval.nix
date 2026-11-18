@@ -22,7 +22,7 @@ let
       installLines = builtins.filter builtins.isString (builtins.split "\n" drv.postInstall);
       checksBinary = binary: builtins.elem ''test -x "$out/bin/${binary}"'' installLines;
       expectedPackages = [ "reiclaw" ]
-        ++ (if wantAcp then [ "zeroclaw-bridge-acp" ] else [ ]);
+        ++ (if wantAcp then [ "reiclaw-bridge-acp" ] else [ ]);
     in
     assert require name (drv.type == "derivation") "expected a real package derivation";
     assert require name (selectedPackages == expectedPackages) "unexpected Cargo packages";
@@ -34,8 +34,7 @@ let
       (builtins.all (feature: builtins.match "reiclaw/.+" feature != null) featureNames)
       "root features must be package-qualified";
     assert require name (checksBinary "rei") "missing rei executable postInstall check";
-    assert require name (checksBinary "zeroclaw") "missing main executable postInstall check";
-    assert require name ((checksBinary "zeroclaw-acp-bridge") == wantAcp)
+    assert require name ((checksBinary "rei-acp-bridge") == wantAcp)
       "ACP postInstall check does not match the selected features";
     {
       cargoBuildFlags = flags;

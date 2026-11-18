@@ -123,7 +123,7 @@ pub async fn handle_ws_bridge(
         );
         return (
             StatusCode::UNAUTHORIZED,
-            "Unauthorized: /ws/bridge needs a bridge token (zeroclaw gateway bridge add <name>)",
+            "Unauthorized: /ws/bridge needs a bridge token (rei gateway bridge add <name>)",
         )
             .into_response();
     };

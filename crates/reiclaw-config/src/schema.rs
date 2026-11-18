@@ -35,15 +35,15 @@ pub(crate) const CONFIG_SCHEMA_LOG_TARGET: &str = module_path!();
 
 // ── Top-level config ──────────────────────────────────────────────
 
-/// Top-level ZeroClaw configuration, loaded from `config.toml`.
+/// Top-level ReiClaw configuration, loaded from `config.toml`.
 ///
-/// Resolution order: `ZEROCLAW_CONFIG_DIR` env → `ZEROCLAW_WORKSPACE` env → `~/.zeroclaw/config.toml`.
+/// Resolution order: `REI_CONFIG_DIR` env -> `REI_WORKSPACE` env -> `~/.rei/config.toml`.
 #[derive(Debug, Clone, Serialize, Deserialize, Configurable)]
 #[cfg_attr(feature = "schema-export", derive(schemars::JsonSchema))]
 pub struct Config {
     /// Shared instance data directory (databases, hygiene state, cost
-    /// records, daemon state files). Computed from `ZEROCLAW_CONFIG_DIR`
-    /// / `ZEROCLAW_DATA_DIR` / `ZEROCLAW_WORKSPACE` (deprecated) at
+    /// records, daemon state files). Computed from `REI_CONFIG_DIR`
+    /// / `REI_DATA_DIR` / `REI_WORKSPACE` at
     /// load time, not serialized. Per-agent identity + markdown lives
     /// at `agent_workspace_dir(&alias)`, not here.
     #[serde(skip)]
@@ -51,7 +51,7 @@ pub struct Config {
     /// Path to config.toml - computed from home, not serialized
     #[serde(skip)]
     pub config_path: PathBuf,
-    /// Dotted prop-paths overridden by `ZEROCLAW_*` env vars at load time.
+    /// Dotted prop-paths overridden by `REI_*` env vars at load time.
     /// Populated by `apply_env_overrides`; consulted by `save()` to mask the
     /// env-injected values back to disk-or-default before encryption, and by
     /// `prop_is_env_overridden` for O(1) display-layer lookup (config list,
@@ -104,7 +104,7 @@ pub struct Config {
     #[serde(skip)]
     pub degraded_sections: Vec<String>,
     /// Structured deprecation warnings for retired config surfaces,
-    /// observed at load time: `ZEROCLAW_gateway__pairing_dashboard__*` env
+    /// observed at load time: `REI_gateway__pairing_dashboard__*` env
     /// overrides (ignored by the env-override tombstone) and a
     /// `[gateway.pairing_dashboard]` section left in a config file. This
     /// field is the only place those observations can live — nothing else
@@ -707,7 +707,7 @@ pub struct ModelProviderConfig {
     #[tab(Advanced)]
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub wire_api: Option<WireApi>,
-    /// When true, the client pulls credentials from ZeroClaw's stored `openai-codex` auth profile instead of the `api_key` field above. Import an existing Codex CLI login with `zeroclaw auth login --model-provider openai-codex --import ~/.codex/auth.json`, or run `zeroclaw auth login --model-provider openai-codex`. Turn on only for the OpenAI Codex model_provider; leave off for standard API-key model_providers.
+    /// When true, the client pulls credentials from ReiClaw's stored `openai-codex` auth profile instead of the `api_key` field above. Import an existing Codex CLI login with `rei auth login --model-provider openai-codex --import ~/.codex/auth.json`, or run `rei auth login --model-provider openai-codex`. Turn on only for the OpenAI Codex model_provider; leave off for standard API-key model_providers.
     #[tab(Connection)]
     #[serde(default, skip_serializing_if = "is_false")]
     #[credential_class = "external_auth_store"]
@@ -1189,8 +1189,8 @@ pub struct GeminiModelProviderConfig {
     /// OAuth-cache integration instead of the `api_key` field.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub auth_mode: Option<AuthMode>,
-    /// Google OAuth app `client_id`, used when this alias drives ZeroClaw's
-    /// own browser/device-code login flow (`zeroclaw auth login
+    /// Google OAuth app `client_id`, used when this alias drives ReiClaw's
+    /// own browser/device-code login flow (`rei auth login
     /// --model-provider gemini --profile <alias>`). Operators relying on
     /// the upstream `gemini login` tool don't need this; that tool writes
     /// its own client_id / client_secret into `~/.gemini/oauth_creds.json`.
@@ -2584,7 +2584,7 @@ pub struct TranscriptionConfig {
     pub enabled: bool,
     /// API key used for transcription requests (Groq transcription provider).
     ///
-    /// Use the schema-mirror env grammar (`ZEROCLAW_transcription__api_key=...`)
+    /// Use the schema-mirror env grammar (`REI_transcription__api_key=...`)
     /// for runtime env injection. Legacy `GROQ_API_KEY` constructor fallback was
     /// removed in v0.8.0.
     #[serde(default)]
@@ -4659,7 +4659,7 @@ pub struct GatewayConfig {
     #[serde(default = "default_true")]
     pub check_updates: bool,
 
-    /// Allow triggering a self-upgrade (binary swap via `zeroclaw update`) from
+    /// Allow triggering a self-upgrade (binary swap via `rei update`) from
     /// the dashboard. This is a remote-code-execution-adjacent surface: any
     /// authenticated dashboard user could replace the running binary. Keep off
     /// unless you trust every paired client. (default: false)
@@ -4667,10 +4667,10 @@ pub struct GatewayConfig {
     pub allow_self_upgrade: bool,
 
     /// Channel bridges allowed to attach (`[gateway.bridges.<name>]`). A
-    /// bridge is a separate process (for example `zeroclaw-bridge-telegram`)
+    /// bridge is a separate process (for example `rei-bridge-telegram`)
     /// that relays a messaging platform through `/ws/chat` and receives
     /// proactive messages (cron, heartbeat, `notify`) on `/ws/bridge`.
-    /// Mint entries with `zeroclaw gateway bridge add <name>`.
+    /// Mint entries with `rei gateway bridge add <name>`.
     #[serde(default, skip_serializing_if = "HashMap::is_empty")]
     #[nested]
     pub bridges: HashMap<String, GatewayBridgeConfig>,
@@ -5980,13 +5980,13 @@ pub struct MemoryConfig {
     /// Source of embedding vectors for semantic search. `none` = keyword-only retrieval (no API calls, no vector cost); `openai` = OpenAI's embedding API; `custom:URL` = any OpenAI-compatible embedding endpoint (LiteLLM, local gateway, etc.).
     #[serde(default = "default_embedding_provider")]
     pub embedding_provider: String,
-    /// Embedding model identifier — must match a model your chosen embedding model_provider serves (e.g. `text-embedding-3-small` for OpenAI). Changing this invalidates existing embeddings: the change is detected at startup and stale vectors are cleared automatically; run `zeroclaw memory reindex` to re-embed (or set `auto_reindex_on_identity_change`).
+    /// Embedding model identifier — must match a model your chosen embedding model_provider serves (e.g. `text-embedding-3-small` for OpenAI). Changing this invalidates existing embeddings: the change is detected at startup and stale vectors are cleared automatically; run `rei memory reindex` to re-embed (or set `auto_reindex_on_identity_change`).
     #[serde(default = "default_embedding_model")]
     pub embedding_model: String,
     /// Vector width produced by the embedding model — must match the model's native dimension or vectors won't store correctly. Look up the number on the model_provider's model page.
     #[serde(default = "default_embedding_dims")]
     pub embedding_dimensions: usize,
-    /// Automatically re-embed all memories in the background when a change of embedding provider/model/dimensions is detected at startup (after the stale vectors have been cleared). Costs one embedding API call per memory, so it's off by default — leave it off for large stores and run `zeroclaw memory reindex` explicitly instead.
+    /// Automatically re-embed all memories in the background when a change of embedding provider/model/dimensions is detected at startup (after the stale vectors have been cleared). Costs one embedding API call per memory, so it's off by default — leave it off for large stores and run `rei memory reindex` explicitly instead.
     #[serde(default)]
     pub auto_reindex_on_identity_change: bool,
     /// Optional API key for the embedding endpoint. When set, embedding calls use this key instead of inheriting one from the seed model provider — decoupling embeddings from the chat model. Use it when the chat model runs on a provider that carries no usable embedding credential (e.g. an OAuth-only provider) while embeddings keep hitting an `openai`/`custom:` endpoint with their own key. Leave unset to inherit the seed provider's key (backward-compatible default).
@@ -8695,7 +8695,7 @@ pub struct WebAuthnConfig {
     /// Relying Party origin URL (e.g. `"https://example.com"`). Default: `"http://localhost:42617"`.
     #[serde(default = "default_webauthn_rp_origin")]
     pub rp_origin: String,
-    /// Relying Party display name. Default: "ZeroClaw".
+    /// Relying Party display name. Default: "ReiClaw".
     #[serde(default = "default_webauthn_rp_name")]
     pub rp_name: String,
 }
@@ -8720,7 +8720,7 @@ fn default_webauthn_rp_origin() -> String {
 }
 
 fn default_webauthn_rp_name() -> String {
-    "ZeroClaw".into()
+    "ReiClaw".into()
 }
 
 /// OTP validation strategy.
@@ -9148,11 +9148,11 @@ impl Default for Config {
     fn default() -> Self {
         let home =
             UserDirs::new().map_or_else(|| PathBuf::from("."), |u| u.home_dir().to_path_buf());
-        let zeroclaw_dir = home.join(".zeroclaw");
+        let rei_dir = home.join(".rei");
 
         Self {
-            data_dir: zeroclaw_dir.join("data"),
-            config_path: zeroclaw_dir.join("config.toml"),
+            data_dir: rei_dir.join("data"),
+            config_path: rei_dir.join("config.toml"),
             composition: None,
             tasks: crate::tasks::TasksConfig::default(),
             env_overridden_paths: EnvOverriddenPaths::new(),
@@ -9361,7 +9361,7 @@ impl Config {
         }]
     }
 
-    /// Returns `true` if `path` was populated by a `ZEROCLAW_*` env-var
+    /// Returns `true` if `path` was populated by a `REI_*` env-var
     /// override at load time. O(1) HashSet lookup; safe to call per row in
     /// list-rendering paths (`config list`, dashboard, quickstart).
     pub fn prop_is_env_overridden(&self, path: &str) -> bool {
@@ -9400,7 +9400,7 @@ impl HasPropKind for serde_json::Value {
     // the form renders a text input where the user pastes raw JSON.
     // Round-trip via `set_prop` stays correct: serde deserializes the TOML
     // string back into `Value::String(...)`. Power users editing complex
-    // objects still use `zeroclaw config set --json` or hand-edit the
+    // objects still use `rei config set --json` or hand-edit the
     // `config.toml`.
     const PROP_KIND: PropKind = PropKind::String;
 }

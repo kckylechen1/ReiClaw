@@ -56,14 +56,14 @@ pub fn log_gateway_start(host: &str, port: u16) {
             INFO,
             ::reiclaw_log::Event::new(module_path!(), ::reiclaw_log::Action::Note)
                 .with_attrs(::serde_json::json!({"host": host})),
-            "🚀 Starting ZeroClaw Gateway on (random port)"
+            "🚀 Starting ReiClaw Gateway on (random port)"
         );
     } else {
         ::reiclaw_log::record!(
             INFO,
             ::reiclaw_log::Event::new(module_path!(), ::reiclaw_log::Action::Note)
                 .with_attrs(::serde_json::json!({"host": host, "port": port})),
-            "🚀 Starting ZeroClaw Gateway on"
+            "🚀 Starting ReiClaw Gateway on"
         );
     }
 }
@@ -318,7 +318,7 @@ pub fn paircode_no_code_message(
     match action {
         PaircodeAction::Show => {
             lines.push(
-                "`zeroclaw gateway get-paircode` only displays an existing active code; it does not mint a new one."
+                "`rei gateway get-paircode` only displays an existing active code; it does not mint a new one."
                     .into(),
             );
             lines.push("To pair another device, run:".into());
@@ -383,7 +383,7 @@ fn paircode_command(
     default_port: u16,
     flag: Option<&str>,
 ) -> String {
-    let mut command = "    zeroclaw gateway get-paircode".to_string();
+    let mut command = "    rei gateway get-paircode".to_string();
     if let Some(flag) = flag {
         command.push(' ');
         command.push_str(flag);

@@ -478,7 +478,7 @@ fn soul_check_hint_lists_enabled_agents_with_a_soul_store_as_informational() {
         assert_eq!(item.category, "agent.soul");
         assert!(
             item.message
-                .contains(&format!("zeroclaw soul check --agent {alias}")),
+                .contains(&format!("rei soul check --agent {alias}")),
             "{}",
             item.message
         );

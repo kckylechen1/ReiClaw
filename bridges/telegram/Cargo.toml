@@ -1,6 +1,6 @@
 [package]
-name = "zeroclaw-bridge-telegram"
-description = "Telegram bridge that attaches to the ZeroClaw gateway's chat socket"
+name = "reiclaw-bridge-telegram"
+description = "Telegram bridge that attaches to the ReiClaw gateway's chat socket"
 publish = false
 version.workspace = true
 edition.workspace = true
@@ -9,7 +9,7 @@ repository.workspace = true
 rust-version.workspace = true
 
 [[bin]]
-name = "zeroclaw-bridge-telegram"
+name = "rei-bridge-telegram"
 path = "src/main.rs"
 
 # A bridge is a gateway client: the chat socket client, an HTTP client for

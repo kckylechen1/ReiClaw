@@ -150,7 +150,7 @@ impl WebFetchTool {
             .timeout(Duration::from_secs(timeout_secs))
             .connect_timeout(Duration::from_secs(10))
             .redirect(redirect_policy)
-            .user_agent("ZeroClaw/0.1 (web_fetch)");
+            .user_agent("ReiClaw/0.1 (web_fetch)");
         let builder = pin_resolved_host(builder, target);
         Ok((builder.build()?, rejected))
     }

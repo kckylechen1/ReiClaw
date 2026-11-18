@@ -35,7 +35,7 @@ export function isSideQueryRequestId(id: string | undefined): id is string {
   return id?.startsWith(SIDE_QUERY_ID_PREFIX) === true;
 }
 
-const SESSION_ID_KEY_PREFIX = 'zeroclaw_session_id';
+const SESSION_ID_KEY_PREFIX = 'reiclaw_session_id';
 
 /** Return a stable session ID for the given agent alias, persisted in
  * localStorage. Each agent gets its own session so parallel conversations

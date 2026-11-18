@@ -336,7 +336,7 @@ async fn expand_tilde_path_handles_relative_path() {
 async fn expand_tilde_path_expands_tilde_when_home_set() {
     // This test verifies that tilde expansion works when HOME is set.
     // In normal environments, HOME is set, so ~ should expand.
-    let path = expand_tilde_path("~/.zeroclaw");
+    let path = expand_tilde_path("~/.rei");
     // The path should not literally start with '~' if HOME is set
     // (it should be expanded to the actual home directory)
     if std::env::var("HOME").is_ok() {
@@ -954,10 +954,10 @@ fn drain_captured(rx: &mut tokio::sync::broadcast::Receiver<serde_json::Value>) 
 
 #[test]
 async fn config_dir_creation_error_mentions_openrc_and_path() {
-    let msg = config_dir_creation_error(Path::new("/etc/zeroclaw"));
-    assert!(msg.contains("/etc/zeroclaw"));
+    let msg = config_dir_creation_error(Path::new("/etc/rei"));
+    assert!(msg.contains("/etc/rei"));
     assert!(msg.contains("OpenRC"));
-    assert!(msg.contains("zeroclaw"));
+    assert!(msg.contains("rei"));
 }
 
 #[test]
@@ -1646,8 +1646,8 @@ runtime_profile = "default"
 "#;
     fs::write(&config_path, contents).await.unwrap();
     let _home = EnvValueGuard::set("HOME", home.path());
-    let _workspace = EnvValueGuard::set("ZEROCLAW_WORKSPACE", &workspace);
-    let _config_dir = EnvValueGuard::remove("ZEROCLAW_CONFIG_DIR");
+    let _workspace = EnvValueGuard::set("REI_WORKSPACE", &workspace);
+    let _config_dir = EnvValueGuard::remove("REI_CONFIG_DIR");
 
     let mut config = Box::pin(Config::load_or_init()).await.unwrap();
     assert!(config.degraded_sections.is_empty());
@@ -3369,7 +3369,7 @@ default_temperature = 0.7
 async fn env_override_lock() -> MutexGuard<'static, ()> {
     // Delegate to the crate-shared lock so env-mutating tests in this
     // module serialize against `env_overrides::tests` too. Without
-    // this, tests across the two modules race on `ZEROCLAW_*` vars.
+    // this, tests across the two modules race on `REI_*` vars.
     crate::env_overrides::env_test_lock().await
 }
 
@@ -3544,13 +3544,13 @@ async fn save_repairs_bare_config_filename_using_runtime_resolution() {
     let temp_home =
         std::env::temp_dir().join(format!("zeroclaw_test_home_{}", uuid::Uuid::new_v4()));
     let workspace_dir = temp_home.join("workspace");
-    let resolved_config_path = temp_home.join(".zeroclaw").join("config.toml");
+    let resolved_config_path = temp_home.join(".rei").join("config.toml");
 
     let original_home = std::env::var("HOME").ok();
     // SAFETY: test-only, single-threaded test runner.
     unsafe { std::env::set_var("HOME", &temp_home) };
     // SAFETY: test-only, single-threaded test runner.
-    unsafe { std::env::set_var("ZEROCLAW_WORKSPACE", &workspace_dir) };
+    unsafe { std::env::set_var("REI_WORKSPACE", &workspace_dir) };
 
     let mut config = Config {
         data_dir: workspace_dir,
@@ -3587,7 +3587,7 @@ async fn save_repairs_bare_config_filename_using_runtime_resolution() {
     );
 
     // SAFETY: test-only, single-threaded test runner.
-    unsafe { std::env::remove_var("ZEROCLAW_WORKSPACE") };
+    unsafe { std::env::remove_var("REI_WORKSPACE") };
     if let Some(home) = original_home {
         // SAFETY: test-only, single-threaded test runner.
         unsafe { std::env::set_var("HOME", home) };
@@ -3734,20 +3734,20 @@ wire_api = "ws"
 }
 
 #[test]
-async fn resolve_runtime_config_dirs_accepts_legacy_zeroclaw_workspace() {
+async fn resolve_runtime_config_dirs_accepts_legacy_rei_workspace() {
     let _env_guard = env_override_lock().await;
     let default_config_dir = std::env::temp_dir().join(uuid::Uuid::new_v4().to_string());
     let default_workspace_dir = default_config_dir.join("workspace");
     let workspace_dir = default_config_dir.join("profile-a");
 
     // SAFETY: test-only, single-threaded test runner.
-    unsafe { std::env::set_var("ZEROCLAW_WORKSPACE", &workspace_dir) };
+    unsafe { std::env::set_var("REI_WORKSPACE", &workspace_dir) };
     let (config_dir, resolved_workspace_dir, source) =
         resolve_runtime_config_dirs(&default_config_dir, &default_workspace_dir)
             .await
             .unwrap();
 
-    // ZEROCLAW_WORKSPACE is the deprecated alias for ZEROCLAW_DATA_DIR.
+    // REI_WORKSPACE is the deprecated alias for REI_DATA_DIR.
     // Resolution treats the path as the config root and derives the data
     // sub-dir from it; the source label reflects the deprecated entry.
     assert_eq!(source, ConfigResolutionSource::EnvWorkspaceLegacy);
@@ -3755,7 +3755,7 @@ async fn resolve_runtime_config_dirs_accepts_legacy_zeroclaw_workspace() {
     assert_eq!(resolved_workspace_dir, workspace_dir.join("data"));
 
     // SAFETY: test-only, single-threaded test runner.
-    unsafe { std::env::remove_var("ZEROCLAW_WORKSPACE") };
+    unsafe { std::env::remove_var("REI_WORKSPACE") };
     let _ = fs::remove_dir_all(default_config_dir).await;
 }
 
@@ -3769,9 +3769,9 @@ async fn resolve_runtime_config_dirs_uses_env_config_dir_first() {
     fs::create_dir_all(&default_config_dir).await.unwrap();
 
     // SAFETY: test-only, single-threaded test runner.
-    unsafe { std::env::set_var("ZEROCLAW_CONFIG_DIR", &explicit_config_dir) };
+    unsafe { std::env::set_var("REI_CONFIG_DIR", &explicit_config_dir) };
     // SAFETY: test-only, single-threaded test runner.
-    unsafe { std::env::remove_var("ZEROCLAW_WORKSPACE") };
+    unsafe { std::env::remove_var("REI_WORKSPACE") };
 
     let (config_dir, resolved_workspace_dir, source) =
         resolve_runtime_config_dirs(&default_config_dir, &default_workspace_dir)
@@ -3783,7 +3783,7 @@ async fn resolve_runtime_config_dirs_uses_env_config_dir_first() {
     assert_eq!(resolved_workspace_dir, explicit_config_dir.join("data"));
 
     // SAFETY: test-only, single-threaded test runner.
-    unsafe { std::env::remove_var("ZEROCLAW_CONFIG_DIR") };
+    unsafe { std::env::remove_var("REI_CONFIG_DIR") };
     let _ = fs::remove_dir_all(default_config_dir).await;
 }
 
@@ -3794,7 +3794,7 @@ async fn resolve_runtime_config_dirs_falls_back_to_default_layout() {
     let default_workspace_dir = default_config_dir.join("workspace");
 
     // SAFETY: test-only, single-threaded test runner.
-    unsafe { std::env::remove_var("ZEROCLAW_WORKSPACE") };
+    unsafe { std::env::remove_var("REI_WORKSPACE") };
     let (config_dir, resolved_workspace_dir, source) =
         resolve_runtime_config_dirs(&default_config_dir, &default_workspace_dir)
             .await
@@ -3826,9 +3826,8 @@ async fn classify_runtime_config_kind_uses_runtime_resolution_source() {
     let _home_guard = EnvValueGuard::remove("HOME");
     let _rei_guard = EnvValueGuard::remove("REI_CONFIG_DIR");
     let _reiclaw_guard = EnvValueGuard::remove("REICLAW_CONFIG_DIR");
-    let _zc_guard = EnvValueGuard::remove("ZEROCLAW_CONFIG_DIR");
-    let _data_guard = EnvValueGuard::remove("ZEROCLAW_DATA_DIR");
-    let _workspace_guard = EnvValueGuard::remove("ZEROCLAW_WORKSPACE");
+    let _data_guard = EnvValueGuard::remove("REI_DATA_DIR");
+    let _workspace_guard = EnvValueGuard::remove("REI_WORKSPACE");
 
     assert_eq!(
         classify_runtime_config_kind(&fake_home.join(".rei").join("config.toml")).await,
@@ -3836,10 +3835,10 @@ async fn classify_runtime_config_kind_uses_runtime_resolution_source() {
     );
     assert_eq!(
         classify_runtime_config_kind(&fake_home.join(".zeroclaw").join("config.toml")).await,
-        RuntimeConfigKind::Default
+        RuntimeConfigKind::Custom
     );
 
-    let _config_guard = EnvValueGuard::set("ZEROCLAW_CONFIG_DIR", &explicit_config_dir);
+    let _config_guard = EnvValueGuard::set("REI_CONFIG_DIR", &explicit_config_dir);
     assert_eq!(
         classify_runtime_config_kind(&explicit_config_dir.join("config.toml")).await,
         RuntimeConfigKind::Custom
@@ -3847,28 +3846,27 @@ async fn classify_runtime_config_kind_uses_runtime_resolution_source() {
 }
 
 #[test]
-async fn config_dir_env_precedence_prefers_rei_over_reiclaw_over_zeroclaw() {
+async fn config_dir_env_precedence_prefers_rei_over_reiclaw_and_ignores_zeroclaw() {
     let _env_guard = env_override_lock().await;
     let base = std::env::temp_dir().join(format!("reiclaw_env_test_{}", uuid::Uuid::new_v4()));
     let rei_dir = base.join("rei-dir");
     let reiclaw_dir = base.join("reiclaw-dir");
     let zeroclaw_dir = base.join("zeroclaw-dir");
+    let temp_home = base.join("home");
+    let _home_guard = EnvValueGuard::set("HOME", &temp_home);
 
     let _rei_guard = EnvValueGuard::remove("REI_CONFIG_DIR");
     let _reiclaw_guard = EnvValueGuard::remove("REICLAW_CONFIG_DIR");
     let _zc_guard = EnvValueGuard::remove("ZEROCLAW_CONFIG_DIR");
-    let _data_guard = EnvValueGuard::remove("ZEROCLAW_DATA_DIR");
-    let _workspace_guard = EnvValueGuard::remove("ZEROCLAW_WORKSPACE");
+    let _data_guard = EnvValueGuard::remove("REI_DATA_DIR");
+    let _workspace_guard = EnvValueGuard::remove("REI_WORKSPACE");
 
     {
+        // Legacy ZEROCLAW_CONFIG_DIR is ignored; falls back to ~/.rei.
         let _zc = EnvValueGuard::set("ZEROCLAW_CONFIG_DIR", &zeroclaw_dir);
         let (cfg, data) = resolve_runtime_dirs().await.unwrap();
-        assert_eq!(cfg, zeroclaw_dir);
-        assert_eq!(data, zeroclaw_dir.join("data"));
-        assert_eq!(
-            ftl_locale_dir("zh-CN").unwrap(),
-            zeroclaw_dir.join("data").join("ftl").join("zh-CN")
-        );
+        assert_eq!(cfg, temp_home.join(".rei"));
+        assert_eq!(data, temp_home.join(".rei").join("data"));
 
         let _reiclaw = EnvValueGuard::set("REICLAW_CONFIG_DIR", &reiclaw_dir);
         let (cfg, data) = resolve_runtime_dirs().await.unwrap();
@@ -3897,18 +3895,17 @@ async fn config_dir_env_precedence_prefers_rei_over_reiclaw_over_zeroclaw() {
 }
 
 #[test]
-async fn default_config_dir_uses_rei_and_falls_back_to_existing_zeroclaw() {
+async fn default_config_dir_uses_rei_without_zeroclaw_fallback() {
     let _env_guard = env_override_lock().await;
     let temp_home =
         std::env::temp_dir().join(format!("reiclaw_home_test_{}", uuid::Uuid::new_v4()));
     let _home_guard = EnvValueGuard::set("HOME", &temp_home);
     let _rei_guard = EnvValueGuard::remove("REI_CONFIG_DIR");
     let _reiclaw_guard = EnvValueGuard::remove("REICLAW_CONFIG_DIR");
-    let _zc_guard = EnvValueGuard::remove("ZEROCLAW_CONFIG_DIR");
-    let _data_guard = EnvValueGuard::remove("ZEROCLAW_DATA_DIR");
-    let _workspace_guard = EnvValueGuard::remove("ZEROCLAW_WORKSPACE");
+    let _data_guard = EnvValueGuard::remove("REI_DATA_DIR");
+    let _workspace_guard = EnvValueGuard::remove("REI_WORKSPACE");
 
-    // Fresh home (neither ~/.rei nor ~/.zeroclaw exists) defaults to ~/.rei.
+    // Fresh home defaults to ~/.rei.
     let (cfg, data) = resolve_runtime_dirs().await.unwrap();
     assert_eq!(cfg, temp_home.join(".rei"));
     assert_eq!(data, temp_home.join(".rei").join("data"));
@@ -3917,27 +3914,21 @@ async fn default_config_dir_uses_rei_and_falls_back_to_existing_zeroclaw() {
         temp_home.join(".rei").join("data").join("ftl").join("en")
     );
 
-    // Legacy install: ~/.zeroclaw exists and ~/.rei does not -> falls back to ~/.zeroclaw.
+    // Even if ~/.zeroclaw exists, ReiClaw stays purely on ~/.rei.
     fs::create_dir_all(temp_home.join(".zeroclaw"))
         .await
         .unwrap();
     let (cfg, data) = resolve_runtime_dirs().await.unwrap();
-    assert_eq!(cfg, temp_home.join(".zeroclaw"));
-    assert_eq!(data, temp_home.join(".zeroclaw").join("data"));
+    assert_eq!(cfg, temp_home.join(".rei"));
+    assert_eq!(data, temp_home.join(".rei").join("data"));
     assert_eq!(
         ftl_locale_dir("zh-CN").unwrap(),
         temp_home
-            .join(".zeroclaw")
+            .join(".rei")
             .join("data")
             .join("ftl")
             .join("zh-CN")
     );
-
-    // When both ~/.rei and ~/.zeroclaw exist, ~/.rei takes precedence.
-    fs::create_dir_all(temp_home.join(".rei")).await.unwrap();
-    let (cfg, data) = resolve_runtime_dirs().await.unwrap();
-    assert_eq!(cfg, temp_home.join(".rei"));
-    assert_eq!(data, temp_home.join(".rei").join("data"));
 
     let _ = fs::remove_dir_all(&temp_home).await;
 }
@@ -3966,28 +3957,28 @@ async fn try_resolve_macos_homebrew_config_dir_detects_cellar_layout() {
     let exe = prefix
         .path()
         .join("Cellar")
-        .join("zeroclaw")
+        .join("rei")
         .join("0.7.0")
         .join("bin")
-        .join("zeroclaw");
+        .join("rei");
 
     let config_dir = try_resolve_macos_homebrew_config_dir(&exe)
         .await
         .expect("expected Homebrew layout");
 
-    assert_eq!(config_dir, prefix.path().join("var").join("zeroclaw"));
+    assert_eq!(config_dir, prefix.path().join("var").join("rei"));
 }
 
 #[test]
 async fn try_resolve_macos_homebrew_config_dir_detects_prefix_bin_layout() {
     let prefix = create_homebrew_prefix().await;
-    let exe = prefix.path().join("bin").join("zeroclaw");
+    let exe = prefix.path().join("bin").join("rei");
 
     let config_dir = try_resolve_macos_homebrew_config_dir(&exe)
         .await
         .expect("expected Homebrew layout");
 
-    assert_eq!(config_dir, prefix.path().join("var").join("zeroclaw"));
+    assert_eq!(config_dir, prefix.path().join("var").join("rei"));
 }
 
 #[test]
@@ -3996,36 +3987,36 @@ async fn try_resolve_macos_homebrew_config_dir_detects_opt_bin_layout() {
     let exe = prefix
         .path()
         .join("opt")
-        .join("zeroclaw")
+        .join("rei")
         .join("bin")
-        .join("zeroclaw");
+        .join("rei");
 
     let config_dir = try_resolve_macos_homebrew_config_dir(&exe)
         .await
         .expect("expected Homebrew layout");
 
-    assert_eq!(config_dir, prefix.path().join("var").join("zeroclaw"));
+    assert_eq!(config_dir, prefix.path().join("var").join("rei"));
 }
 
 #[test]
 async fn try_resolve_macos_homebrew_config_dir_rejects_non_homebrew_layout() {
     let prefix = TempDir::new().expect("non-homebrew temp dir");
-    let exe = prefix.path().join("bin").join("zeroclaw");
+    let exe = prefix.path().join("bin").join("rei");
 
     assert!(try_resolve_macos_homebrew_config_dir(&exe).await.is_none());
 }
 
 #[test]
-async fn default_path_under_config_dir_respects_zeroclaw_config_dir() {
+async fn default_path_under_config_dir_respects_rei_config_dir() {
     let _env_guard = env_override_lock().await;
-    let custom_dir = std::env::temp_dir().join("zeroclaw-test-profile");
+    let custom_dir = std::env::temp_dir().join("reiclaw-test-profile");
     // SAFETY: test-only, single-threaded test runner.
-    unsafe { std::env::set_var("ZEROCLAW_CONFIG_DIR", &custom_dir) };
+    unsafe { std::env::set_var("REI_CONFIG_DIR", &custom_dir) };
 
     let result = default_path_under_config_dir("estop-state.json");
 
     // SAFETY: test-only, single-threaded test runner.
-    unsafe { std::env::remove_var("ZEROCLAW_CONFIG_DIR") };
+    unsafe { std::env::remove_var("REI_CONFIG_DIR") };
 
     assert_eq!(
         result,
@@ -4033,7 +4024,7 @@ async fn default_path_under_config_dir_respects_zeroclaw_config_dir() {
             .join("estop-state.json")
             .to_string_lossy()
             .as_ref(),
-        "expected path under ZEROCLAW_CONFIG_DIR, got: {result}"
+        "expected path under REI_CONFIG_DIR, got: {result}"
     );
 }
 
@@ -4048,7 +4039,7 @@ async fn load_or_init_workspace_override_uses_workspace_root_for_config() {
     // SAFETY: test-only, single-threaded test runner.
     unsafe { std::env::set_var("HOME", &temp_home) };
     // SAFETY: test-only, single-threaded test runner.
-    unsafe { std::env::set_var("ZEROCLAW_WORKSPACE", &workspace_dir) };
+    unsafe { std::env::set_var("REI_WORKSPACE", &workspace_dir) };
 
     let config = Box::pin(Config::load_or_init()).await.unwrap();
 
@@ -4066,7 +4057,7 @@ async fn load_or_init_workspace_override_uses_workspace_root_for_config() {
     );
 
     // SAFETY: test-only, single-threaded test runner.
-    unsafe { std::env::remove_var("ZEROCLAW_WORKSPACE") };
+    unsafe { std::env::remove_var("REI_WORKSPACE") };
     if let Some(home) = original_home {
         // SAFETY: test-only, single-threaded test runner.
         unsafe { std::env::set_var("HOME", home) };
@@ -4101,7 +4092,7 @@ async fn load_or_init_invalid_composition_hard_errors() {
     // SAFETY: test-only, single-threaded test runner.
     unsafe { std::env::set_var("HOME", &temp_home) };
     // SAFETY: test-only, single-threaded test runner.
-    unsafe { std::env::set_var("ZEROCLAW_WORKSPACE", &existing_dir) };
+    unsafe { std::env::set_var("REI_WORKSPACE", &existing_dir) };
 
     let err = Box::pin(Config::load_or_init())
         .await
@@ -4117,7 +4108,7 @@ async fn load_or_init_invalid_composition_hard_errors() {
     );
 
     // SAFETY: test-only, single-threaded test runner.
-    unsafe { std::env::remove_var("ZEROCLAW_WORKSPACE") };
+    unsafe { std::env::remove_var("REI_WORKSPACE") };
     if let Some(home) = original_home {
         // SAFETY: test-only, single-threaded test runner.
         unsafe { std::env::set_var("HOME", home) };
@@ -4132,7 +4123,7 @@ async fn load_or_init_invalid_composition_hard_errors() {
 async fn load_or_init_warns_about_retired_feishu_and_lark_settings() {
     let _env_guard = env_override_lock().await;
     let dir = TempDir::new().unwrap();
-    let _config_guard = EnvValueGuard::set("ZEROCLAW_CONFIG_DIR", dir.path());
+    let _config_guard = EnvValueGuard::set("REI_CONFIG_DIR", dir.path());
     let config_path = dir.path().join("config.toml");
 
     for (version, channels, retired, setting, remedy) in [
@@ -4181,7 +4172,7 @@ async fn load_or_init_warns_about_retired_feishu_and_lark_settings() {
 async fn assert_retired_channel_settings_load_with_warning(settings: &[(&str, &str)]) {
     let _env_guard = env_override_lock().await;
     let dir = TempDir::new().unwrap();
-    let _config_guard = EnvValueGuard::set("ZEROCLAW_CONFIG_DIR", dir.path());
+    let _config_guard = EnvValueGuard::set("REI_CONFIG_DIR", dir.path());
     let config_path = dir.path().join("config.toml");
     const RETIRED_SECRET: &str = "synthetic-retired-credential";
     let version = 3;
@@ -4274,7 +4265,7 @@ async fn load_or_init_warns_about_retired_voice_duplex_settings() {
 async fn load_or_init_warns_about_retired_whatsapp_security_settings() {
     let _env_guard = env_override_lock().await;
     let dir = TempDir::new().unwrap();
-    let _config_guard = EnvValueGuard::set("ZEROCLAW_CONFIG_DIR", dir.path());
+    let _config_guard = EnvValueGuard::set("REI_CONFIG_DIR", dir.path());
     let config_path = dir.path().join("config.toml");
 
     let (version, channels, alias) = ("schema_version = 3\n", "channels", ".personal");
@@ -4380,9 +4371,9 @@ max_retries = 3
     .await
     .unwrap();
     let _home = EnvValueGuard::set("HOME", home.path());
-    let _workspace = EnvValueGuard::remove("ZEROCLAW_WORKSPACE");
-    let _data_dir = EnvValueGuard::remove("ZEROCLAW_DATA_DIR");
-    let _config_dir = EnvValueGuard::set("ZEROCLAW_CONFIG_DIR", &workspace);
+    let _workspace = EnvValueGuard::remove("REI_WORKSPACE");
+    let _data_dir = EnvValueGuard::remove("REI_DATA_DIR");
+    let _config_dir = EnvValueGuard::set("REI_CONFIG_DIR", &workspace);
 
     let config = Box::pin(Config::load_or_init()).await.unwrap();
     assert_eq!(config.config_path, workspace.join("config.toml"));
@@ -4426,7 +4417,7 @@ async fn load_or_init_retired_pairing_dashboard_section_parses_with_tombstone_wa
     // SAFETY: test-only, single-threaded test runner.
     unsafe { std::env::set_var("HOME", &temp_home) };
     // SAFETY: test-only, single-threaded test runner.
-    unsafe { std::env::set_var("ZEROCLAW_WORKSPACE", &existing_dir) };
+    unsafe { std::env::set_var("REI_WORKSPACE", &existing_dir) };
 
     let config = Box::pin(Config::load_or_init())
         .await
@@ -4457,7 +4448,7 @@ async fn load_or_init_retired_pairing_dashboard_section_parses_with_tombstone_wa
     );
 
     // SAFETY: test-only, single-threaded test runner.
-    unsafe { std::env::remove_var("ZEROCLAW_WORKSPACE") };
+    unsafe { std::env::remove_var("REI_WORKSPACE") };
     if let Some(home) = original_home {
         // SAFETY: test-only, single-threaded test runner.
         unsafe { std::env::set_var("HOME", home) };
@@ -4479,7 +4470,7 @@ async fn load_or_init_fresh_install_pins_minimal_composition_and_keeps_existing_
     // SAFETY: test-only, single-threaded test runner.
     unsafe { std::env::set_var("HOME", &temp_home) };
     // SAFETY: test-only, single-threaded test runner.
-    unsafe { std::env::set_var("ZEROCLAW_WORKSPACE", &workspace_dir) };
+    unsafe { std::env::set_var("REI_WORKSPACE", &workspace_dir) };
 
     // Fresh install: the bootstrap writes the minimal composition into
     // the brand-new file and the in-memory config carries the same
@@ -4511,7 +4502,7 @@ model = "persisted-profile"
     .await
     .unwrap();
     // SAFETY: test-only, single-threaded test runner.
-    unsafe { std::env::set_var("ZEROCLAW_WORKSPACE", &existing_dir) };
+    unsafe { std::env::set_var("REI_WORKSPACE", &existing_dir) };
     let existing = Box::pin(Config::load_or_init()).await.unwrap();
     assert!(
         existing.composition.is_none(),
@@ -4528,7 +4519,7 @@ model = "persisted-profile"
     );
 
     // SAFETY: test-only, single-threaded test runner.
-    unsafe { std::env::remove_var("ZEROCLAW_WORKSPACE") };
+    unsafe { std::env::remove_var("REI_WORKSPACE") };
     if let Some(home) = original_home {
         // SAFETY: test-only, single-threaded test runner.
         unsafe { std::env::set_var("HOME", home) };
@@ -4545,19 +4536,19 @@ async fn load_or_init_workspace_suffix_uses_legacy_config_layout() {
     let temp_home =
         std::env::temp_dir().join(format!("zeroclaw_test_home_{}", uuid::Uuid::new_v4()));
     let workspace_dir = temp_home.join("workspace");
-    let legacy_config_dir = temp_home.join(".zeroclaw");
+    let legacy_config_dir = temp_home.join(".rei");
     let legacy_config_path = legacy_config_dir.join("config.toml");
 
     let original_home = std::env::var("HOME").ok();
     // SAFETY: test-only, single-threaded test runner.
     unsafe { std::env::set_var("HOME", &temp_home) };
     // SAFETY: test-only, single-threaded test runner.
-    unsafe { std::env::set_var("ZEROCLAW_WORKSPACE", &workspace_dir) };
+    unsafe { std::env::set_var("REI_WORKSPACE", &workspace_dir) };
 
     let config = Box::pin(Config::load_or_init()).await.unwrap();
 
     // V3: `config.data_dir` lives at `<install>/data/`. The
-    // ZEROCLAW_WORKSPACE env var (deprecated alias) resolved to the
+    // REI_WORKSPACE env var (deprecated alias) resolved to the
     // legacy config layout where the install root is the parent of
     // the env-var path; data sits at `<install>/data/`.
     assert_eq!(config.data_dir, legacy_config_dir.join("data"));
@@ -4565,7 +4556,7 @@ async fn load_or_init_workspace_suffix_uses_legacy_config_layout() {
     assert!(config.config_path.exists());
 
     // SAFETY: test-only, single-threaded test runner.
-    unsafe { std::env::remove_var("ZEROCLAW_WORKSPACE") };
+    unsafe { std::env::remove_var("REI_WORKSPACE") };
     if let Some(home) = original_home {
         // SAFETY: test-only, single-threaded test runner.
         unsafe { std::env::set_var("HOME", home) };
@@ -4582,7 +4573,7 @@ async fn load_or_init_workspace_override_keeps_existing_legacy_config() {
     let temp_home =
         std::env::temp_dir().join(format!("zeroclaw_test_home_{}", uuid::Uuid::new_v4()));
     let workspace_dir = temp_home.join("custom-workspace");
-    let legacy_config_dir = temp_home.join(".zeroclaw");
+    let legacy_config_dir = temp_home.join(".rei");
     let legacy_config_path = legacy_config_dir.join("config.toml");
 
     fs::create_dir_all(&legacy_config_dir).await.unwrap();
@@ -4601,13 +4592,13 @@ model = "legacy-model"
     // SAFETY: test-only, single-threaded test runner.
     unsafe { std::env::set_var("HOME", &temp_home) };
     // SAFETY: test-only, single-threaded test runner.
-    unsafe { std::env::set_var("ZEROCLAW_WORKSPACE", &workspace_dir) };
+    unsafe { std::env::set_var("REI_WORKSPACE", &workspace_dir) };
 
     let config = Box::pin(Config::load_or_init()).await.unwrap();
 
     // V3: `config.data_dir` resolves to `<install>/data/` under
     // the install root (the directory holding the existing
-    // `config.toml`), regardless of the ZEROCLAW_WORKSPACE
+    // `config.toml`), regardless of the REI_WORKSPACE
     // (deprecated) override.
     assert_eq!(config.data_dir, legacy_config_dir.join("data"));
     assert_eq!(config.config_path, legacy_config_path);
@@ -4621,7 +4612,7 @@ model = "legacy-model"
     );
 
     // SAFETY: test-only, single-threaded test runner.
-    unsafe { std::env::remove_var("ZEROCLAW_WORKSPACE") };
+    unsafe { std::env::remove_var("REI_WORKSPACE") };
     if let Some(home) = original_home {
         // SAFETY: test-only, single-threaded test runner.
         unsafe { std::env::set_var("HOME", home) };
@@ -4637,7 +4628,7 @@ async fn load_or_init_decrypts_telegram_channel_secrets() {
     let _env_guard = env_override_lock().await;
     let temp_home =
         std::env::temp_dir().join(format!("zeroclaw_test_home_{}", uuid::Uuid::new_v4()));
-    let config_dir = temp_home.join(".zeroclaw");
+    let config_dir = temp_home.join(".rei");
     let config_path = config_dir.join("config.toml");
 
     fs::create_dir_all(&config_dir).await.unwrap();
@@ -4646,7 +4637,7 @@ async fn load_or_init_decrypts_telegram_channel_secrets() {
     // SAFETY: test-only, single-threaded test runner.
     unsafe { std::env::set_var("HOME", &temp_home) };
     // SAFETY: test-only, single-threaded test runner.
-    unsafe { std::env::remove_var("ZEROCLAW_WORKSPACE") };
+    unsafe { std::env::remove_var("REI_WORKSPACE") };
 
     let mut config = Config {
         config_path: config_path.clone(),
@@ -4703,7 +4694,7 @@ model = "persisted-profile"
     // SAFETY: test-only, single-threaded test runner.
     unsafe { std::env::set_var("HOME", &temp_home) };
     // SAFETY: test-only, single-threaded test runner.
-    unsafe { std::env::set_var("ZEROCLAW_WORKSPACE", &workspace_dir) };
+    unsafe { std::env::set_var("REI_WORKSPACE", &workspace_dir) };
 
     let mut rx = capture_log_events();
 
@@ -4713,8 +4704,8 @@ model = "persisted-profile"
 
     // V3: shared databases live at `<install>/data/`, per-agent
     // identity at `<install>/agents/<alias>/workspace/`. The
-    // ZEROCLAW_WORKSPACE env var (deprecated alias for
-    // ZEROCLAW_DATA_DIR) pinned the install root, so data_dir is
+    // REI_WORKSPACE env var (deprecated alias for
+    // REI_DATA_DIR) pinned the install root, so data_dir is
     // `<install>/data/` derived from the resolved root.
     assert_eq!(config.data_dir, workspace_dir.join("data"));
     assert_eq!(config.config_path, config_path);
@@ -4731,7 +4722,7 @@ model = "persisted-profile"
     assert!(!logs.contains("\"initialized\":false"), "{logs}");
 
     // SAFETY: test-only, single-threaded test runner.
-    unsafe { std::env::remove_var("ZEROCLAW_WORKSPACE") };
+    unsafe { std::env::remove_var("REI_WORKSPACE") };
     if let Some(home) = original_home {
         // SAFETY: test-only, single-threaded test runner.
         unsafe { std::env::set_var("HOME", home) };
@@ -4770,7 +4761,7 @@ audit = "should-be-a-table-not-a-string"
     // SAFETY: test-only, single-threaded test runner.
     unsafe { std::env::set_var("HOME", &temp_home) };
     // SAFETY: test-only, single-threaded test runner.
-    unsafe { std::env::set_var("ZEROCLAW_WORKSPACE", &workspace_dir) };
+    unsafe { std::env::set_var("REI_WORKSPACE", &workspace_dir) };
 
     let config = Box::pin(Config::load_or_init()).await.unwrap();
 
@@ -4781,7 +4772,7 @@ audit = "should-be-a-table-not-a-string"
     );
 
     // SAFETY: test-only, single-threaded test runner.
-    unsafe { std::env::remove_var("ZEROCLAW_WORKSPACE") };
+    unsafe { std::env::remove_var("REI_WORKSPACE") };
     if let Some(home) = original_home {
         // SAFETY: test-only, single-threaded test runner.
         unsafe { std::env::set_var("HOME", home) };
@@ -4825,7 +4816,7 @@ bot_token = 42
     // SAFETY: test-only, single-threaded test runner.
     unsafe { std::env::set_var("HOME", &temp_home) };
     // SAFETY: test-only, single-threaded test runner.
-    unsafe { std::env::set_var("ZEROCLAW_WORKSPACE", &workspace_dir) };
+    unsafe { std::env::set_var("REI_WORKSPACE", &workspace_dir) };
 
     let config = Box::pin(Config::load_or_init()).await.unwrap();
 
@@ -4840,7 +4831,7 @@ bot_token = 42
     );
 
     // SAFETY: test-only, single-threaded test runner.
-    unsafe { std::env::remove_var("ZEROCLAW_WORKSPACE") };
+    unsafe { std::env::remove_var("REI_WORKSPACE") };
     if let Some(home) = original_home {
         // SAFETY: test-only, single-threaded test runner.
         unsafe { std::env::set_var("HOME", home) };
@@ -4879,7 +4870,7 @@ enabled = false
     // SAFETY: test-only, single-threaded test runner.
     unsafe { std::env::set_var("HOME", &temp_home) };
     // SAFETY: test-only, single-threaded test runner.
-    unsafe { std::env::set_var("ZEROCLAW_WORKSPACE", &workspace_dir) };
+    unsafe { std::env::set_var("REI_WORKSPACE", &workspace_dir) };
 
     let config = Box::pin(Config::load_or_init()).await.unwrap();
 
@@ -4895,7 +4886,7 @@ enabled = false
     );
 
     // SAFETY: test-only, single-threaded test runner.
-    unsafe { std::env::remove_var("ZEROCLAW_WORKSPACE") };
+    unsafe { std::env::remove_var("REI_WORKSPACE") };
     if let Some(home) = original_home {
         // SAFETY: test-only, single-threaded test runner.
         unsafe { std::env::set_var("HOME", home) };
@@ -4927,7 +4918,7 @@ async fn load_or_init_marks_whole_config_degraded_for_unparseable_file() {
     // SAFETY: test-only, single-threaded test runner.
     unsafe { std::env::set_var("HOME", &temp_home) };
     // SAFETY: test-only, single-threaded test runner.
-    unsafe { std::env::set_var("ZEROCLAW_WORKSPACE", &workspace_dir) };
+    unsafe { std::env::set_var("REI_WORKSPACE", &workspace_dir) };
 
     let config = Box::pin(Config::load_or_init()).await.unwrap();
 
@@ -4938,7 +4929,7 @@ async fn load_or_init_marks_whole_config_degraded_for_unparseable_file() {
     );
 
     // SAFETY: test-only, single-threaded test runner.
-    unsafe { std::env::remove_var("ZEROCLAW_WORKSPACE") };
+    unsafe { std::env::remove_var("REI_WORKSPACE") };
     if let Some(home) = original_home {
         // SAFETY: test-only, single-threaded test runner.
         unsafe { std::env::set_var("HOME", home) };
@@ -5002,12 +4993,12 @@ runtime_profile = "default"
     // SAFETY: test-only, guarded by env_override_lock.
     unsafe { std::env::set_var("HOME", &temp_home) };
     // SAFETY: test-only, guarded by env_override_lock.
-    unsafe { std::env::set_var("ZEROCLAW_WORKSPACE", &workspace_dir) };
+    unsafe { std::env::set_var("REI_WORKSPACE", &workspace_dir) };
 
     let config = Box::pin(Config::load_or_init()).await.unwrap();
 
     // SAFETY: test-only, guarded by env_override_lock.
-    unsafe { std::env::remove_var("ZEROCLAW_WORKSPACE") };
+    unsafe { std::env::remove_var("REI_WORKSPACE") };
     if let Some(home) = original_home {
         // SAFETY: test-only, guarded by env_override_lock.
         unsafe { std::env::set_var("HOME", home) };
@@ -5260,13 +5251,13 @@ async fn load_or_init_config_saves_over_existing_file() {
     let _env_guard = env_override_lock().await;
     let temp_home =
         std::env::temp_dir().join(format!("zeroclaw_test_home_{}", uuid::Uuid::new_v4()));
-    // ZEROCLAW_* vars outrank HOME in path resolution; remove them so an
+    // REI_* vars outrank HOME in path resolution; remove them so an
     // inherited developer environment cannot redirect this test at a
     // real operator config. RAII guards restore on panic.
     let _home = EnvValueGuard::set("HOME", &temp_home);
-    let _config_dir = EnvValueGuard::remove("ZEROCLAW_CONFIG_DIR");
-    let _data_dir = EnvValueGuard::remove("ZEROCLAW_DATA_DIR");
-    let _workspace = EnvValueGuard::remove("ZEROCLAW_WORKSPACE");
+    let _config_dir = EnvValueGuard::remove("REI_CONFIG_DIR");
+    let _data_dir = EnvValueGuard::remove("REI_DATA_DIR");
+    let _workspace = EnvValueGuard::remove("REI_WORKSPACE");
 
     let fresh = Box::pin(Config::load_or_init()).await.unwrap();
     fresh
@@ -6450,7 +6441,7 @@ gated_domain_categories = ["banking"]
 
 [security.estop]
 enabled = true
-state_file = "~/.zeroclaw/estop-state.json"
+state_file = "~/.rei/estop-state.json"
 require_otp_to_resume = true
 "#,
     );
@@ -7897,11 +7888,11 @@ async fn prop_is_secret_static_check() {
 async fn apply_env_overrides_rejects_schema_version() {
     let _env_guard = env_override_lock().await;
     // SAFETY: test-only, single-threaded test runner.
-    unsafe { std::env::set_var("ZEROCLAW_schema_version", "99") };
+    unsafe { std::env::set_var("REI_schema_version", "99") };
     let mut config = Config::default();
     let result = crate::env_overrides::apply_env_overrides(&mut config);
     // SAFETY: test-only, single-threaded test runner.
-    unsafe { std::env::remove_var("ZEROCLAW_schema_version") };
+    unsafe { std::env::remove_var("REI_schema_version") };
 
     let err = result.expect_err("schema_version override must be rejected");
     let msg = format!("{err:#}");
@@ -8071,7 +8062,7 @@ async fn typed_custom_slot_round_trips_uri_through_save_and_load() {
 async fn env_override_save_cycle_preserves_on_disk_secret() {
     // Regression bar for the data-loss bug identified in PR
     // review: an operator with a real on-disk credential who sets a
-    // `ZEROCLAW_*` env override for the same path and triggers any
+    // `REI_*` env override for the same path and triggers any
     // save (dashboard auto-save, CLI `config set` for an unrelated
     // field, Quickstart finalizer) must NOT corrupt the disk file.
     //
@@ -8129,7 +8120,7 @@ async fn env_override_save_cycle_preserves_on_disk_secret() {
     // Simulate `apply_env_overrides` having injected a different value
     // for the same path — this is the state `Config::load_or_init`
     // leaves the in-memory config in when an operator boots with
-    // `ZEROCLAW_providers__models__anthropic__default__api_key=...`
+    // `REI_providers__models__anthropic__default__api_key=...`
     // set in the environment.
     let env_value = "sk-ant-from-env-DIFFERENT";
     reloaded.env_overridden_paths =
@@ -8202,9 +8193,9 @@ exit 65
     let guards = vec![
         EnvValueGuard::set("PATH", &bin),
         EnvValueGuard::set("HOME", dir.path()),
-        EnvValueGuard::set("ZEROCLAW_CONFIG_DIR", dir.path()),
-        EnvValueGuard::remove("ZEROCLAW_WORKSPACE"),
-        EnvValueGuard::set("ZEROCLAW_DATA_DIR", dir.path().join("workspace")),
+        EnvValueGuard::set("REI_CONFIG_DIR", dir.path()),
+        EnvValueGuard::remove("REI_WORKSPACE"),
+        EnvValueGuard::set("REI_DATA_DIR", dir.path().join("workspace")),
     ];
     std::fs::write(
         dir.path().join("config.toml"),
@@ -8399,7 +8390,7 @@ api_key = "vault:OPENAI_OFFICIAL_API_KEY"
     )
     .unwrap();
     guards.push(EnvValueGuard::set(
-        "ZEROCLAW_providers__models__openai__default__api_key",
+        "REI_providers__models__openai__default__api_key",
         "synthetic-env-override",
     ));
 
@@ -8687,7 +8678,7 @@ API_TOKEN = "vault:OPENAI_OFFICIAL_API_KEY"
     )
     .unwrap();
     guards.push(EnvValueGuard::set(
-        "ZEROCLAW_model_routes__fast__api_key",
+        "REI_model_routes__fast__api_key",
         "synthetic-route-env",
     ));
 
@@ -9020,7 +9011,7 @@ TOKEN = "plain-other"
     );
 
     // 5. Deleting or renaming a dotted sibling (`hint = "fast.api_key"`) must never drop
-    // or migrate the shorter sibling's (`hint = "fast"`) `ZEROCLAW_*` env-override snapshot.
+    // or migrate the shorter sibling's (`hint = "fast"`) `REI_*` env-override snapshot.
     std::fs::write(
         dir.path().join("config.toml"),
         r#"
@@ -9046,10 +9037,8 @@ model = "gpt-5-nano"
     )
     .unwrap();
     {
-        let _route_env = EnvValueGuard::set(
-            "ZEROCLAW_model_routes__fast__api_key",
-            "env-secret-override",
-        );
+        let _route_env =
+            EnvValueGuard::set("REI_model_routes__fast__api_key", "env-secret-override");
         let mut env_cfg = Config::load_or_init().await.unwrap();
         assert_eq!(
             env_cfg.model_routes[0].api_key.as_deref(),
@@ -9116,11 +9105,11 @@ model = "gpt-5-nano"
         );
     }
 
-    // 6. Env-only external reference (`ZEROCLAW_* = "vault:..."`) must never be persisted
+    // 6. Env-only external reference (`REI_* = "vault:..."`) must never be persisted
     // on `save()` over the existing on-disk credential.
     {
         let _route_env = EnvValueGuard::set(
-            "ZEROCLAW_model_routes__fast__api_key",
+            "REI_model_routes__fast__api_key",
             "vault:OPENAI_OFFICIAL_API_KEY",
         );
         let env_ref_cfg = Config::load_or_init().await.unwrap();
@@ -9570,7 +9559,7 @@ model = "gpt-5-mini"
     )
     .unwrap();
     let _env_guard = EnvValueGuard::set(
-        "ZEROCLAW_model_routes__env_only__api_key",
+        "REI_model_routes__env_only__api_key",
         "vault:OPENAI_OFFICIAL_API_KEY",
     );
     let mut env_cfg = Config::load_or_init().await.unwrap();
@@ -10119,7 +10108,7 @@ api_key = "vault:OPENAI_OFFICIAL_API_KEY"
         )
         .unwrap();
         let _env_guard = EnvValueGuard::set(
-            "ZEROCLAW_providers__models__openai__default__api_key",
+            "REI_providers__models__openai__default__api_key",
             "synthetic-env-override",
         );
         let path = "providers.models.openai.default.api_key";
@@ -10184,8 +10173,8 @@ exit 65
         _ => bin_dir.display().to_string(),
     };
     let _path_guard = EnvValueGuard::set("PATH", path);
-    let _config_guard = EnvValueGuard::set("ZEROCLAW_CONFIG_DIR", dir.path());
-    let _workspace_guard = EnvValueGuard::remove("ZEROCLAW_WORKSPACE");
+    let _config_guard = EnvValueGuard::set("REI_CONFIG_DIR", dir.path());
+    let _workspace_guard = EnvValueGuard::remove("REI_WORKSPACE");
 
     let config_path = dir.path().join("config.toml");
     std::fs::write(
@@ -10253,8 +10242,8 @@ exit 65
         _ => bin_dir.display().to_string(),
     };
     let _path_guard = EnvValueGuard::set("PATH", path);
-    let _config_guard = EnvValueGuard::set("ZEROCLAW_CONFIG_DIR", dir.path());
-    let _workspace_guard = EnvValueGuard::remove("ZEROCLAW_WORKSPACE");
+    let _config_guard = EnvValueGuard::set("REI_CONFIG_DIR", dir.path());
+    let _workspace_guard = EnvValueGuard::remove("REI_WORKSPACE");
 
     let config_path = dir.path().join("config.toml");
     std::fs::write(
@@ -10310,8 +10299,8 @@ printf '%s\n' 'sk-proj-from-onepassword'
         _ => bin_dir.display().to_string(),
     };
     let _path_guard = EnvValueGuard::set("PATH", path);
-    let _config_guard = EnvValueGuard::set("ZEROCLAW_CONFIG_DIR", dir.path());
-    let _workspace_guard = EnvValueGuard::remove("ZEROCLAW_WORKSPACE");
+    let _config_guard = EnvValueGuard::set("REI_CONFIG_DIR", dir.path());
+    let _workspace_guard = EnvValueGuard::remove("REI_WORKSPACE");
 
     let config_path = dir.path().join("config.toml");
     std::fs::write(
@@ -12072,8 +12061,8 @@ runtime_profile = "fast"
 "#;
     fs::write(&config_path, contents).await.unwrap();
     let _home = EnvValueGuard::set("HOME", home.path());
-    let _workspace = EnvValueGuard::set("ZEROCLAW_WORKSPACE", &workspace);
-    let _config_dir = EnvValueGuard::remove("ZEROCLAW_CONFIG_DIR");
+    let _workspace = EnvValueGuard::set("REI_WORKSPACE", &workspace);
+    let _config_dir = EnvValueGuard::remove("REI_CONFIG_DIR");
 
     let mut config = Box::pin(Config::load_or_init()).await.unwrap();
     assert!(config.degraded_sections.is_empty());
@@ -14776,8 +14765,8 @@ async fn load_or_init_rejects_retired_model_provider_without_rewriting_file() {
     fs::create_dir_all(&config_dir).await.unwrap();
     let config_path = config_dir.join("config.toml");
     let _home = EnvValueGuard::set("HOME", home.path());
-    let _config_dir = EnvValueGuard::set("ZEROCLAW_CONFIG_DIR", &config_dir);
-    let _workspace = EnvValueGuard::remove("ZEROCLAW_WORKSPACE");
+    let _config_dir = EnvValueGuard::set("REI_CONFIG_DIR", &config_dir);
+    let _workspace = EnvValueGuard::remove("REI_WORKSPACE");
     for family in crate::providers::retired_model_provider_names() {
         let raw = format!(
             "schema_version = 3\n[providers.models.\"{family}\".private_alias]\napi_key = \"private-test-key\"\n"
@@ -14803,8 +14792,8 @@ async fn load_or_init_rejects_retired_sop_without_rewriting_file() {
     fs::create_dir_all(&config_dir).await.unwrap();
     let config_path = config_dir.join("config.toml");
     let _home = EnvValueGuard::set("HOME", home.path());
-    let _config_dir = EnvValueGuard::set("ZEROCLAW_CONFIG_DIR", &config_dir);
-    let _workspace = EnvValueGuard::remove("ZEROCLAW_WORKSPACE");
+    let _config_dir = EnvValueGuard::set("REI_CONFIG_DIR", &config_dir);
+    let _workspace = EnvValueGuard::remove("REI_WORKSPACE");
     for version in 1..=crate::current::CURRENT_SCHEMA_VERSION {
         let raw = format!(
             "schema_version = {version}\n[sop.approval.policies.private_policy]\n\
@@ -14831,8 +14820,8 @@ async fn saves_reject_sop_added_after_load_without_mutating_disk_or_tracking() {
     fs::create_dir_all(&config_dir).await.unwrap();
     let config_path = config_dir.join("config.toml");
     let _home = EnvValueGuard::set("HOME", home.path());
-    let _config_dir = EnvValueGuard::set("ZEROCLAW_CONFIG_DIR", &config_dir);
-    let _workspace = EnvValueGuard::remove("ZEROCLAW_WORKSPACE");
+    let _config_dir = EnvValueGuard::set("REI_CONFIG_DIR", &config_dir);
+    let _workspace = EnvValueGuard::remove("REI_WORKSPACE");
     let clean = "schema_version = 3\n[secrets]\nencrypt = true\n";
     fs::write(&config_path, clean).await.unwrap();
     let mut config = Box::pin(Config::load_or_init()).await.unwrap();
@@ -14930,8 +14919,8 @@ async fn retired_email_and_discord_refuse_load_and_every_write_without_touching_
         fs::create_dir_all(&config_dir).await.unwrap();
         let config_path = config_dir.join("config.toml");
         let _home = EnvValueGuard::set("HOME", home.path());
-        let _config_dir = EnvValueGuard::set("ZEROCLAW_CONFIG_DIR", &config_dir);
-        let _workspace = EnvValueGuard::remove("ZEROCLAW_WORKSPACE");
+        let _config_dir = EnvValueGuard::set("REI_CONFIG_DIR", &config_dir);
+        let _workspace = EnvValueGuard::remove("REI_WORKSPACE");
         let clean = "schema_version = 3\n[secrets]\nencrypt = true\n";
         fs::write(&config_path, clean).await.unwrap();
         let mut config = Box::pin(Config::load_or_init()).await.unwrap();
@@ -15024,8 +15013,8 @@ async fn load_or_init_refuses_unsupported_versions_before_filesystem_changes() {
     fs::create_dir_all(&config_dir).await.unwrap();
     let config_path = config_dir.join("config.toml");
     let _home = EnvValueGuard::set("HOME", home.path());
-    let _config_dir = EnvValueGuard::set("ZEROCLAW_CONFIG_DIR", &config_dir);
-    let _workspace = EnvValueGuard::remove("ZEROCLAW_WORKSPACE");
+    let _config_dir = EnvValueGuard::set("REI_CONFIG_DIR", &config_dir);
+    let _workspace = EnvValueGuard::remove("REI_WORKSPACE");
     let legacy_identity = config_dir.join("workspace/SOUL.md");
     fs::create_dir_all(legacy_identity.parent().unwrap())
         .await

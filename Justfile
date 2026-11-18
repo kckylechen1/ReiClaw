@@ -1,4 +1,4 @@
-# Justfile - Convenient command runner for ZeroClaw development
+# Justfile - Convenient command runner for ReiClaw development
 # https://github.com/casey/just
 
 # Default recipe to display help
@@ -57,7 +57,7 @@ test-slim: toolchain
 clean: toolchain
     cargo clean
 
-# Run zeroclaw with example config (for development)
+# Run rei with example config (for development)
 dev *ARGS: toolchain
     cargo run -- {{ARGS}}
 

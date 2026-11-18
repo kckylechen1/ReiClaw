@@ -1,4 +1,4 @@
-//! `zeroclaw chat`: a thin client of the gateway's chat socket.
+//! `rei chat`: a thin client of the gateway's chat socket.
 //!
 //! The gateway owns the conversation; this command only attaches to a
 //! session, forwards what the user types and renders what every attached

@@ -7,7 +7,7 @@ const { JSDOM } = require('jsdom');
 const { createJiti } = require('jiti');
 const React = require('react');
 const { act } = React;
-const dom = new JSDOM('<body></body>', { url: 'https://zeroclaw.test', pretendToBeVisual: true });
+const dom = new JSDOM('<body></body>', { url: 'https://reiclaw.test', pretendToBeVisual: true });
 Object.assign(globalThis, {
   window: dom.window, document: dom.window.document,
   localStorage: dom.window.localStorage, IS_REACT_ACT_ENVIRONMENT: true,
@@ -81,7 +81,7 @@ async function update(action) {
 }
 async function withAgent(token, run, renderChat = false) {
   localStorage.clear();
-  if (token) localStorage.setItem('zeroclaw_token', 'synthetic-owner');
+  if (token) localStorage.setItem('reiclaw_token', 'synthetic-owner');
   sockets.length = 0;
   requests.length = 0;
   const container = document.createElement('div');
@@ -118,7 +118,7 @@ const sideRequests = () => sockets.flatMap(socket => socket.sent).filter(frame =
   frame.type === 'btw' || (frame.op === 'message' && frame.content.startsWith('/btw ')));
 const sideAnswers = ctx => ctx.value.messages.filter(message => message.sideQuery && message.role === 'agent');
 const persistedMessages = () => JSON.parse(localStorage.getItem(
-  `zeroclaw_chat_history_v1:${localStorage.getItem('zeroclaw_session_id.test-agent')}`)).messages;
+  `reiclaw_chat_history_v1:${localStorage.getItem('reiclaw_session_id.test-agent')}`)).messages;
 async function typeChat(ctx, text) {
   const input = ctx.container.querySelector('textarea');
   assert.equal(input.disabled, false, 'the composer stays available for side queries');
@@ -539,7 +539,7 @@ test('losing authentication on reconnect never downgrades a sent S2 request', as
   await update(() => ctx.wire.receive(ready()));
   await update(() => ctx.value.sendMessage('possibly admitted'));
   await update(() => ctx.wire.close(1006));
-  localStorage.removeItem('zeroclaw_token');
+  localStorage.removeItem('reiclaw_token');
   await update(() => tick(1000));
   const reconnect = sockets.at(-1);
   await update(() => reconnect.open());
@@ -559,7 +559,7 @@ for (const refused of [false, true]) {
       await update(() => ctx.wire.receive({ type: 'turn_error', op: 'negotiate', code: 'AUTHENTICATION_REQUIRED' }));
     }
     await update(() => ctx.wire.close(1006));
-    localStorage.removeItem('zeroclaw_token');
+    localStorage.removeItem('reiclaw_token');
     await update(() => tick(1000));
     const reconnect = sockets.at(-1);
     await update(() => reconnect.open());
@@ -573,7 +573,7 @@ for (const refused of [false, true]) {
 
 test('a model-switch client preserves the previous attachment S2 requirement', async () => withAgent(true, async ctx => {
   await update(() => ctx.wire.receive(ready()));
-  localStorage.removeItem('zeroclaw_token');
+  localStorage.removeItem('reiclaw_token');
   await update(() => ctx.value.switchModel('synthetic.next'));
   const replacement = sockets.at(-1);
   assert.notEqual(replacement, ctx.wire);
@@ -585,7 +585,7 @@ test('a model-switch client preserves the previous attachment S2 requirement', a
 for (const negotiated of [false, true]) {
   test(`Clear chat preserves S2 after token loss ${negotiated ? 'after' : 'before'} initial ready`, async () => withAgent(true, async ctx => {
     if (negotiated) await update(() => ctx.wire.receive(ready()));
-    localStorage.removeItem('zeroclaw_token');
+    localStorage.removeItem('reiclaw_token');
     await update(() => ctx.value.clearAllMessages());
     assert.ok(requests.some(request => request.method === 'DELETE' && request.path.startsWith('/api/sessions/')));
     const replacement = sockets.at(-1);

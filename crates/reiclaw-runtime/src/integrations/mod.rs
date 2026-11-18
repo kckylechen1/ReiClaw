@@ -55,7 +55,7 @@ pub fn show_integration_info(config: &Config, name: &str) -> Result<()> {
 
     let Some(entry) = entries.iter().find(|e| e.name.to_lowercase() == name_lower) else {
         anyhow::bail!(
-            "Unknown integration: {name}. Check README for supported integrations or run `zeroclaw quickstart` to configure a model provider, then `zeroclaw config set channels.<name>.<field>=<value>` for channels."
+            "Unknown integration: {name}. Check README for supported integrations or run `rei quickstart` to configure a model provider, then `rei config set channels.<name>.<field>=<value>` for channels."
         );
     };
 
@@ -76,7 +76,7 @@ pub fn show_integration_info(config: &Config, name: &str) -> Result<()> {
     println!();
 
     // Setup hints. Channel-specific steps that are not yet covered by a
-    // standalone book walkthrough stay here so `zeroclaw integration info
+    // standalone book walkthrough stay here so `rei integration info
     // <name>` keeps producing actionable output. The Chat-category catch-all
     // points operators at the per-channel config keys.
     match entry.name.as_str() {
@@ -84,8 +84,8 @@ pub fn show_integration_info(config: &Config, name: &str) -> Result<()> {
             println!("  Setup:");
             println!("    1. Message @BotFather on Telegram");
             println!("    2. Create a bot and copy the token");
-            println!("    3. Run: zeroclaw config set channels.telegram.default.bot_token <token>");
-            println!("    4. Start: zeroclaw channel start");
+            println!("    3. Run: rei config set channels.telegram.default.bot_token <token>");
+            println!("    4. Start: rei channel start");
         }
         "Ollama" => {
             println!("  Setup:");
@@ -95,12 +95,12 @@ pub fn show_integration_info(config: &Config, name: &str) -> Result<()> {
         }
         "Cron" => {
             println!("  Built-in:");
-            println!("    Schedule tasks in ~/.zeroclaw/workspace/cron/");
-            println!("    Run: zeroclaw cron list");
+            println!("    Schedule tasks in ~/.reiclaw/workspace/cron/");
+            println!("    Run: rei cron list");
         }
         _ if entry.category == IntegrationCategory::Chat => {
             println!("  Setup:");
-            println!("    Run: zeroclaw config set channels.<name>.<field>=<value>");
+            println!("    Run: rei config set channels.<name>.<field>=<value>");
             println!("    (see docs/book/src/channels/overview.md for the per-channel field list)");
         }
         _ => {}

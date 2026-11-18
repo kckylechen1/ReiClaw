@@ -182,9 +182,9 @@ const server = http.createServer((req, res) => { const file = path.join(dist, re
     await page.getByText('Pairing is disabled.', { exact: false }).waitFor();
     assert.equal(await page.getByLabel('Pairing code', { exact: true }).count(), 0);
     assert.equal(pairCalls, 0);
-    await page.screenshot({ path: path.join(artifacts, 'zeroclaw-phone-pair-disabled-375.png') });
+    await page.screenshot({ path: path.join(artifacts, 'reiclaw-phone-pair-disabled-375.png') });
     // A bridge token cannot enroll an operator while pairing remains disabled.
-    await page.evaluate(() => localStorage.setItem('zeroclaw_token', 'synthetic-bridge'));
+    await page.evaluate(() => localStorage.setItem('reiclaw_token', 'synthetic-bridge'));
     await page.reload();
     await page.getByText('Pairing is disabled.', { exact: false }).waitFor();
     assert.equal(await page.getByLabel('Pairing code', { exact: true }).count(), 0);
@@ -215,7 +215,7 @@ const server = http.createServer((req, res) => { const file = path.join(dist, re
     await staleCard.getByRole('button', { name: 'Accept', exact: true }).click();
     await staleCard.getByText('This proposal no longer matches its target.', { exact: false }).waitFor();
     assert.equal(await staleCard.getByRole('button', { name: 'Accept', exact: true }).count(), 0);
-    await page.screenshot({ path: path.join(artifacts, 'zeroclaw-phone-stale-proposal-375.png') });
+    await page.screenshot({ path: path.join(artifacts, 'reiclaw-phone-stale-proposal-375.png') });
     await staleCard.getByRole('button', { name: 'Dismiss', exact: true }).click();
     await page.getByRole('heading', { name: proposal.item.proposal, exact: true }).waitFor({ state: 'detached' });
     const userCard = page.locator('article').filter({ has: page.getByRole('heading', { name: user.item.statement, exact: true }) });
@@ -223,7 +223,7 @@ const server = http.createServer((req, res) => { const file = path.join(dist, re
     assert.match(await userCard.innerText(), /Preference/);
     assert.match(await userCard.innerText(), /Existing detailed planning preference/);
     assert.match(await userCard.innerText(), /revision-current/);
-    await userCard.screenshot({ path: path.join(artifacts, 'zeroclaw-phone-approval-details-375.png') });
+    await userCard.screenshot({ path: path.join(artifacts, 'reiclaw-phone-approval-details-375.png') });
     const beforeConflict = actions.length;
     await userCard.getByRole('button', { name: 'Accept', exact: true }).click();
     await userCard.getByText('Changed elsewhere before acceptance', { exact: true }).waitFor();
@@ -261,7 +261,7 @@ const server = http.createServer((req, res) => { const file = path.join(dist, re
     await toneCard.getByRole('heading', { name: 'Stored Tone', exact: true }).waitFor();
     assert.match(await toneCard.innerText(), /high/);
     assert.match(await toneCard.innerText(), /low/);
-    await toneCard.screenshot({ path: path.join(artifacts, 'zeroclaw-phone-tone-fallback-375.png') });
+    await toneCard.screenshot({ path: path.join(artifacts, 'reiclaw-phone-tone-fallback-375.png') });
     // Tone exemplars (ADR-018 §3): list, edit with live UTF-8 counters, CAS save, conflict and server rejection.
     const exemplarRegion = toneCard.getByRole('region', { name: 'Tone exemplars', exact: true });
     await exemplarRegion.getByText('No exemplars yet.', { exact: true }).waitFor();
@@ -288,7 +288,7 @@ const server = http.createServer((req, res) => { const file = path.join(dist, re
     await first.getByText('Must be a single line: remove the line breaks.', { exact: false }).waitFor();
     assert.equal(await first.getByLabel('You', { exact: true }).inputValue(), '第一行\n第二行');
     assert.equal(await exemplarSave.isDisabled(), true, 'a newline blocks saving');
-    await toneCard.screenshot({ path: path.join(artifacts, 'zeroclaw-phone-exemplar-editor-375.png') });
+    await toneCard.screenshot({ path: path.join(artifacts, 'reiclaw-phone-exemplar-editor-375.png') });
     assert.equal(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth), true);
     await first.getByLabel('You', { exact: true }).fill('辛苦了。先坐一会儿,剩下的我来。');
     assert.equal(await exemplarSave.isDisabled(), false);
@@ -346,8 +346,8 @@ const server = http.createServer((req, res) => { const file = path.join(dist, re
     const replyText = '辛苦了。\n先歇一会儿,剩下的我来。';
     await page.evaluate(([owner, reply]) => {
         const at = new Date().toISOString();
-        localStorage.setItem('zeroclaw_session_id.nova', 'pin-session');
-        localStorage.setItem('zeroclaw_chat_history_v1:pin-session', JSON.stringify({ messages: [
+        localStorage.setItem('reiclaw_session_id.nova', 'pin-session');
+        localStorage.setItem('reiclaw_chat_history_v1:pin-session', JSON.stringify({ messages: [
             { id: 'm1', role: 'user', content: 'Earlier question', local: true, timestamp: at },
             { id: 'm2', role: 'agent', content: 'Earlier answer', markdown: false, timestamp: at },
             { id: 'm3', role: 'user', content: owner, local: true, timestamp: at },
@@ -367,7 +367,7 @@ const server = http.createServer((req, res) => { const file = path.join(dist, re
     await pinEditor.waitFor();
     assert.equal(page.url(), `${origin}/review?agent=nova`, 'the draft is not in the URL');
     assert.equal(await page.evaluate(() => (history.state && history.state.usr) ?? null), null, 'the navigation state is dropped once the editor opens');
-    assert.deepEqual(await page.evaluate(needle => Object.keys(localStorage).filter(key => !key.startsWith('zeroclaw_chat_history_v1:') && (localStorage.getItem(key) ?? '').includes(needle)), '先歇一会儿'), [], 'the draft is not in storage');
+    assert.deepEqual(await page.evaluate(needle => Object.keys(localStorage).filter(key => !key.startsWith('reiclaw_chat_history_v1:') && (localStorage.getItem(key) ?? '').includes(needle)), '先歇一会儿'), [], 'the draft is not in storage');
     await pinEditor.getByText('Prefilled from the chat.', { exact: false }).waitFor();
     const pinnedRow = pinEditor.getByRole('group', { name: 'Exemplar 2', exact: true });
     assert.equal(await pinEditor.getByRole('group', { name: 'Exemplar 1', exact: true }).getByLabel('Owner', { exact: true }).inputValue(), '别处');
@@ -378,7 +378,7 @@ const server = http.createServer((req, res) => { const file = path.join(dist, re
     await pinnedRow.getByText('Must be a single line: remove the line breaks.', { exact: false }).first().waitFor();
     assert.equal(await pinEditor.getByRole('button', { name: 'Save exemplars', exact: true }).isDisabled(), true);
     assert.equal(writes.length, writesBeforePin, 'nothing is saved until the owner presses save');
-    await page.screenshot({ path: path.join(artifacts, 'zeroclaw-phone-exemplar-pinned-375.png') });
+    await page.screenshot({ path: path.join(artifacts, 'reiclaw-phone-exemplar-pinned-375.png') });
     assert.equal(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth), true);
     await pinnedRow.getByLabel('Situation', { exact: true }).fill('owner is tired');
     await pinnedRow.getByLabel('Owner', { exact: true }).fill('今天好累。还有很多事');
@@ -417,7 +417,7 @@ const server = http.createServer((req, res) => { const file = path.join(dist, re
     assert.match(driftText, /Story entries retired: 2/);
     assert.match(driftText, /Approved proposals: 3/);
     assert.equal(await driftCard.getByRole('button', { name: 'Roll back to anchor', exact: true }).isDisabled(), false);
-    await driftCard.screenshot({ path: path.join(artifacts, 'zeroclaw-phone-drift-375.png') });
+    await driftCard.screenshot({ path: path.join(artifacts, 'reiclaw-phone-drift-375.png') });
     assert.equal(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth), true);
     // Keep: both revisions are named; a stale one is the existing 409 and writes nothing.
     const beforeKeep = actions.length;
@@ -475,7 +475,7 @@ const server = http.createServer((req, res) => { const file = path.join(dist, re
     await page.getByRole('button', { name: 'History and sources', exact: true }).click();
     await page.getByText('Scope limited', { exact: true }).waitFor();
     assert.equal(await page.getByRole('button', { name: 'Limit scope' }).count(), 0);
-    await page.screenshot({ path: path.join(artifacts, 'zeroclaw-phone-history-narrowed-375.png') });
+    await page.screenshot({ path: path.join(artifacts, 'reiclaw-phone-history-narrowed-375.png') });
     assert.equal(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth), true);
     // History uses explicit bounded pages and retains its cursor after failures.
     candidatePaging = true;
@@ -501,7 +501,7 @@ const server = http.createServer((req, res) => { const file = path.join(dist, re
     assert.equal(await page.getByText(rejected.statement, { exact: true }).count(), 1);
     assert.equal(await page.getByRole('button', { name: 'Load older candidates', exact: true }).count(), 0);
     assert.equal(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth), true);
-    await page.screenshot({ path: path.join(artifacts, 'zeroclaw-phone-history-paged-375.png') });
+    await page.screenshot({ path: path.join(artifacts, 'reiclaw-phone-history-paged-375.png') });
     // A refresh aborts a pending page and a late response cannot restore it.
     await page.getByRole('button', { name: 'All candidate review history' }).click();
     await page.getByRole('button', { name: 'Load older candidates', exact: true }).waitFor();
@@ -579,7 +579,7 @@ const server = http.createServer((req, res) => { const file = path.join(dist, re
     // The same card in Chinese, on the inbox tab the notification links to.
     driftState = drifted();
     locale = 'zh';
-    await page.evaluate(() => localStorage.setItem('zeroclaw-locale', 'zh'));
+    await page.evaluate(() => localStorage.setItem('reiclaw-locale', 'zh'));
     await page.reload();
     const zhDrift = page.getByRole('region', { name: '偏离', exact: true });
     await zhDrift.waitFor();
@@ -588,7 +588,7 @@ const server = http.createServer((req, res) => { const file = path.join(dist, re
     await zhDrift.getByRole('button', { name: '保持为锚点', exact: true }).waitFor();
     await zhDrift.getByRole('button', { name: '回滚到锚点', exact: true }).waitFor();
     assert.match(await zhDrift.innerText(), /亲切度\s+中 → 极高\s+\+2/);
-    await page.screenshot({ path: path.join(artifacts, 'zeroclaw-phone-drift-zh-375.png') });
+    await page.screenshot({ path: path.join(artifacts, 'reiclaw-phone-drift-zh-375.png') });
     assert.equal(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth), true);
     // Tone exemplars and the chat action in Chinese.
     await page.goto(origin + '/agent/nova');
@@ -604,7 +604,7 @@ const server = http.createServer((req, res) => { const file = path.join(dist, re
     await zhRow.getByLabel('情境', { exact: true }).fill('累'.repeat(27));
     await zhRow.getByText('81 / 80 字节 · 超出字节限制。', { exact: true }).waitFor();
     await zhEditor.getByRole('button', { name: '保存示范片段', exact: true }).waitFor();
-    await page.screenshot({ path: path.join(artifacts, 'zeroclaw-phone-exemplar-editor-zh-375.png') });
+    await page.screenshot({ path: path.join(artifacts, 'reiclaw-phone-exemplar-editor-zh-375.png') });
     assert.equal(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth), true);
     await zhEditor.getByRole('button', { name: '取消', exact: true }).click();
     await page.getByRole('button', { name: '关于我', exact: true }).click();
@@ -614,7 +614,7 @@ const server = http.createServer((req, res) => { const file = path.join(dist, re
     assert.equal(await page.getByText('narrowed', { exact: true }).count(), 0);
     assert.equal(await page.getByText(/^reject ·/).count(), 0);
     await page.getByText(/^忽略 ·/).waitFor();
-    await page.screenshot({ path: path.join(artifacts, 'zeroclaw-phone-localized-history-375.png') });
+    await page.screenshot({ path: path.join(artifacts, 'reiclaw-phone-localized-history-375.png') });
     assert.equal(await page.evaluate(() => document.documentElement.scrollWidth <= innerWidth), true);
     await page.getByRole('button', { name: '待审核', exact: true }).click();
     for (const label of ['每周反思计时已开始', '本期没有可供反思的内容', '待审核提案已满', '反思模型调用失败: synthetic timeout: retry']) await page.getByText(label, { exact: true }).waitFor();
@@ -646,7 +646,7 @@ const server = http.createServer((req, res) => { const file = path.join(dist, re
     assert.equal(await userCard.getByRole('button', { name: '限定范围', exact: true }).count(), 0);
     assert.equal(await userCard.getByRole('button', { name: '忽略', exact: true }).count(), 1);
     assert.equal(await userCard.getByText('没有相同语义标识的当前条目。', { exact: true }).count(), 0);
-    await userCard.screenshot({ path: path.join(artifacts, 'zeroclaw-phone-heads-unavailable-375.png') });
+    await userCard.screenshot({ path: path.join(artifacts, 'reiclaw-phone-heads-unavailable-375.png') });
     // Authentication failures still clear previously displayed owner data.
     headsFailureStatus = 401;
     await page.getByRole('button', { name: '刷新', exact: true }).click();

@@ -24,17 +24,17 @@ use tokio::fs;
 /// not change process-wide proxy state. Proxy fields are never secret-annotated,
 /// so plain parsing is sufficient.
 ///
-/// This is a raw file read by design: `ZEROCLAW_PROXY_*` env-var
+/// This is a raw file read by design: `REI_PROXY_*` env-var
 /// overrides are NOT reflected here. The runtime global is refreshed
 /// from the fully-loaded config after `load_or_init` runs; the process
 /// env stays restart-only and follows the persisted file.
 pub async fn read_persisted_proxy_for_boot() -> Option<ProxyConfig> {
-    let (default_zeroclaw_dir, default_workspace_dir) = default_config_and_data_dirs().ok()?;
-    let (zeroclaw_dir, _legacy_workspace_dir, _source) =
-        resolve_runtime_config_dirs(&default_zeroclaw_dir, &default_workspace_dir)
+    let (default_rei_dir, default_workspace_dir) = default_config_and_data_dirs().ok()?;
+    let (rei_dir, _legacy_workspace_dir, _source) =
+        resolve_runtime_config_dirs(&default_rei_dir, &default_workspace_dir)
             .await
             .ok()?;
-    let raw = std::fs::read_to_string(zeroclaw_dir.join("config.toml")).ok()?;
+    let raw = std::fs::read_to_string(rei_dir.join("config.toml")).ok()?;
     let value: toml::Value = toml::from_str(&raw).ok()?;
     if crate::current::detect_version(&value).ok() != Some(crate::current::CURRENT_SCHEMA_VERSION) {
         return None;
@@ -53,11 +53,7 @@ pub(crate) fn default_config_and_data_dirs() -> Result<(PathBuf, PathBuf)> {
 }
 
 /// Ordered config-directory override env vars, highest precedence first.
-const CONFIG_DIR_ENV_VARS: &[&str] = &[
-    "REI_CONFIG_DIR",
-    "REICLAW_CONFIG_DIR",
-    "ZEROCLAW_CONFIG_DIR",
-];
+const CONFIG_DIR_ENV_VARS: &[&str] = &["REI_CONFIG_DIR", "REICLAW_CONFIG_DIR"];
 
 pub(crate) fn env_config_dir_override() -> Option<(&'static str, String)> {
     for &name in CONFIG_DIR_ENV_VARS {
@@ -82,15 +78,7 @@ pub(crate) fn resolve_home_dir() -> Option<PathBuf> {
 }
 
 fn default_home_config_dir(home: &Path) -> PathBuf {
-    let rei_dir = home.join(".rei");
-    if rei_dir.exists() {
-        return rei_dir;
-    }
-    let zeroclaw_dir = home.join(".zeroclaw");
-    if zeroclaw_dir.exists() {
-        return zeroclaw_dir;
-    }
-    rei_dir
+    home.join(".rei")
 }
 
 fn default_config_dir() -> Result<PathBuf> {
@@ -103,16 +91,15 @@ fn default_config_dir() -> Result<PathBuf> {
 }
 
 /// Canonical on-disk directory for a locale's runtime FTL catalogues:
-/// `<config_dir>/data/ftl/<locale>/`. This is where `zeroclaw locales fetch`
+/// `<config_dir>/data/ftl/<locale>/`. This is where `rei locales fetch`
 /// restores bundled translations and where the runtime i18n loader reads them.
-/// `<config_dir>` honors `REI_CONFIG_DIR`, `REICLAW_CONFIG_DIR`, and
-/// `ZEROCLAW_CONFIG_DIR`, and otherwise defaults to `~/.rei` (falling back to
-/// an existing `~/.zeroclaw`).
+/// `<config_dir>` honors `REI_CONFIG_DIR` and `REICLAW_CONFIG_DIR`, and
+/// otherwise defaults to `~/.rei`.
 pub fn ftl_locale_dir(locale: &str) -> Result<PathBuf> {
     Ok(default_config_dir()?.join("data").join("ftl").join(locale))
 }
 
-/// The FTL catalogues that `zeroclaw locales fetch` can restore from the
+/// The FTL catalogues that `rei locales fetch` can restore from the
 /// current build, as `(name, output-filename)`. This is the single
 /// source of truth — a caller supplies only a catalog *name* matched against
 /// this table, never a path.
@@ -128,7 +115,7 @@ pub const FTL_CATALOGS: &[(&str, &str)] = &[("cli", "cli.ftl"), ("tools", "tools
 /// `expand_tilde_path()` handles that literal at use-time.
 ///
 /// Switching to platform-native config locations (`~/Library/Application
-/// Support/zeroclaw/` on macOS, `%APPDATA%\zeroclaw\` on Windows) is the
+/// Support/reiclaw/` on macOS, `%APPDATA%\reiclaw\` on Windows) is the
 /// schema-v3 follow-up tracked in — that needs a migration to move
 /// existing users' configs.
 pub(crate) fn default_path_under_config_dir(relative: &str) -> String {
@@ -144,7 +131,7 @@ pub fn resolve_config_dir_for_data(data_dir: &Path) -> (PathBuf, PathBuf) {
         return (data_config_dir.clone(), data_config_dir.join("data"));
     }
 
-    let legacy_config_dir = data_dir.parent().map(|parent| parent.join(".zeroclaw"));
+    let legacy_config_dir = data_dir.parent().map(|parent| parent.join(".rei"));
     if let Some(legacy_dir) = legacy_config_dir {
         if legacy_dir.join("config.toml").exists() {
             return (legacy_dir, data_config_dir);
@@ -182,10 +169,6 @@ pub async fn classify_runtime_config_kind(config_path: &Path) -> RuntimeConfigKi
                 paths_equal_lexically(config_path, &resolved_config_dir.join("config.toml"));
             let matches_known_home_default = resolve_home_dir().is_some_and(|home| {
                 paths_equal_lexically(config_path, &home.join(".rei").join("config.toml"))
-                    || paths_equal_lexically(
-                        config_path,
-                        &home.join(".zeroclaw").join("config.toml"),
-                    )
             });
             if matches_resolved || matches_known_home_default {
                 RuntimeConfigKind::Default
@@ -209,12 +192,12 @@ pub async fn classify_runtime_config_kind(config_path: &Path) -> RuntimeConfigKi
 /// Resolve the current runtime config/data directories.
 ///
 /// This mirrors the same precedence used by `Config::load_or_init()`:
-/// `REI_CONFIG_DIR` > `REICLAW_CONFIG_DIR` > `ZEROCLAW_CONFIG_DIR` >
-/// `ZEROCLAW_DATA_DIR` > `ZEROCLAW_WORKSPACE` (deprecated) > defaults.
+/// `REI_CONFIG_DIR` > `REICLAW_CONFIG_DIR` >
+/// `REI_DATA_DIR` > `REI_WORKSPACE` (deprecated) > defaults.
 pub async fn resolve_runtime_dirs() -> Result<(PathBuf, PathBuf)> {
-    let (default_zeroclaw_dir, default_data_dir) = default_config_and_data_dirs()?;
+    let (default_rei_dir, default_data_dir) = default_config_and_data_dirs()?;
     let (config_dir, data_dir, _) =
-        resolve_runtime_config_dirs(&default_zeroclaw_dir, &default_data_dir).await?;
+        resolve_runtime_config_dirs(&default_rei_dir, &default_data_dir).await?;
     Ok((config_dir, data_dir))
 }
 
@@ -230,9 +213,9 @@ pub(crate) enum ConfigResolutionSource {
 impl ConfigResolutionSource {
     pub(crate) const fn as_str(self) -> &'static str {
         match self {
-            Self::EnvConfigDir => "ZEROCLAW_CONFIG_DIR",
-            Self::EnvDataDir => "ZEROCLAW_DATA_DIR",
-            Self::EnvWorkspaceLegacy => "ZEROCLAW_WORKSPACE",
+            Self::EnvConfigDir => "REI_CONFIG_DIR",
+            Self::EnvDataDir => "REI_DATA_DIR",
+            Self::EnvWorkspaceLegacy => "REI_WORKSPACE",
             Self::DefaultConfigDir => "default",
             Self::HomebrewConfigDir => "homebrew",
         }
@@ -288,24 +271,24 @@ fn paths_equal_lexically(a: &Path, b: &Path) -> bool {
 /// Detect if an executable path lives under a macOS Homebrew prefix and return
 /// the Homebrew-managed config directory.
 ///
-/// Homebrew can execute ZeroClaw from `<prefix>/Cellar/zeroclaw/<version>/bin/`,
-/// `<prefix>/bin/`, or `<prefix>/opt/zeroclaw/bin/`.
+/// Homebrew can execute ReiClaw from `<prefix>/Cellar/rei/<version>/bin/`,
+/// `<prefix>/bin/`, or `<prefix>/opt/rei/bin/`.
 pub(crate) async fn try_resolve_macos_homebrew_config_dir(exe: &Path) -> Option<PathBuf> {
     let parts = exe.iter().collect::<Vec<_>>();
     let prefix = match parts.as_slice() {
         [prefix @ .., cellar, formula, _version, bin, exe_name]
             if *cellar == std::ffi::OsStr::new("Cellar")
-                && *formula == std::ffi::OsStr::new("zeroclaw")
+                && *formula == std::ffi::OsStr::new("rei")
                 && *bin == std::ffi::OsStr::new("bin")
-                && *exe_name == std::ffi::OsStr::new("zeroclaw") =>
+                && *exe_name == std::ffi::OsStr::new("rei") =>
         {
             prefix.iter().collect::<PathBuf>()
         }
         [prefix @ .., opt, formula, bin, exe_name]
             if *opt == std::ffi::OsStr::new("opt")
-                && *formula == std::ffi::OsStr::new("zeroclaw")
+                && *formula == std::ffi::OsStr::new("rei")
                 && *bin == std::ffi::OsStr::new("bin")
-                && *exe_name == std::ffi::OsStr::new("zeroclaw") =>
+                && *exe_name == std::ffi::OsStr::new("rei") =>
         {
             let prefix = prefix.iter().collect::<PathBuf>();
             if !prefix.as_os_str().is_empty()
@@ -319,8 +302,7 @@ pub(crate) async fn try_resolve_macos_homebrew_config_dir(exe: &Path) -> Option<
             }
         }
         [prefix @ .., bin, exe_name]
-            if *bin == std::ffi::OsStr::new("bin")
-                && *exe_name == std::ffi::OsStr::new("zeroclaw") =>
+            if *bin == std::ffi::OsStr::new("bin") && *exe_name == std::ffi::OsStr::new("rei") =>
         {
             let prefix = prefix.iter().collect::<PathBuf>();
             if !prefix.as_os_str().is_empty()
@@ -335,18 +317,18 @@ pub(crate) async fn try_resolve_macos_homebrew_config_dir(exe: &Path) -> Option<
         }
         _ => return None,
     };
-    Some(prefix.join("var").join("zeroclaw"))
+    Some(prefix.join("var").join("rei"))
 }
 
 pub(crate) async fn resolve_runtime_config_dirs(
-    default_zeroclaw_dir: &Path,
+    default_rei_dir: &Path,
     default_data_dir: &Path,
 ) -> Result<(PathBuf, PathBuf, ConfigResolutionSource)> {
     if let Some((env_name, custom_config_dir)) = env_config_dir_override() {
-        // If the operator ALSO set ZEROCLAW_DATA_DIR or
-        // ZEROCLAW_WORKSPACE, CONFIG_DIR wins; surface the
+        // If the operator ALSO set REI_DATA_DIR or
+        // REI_WORKSPACE, CONFIG_DIR wins; surface the
         // collision so they know which one took effect.
-        if std::env::var("ZEROCLAW_DATA_DIR")
+        if std::env::var("REI_DATA_DIR")
             .ok()
             .filter(|v| !v.trim().is_empty())
             .is_some()
@@ -359,13 +341,13 @@ pub(crate) async fn resolve_runtime_config_dirs(
                 )
                 .with_outcome(::reiclaw_log::EventOutcome::Unknown),
                 &format!(
-                    "{env_name} is set; ZEROCLAW_DATA_DIR is ignored \
+                    "{env_name} is set; REI_DATA_DIR is ignored \
                      (CONFIG_DIR pins both the config directory and the data \
                      directory under it)."
                 )
             );
         }
-        if std::env::var("ZEROCLAW_WORKSPACE")
+        if std::env::var("REI_WORKSPACE")
             .ok()
             .filter(|v| !v.is_empty())
             .is_some()
@@ -378,24 +360,24 @@ pub(crate) async fn resolve_runtime_config_dirs(
                 )
                 .with_outcome(::reiclaw_log::EventOutcome::Unknown),
                 &format!(
-                    "{env_name} is set; ZEROCLAW_WORKSPACE (deprecated) \
-                     is ignored. ZEROCLAW_WORKSPACE will be removed in a future \
-                     release; switch any remaining references to ZEROCLAW_DATA_DIR."
+                    "{env_name} is set; REI_WORKSPACE (deprecated) \
+                     is ignored. REI_WORKSPACE will be removed in a future \
+                     release; switch any remaining references to REI_DATA_DIR."
                 )
             );
         }
-        let zeroclaw_dir = expand_tilde_path(&custom_config_dir);
+        let rei_dir = expand_tilde_path(&custom_config_dir);
         return Ok((
-            zeroclaw_dir.clone(),
-            zeroclaw_dir.join("data"),
+            rei_dir.clone(),
+            rei_dir.join("data"),
             ConfigResolutionSource::EnvConfigDir,
         ));
     }
 
-    if let Ok(custom_data) = std::env::var("ZEROCLAW_DATA_DIR")
+    if let Ok(custom_data) = std::env::var("REI_DATA_DIR")
         && !custom_data.trim().is_empty()
     {
-        if std::env::var("ZEROCLAW_WORKSPACE")
+        if std::env::var("REI_WORKSPACE")
             .ok()
             .filter(|v| !v.is_empty())
             .is_some()
@@ -407,17 +389,17 @@ pub(crate) async fn resolve_runtime_config_dirs(
                     ::reiclaw_log::Action::Note
                 )
                 .with_outcome(::reiclaw_log::EventOutcome::Unknown),
-                "ZEROCLAW_DATA_DIR and ZEROCLAW_WORKSPACE are both set; \
-                 ZEROCLAW_WORKSPACE (deprecated) is ignored. \
-                 ZEROCLAW_WORKSPACE will be removed in a future release."
+                "REI_DATA_DIR and REI_WORKSPACE are both set; \
+                 REI_WORKSPACE (deprecated) is ignored. \
+                 REI_WORKSPACE will be removed in a future release."
             );
         }
         let expanded = expand_tilde_path(&custom_data);
-        let (zeroclaw_dir, data_dir) = resolve_config_dir_for_data(&expanded);
-        return Ok((zeroclaw_dir, data_dir, ConfigResolutionSource::EnvDataDir));
+        let (rei_dir, data_dir) = resolve_config_dir_for_data(&expanded);
+        return Ok((rei_dir, data_dir, ConfigResolutionSource::EnvDataDir));
     }
 
-    if let Ok(custom_workspace) = std::env::var("ZEROCLAW_WORKSPACE")
+    if let Ok(custom_workspace) = std::env::var("REI_WORKSPACE")
         && !custom_workspace.is_empty()
     {
         ::reiclaw_log::record!(
@@ -427,13 +409,13 @@ pub(crate) async fn resolve_runtime_config_dirs(
                 ::reiclaw_log::Action::Note
             )
             .with_outcome(::reiclaw_log::EventOutcome::Unknown),
-            "ZEROCLAW_WORKSPACE is deprecated; use ZEROCLAW_DATA_DIR instead. \
-             ZEROCLAW_WORKSPACE will be removed in a future release."
+            "REI_WORKSPACE is deprecated; use REI_DATA_DIR instead. \
+             REI_WORKSPACE will be removed in a future release."
         );
         let expanded = expand_tilde_path(&custom_workspace);
-        let (zeroclaw_dir, data_dir) = resolve_config_dir_for_data(&expanded);
+        let (rei_dir, data_dir) = resolve_config_dir_for_data(&expanded);
         return Ok((
-            zeroclaw_dir,
+            rei_dir,
             data_dir,
             ConfigResolutionSource::EnvWorkspaceLegacy,
         ));
@@ -451,7 +433,7 @@ pub(crate) async fn resolve_runtime_config_dirs(
     }
 
     Ok((
-        default_zeroclaw_dir.to_path_buf(),
+        default_rei_dir.to_path_buf(),
         default_data_dir.to_path_buf(),
         ConfigResolutionSource::DefaultConfigDir,
     ))
@@ -460,7 +442,7 @@ pub(crate) async fn resolve_runtime_config_dirs(
 pub(crate) fn config_dir_creation_error(path: &Path) -> String {
     format!(
         "Failed to create config directory: {}. If running as an OpenRC service, \
-         ensure this path is writable by user 'zeroclaw'.",
+         ensure this path is writable by user 'rei'.",
         path.display()
     )
 }
@@ -475,7 +457,7 @@ pub async fn ensure_bootstrap_files(workspace_dir: &Path) -> Result<()> {
         (
             "IDENTITY.md",
             "# IDENTITY.md — Who Am I?\n\n\
-             I am ZeroClaw, an autonomous AI agent.\n\n\
+             I am ReiClaw, an autonomous AI agent.\n\n\
              ## Traits\n\
              - Helpful, precise, and safety-conscious\n\
              - I prioritize clarity and correctness\n",
@@ -483,7 +465,7 @@ pub async fn ensure_bootstrap_files(workspace_dir: &Path) -> Result<()> {
         (
             "SOUL.md",
             "# SOUL.md — Who You Are\n\n\
-             You are ZeroClaw, an autonomous AI agent.\n\n\
+             You are ReiClaw, an autonomous AI agent.\n\n\
              ## Core Principles\n\
              - Be helpful and accurate\n\
              - Respect user intent and boundaries\n\
@@ -659,12 +641,12 @@ impl Config {
     }
 
     pub async fn load_or_init() -> Result<Self> {
-        let (default_zeroclaw_dir, default_workspace_dir) = default_config_and_data_dirs()?;
+        let (default_rei_dir, default_workspace_dir) = default_config_and_data_dirs()?;
 
         // Resolve the operator's install root before inspecting its config.
-        let (zeroclaw_dir, _legacy_workspace_dir, resolution_source) =
-            resolve_runtime_config_dirs(&default_zeroclaw_dir, &default_workspace_dir).await?;
-        let config_path = zeroclaw_dir.join("config.toml");
+        let (rei_dir, _legacy_workspace_dir, resolution_source) =
+            resolve_runtime_config_dirs(&default_rei_dir, &default_workspace_dir).await?;
+        let config_path = rei_dir.join("config.toml");
         let persisted_contents = match fs::read_to_string(&config_path).await {
             Ok(contents) => Some(contents),
             Err(err) if err.kind() == std::io::ErrorKind::NotFound => None,
@@ -677,7 +659,7 @@ impl Config {
         {
             crate::current::require_current_schema(&raw)?;
         }
-        if let Err(err) = crate::install::relocate_default_agent_skills_to_shared(&zeroclaw_dir) {
+        if let Err(err) = crate::install::relocate_default_agent_skills_to_shared(&rei_dir) {
             ::reiclaw_log::record!(
                 WARN,
                 ::reiclaw_log::Event::new(
@@ -686,7 +668,7 @@ impl Config {
                 )
                 .with_outcome(::reiclaw_log::EventOutcome::Unknown)
                 .with_attrs(::serde_json::json!({
-                    "install": zeroclaw_dir.display().to_string(),
+                    "install": rei_dir.display().to_string(),
                     "error": format!("{err}"),
                 })),
                 "[system] skills relocation to shared workspace failed; continuing"
@@ -705,7 +687,7 @@ impl Config {
         // cost records) and hygiene/state files. Per-agent identity
         // and markdown (MEMORY.md, IDENTITY.md, SOUL.md) lives at
         // `Config::agent_workspace_dir(alias)` instead.
-        let data_dir = zeroclaw_dir.join("data");
+        let data_dir = rei_dir.join("data");
         fs::create_dir_all(&data_dir).await.with_context(|| {
             format!(
                 "Failed to create data directory: {}",
@@ -720,7 +702,7 @@ impl Config {
         // on the host. Holds skills, skill bundles, and other content
         // not scoped to a single agent. Per-agent state still lives at
         // `<install>/agents/<alias>/workspace/`.
-        let shared_dir = zeroclaw_dir.join("shared");
+        let shared_dir = rei_dir.join("shared");
         fs::create_dir_all(&shared_dir).await.with_context(|| {
             format!(
                 "Failed to create shared workspace directory: {}",
@@ -728,9 +710,9 @@ impl Config {
             )
         })?;
 
-        fs::create_dir_all(&zeroclaw_dir)
+        fs::create_dir_all(&rei_dir)
             .await
-            .with_context(|| config_dir_creation_error(&zeroclaw_dir))?;
+            .with_context(|| config_dir_creation_error(&rei_dir))?;
 
         if let Some(contents) = persisted_contents {
             // Warn if config file is world-readable (may contain API keys)
@@ -819,7 +801,7 @@ impl Config {
             // degrades (dropping invalid blocks to defaults); security-critical
             // drops are recorded on `degraded_security` for exposure gating.
             // Unsupported versions always fail; strict validation lives in
-            // `zeroclaw config validate`.
+            // `rei config validate`.
             let salvage = crate::current::parse_current_salvaged(&contents)?;
             let mut config: Config = salvage.config;
             config.degraded_security = salvage.dropped_security;
@@ -867,7 +849,7 @@ impl Config {
                 let (kind, family) = entry.split_once('.').unwrap_or(("models", entry.as_str()));
                 let reference = if kind == "models" {
                     "any agents.*.model_provider referencing them will fail to resolve; \
-                     run `zeroclaw providers` for valid family names"
+                     run `rei providers` for valid family names"
                 } else {
                     "references to its aliases will fail to resolve"
                 };
@@ -942,7 +924,7 @@ impl Config {
                 }
             }
 
-            let store = crate::secrets::SecretStore::new(&zeroclaw_dir, config.secrets.encrypt);
+            let store = crate::secrets::SecretStore::new(&rei_dir, config.secrets.encrypt);
             config.onepassword_reference_snapshots =
                 ExternalRefSnapshots::from_map(collect_onepassword_reference_snapshots(&config)?);
             // Decrypt all #[secret]-annotated fields via Configurable derive
@@ -953,7 +935,7 @@ impl Config {
             .await
             .context("Config secret decryption task failed")??;
 
-            // Apply ZEROCLAW_<lowercase_path> env-var overrides. Hard-errors
+            // Apply REI_<lowercase_path> env-var overrides. Hard-errors
             // on any unresolvable path — no silent ignores. Tracks overridden
             // paths and per-path pre-override snapshots so save() can mask
             // env-injected values back to the original on-disk state.
@@ -983,7 +965,7 @@ impl Config {
                     .with_outcome(::reiclaw_log::EventOutcome::Unknown)
                     .with_attrs(::serde_json::json!({"error": format!("{e:#}")})),
                     "[system] config has validation errors — booting anyway so you \
-                     can fix them via /config or `zeroclaw config set`"
+                     can fix them via /config or `rei config set`"
                 );
             }
             ::reiclaw_log::record!(INFO, ::reiclaw_log::Event::new(crate::schema::CONFIG_SCHEMA_LOG_TARGET, ::reiclaw_log::Action::Note).with_attrs(::serde_json::json!({"path": config.config_path.display().to_string(), "workspace": config.data_dir.display().to_string(), "source": resolution_source.as_str(), "initialized": true})), "Config loaded");

@@ -278,7 +278,7 @@ async fn receive_loopback_code_inner(expected_state: &str, timeout: Duration) ->
     let code = parse_code_from_redirect(path, Some(expected_state))?;
 
     let body =
-        "<html><body><h2>ZeroClaw login complete</h2><p>You can close this tab.</p></body></html>";
+        "<html><body><h2>ReiClaw login complete</h2><p>You can close this tab.</p></body></html>";
     let response = format!(
         "HTTP/1.1 200 OK\r\nContent-Type: text/html; charset=utf-8\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{}",
         body.len(),

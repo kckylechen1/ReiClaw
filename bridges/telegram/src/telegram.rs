@@ -12,7 +12,7 @@ pub const MESSAGE_LIMIT: usize = 4096;
 
 /// Reserved bridge-owned question prefix. Ordinary sends escape its first
 /// bracket, preserving Telegram's UTF-16 length and preventing spoofed UI.
-pub const QUESTION_MARKER: &str = "[ZeroClaw question]";
+pub const QUESTION_MARKER: &str = "[ReiClaw question]";
 
 fn ordinary_text(text: &str) -> std::borrow::Cow<'_, str> {
     if text.starts_with(QUESTION_MARKER) {
@@ -72,7 +72,7 @@ pub const DOWNLOAD_LIMIT: usize = 2 * 1024 * 1024;
 pub const DOCUMENT_LIMIT: usize = 10 * 1024 * 1024;
 
 /// Default filename for an outbound full-reply document.
-pub const REPLY_DOCUMENT_NAME: &str = "zeroclaw-reply.txt";
+pub const REPLY_DOCUMENT_NAME: &str = "rei-reply.txt";
 
 /// Only the correlation field is needed, not a recursive message history.
 #[derive(Debug, Clone, Deserialize)]

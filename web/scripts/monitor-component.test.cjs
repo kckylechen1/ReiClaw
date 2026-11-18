@@ -5,7 +5,7 @@ const { JSDOM } = require('jsdom');
 const { createJiti } = require('jiti');
 const React = require('react');
 const { act } = React;
-const dom = new JSDOM('<div id="root"></div>', { url: 'https://zeroclaw.test', pretendToBeVisual: true });
+const dom = new JSDOM('<div id="root"></div>', { url: 'https://reiclaw.test', pretendToBeVisual: true });
 Object.assign(globalThis, {
   window: dom.window, document: dom.window.document,
   localStorage: dom.window.localStorage, IS_REACT_ACT_ENVIRONMENT: true,

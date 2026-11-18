@@ -1,0 +1,27 @@
+{
+    "version": "0.8.3",
+    "description": "ReiClaw (rei) - Personal AI Controller.",
+    "homepage": "https://github.com/kckylechen1/ReiClaw",
+    "license": "MIT|Apache-2.0",
+    "architecture": {
+        "64bit": {
+            "url": "https://github.com/kckylechen1/ReiClaw/releases/download/v0.8.3/reiclaw-x86_64-pc-windows-msvc.zip",
+            "hash": "",
+            "bin": ["rei.exe"]
+        }
+    },
+    "checkver": {
+        "github": "https://github.com/kckylechen1/ReiClaw"
+    },
+    "autoupdate": {
+        "architecture": {
+            "64bit": {
+                "url": "https://github.com/kckylechen1/ReiClaw/releases/download/v$version/reiclaw-x86_64-pc-windows-msvc.zip"
+            }
+        },
+        "hash": {
+            "url": "https://github.com/kckylechen1/ReiClaw/releases/download/v$version/SHA256SUMS",
+            "regex": "([a-f0-9]{64})\\s+reiclaw-x86_64-pc-windows-msvc\\.zip"
+        }
+    }
+}

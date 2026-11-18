@@ -839,7 +839,7 @@ pub async fn api_error(model_provider: &str, response: reqwest::Response) -> any
 
 /// Resolve API key for a model_provider from config and environment variables.
 /// Return the typed-alias `api_key` field, trimmed. Env-var overrides land on
-/// the field at config-load via the `ZEROCLAW_*` schema-mirror grammar.
+/// the field at config-load via the `REI_*` schema-mirror grammar.
 fn resolve_model_provider_credential(
     _name: &str,
     credential_override: Option<&str>,

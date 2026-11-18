@@ -231,7 +231,7 @@ impl AuditLogger {
     pub fn new(config: AuditConfig, zeroclaw_dir: PathBuf) -> Result<Self> {
         // Load and validate signing key if sign_events enabled
         let signing_key = if config.sign_events {
-            let key_hex = std::env::var("ZEROCLAW_AUDIT_SIGNING_KEY").map_err(|e| {
+            let key_hex = std::env::var("REI_AUDIT_SIGNING_KEY").map_err(|e| {
                 // Do not format the VarError: VarError::NotUnicode includes the
                 // raw env-var value in its Display/Debug text, which would leak
                 // signing-key material into logs and error output.
@@ -244,15 +244,15 @@ impl AuditLogger {
                     ::reiclaw_log::Event::new(module_path!(), ::reiclaw_log::Action::Fail)
                         .with_outcome(::reiclaw_log::EventOutcome::Failure)
                         .with_attrs(::serde_json::json!({"reason": reason})),
-                    "audit log: sign_events=true but ZEROCLAW_AUDIT_SIGNING_KEY env var is not usable"
+                    "audit log: sign_events=true but REI_AUDIT_SIGNING_KEY env var is not usable"
                 );
                 match e {
-                    std::env::VarError::NotPresent => anyhow::Error::msg(
-                        "sign_events enabled but ZEROCLAW_AUDIT_SIGNING_KEY not set",
-                    ),
-                    std::env::VarError::NotUnicode(_) => anyhow::Error::msg(
-                        "ZEROCLAW_AUDIT_SIGNING_KEY env var is not valid UTF-8",
-                    ),
+                    std::env::VarError::NotPresent => {
+                        anyhow::Error::msg("sign_events enabled but REI_AUDIT_SIGNING_KEY not set")
+                    }
+                    std::env::VarError::NotUnicode(_) => {
+                        anyhow::Error::msg("REI_AUDIT_SIGNING_KEY env var is not valid UTF-8")
+                    }
                 }
             })?;
 
@@ -262,16 +262,14 @@ impl AuditLogger {
                     ::reiclaw_log::Event::new(module_path!(), ::reiclaw_log::Action::Fail)
                         .with_outcome(::reiclaw_log::EventOutcome::Failure)
                         .with_attrs(::serde_json::json!({"error": format!("{e}")})),
-                    "audit log: ZEROCLAW_AUDIT_SIGNING_KEY env var must be hex-encoded"
+                    "audit log: REI_AUDIT_SIGNING_KEY env var must be hex-encoded"
                 );
-                anyhow::Error::msg(format!(
-                    "ZEROCLAW_AUDIT_SIGNING_KEY must be hex-encoded: {e}"
-                ))
+                anyhow::Error::msg(format!("REI_AUDIT_SIGNING_KEY must be hex-encoded: {e}"))
             })?;
 
             if key_bytes.len() != 32 {
                 bail!(
-                    "ZEROCLAW_AUDIT_SIGNING_KEY must be 32 bytes (64 hex chars), got {}",
+                    "REI_AUDIT_SIGNING_KEY must be 32 bytes (64 hex chars), got {}",
                     key_bytes.len()
                 );
             }
@@ -456,7 +454,7 @@ pub fn verify_chain(log_path: &Path) -> Result<u64> {
     let mut expected_sequence: u64 = 0;
 
     // Attempt to load signing key from environment (optional)
-    let signing_key = std::env::var("ZEROCLAW_AUDIT_SIGNING_KEY")
+    let signing_key = std::env::var("REI_AUDIT_SIGNING_KEY")
         .ok()
         .and_then(|key_hex| hex::decode(&key_hex).ok())
         .filter(|key_bytes| key_bytes.len() == 32);
@@ -545,7 +543,7 @@ mod tests {
     use std::sync::Mutex;
     use tempfile::TempDir;
 
-    /// Mutex to serialize tests that read/write ZEROCLAW_AUDIT_SIGNING_KEY env var.
+    /// Mutex to serialize tests that read/write REI_AUDIT_SIGNING_KEY env var.
     static ENV_MUTEX: Mutex<()> = Mutex::new(());
 
     #[test]
@@ -895,21 +893,21 @@ mod tests {
     #[test]
     fn signature_present_when_sign_events_enabled() -> Result<()> {
         let _guard = ENV_MUTEX.lock().unwrap();
-        let old_key = std::env::var("ZEROCLAW_AUDIT_SIGNING_KEY").ok();
+        let old_key = std::env::var("REI_AUDIT_SIGNING_KEY").ok();
         defer! {
             if let Some(key) = old_key {
                 // SAFETY: test-only, single-threaded test runner.
-                unsafe { std::env::set_var("ZEROCLAW_AUDIT_SIGNING_KEY", key) };
+                unsafe { std::env::set_var("REI_AUDIT_SIGNING_KEY", key) };
             } else {
                 // SAFETY: test-only, single-threaded test runner.
-                unsafe { std::env::remove_var("ZEROCLAW_AUDIT_SIGNING_KEY") };
+                unsafe { std::env::remove_var("REI_AUDIT_SIGNING_KEY") };
             }
         }
 
         let tmp = TempDir::new()?;
         let test_key = "a".repeat(64); // 64 hex chars = 32 bytes
         // SAFETY: test-only, single-threaded test runner.
-        unsafe { std::env::set_var("ZEROCLAW_AUDIT_SIGNING_KEY", &test_key) };
+        unsafe { std::env::set_var("REI_AUDIT_SIGNING_KEY", &test_key) };
 
         let config = AuditConfig {
             enabled: true,
@@ -963,21 +961,21 @@ mod tests {
     #[test]
     fn signature_computed_over_entry_hash() -> Result<()> {
         let _guard = ENV_MUTEX.lock().unwrap();
-        let old_key = std::env::var("ZEROCLAW_AUDIT_SIGNING_KEY").ok();
+        let old_key = std::env::var("REI_AUDIT_SIGNING_KEY").ok();
         defer! {
             if let Some(key) = old_key {
                 // SAFETY: test-only, single-threaded test runner.
-                unsafe { std::env::set_var("ZEROCLAW_AUDIT_SIGNING_KEY", key) };
+                unsafe { std::env::set_var("REI_AUDIT_SIGNING_KEY", key) };
             } else {
                 // SAFETY: test-only, single-threaded test runner.
-                unsafe { std::env::remove_var("ZEROCLAW_AUDIT_SIGNING_KEY") };
+                unsafe { std::env::remove_var("REI_AUDIT_SIGNING_KEY") };
             }
         }
 
         let tmp = TempDir::new()?;
         let test_key = "b".repeat(64);
         // SAFETY: test-only, single-threaded test runner.
-        unsafe { std::env::set_var("ZEROCLAW_AUDIT_SIGNING_KEY", &test_key) };
+        unsafe { std::env::set_var("REI_AUDIT_SIGNING_KEY", &test_key) };
 
         let config = AuditConfig {
             enabled: true,
@@ -1009,20 +1007,20 @@ mod tests {
     #[test]
     fn constructor_fails_if_sign_events_but_no_key() -> Result<()> {
         let _guard = ENV_MUTEX.lock().unwrap();
-        let old_key = std::env::var("ZEROCLAW_AUDIT_SIGNING_KEY").ok();
+        let old_key = std::env::var("REI_AUDIT_SIGNING_KEY").ok();
         defer! {
             // Only restore if it was a valid 64-char key
             if let Some(key) = old_key.as_ref().filter(|k| k.len() == 64) {
                 // SAFETY: test-only, single-threaded test runner.
-                unsafe { std::env::set_var("ZEROCLAW_AUDIT_SIGNING_KEY", key) };
+                unsafe { std::env::set_var("REI_AUDIT_SIGNING_KEY", key) };
             } else {
                 // SAFETY: test-only, single-threaded test runner.
-                unsafe { std::env::remove_var("ZEROCLAW_AUDIT_SIGNING_KEY") };
+                unsafe { std::env::remove_var("REI_AUDIT_SIGNING_KEY") };
             }
         }
 
         // SAFETY: test-only, single-threaded test runner.
-        unsafe { std::env::remove_var("ZEROCLAW_AUDIT_SIGNING_KEY") };
+        unsafe { std::env::remove_var("REI_AUDIT_SIGNING_KEY") };
 
         let tmp = TempDir::new()?;
         let config = AuditConfig {
@@ -1036,7 +1034,7 @@ mod tests {
         if let Err(e) = result {
             let err_msg = e.to_string();
             assert!(
-                err_msg.contains("ZEROCLAW_AUDIT_SIGNING_KEY not set"),
+                err_msg.contains("REI_AUDIT_SIGNING_KEY not set"),
                 "error: {}",
                 err_msg
             );
@@ -1048,20 +1046,20 @@ mod tests {
     #[test]
     fn constructor_fails_if_signing_key_invalid_hex() -> Result<()> {
         let _guard = ENV_MUTEX.lock().unwrap();
-        let old_key = std::env::var("ZEROCLAW_AUDIT_SIGNING_KEY").ok();
+        let old_key = std::env::var("REI_AUDIT_SIGNING_KEY").ok();
         defer! {
             // Only restore if it was a valid 64-char key
             if let Some(key) = old_key.as_ref().filter(|k| k.len() == 64) {
                 // SAFETY: test-only, single-threaded test runner.
-                unsafe { std::env::set_var("ZEROCLAW_AUDIT_SIGNING_KEY", key) };
+                unsafe { std::env::set_var("REI_AUDIT_SIGNING_KEY", key) };
             } else {
                 // SAFETY: test-only, single-threaded test runner.
-                unsafe { std::env::remove_var("ZEROCLAW_AUDIT_SIGNING_KEY") };
+                unsafe { std::env::remove_var("REI_AUDIT_SIGNING_KEY") };
             }
         }
 
         // SAFETY: test-only, single-threaded test runner.
-        unsafe { std::env::set_var("ZEROCLAW_AUDIT_SIGNING_KEY", "not-valid-hex") };
+        unsafe { std::env::set_var("REI_AUDIT_SIGNING_KEY", "not-valid-hex") };
 
         let tmp = TempDir::new()?;
         let config = AuditConfig {
@@ -1091,21 +1089,21 @@ mod tests {
         use std::os::unix::ffi::OsStrExt;
 
         let _guard = ENV_MUTEX.lock().unwrap();
-        let old_key = std::env::var_os("ZEROCLAW_AUDIT_SIGNING_KEY");
+        let old_key = std::env::var_os("REI_AUDIT_SIGNING_KEY");
         defer! {
             if let Some(key) = old_key {
                 // SAFETY: test-only, single-threaded test runner.
-                unsafe { std::env::set_var("ZEROCLAW_AUDIT_SIGNING_KEY", key) };
+                unsafe { std::env::set_var("REI_AUDIT_SIGNING_KEY", key) };
             } else {
                 // SAFETY: test-only, single-threaded test runner.
-                unsafe { std::env::remove_var("ZEROCLAW_AUDIT_SIGNING_KEY") };
+                unsafe { std::env::remove_var("REI_AUDIT_SIGNING_KEY") };
             }
         }
 
         let secret_bytes: &[u8] = b"ab\xFFc";
         let bad_value = OsStr::from_bytes(secret_bytes);
         // SAFETY: test-only, single-threaded test runner.
-        unsafe { std::env::set_var("ZEROCLAW_AUDIT_SIGNING_KEY", bad_value) };
+        unsafe { std::env::set_var("REI_AUDIT_SIGNING_KEY", bad_value) };
 
         let tmp = TempDir::new()?;
         let config = AuditConfig {
@@ -1132,22 +1130,22 @@ mod tests {
     #[test]
     fn constructor_fails_if_signing_key_wrong_length() -> Result<()> {
         let _guard = ENV_MUTEX.lock().unwrap();
-        let old_key = std::env::var("ZEROCLAW_AUDIT_SIGNING_KEY").ok();
+        let old_key = std::env::var("REI_AUDIT_SIGNING_KEY").ok();
         defer! {
             // Only restore if it was a valid 64-char key
             if let Some(key) = old_key.as_ref().filter(|k| k.len() == 64) {
                 // SAFETY: test-only, single-threaded test runner.
-                unsafe { std::env::set_var("ZEROCLAW_AUDIT_SIGNING_KEY", key) };
+                unsafe { std::env::set_var("REI_AUDIT_SIGNING_KEY", key) };
             } else {
                 // SAFETY: test-only, single-threaded test runner.
-                unsafe { std::env::remove_var("ZEROCLAW_AUDIT_SIGNING_KEY") };
+                unsafe { std::env::remove_var("REI_AUDIT_SIGNING_KEY") };
             }
         }
 
         // 30 bytes = 60 hex chars (not 32 bytes)
         let short_key = "c".repeat(60);
         // SAFETY: test-only, single-threaded test runner.
-        unsafe { std::env::set_var("ZEROCLAW_AUDIT_SIGNING_KEY", &short_key) };
+        unsafe { std::env::set_var("REI_AUDIT_SIGNING_KEY", &short_key) };
         let tmp = TempDir::new()?;
         let config = AuditConfig {
             enabled: true,
@@ -1168,14 +1166,14 @@ mod tests {
     #[test]
     fn different_keys_produce_different_signatures() -> Result<()> {
         let _guard = ENV_MUTEX.lock().unwrap();
-        let old_key = std::env::var("ZEROCLAW_AUDIT_SIGNING_KEY").ok();
+        let old_key = std::env::var("REI_AUDIT_SIGNING_KEY").ok();
         defer! {
             if let Some(key) = old_key {
                 // SAFETY: test-only, single-threaded test runner.
-                unsafe { std::env::set_var("ZEROCLAW_AUDIT_SIGNING_KEY", key) };
+                unsafe { std::env::set_var("REI_AUDIT_SIGNING_KEY", key) };
             } else {
                 // SAFETY: test-only, single-threaded test runner.
-                unsafe { std::env::remove_var("ZEROCLAW_AUDIT_SIGNING_KEY") };
+                unsafe { std::env::remove_var("REI_AUDIT_SIGNING_KEY") };
             }
         }
 
@@ -1214,21 +1212,21 @@ mod tests {
     #[test]
     fn signature_deterministic_for_same_entry_hash() -> Result<()> {
         let _guard = ENV_MUTEX.lock().unwrap();
-        let old_key = std::env::var("ZEROCLAW_AUDIT_SIGNING_KEY").ok();
+        let old_key = std::env::var("REI_AUDIT_SIGNING_KEY").ok();
         defer! {
             if let Some(key) = old_key {
                 // SAFETY: test-only, single-threaded test runner.
-                unsafe { std::env::set_var("ZEROCLAW_AUDIT_SIGNING_KEY", key) };
+                unsafe { std::env::set_var("REI_AUDIT_SIGNING_KEY", key) };
             } else {
                 // SAFETY: test-only, single-threaded test runner.
-                unsafe { std::env::remove_var("ZEROCLAW_AUDIT_SIGNING_KEY") };
+                unsafe { std::env::remove_var("REI_AUDIT_SIGNING_KEY") };
             }
         }
 
         let tmp = TempDir::new()?;
         let test_key = "f".repeat(64);
         // SAFETY: test-only, single-threaded test runner.
-        unsafe { std::env::set_var("ZEROCLAW_AUDIT_SIGNING_KEY", &test_key) };
+        unsafe { std::env::set_var("REI_AUDIT_SIGNING_KEY", &test_key) };
 
         let config = AuditConfig {
             enabled: true,
@@ -1273,14 +1271,14 @@ mod tests {
     #[test]
     fn verify_chain_accepts_mixed_signed_and_unsigned_records() -> Result<()> {
         let _guard = ENV_MUTEX.lock().unwrap();
-        let old_key = std::env::var("ZEROCLAW_AUDIT_SIGNING_KEY").ok();
+        let old_key = std::env::var("REI_AUDIT_SIGNING_KEY").ok();
         defer! {
             if let Some(key) = old_key.as_ref().filter(|k| k.len() == 64) {
                 // SAFETY: test-only, single-threaded test runner.
-                unsafe { std::env::set_var("ZEROCLAW_AUDIT_SIGNING_KEY", key) };
+                unsafe { std::env::set_var("REI_AUDIT_SIGNING_KEY", key) };
             } else {
                 // SAFETY: test-only, single-threaded test runner.
-                unsafe { std::env::remove_var("ZEROCLAW_AUDIT_SIGNING_KEY") };
+                unsafe { std::env::remove_var("REI_AUDIT_SIGNING_KEY") };
             }
         }
 
@@ -1291,7 +1289,7 @@ mod tests {
         // First logger with sign_events=false (unsigned records)
         {
             // SAFETY: test-only, single-threaded test runner.
-            unsafe { std::env::remove_var("ZEROCLAW_AUDIT_SIGNING_KEY") };
+            unsafe { std::env::remove_var("REI_AUDIT_SIGNING_KEY") };
             let config = AuditConfig {
                 enabled: true,
                 sign_events: false,
@@ -1312,7 +1310,7 @@ mod tests {
         // Second logger with sign_events=true (signed records)
         {
             // SAFETY: test-only, single-threaded test runner.
-            unsafe { std::env::set_var("ZEROCLAW_AUDIT_SIGNING_KEY", &test_key) };
+            unsafe { std::env::set_var("REI_AUDIT_SIGNING_KEY", &test_key) };
             let config = AuditConfig {
                 enabled: true,
                 sign_events: true,
@@ -1333,7 +1331,7 @@ mod tests {
         // Verify the full chain (4 records: 2 unsigned + 2 signed)
         // Set the key in env so verify_chain can check signatures
         // SAFETY: test-only, single-threaded test runner.
-        unsafe { std::env::set_var("ZEROCLAW_AUDIT_SIGNING_KEY", &test_key) };
+        unsafe { std::env::set_var("REI_AUDIT_SIGNING_KEY", &test_key) };
         let count = verify_chain(&log_path)?;
         assert_eq!(count, 4, "should verify all 4 records");
 

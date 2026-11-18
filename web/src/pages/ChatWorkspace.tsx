@@ -4,7 +4,7 @@ import { AgentChatInner, type AgentChatStatus } from '@/pages/AgentChat';
 import { ChatTabBar, type TabIndicator, type WorkspaceLayout } from '@/components/ChatTabBar';
 import { basePath } from '@/lib/basePath';
 
-const STORAGE_KEY = 'zeroclaw-chat-workspace';
+const STORAGE_KEY = 'reiclaw-chat-workspace';
 
 interface PersistedState {
   openChats: string[];

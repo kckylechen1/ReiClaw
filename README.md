@@ -1,5 +1,5 @@
 <p align="center">
-  <img src="docs/assets/zeroclaw-banner.png" alt="ReiClaw" width="600" />
+  <img src="docs/assets/reiclaw-banner.png" alt="ReiClaw" width="600" />
 </p>
 
 <h1 align="center">ReiClaw (<code>rei</code>): Personal AI Controller</h1>
@@ -81,7 +81,7 @@ Most requests end at L0. A spoken "what's the weather" never waits on Tachi.
   reads are available; automatic background completion delivery remains open
   in #381 and #63. An acknowledgement must not promise an unconfigured delivery.
 - **New external surfaces default closed.** `[tachi]` and `[nodes]` are disabled
-  by default, ZeroClaw accepts only loopback Tachi endpoints, and no harness or Node
+  by default, ReiClaw accepts only loopback Tachi endpoints, and no harness or Node
   capability is available until you grant it explicitly.
 
 Full details: [ADR-013](docs/book/src/architecture/decisions/ADR-013-channels-as-gateway-clients.md)
@@ -106,7 +106,7 @@ acceptance is tracked in [#374](https://github.com/kckylechen1/ReiClaw/issues/37
 | A delegated result reaches the owner after the foreground client leaves | ⏳ Background observation and actual delivery remain open in #381 / #63 |
 
 **First physical body:** the Yonbo X1 companion robot (#535). Its dialogue
-still runs through an interim adapter; switching that brain to ZeroClaw (S5)
+still runs through an interim adapter; switching that brain to ReiClaw (S5)
 and enabling its face capability as a Node (S8) are pending.
 
 The in-process `zeroclaw-channels` crate has been removed (#579). External
@@ -129,7 +129,7 @@ cd ReiClaw
 
 To update this fork, update its source checkout and run `./install.sh --source`
 with the same preset and features as your existing installation. The legacy
-`zeroclaw update` command (including `--check`, `--force`, and `--version`)
+`rei update` command (including `--check`, `--force`, and `--version`)
 returns source-update instructions without accessing a release server or
 replacing the executable. This fork does not yet publish a verified binary
 update channel. Both bootstrap scripts now default to source builds;
@@ -168,9 +168,9 @@ Flags:
 ./install.sh --without-gateway       # force gateway support off
 ./install.sh --prefix /tmp/zc-test   # install under a custom prefix
 ./install.sh --dry-run --source      # preview without installing
-./install.sh --skip-quickstart       # install only, run `zeroclaw quickstart` later
+./install.sh --skip-quickstart       # install only, run `rei quickstart` later
 ./install.sh --list-features         # print available feature flags
-./install.sh --uninstall             # remove ZeroClaw
+./install.sh --uninstall             # remove ReiClaw
 ```
 
 Platform-specific notes: [Linux](docs/book/src/setup/linux.md) · [macOS](docs/book/src/setup/macos.md) · [Windows](docs/book/src/setup/windows.md) · [FreeBSD](docs/book/src/setup/freebsd.md) · [NixOS](docs/book/src/setup/nixos.md) · [Docker](docs/book/src/setup/container.md)
@@ -183,9 +183,6 @@ rei chat -a <alias>               # chat with the [agents.<alias>] entry through
 rei service install               # register as systemd/launchctl/Windows Service
 rei service start                 # run it always-on in the background
 ```
-
-The `zeroclaw` compatibility binary alias remains installed alongside `rei` so
-existing automation scripts keep working.
 
 Full walkthrough: [Quick start](docs/book/src/getting-started/quickstart.md); or skip the safety gates with [YOLO mode](docs/book/src/getting-started/yolo.md) for dev boxes.
 
@@ -208,7 +205,7 @@ To try a local read-only Node, build with the `nodes` feature and follow
 - **Security-first**: default autonomy is `supervised`: medium-risk ops require approval, high-risk blocked. Workspace boundaries, command policy, OS-level sandboxes (Landlock / Bubblewrap / Seatbelt / Docker), and [tool receipts](docs/book/src/security/tool-receipts.md). This fork keeps several deliberately stricter defaults than upstream; see [fork notes](docs/book/src/contributing/fork-notes.md#deliberate-behavioral-divergences).
 - **Edge devices as Nodes**: signed Ed25519 device identity, the v2 handshake,
   owner-set capability ceilings, and bounded invocation of safe capabilities
-  through the opt-in `zeroclaw-node-host` (#514). Each call is bound to the
+  through the opt-in `rei-node-host` (#514). Each call is bound to the
   device, connection and capability revision; unknown outcomes are never
   replayed. High-risk capabilities stay unavailable.
 - **Delegation through Tachi**: L2 work uses `tachi_start`, `tachi_status`,
@@ -219,15 +216,14 @@ To try a local read-only Node, build with the `nodes` feature and follow
   the retained Procedure/TaskIntent seam has no production Tachi peer.
   Production delegated execution uses the Staff interface above.
 - **ACP**: the optional [gateway-backed ACP bridge](docs/book/src/gateway/api.md)
-  supports new Zed text sessions (#517). Legacy `zeroclaw acp` and its
+  supports new Zed text sessions (#517). Legacy `rei acp` and its
   [session store](docs/book/src/channels/acp.md) remain until their consumers
   migrate under #378.
 
 ## Configuration
 
-One TOML file at `~/.rei/config.toml` (existing `~/.zeroclaw/config.toml`
-installations are detected automatically as a fallback; env override precedence:
-`REI_CONFIG_DIR` > `REICLAW_CONFIG_DIR` > `ZEROCLAW_CONFIG_DIR`). Pointers:
+One TOML file at `~/.rei/config.toml` (env override precedence:
+`REI_CONFIG_DIR` > `REICLAW_CONFIG_DIR`). Pointers:
 
 - [Provider configuration](docs/book/src/providers/configuration.md): the universal `[providers.models.<type>.<alias>]` schema
 - [Security overview](docs/book/src/security/overview.md): autonomy, sandboxing, tool receipts
@@ -240,8 +236,8 @@ For standard OpenAI Codex subscription auth, Quickstart can write the provider
 entry for you:
 
 ```bash
-zeroclaw auth login --model-provider openai-codex --import ~/.codex/auth.json  # if already signed in with Codex CLI
-zeroclaw quickstart --model-provider openai-codex --model gpt-5.4
+rei auth login --model-provider openai-codex --import ~/.codex/auth.json  # if already signed in with Codex CLI
+rei quickstart --model-provider openai-codex --model gpt-5.4
 ```
 
 The provider entry uses the canonical OpenAI shape; the alias below is an
@@ -262,7 +258,7 @@ Notes:
 - Claude Max setup-token auth stays on the canonical Anthropic slot: run `claude setup-token`, choose `setup_token` in Quickstart, and paste the generated token into the API key/token prompt.
 - Only set `api_key` / `uri` on `[providers.models.openai.<alias>]` when intentionally targeting a custom OpenAI-compatible gateway or endpoint.
 - Retryable streaming failures may fall back to non-streaming chat. Authentication
-  failures stop before that fallback (#504); check `zeroclaw auth status` before
+  failures stop before that fallback (#504); check `rei auth status` before
   changing provider config.
 
 ## Architecture

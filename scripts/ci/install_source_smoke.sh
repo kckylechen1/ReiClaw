@@ -86,7 +86,7 @@ run_installer() {
   local expected=$1 directory=$2 cache=$3
   shift 3
   local status=0
-  output="$(cd "$directory" && ZEROCLAW_INSTALL_DIR="$cache" \
+  output="$(cd "$directory" && REI_INSTALL_DIR="$cache" \
     sh "$installer" --prefix "$prefix" --no-modify-path --skip-quickstart "$@" \
     </dev/null 2>&1)" || status=$?
   if [[ $expected == success ]]; then
@@ -118,7 +118,7 @@ done
 # No installation-mode flag must still choose source; dry-run must not compile.
 run_installer success "$scratch/fork" "$scratch/missing" --dry-run
 contains 'cargo install --path . --locked --force'
-contains 'cargo install --path bridges/acp --locked --force --bin zeroclaw-acp-bridge'
+contains 'cargo install --path bridges/acp --locked --force --bin rei-acp-bridge'
 no_mutations
 run_installer success "$scratch/fork" "$scratch/missing" --source --minimal --dry-run
 contains 'cargo install --path . --locked --force --no-default-features'
@@ -127,7 +127,7 @@ no_mutations
 for feature in agent-runtime slim-control default installer-smoke-indirect; do
   run_installer success "$scratch/fork" "$scratch/missing" --minimal --features "$feature" --dry-run
   contains "cargo install --path . --locked --force --no-default-features --features $feature"
-  contains 'cargo install --path bridges/acp --locked --force --bin zeroclaw-acp-bridge'
+  contains 'cargo install --path bridges/acp --locked --force --bin rei-acp-bridge'
   no_mutations
 done
 run_installer success "$scratch/fork" "$scratch/missing" --minimal --features schema-export --dry-run
@@ -136,7 +136,7 @@ excludes 'cargo install --path bridges/acp'
 no_mutations
 run_installer success "$scratch/fork" "$scratch/missing" --full --dry-run
 contains 'cargo generate features --selection all'
-contains 'cargo install --path bridges/acp --locked --force --bin zeroclaw-acp-bridge when the resolved root feature closure enables agent-runtime'
+contains 'cargo install --path bridges/acp --locked --force --bin rei-acp-bridge when the resolved root feature closure enables agent-runtime'
 contains 'Feature resolution is deferred'
 no_mutations
 
@@ -177,42 +177,47 @@ no_mutations
 
 for origin in 'https://github.com/kckylechen1/ReiClaw' \
   'git@github.com:kckylechen1/ReiClaw.git' \
-  'ssh://git@github.com/kckylechen1/ReiClaw.git' \
-  'https://github.com/kckylechen1/zeroclaw' \
-  'https://github.com/kckylechen1/zeroclaw.git' \
-  'git@github.com:kckylechen1/zeroclaw.git' \
-  'ssh://git@github.com/kckylechen1/zeroclaw.git'; do
+  'ssh://git@github.com/kckylechen1/ReiClaw.git'; do
   "$real_git" -C "$scratch/fork" remote set-url origin "$origin"
   run_installer success "$scratch/fork" "$scratch/missing" --dry-run
   contains 'cargo install --path . --locked --force'
   no_mutations
 done
 
+for legacy_origin in 'https://github.com/kckylechen1/zeroclaw' \
+  'https://github.com/kckylechen1/zeroclaw.git'; do
+  "$real_git" -C "$scratch/fork" remote set-url origin "$legacy_origin"
+  run_installer refusal "$scratch/fork" "$scratch/missing" --dry-run
+  contains 'Source origin is not this fork'
+  no_mutations
+done
+"$real_git" -C "$scratch/fork" remote set-url origin "$fork_url"
+
 # A successful root install must not hide failure to install the separate ACP
 # package. Use the real source branch with only Cargo itself stubbed.
 mkdir -p "$RUSTUP_HOME/toolchains"
 ZEROCLAW_SMOKE_ALLOW_ROOT_INSTALL=1 run_installer 97 "$scratch/fork" "$scratch/missing" \
   --source --minimal --features agent-runtime
-expected_calls=$'cargo install --path . --locked --force --no-default-features --features agent-runtime\ncargo install --path bridges/acp --locked --force --bin zeroclaw-acp-bridge'
+expected_calls=$'cargo install --path . --locked --force --no-default-features --features agent-runtime\ncargo install --path bridges/acp --locked --force --bin rei-acp-bridge'
 [[ $(cat "$ZEROCLAW_SMOKE_LOG") == "$expected_calls" ]] || fail 'ACP install did not follow the root install with independent flags'
 : > "$ZEROCLAW_SMOKE_LOG"
 
 # Uninstall preview must not call an installed binary, remove its file, ask
 # about deleting data, or rewrite the caller's shell profile. The rm sentinel
 # also makes a regression stop before it could reach a real profile.
-mkdir -p "$CARGO_HOME/bin" "$prefix/.zeroclaw"
-cat > "$CARGO_HOME/bin/zeroclaw" <<'SH'
+mkdir -p "$CARGO_HOME/bin" "$prefix/.rei"
+cat > "$CARGO_HOME/bin/rei" <<'SH'
 #!/bin/sh
-printf 'zeroclaw %s\n' "$*" >> "$ZEROCLAW_SMOKE_LOG"
+printf 'rei %s\n' "$*" >> "$ZEROCLAW_SMOKE_LOG"
 exit 97
 SH
-chmod +x "$CARGO_HOME/bin/zeroclaw"
-printf 'preserve uninstall data\n' > "$prefix/.zeroclaw/marker"
+chmod +x "$CARGO_HOME/bin/rei"
+printf 'preserve uninstall data\n' > "$prefix/.rei/marker"
 run_installer success "$scratch/outside" "$scratch/missing" --dry-run --uninstall
 contains 'Would stop and uninstall the service'
 contains 'No service, binary, configuration, or shell profile was changed'
-[[ -f $CARGO_HOME/bin/zeroclaw ]] || fail 'uninstall preview removed the binary'
-[[ $(cat "$prefix/.zeroclaw/marker") == 'preserve uninstall data' ]] || fail 'uninstall preview changed data'
+[[ -f $CARGO_HOME/bin/rei ]] || fail 'uninstall preview removed the binary'
+[[ $(cat "$prefix/.rei/marker") == 'preserve uninstall data' ]] || fail 'uninstall preview changed data'
 [[ ! -s $ZEROCLAW_SMOKE_LOG ]] || fail 'uninstall preview executed a mutation'
 
 printf 'POSIX source installer smoke: %s scenarios passed.\n' "$checks"

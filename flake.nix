@@ -43,7 +43,7 @@
         # >>> generated:flake-packages by `cargo generate installers` - do not edit <<<
         # Default feature set: canonical lean Dist.
         # Override with `packages.reiclaw.override { features = [ ... ]; }`.
-        zeroclawDefaultFeatures = [ "agent-runtime" "channel-acp-server" "channel-telegram" "channel-webhook" "gateway" "memory-core" "observability-prometheus" "schema-export" ];
+        reiclawDefaultFeatures = [ "agent-runtime" "channel-acp-server" "channel-telegram" "channel-webhook" "gateway" "memory-core" "observability-prometheus" "schema-export" ];
         rootFeatureGraph = (builtins.fromTOML (builtins.readFile ./Cargo.toml)).features;
         rootFeatureClosure = features: builtins.map (node: node.key) (builtins.genericClosure {
           startSet = builtins.map (feature: { key = feature; }) features;
@@ -51,8 +51,8 @@
             (builtins.filter (feature: builtins.hasAttr feature rootFeatureGraph)
               (rootFeatureGraph.${node.key} or []));
         });
-        buildZeroclaw = pkgs.lib.makeOverridable
-          ({ pname, cargoPkg, features ? zeroclawDefaultFeatures }:
+        buildReiclaw = pkgs.lib.makeOverridable
+          ({ pname, cargoPkg, features ? reiclawDefaultFeatures }:
             let
               withAcpBridge = builtins.elem "agent-runtime" (rootFeatureClosure features);
             in
@@ -69,7 +69,7 @@
               };
               cargoBuildFlags =
                 [ "-p" cargoPkg "--no-default-features" ]
-                ++ pkgs.lib.optionals withAcpBridge [ "-p" "zeroclaw-bridge-acp" ]
+                ++ pkgs.lib.optionals withAcpBridge [ "-p" "reiclaw-bridge-acp" ]
                 ++ pkgs.lib.optionals (features != [])
                   [ "--features" (pkgs.lib.concatStringsSep ","
                     (builtins.map (feature: "${cargoPkg}/${feature}") features)) ];
@@ -77,20 +77,18 @@
               buildInputs = [ pkgs.stdenv.cc.cc ];
               postInstall = ''
                 test -x "$out/bin/rei"
-                test -x "$out/bin/zeroclaw"
               '' + pkgs.lib.optionalString withAcpBridge ''
-                test -x "$out/bin/zeroclaw-acp-bridge"
+                test -x "$out/bin/rei-acp-bridge"
               '';
             });
         # >>> end generated:flake-packages <<<
       in let
-        reiclawPkg = buildZeroclaw { pname = "reiclaw"; cargoPkg = "reiclaw"; };
+        reiclawPkg = buildReiclaw { pname = "reiclaw"; cargoPkg = "reiclaw"; };
       in {
         packages.reiclaw = reiclawPkg;
-        packages.zeroclaw = reiclawPkg;
         packages.default = reiclawPkg;
         checks = pkgs.lib.optionalAttrs pkgs.stdenv.isLinux {
-          nixos-module-eval = pkgs.writeText "zeroclaw-nixos-module-eval" (
+          nixos-module-eval = pkgs.writeText "reiclaw-nixos-module-eval" (
             builtins.toJSON nixosModuleEvalTests
           );
         };
@@ -103,7 +101,7 @@
           ];
         };
       }) // {
-      # The `services.zeroclaw` NixOS module (multi-instance; see nix/module.nix
+      # The `services.reiclaw` NixOS module (multi-instance; see nix/module.nix
       # and nix/README.md). Exposed as the default so `nixosModules.default` can
       # be imported directly into a system configuration.
       nixosModules.default = import ./nix/module.nix;

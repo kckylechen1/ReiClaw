@@ -6,14 +6,14 @@ An agent lists the channels it answers on; see [Agents](../agents/overview.md) f
 
 ## Bridges
 
-A **bridge** is a channel that runs as its own process and attaches to the gateway's `/ws/chat` socket, the same way `zeroclaw chat` does, instead of being compiled into the core (see [ADR-013](../architecture/decisions/ADR-013-channels-as-gateway-clients.md)). The first is the Telegram bridge, `zeroclaw-bridge-telegram`, built from `bridges/telegram` in the repository (`cargo build -p zeroclaw-bridge-telegram`). It serves one owner's private chat and maps it to a gateway session (`main` by default), so a conversation continues between Telegram and `zeroclaw chat -s main`. Its flags and behavior are in `bridges/telegram/README.md`. A bridge authenticates with its own token from `zeroclaw gateway bridge add <name>`, and receives cron output, heartbeat alerts and `notify` messages through the gateway's outbox; see [Channel bridges](../gateway/api.md#channel-bridges).
+A **bridge** is a channel that runs as its own process and attaches to the gateway's `/ws/chat` socket, the same way `rei chat` does, instead of being compiled into the core (see [ADR-013](../architecture/decisions/ADR-013-channels-as-gateway-clients.md)). The first is the Telegram bridge, `rei-bridge-telegram`, built from `bridges/telegram` in the repository (`cargo build -p reiclaw-bridge-telegram`). It serves one owner's private chat and maps it to a gateway session (`main` by default), so a conversation continues between Telegram and `rei chat -s main`. Its flags and behavior are in `bridges/telegram/README.md`. A bridge authenticates with its own token from `rei gateway bridge add <name>`, and receives cron output, heartbeat alerts and `notify` messages through the gateway's outbox; see [Channel bridges](../gateway/api.md#channel-bridges).
 
 ## Live surfaces
 
 | Surface | Where it runs | Guide |
 |---|---|---|
 | CLI | Local stdin/stdout, always on | always on (no page) |
-| Telegram | Gateway bridge (`zeroclaw-bridge-telegram`) | [Other chat platforms](./chat-others.md) |
+| Telegram | Gateway bridge (`rei-bridge-telegram`) | [Other chat platforms](./chat-others.md) |
 | Webhook | Gateway ingress (`[channels.webhook]`) | [Webhooks](./webhook.md) |
 | ACP (Agent Client Protocol) | JSON-RPC 2.0 over stdio: editor/IDE sessions | [ACP](./acp.md) |
 | Voice surface (opt-in) | Spoken text over `/ws/chat` with `surface=voice`; audio belongs to the adapter | [Voice & telephony](./voice.md) |

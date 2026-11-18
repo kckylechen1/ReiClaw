@@ -1095,16 +1095,16 @@ api_token = "Bearer from-disk"
 schema_version = 3
 
 [http_request.secrets]
-api_token = "${ZEROCLAW_TEST_HTTP_REQUEST_SECRET}"
+api_token = "${REI_TEST_HTTP_REQUEST_SECRET}"
 "#,
         )
         .unwrap();
         unsafe {
-            std::env::set_var("ZEROCLAW_TEST_HTTP_REQUEST_SECRET", "Bearer from-env");
+            std::env::set_var("REI_TEST_HTTP_REQUEST_SECRET", "Bearer from-env");
         }
         scopeguard::defer! {
             unsafe {
-                std::env::remove_var("ZEROCLAW_TEST_HTTP_REQUEST_SECRET");
+                std::env::remove_var("REI_TEST_HTTP_REQUEST_SECRET");
             }
         }
 
@@ -1127,12 +1127,12 @@ api_token = "${ZEROCLAW_TEST_HTTP_REQUEST_SECRET}"
 schema_version = 3
 
 [http_request.secrets]
-api_token = "${ZEROCLAW_TEST_HTTP_REQUEST_MISSING_SECRET}"
+api_token = "${REI_TEST_HTTP_REQUEST_MISSING_SECRET}"
 "#,
         )
         .unwrap();
         unsafe {
-            std::env::remove_var("ZEROCLAW_TEST_HTTP_REQUEST_MISSING_SECRET");
+            std::env::remove_var("REI_TEST_HTTP_REQUEST_MISSING_SECRET");
         }
 
         let tool = test_tool_with_auth_config(config_path, false);
@@ -1142,7 +1142,7 @@ api_token = "${ZEROCLAW_TEST_HTTP_REQUEST_MISSING_SECRET}"
             .to_string();
 
         assert!(
-            err.contains("ZEROCLAW_TEST_HTTP_REQUEST_MISSING_SECRET"),
+            err.contains("REI_TEST_HTTP_REQUEST_MISSING_SECRET"),
             "missing env-backed secret should name the missing variable: {err}"
         );
     }
@@ -1210,7 +1210,7 @@ api_token = "{encrypted}"
         let config_path = tmp.path().join("config.toml");
         let store = reiclaw_config::secrets::SecretStore::new(tmp.path(), true);
         let encrypted = store
-            .encrypt("${ZEROCLAW_TEST_HTTP_REQUEST_ENCRYPTED_SECRET}")
+            .encrypt("${REI_TEST_HTTP_REQUEST_ENCRYPTED_SECRET}")
             .unwrap();
         std::fs::write(
             &config_path,
@@ -1226,13 +1226,13 @@ api_token = "{encrypted}"
         .unwrap();
         unsafe {
             std::env::set_var(
-                "ZEROCLAW_TEST_HTTP_REQUEST_ENCRYPTED_SECRET",
+                "REI_TEST_HTTP_REQUEST_ENCRYPTED_SECRET",
                 "Bearer encrypted-env",
             );
         }
         scopeguard::defer! {
             unsafe {
-                std::env::remove_var("ZEROCLAW_TEST_HTTP_REQUEST_ENCRYPTED_SECRET");
+                std::env::remove_var("REI_TEST_HTTP_REQUEST_ENCRYPTED_SECRET");
             }
         }
 

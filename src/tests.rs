@@ -17,33 +17,27 @@ fn probe_config_dir_extracts_global_flag_in_all_forms() {
     // argv[0] is consumed by clap as the binary name.
     // Space form.
     assert_eq!(
-        probe_config_dir(&command, argv(&["zeroclaw", "--config-dir", "/x"])),
+        probe_config_dir(&command, argv(&["rei", "--config-dir", "/x"])),
         Some("/x".to_string())
     );
     // Equals form.
     assert_eq!(
-        probe_config_dir(&command, argv(&["zeroclaw", "--config-dir=/y"])),
+        probe_config_dir(&command, argv(&["rei", "--config-dir=/y"])),
         Some("/y".to_string())
     );
     // Global arg: may appear *after* a subcommand.
     assert_eq!(
-        probe_config_dir(
-            &command,
-            argv(&["zeroclaw", "status", "--config-dir", "/z"])
-        ),
+        probe_config_dir(&command, argv(&["rei", "status", "--config-dir", "/z"])),
         Some("/z".to_string())
     );
     // Absent.
-    assert_eq!(
-        probe_config_dir(&command, argv(&["zeroclaw", "status"])),
-        None
-    );
+    assert_eq!(probe_config_dir(&command, argv(&["rei", "status"])), None);
     // `--` ends option parsing; later values must never redirect config.
     assert_eq!(
         probe_config_dir(
             &command,
             argv(&[
-                "zeroclaw",
+                "rei",
                 "config",
                 "set",
                 "locale",
@@ -55,7 +49,7 @@ fn probe_config_dir_extracts_global_flag_in_all_forms() {
     );
     // Present but empty — returned verbatim for clap's validation path.
     assert_eq!(
-        probe_config_dir(&command, argv(&["zeroclaw", "--config-dir", ""])),
+        probe_config_dir(&command, argv(&["rei", "--config-dir", ""])),
         Some(String::new())
     );
 }
@@ -71,12 +65,7 @@ fn probe_config_dir_follows_clap_token_ownership() {
     }
 
     let command = Cli::command();
-    let external_payload = [
-        "zeroclaw",
-        "props",
-        "legacy-command",
-        "--config-dir=/unintended",
-    ];
+    let external_payload = ["rei", "props", "legacy-command", "--config-dir=/unintended"];
 
     // The external subcommand owns every remaining token, including one
     // that looks like a global option.
@@ -87,13 +76,13 @@ fn probe_config_dir_follows_clap_token_ownership() {
 
     // Option-looking and terminating tokens cannot satisfy the spaced
     // form's required value.
-    assert!(Cli::try_parse_from(["zeroclaw", "--config-dir", "--help"]).is_err());
+    assert!(Cli::try_parse_from(["rei", "--config-dir", "--help"]).is_err());
     assert_eq!(
-        probe_config_dir(&command, argv(&["zeroclaw", "--config-dir", "--help"])),
+        probe_config_dir(&command, argv(&["rei", "--config-dir", "--help"])),
         None
     );
     assert_eq!(
-        probe_config_dir(&command, argv(&["zeroclaw", "--config-dir", "--"])),
+        probe_config_dir(&command, argv(&["rei", "--config-dir", "--"])),
         None
     );
 }
@@ -297,7 +286,7 @@ fn gateway_admin_url_prepends_configured_path_prefix() {
 #[cfg(feature = "agent-runtime")]
 fn onboard_cli_accepts_model_provider_and_api_key_in_quick_mode() {
     let cli = Cli::try_parse_from([
-        "zeroclaw",
+        "rei",
         "onboard",
         "--model-provider",
         "anthropic",
@@ -331,7 +320,7 @@ fn onboard_cli_accepts_model_provider_and_api_key_in_quick_mode() {
 #[cfg(feature = "agent-runtime")]
 fn completions_cli_parses_supported_shells() {
     for shell in ["bash", "fish", "zsh", "powershell", "elvish"] {
-        let cli = Cli::try_parse_from(["zeroclaw", "completions", shell])
+        let cli = Cli::try_parse_from(["rei", "completions", shell])
             .expect("completions invocation should parse");
         match cli.command {
             Commands::Completions { .. } => {}
@@ -348,7 +337,7 @@ fn completion_generation_mentions_binary_name() {
         .expect("completion generation should succeed");
     let script = String::from_utf8(output).expect("completion output should be valid utf-8");
     assert!(
-        script.contains("zeroclaw"),
+        script.contains("rei"),
         "completion script should reference binary name"
     );
 }
@@ -361,23 +350,23 @@ fn bash_completion_avoids_infinite_recursion() {
         .expect("completion generation should succeed");
     let script = String::from_utf8(output).expect("completion output should be valid utf-8");
     // The wrapper must capture the original clap-generated function body
-    // (via declare -f) rather than calling _zeroclaw by name, which would
-    // create an infinite recursion loop after _zeroclaw is redefined.
+    // (via declare -f) rather than calling _rei by name, which would
+    // create an infinite recursion loop after _rei is redefined.
     assert!(
-        script.contains("declare -f _zeroclaw"),
-        "bash completion should use declare -f to capture the original _zeroclaw function body"
+        script.contains("declare -f _rei"),
+        "bash completion should use declare -f to capture the original _rei function body"
     );
     assert!(
-        !script.contains("_zeroclaw_clap_orig() { _zeroclaw \"$@\"; }"),
-        "bash completion must not define _zeroclaw_clap_orig as a simple forwarder to _zeroclaw"
+        !script.contains("_rei_clap_orig() { _rei \"$@\"; }"),
+        "bash completion must not define _rei_clap_orig as a simple forwarder to _rei"
     );
 }
 
 #[test]
 #[cfg(feature = "agent-runtime")]
 fn onboard_cli_accepts_force_flag() {
-    let cli = Cli::try_parse_from(["zeroclaw", "onboard", "--force"])
-        .expect("onboard --force should parse");
+    let cli =
+        Cli::try_parse_from(["rei", "onboard", "--force"]).expect("onboard --force should parse");
 
     match cli.command {
         Commands::Onboard { force, .. } => assert!(force),
@@ -389,14 +378,14 @@ fn onboard_cli_accepts_force_flag() {
 #[cfg(feature = "agent-runtime")]
 fn onboard_cli_rejects_removed_interactive_flag() {
     // --interactive was removed; onboard auto-detects TTY instead.
-    assert!(Cli::try_parse_from(["zeroclaw", "onboard", "--interactive"]).is_err());
+    assert!(Cli::try_parse_from(["rei", "onboard", "--interactive"]).is_err());
 }
 
 #[test]
 #[cfg(feature = "agent-runtime")]
 fn onboard_cli_parses_quick_flag() {
-    let cli = Cli::try_parse_from(["zeroclaw", "onboard", "--quick"])
-        .expect("onboard --quick should parse");
+    let cli =
+        Cli::try_parse_from(["rei", "onboard", "--quick"]).expect("onboard --quick should parse");
 
     match cli.command {
         Commands::Onboard { quick, .. } => assert!(quick),
@@ -408,7 +397,7 @@ fn onboard_cli_parses_quick_flag() {
 #[cfg(feature = "agent-runtime")]
 fn gateway_get_paircode_cli_accepts_port_and_host_overrides() {
     let cli = Cli::try_parse_from([
-        "zeroclaw",
+        "rei",
         "gateway",
         "get-paircode",
         "--new",
@@ -443,11 +432,11 @@ fn gateway_get_paircode_cli_accepts_port_and_host_overrides() {
 #[test]
 #[cfg(feature = "agent-runtime")]
 fn security_status_cli_requires_agent_and_parses_json_form() {
-    let err = Cli::try_parse_from(["zeroclaw", "security", "status"])
+    let err = Cli::try_parse_from(["rei", "security", "status"])
         .expect_err("security status requires --agent");
     assert_eq!(err.kind(), clap::error::ErrorKind::MissingRequiredArgument);
 
-    let cli = Cli::try_parse_from(["zeroclaw", "security", "status", "--agent", "ops", "--json"])
+    let cli = Cli::try_parse_from(["rei", "security", "status", "--agent", "ops", "--json"])
         .expect("security status --agent --json should parse");
     match cli.command {
         Commands::Security {
@@ -463,11 +452,11 @@ fn security_status_cli_requires_agent_and_parses_json_form() {
 #[test]
 #[cfg(feature = "agent-runtime")]
 fn soul_check_cli_requires_agent_and_parses_repeatable_targets() {
-    let err = Cli::try_parse_from(["zeroclaw", "soul", "check"])
-        .expect_err("soul check requires --agent");
+    let err =
+        Cli::try_parse_from(["rei", "soul", "check"]).expect_err("soul check requires --agent");
     assert_eq!(err.kind(), clap::error::ErrorKind::MissingRequiredArgument);
 
-    let cli = Cli::try_parse_from(["zeroclaw", "soul", "check", "--agent", "ops"])
+    let cli = Cli::try_parse_from(["rei", "soul", "check", "--agent", "ops"])
         .expect("soul check --agent should parse");
     match cli.command {
         Commands::Soul {
@@ -488,7 +477,7 @@ fn soul_check_cli_requires_agent_and_parses_repeatable_targets() {
     }
 
     let cli = Cli::try_parse_from([
-        "zeroclaw",
+        "rei",
         "soul",
         "check",
         "--agent",
@@ -524,7 +513,7 @@ fn soul_check_cli_requires_agent_and_parses_repeatable_targets() {
 #[test]
 #[cfg(feature = "agent-runtime")]
 fn gateway_get_paircode_rotate_flags_parse_and_conflict() {
-    let cli = Cli::try_parse_from(["zeroclaw", "gateway", "get-paircode", "--rotate"])
+    let cli = Cli::try_parse_from(["rei", "gateway", "get-paircode", "--rotate"])
         .expect("gateway get-paircode --rotate should parse");
     match cli.command {
         Commands::Gateway {
@@ -534,7 +523,7 @@ fn gateway_get_paircode_rotate_flags_parse_and_conflict() {
     }
 
     let cli = Cli::try_parse_from([
-        "zeroclaw",
+        "rei",
         "gateway",
         "get-paircode",
         "--rotate-device",
@@ -549,12 +538,12 @@ fn gateway_get_paircode_rotate_flags_parse_and_conflict() {
     }
 
     assert!(
-        Cli::try_parse_from(["zeroclaw", "gateway", "get-paircode", "--new", "--rotate"]).is_err(),
+        Cli::try_parse_from(["rei", "gateway", "get-paircode", "--new", "--rotate"]).is_err(),
         "--new and --rotate must conflict"
     );
     assert!(
         Cli::try_parse_from([
-            "zeroclaw",
+            "rei",
             "gateway",
             "get-paircode",
             "--rotate",
@@ -599,8 +588,8 @@ fn paircode_no_code_message_explains_bare_command_does_not_mint() {
     );
 
     assert!(msg.contains("only displays an existing active code; it does not mint"));
-    assert!(msg.contains("zeroclaw gateway get-paircode --new"));
-    assert!(msg.contains("zeroclaw gateway get-paircode --rotate"));
+    assert!(msg.contains("rei gateway get-paircode --new"));
+    assert!(msg.contains("rei gateway get-paircode --rotate"));
     assert!(msg.contains("open http://127.0.0.1:42617"));
 }
 
@@ -618,8 +607,8 @@ fn paircode_no_code_message_preserves_host_port_on_suggestions() {
         None,
     );
 
-    assert!(msg.contains("zeroclaw gateway get-paircode --new --port 9001 --host 192.168.1.20"));
-    assert!(msg.contains("zeroclaw gateway get-paircode --rotate --port 9001 --host 192.168.1.20"));
+    assert!(msg.contains("rei gateway get-paircode --new --port 9001 --host 192.168.1.20"));
+    assert!(msg.contains("rei gateway get-paircode --rotate --port 9001 --host 192.168.1.20"));
     assert!(msg.contains("open http://192.168.1.20:9001"));
 }
 
@@ -636,8 +625,8 @@ fn paircode_no_code_message_omits_configured_default_host_port() {
         None,
     );
 
-    assert!(msg.contains("zeroclaw gateway get-paircode --new\n"));
-    assert!(msg.contains("zeroclaw gateway get-paircode --rotate\n"));
+    assert!(msg.contains("rei gateway get-paircode --new\n"));
+    assert!(msg.contains("rei gateway get-paircode --rotate\n"));
     assert!(!msg.contains("--port 9001"));
     assert!(!msg.contains("--host 192.168.1.20"));
 }
@@ -657,7 +646,7 @@ fn paircode_no_code_message_for_new_suggests_rotate() {
     );
 
     assert!(msg.contains("did not mint a new pairing code"));
-    assert!(msg.contains("zeroclaw gateway get-paircode --rotate"));
+    assert!(msg.contains("rei gateway get-paircode --rotate"));
 }
 
 #[test]
@@ -668,8 +657,8 @@ fn gateway_addr_in_use_message_guides_default_gateway_recovery() {
 
     assert!(msg.contains("Port 42617 is already in use"));
     assert!(msg.contains("open http://127.0.0.1:42617"));
-    assert!(msg.contains("zeroclaw gateway get-paircode\n"));
-    assert!(msg.contains("zeroclaw gateway start --port 42618"));
+    assert!(msg.contains("rei gateway get-paircode\n"));
+    assert!(msg.contains("rei gateway start --port 42618"));
     assert!(msg.contains("lsof -nP -iTCP:42617 -sTCP:LISTEN"));
 }
 
@@ -679,8 +668,8 @@ fn gateway_addr_in_use_message_keeps_non_default_host_context() {
     let msg = gateway_addr_in_use_message("0.0.0.0", 9001, &default.host, default.port, Some(9002));
 
     assert!(!msg.contains("open http://127.0.0.1:42617"));
-    assert!(msg.contains("zeroclaw gateway get-paircode --port 9001 --host 0.0.0.0"));
-    assert!(msg.contains("zeroclaw gateway start --port 9002 --host 0.0.0.0"));
+    assert!(msg.contains("rei gateway get-paircode --port 9001 --host 0.0.0.0"));
+    assert!(msg.contains("rei gateway start --port 9002 --host 0.0.0.0"));
     assert!(msg.contains("lsof -nP -iTCP:9001 -sTCP:LISTEN"));
 }
 
@@ -689,8 +678,8 @@ fn gateway_addr_in_use_message_omits_restart_when_no_available_port() {
     let default = config::GatewayConfig::default();
     let msg = gateway_addr_in_use_message("127.0.0.1", 42617, &default.host, default.port, None);
 
-    assert!(msg.contains("zeroclaw gateway get-paircode\n"));
-    assert!(!msg.contains("zeroclaw gateway start --port"));
+    assert!(msg.contains("rei gateway get-paircode\n"));
+    assert!(!msg.contains("rei gateway start --port"));
     assert!(msg.contains("lsof -nP -iTCP:42617 -sTCP:LISTEN"));
 }
 
@@ -706,11 +695,11 @@ fn gateway_addr_in_use_message_skips_occupied_restart_hint_port() {
         gateway_addr_in_use_message("127.0.0.1", port, &default.host, default.port, restart_port);
 
     assert!(
-        !msg.contains(&format!("zeroclaw gateway start --port {}", port + 1)),
+        !msg.contains(&format!("rei gateway start --port {}", port + 1)),
         "{msg}"
     );
     assert!(
-        msg.contains(&format!("zeroclaw gateway start --port {available_port}")),
+        msg.contains(&format!("rei gateway start --port {available_port}")),
         "{msg}"
     );
 }
@@ -720,7 +709,7 @@ fn gateway_addr_in_use_message_uses_configured_default_gateway_recovery() {
     let msg = gateway_addr_in_use_message("192.168.1.20", 9001, "192.168.1.20", 9001, None);
 
     assert!(msg.contains("open http://192.168.1.20:9001"));
-    assert!(msg.contains("zeroclaw gateway get-paircode\n"));
+    assert!(msg.contains("rei gateway get-paircode\n"));
     assert!(!msg.contains("get-paircode --port 9001"));
 }
 
@@ -787,7 +776,7 @@ fn reserve_consecutive_local_ports(count: u16) -> (u16, Vec<TcpListener>) {
 fn onboard_cli_quick_and_channels_only_conflict() {
     // --quick and --channels-only should both parse at the CLI level
     // (the conflict is checked at runtime), but we verify both flags parse.
-    let cli = Cli::try_parse_from(["zeroclaw", "onboard", "--quick", "--channels-only"]);
+    let cli = Cli::try_parse_from(["rei", "onboard", "--quick", "--channels-only"]);
     assert!(
         cli.is_ok(),
         "--quick --channels-only should parse at CLI level"
@@ -797,7 +786,7 @@ fn onboard_cli_quick_and_channels_only_conflict() {
 #[test]
 #[cfg(feature = "agent-runtime")]
 fn onboard_cli_bare_parses() {
-    let cli = Cli::try_parse_from(["zeroclaw", "onboard"]).expect("bare onboard should parse");
+    let cli = Cli::try_parse_from(["rei", "onboard"]).expect("bare onboard should parse");
 
     match cli.command {
         Commands::Onboard { section, .. } => assert!(section.is_none()),
@@ -809,7 +798,7 @@ fn onboard_cli_bare_parses() {
 #[cfg(feature = "agent-runtime")]
 fn onboard_cli_positional_sections_parse() {
     for w in reiclaw_config::sections::QUICKSTART_SECTIONS {
-        let cli = Cli::try_parse_from(["zeroclaw", "onboard", w.as_str()])
+        let cli = Cli::try_parse_from(["rei", "onboard", w.as_str()])
             .unwrap_or_else(|_| panic!("onboard {} should parse", w.as_str()));
         match cli.command {
             Commands::Onboard { section, .. } => assert_eq!(section, Some(*w)),
@@ -823,17 +812,17 @@ fn onboard_cli_positional_sections_parse() {
 fn homebrew_onboard_config_dir_detects_cellar_paths() {
     assert_eq!(
         resolve_homebrew_onboard_config_dir(
-            Path::new("/opt/homebrew/Cellar/zeroclaw/0.8.0/bin/zeroclaw"),
+            Path::new("/opt/homebrew/Cellar/rei/0.8.0/bin/rei"),
             |_| None,
         ),
-        Some(PathBuf::from("/opt/homebrew/var/zeroclaw")),
+        Some(PathBuf::from("/opt/homebrew/var/rei")),
     );
     assert_eq!(
         resolve_homebrew_onboard_config_dir(
-            Path::new("/usr/local/Cellar/zeroclaw/0.8.0/bin/zeroclaw"),
+            Path::new("/usr/local/Cellar/rei/0.8.0/bin/rei"),
             |_| None,
         ),
-        Some(PathBuf::from("/usr/local/var/zeroclaw")),
+        Some(PathBuf::from("/usr/local/var/rei")),
     );
 }
 
@@ -843,27 +832,28 @@ fn homebrew_onboard_config_dir_detects_brew_bin_symlink_layout() {
     let temp = tempfile::tempdir().expect("tempdir");
     let prefix = temp.path().join("homebrew");
     std::fs::create_dir_all(prefix.join("Cellar")).expect("create Cellar marker");
-    let exe = prefix.join("bin/zeroclaw");
+    let exe = prefix.join("bin/rei");
 
     assert_eq!(
         resolve_homebrew_onboard_config_dir(&exe, |_| None),
-        Some(prefix.join("var/zeroclaw")),
+        Some(prefix.join("var/rei")),
     );
 }
 
 #[test]
 #[cfg(feature = "agent-runtime")]
 fn homebrew_onboard_config_dir_preserves_explicit_runtime_paths() {
-    let exe = Path::new("/opt/homebrew/Cellar/zeroclaw/0.8.0/bin/zeroclaw");
+    let exe = Path::new("/opt/homebrew/Cellar/rei/0.8.0/bin/rei");
 
     for var in [
-        "ZEROCLAW_CONFIG_DIR",
-        "ZEROCLAW_DATA_DIR",
-        "ZEROCLAW_WORKSPACE",
+        "REI_CONFIG_DIR",
+        "REICLAW_CONFIG_DIR",
+        "REI_DATA_DIR",
+        "REI_WORKSPACE",
     ] {
         assert_eq!(
             resolve_homebrew_onboard_config_dir(exe, |name| {
-                (name == var).then(|| "/tmp/zeroclaw-explicit".to_string())
+                (name == var).then(|| "/tmp/rei-explicit".to_string())
             }),
             None,
             "{var} should take precedence over Homebrew detection",
@@ -874,11 +864,11 @@ fn homebrew_onboard_config_dir_preserves_explicit_runtime_paths() {
 #[test]
 #[cfg(feature = "agent-runtime")]
 fn homebrew_onboard_config_dir_treats_workspace_whitespace_as_explicit() {
-    let exe = Path::new("/opt/homebrew/Cellar/zeroclaw/0.8.0/bin/zeroclaw");
+    let exe = Path::new("/opt/homebrew/Cellar/rei/0.8.0/bin/rei");
 
     assert_eq!(
         resolve_homebrew_onboard_config_dir(exe, |name| {
-            (name == "ZEROCLAW_WORKSPACE").then(|| "   ".to_string())
+            (name == "REI_WORKSPACE").then(|| "   ".to_string())
         }),
         None,
     );
@@ -887,7 +877,7 @@ fn homebrew_onboard_config_dir_treats_workspace_whitespace_as_explicit() {
 #[test]
 #[cfg(feature = "agent-runtime")]
 fn apply_homebrew_onboard_config_dir_sets_detected_config_dir() {
-    let exe = Path::new("/opt/homebrew/Cellar/zeroclaw/0.8.0/bin/zeroclaw");
+    let exe = Path::new("/opt/homebrew/Cellar/rei/0.8.0/bin/rei");
     let mut applied = None;
 
     let detected = apply_homebrew_onboard_config_dir_with(
@@ -896,25 +886,22 @@ fn apply_homebrew_onboard_config_dir_sets_detected_config_dir() {
         |name, value| applied = Some((name, value.to_path_buf())),
     );
 
-    assert_eq!(detected, Some(PathBuf::from("/opt/homebrew/var/zeroclaw")));
+    assert_eq!(detected, Some(PathBuf::from("/opt/homebrew/var/rei")));
     assert_eq!(
         applied,
-        Some((
-            "ZEROCLAW_CONFIG_DIR",
-            PathBuf::from("/opt/homebrew/var/zeroclaw"),
-        )),
+        Some(("REI_CONFIG_DIR", PathBuf::from("/opt/homebrew/var/rei"),)),
     );
 }
 
 #[test]
 #[cfg(feature = "agent-runtime")]
 fn apply_homebrew_onboard_config_dir_skips_explicit_config_dir() {
-    let exe = Path::new("/opt/homebrew/Cellar/zeroclaw/0.8.0/bin/zeroclaw");
+    let exe = Path::new("/opt/homebrew/Cellar/rei/0.8.0/bin/rei");
     let mut applied = None;
 
     let detected = apply_homebrew_onboard_config_dir_with(
         exe,
-        |name| (name == "ZEROCLAW_CONFIG_DIR").then(|| "/tmp/zeroclaw".to_string()),
+        |name| (name == "REI_CONFIG_DIR").then(|| "/tmp/rei".to_string()),
         |name, value| applied = Some((name, value.to_path_buf())),
     );
 
@@ -925,7 +912,7 @@ fn apply_homebrew_onboard_config_dir_skips_explicit_config_dir() {
 #[test]
 #[cfg(feature = "agent-runtime")]
 fn cli_parses_estop_default_engage() {
-    let cli = Cli::try_parse_from(["zeroclaw", "estop"]).expect("estop command should parse");
+    let cli = Cli::try_parse_from(["rei", "estop"]).expect("estop command should parse");
 
     match cli.command {
         Commands::Estop {
@@ -946,7 +933,7 @@ fn cli_parses_estop_default_engage() {
 #[test]
 #[cfg(feature = "agent-runtime")]
 fn cli_parses_estop_resume_domain() {
-    let cli = Cli::try_parse_from(["zeroclaw", "estop", "resume", "--domain", "*.chase.com"])
+    let cli = Cli::try_parse_from(["rei", "estop", "resume", "--domain", "*.chase.com"])
         .expect("estop resume command should parse");
 
     match cli.command {
@@ -962,7 +949,7 @@ fn cli_parses_estop_resume_domain() {
 #[cfg(feature = "agent-runtime")]
 fn agent_command_parses_with_temperature() {
     let cli = Cli::try_parse_from([
-        "zeroclaw",
+        "rei",
         "agent",
         "--agent",
         "morning-shift",
@@ -983,7 +970,7 @@ fn agent_command_parses_with_temperature() {
 #[cfg(feature = "agent-runtime")]
 fn agent_command_parses_without_temperature() {
     let cli = Cli::try_parse_from([
-        "zeroclaw",
+        "rei",
         "agent",
         "--agent",
         "morning-shift",
@@ -1227,7 +1214,7 @@ fn config_set_materializes_agent_workspace_path() {
     let known: Vec<String> = config.prop_paths();
     path = reiclaw_config::helpers::resolve_field_path(&known, &path);
     config
-        .set_prop_persistent(&path, "/srv/zeroclaw/assistant")
+        .set_prop_persistent(&path, "/srv/reiclaw/assistant")
         .expect("agent workspace path should be writable");
 
     assert_eq!(path, raw);
@@ -1236,7 +1223,7 @@ fn config_set_materializes_agent_workspace_path() {
             .agents
             .get("assistant")
             .and_then(|agent| agent.workspace.path.as_deref()),
-        Some(std::path::Path::new("/srv/zeroclaw/assistant"))
+        Some(std::path::Path::new("/srv/reiclaw/assistant"))
     );
 }
 
@@ -1296,7 +1283,7 @@ fn ensure_map_key_for_prop_path_leaves_existing_hyphenated_alias_alone() {
 
 // `config init` alias tests. Every test in this module builds a bare
 // `Config::default()`, whose `config_path` points at the developer's real
-// `~/.zeroclaw/config.toml`, and no gate catches a write from `src/`. These
+// `~/.rei/config.toml`, and no gate catches a write from `src/`. These
 // stay safe only by calling `init_map_alias` and in-memory readers such as
 // `get_map_keys` — never `save()`, `save_dirty()`, a persisting `set_prop`,
 // `ensure_disk_at_current_version`, or the real `ConfigCommands::Init` arm.
@@ -1575,7 +1562,7 @@ fn interactive_agent_rejects_flags_that_only_apply_with_message() {
     );
     // The interactive form clap accepts still parses, so the guard (not clap)
     // is what refuses it.
-    let cli = Cli::try_parse_from(["zeroclaw", "agent", "-a", "x", "-t", "0.5"]).unwrap();
+    let cli = Cli::try_parse_from(["rei", "agent", "-a", "x", "-t", "0.5"]).unwrap();
     let Commands::Agent {
         message,
         temperature,
@@ -1732,7 +1719,7 @@ async fn paircode_owner_cli_sends_token_for_show_mint_and_rotation() {
 #[test]
 fn config_cli_exposes_current_validation_and_generation_only() {
     assert!(matches!(
-        Cli::try_parse_from(["zeroclaw", "config", "validate", "--json"])
+        Cli::try_parse_from(["rei", "config", "validate", "--json"])
             .unwrap()
             .command,
         Commands::Config {
@@ -1740,15 +1727,15 @@ fn config_cli_exposes_current_validation_and_generation_only() {
         }
     ));
     assert!(matches!(
-        Cli::try_parse_from(["zeroclaw", "config", "generate", "--encrypt"])
+        Cli::try_parse_from(["rei", "config", "generate", "--encrypt"])
             .unwrap()
             .command,
         Commands::Config {
             config_command: ConfigCommands::Generate { encrypt: true }
         }
     ));
-    assert!(Cli::try_parse_from(["zeroclaw", "config", "migrate"]).is_err());
+    assert!(Cli::try_parse_from(["rei", "config", "migrate"]).is_err());
     for version in ["1", "2", "3", "4"] {
-        assert!(Cli::try_parse_from(["zeroclaw", "config", "generate", version]).is_err());
+        assert!(Cli::try_parse_from(["rei", "config", "generate", version]).is_err());
     }
 }

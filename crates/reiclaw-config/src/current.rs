@@ -15,7 +15,7 @@ use crate::schema::Config;
 pub const CURRENT_SCHEMA_VERSION: u32 = 3;
 
 pub(crate) const RETIRED_SOP_CONFIG_MESSAGE: &str = "[sop] is retired: the SOP engine, definition loader, authoring surface and \
-     procedure_v1 path were removed. Review and remove [sop] and ZEROCLAW_sop__* \
+     procedure_v1 path were removed. Review and remove [sop] and REI_sop__* \
      overrides explicitly; legacy approval and guard settings are not migrated \
      to current policy or Tachi permissions.";
 
@@ -51,7 +51,7 @@ pub(crate) fn reject_retired_sop_config(table: &toml::Table) -> Result<()> {
     Ok(())
 }
 
-/// Channel kinds the owner retired on 2026-11-18 (ZeroClaw no longer reads
+/// Channel kinds the owner retired on 2026-11-18 (ReiClaw no longer reads
 /// email or Discord archives). Unlike the older tombstoned transports, a
 /// config that still declares or references one is refused outright: the
 /// sections carry credentials and archive/ingest authority that must not be
@@ -67,7 +67,7 @@ impl std::fmt::Display for RetiredChannelConfigError {
     fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         write!(
             formatter,
-            "Channel `{kind}` is retired: ZeroClaw no longer reads {kind} sources. \
+            "Channel `{kind}` is retired: ReiClaw no longer reads {kind} sources. \
              Remove every [channels.{kind}.*] section and every `{kind}.<alias>` \
              channel reference (agents.*.channels, peer_groups.*.channel); \
              credentials and settings are not migrated.",
@@ -314,7 +314,7 @@ fn deserialize_resilient(value: toml::Value) -> ResilientLoad {
                 "SECURITY-CRITICAL config section `{path}` is invalid and was reset to \
                  its default so the daemon can boot; the running posture may be WEAKER \
                  than intended — repair `{path}` and reload before trusting this instance. \
-                 Run `zeroclaw config validate` to see the precise parse error, or fix it \
+                 Run `rei config validate` to see the precise parse error, or fix it \
                  via the gateway config editor at `/api/config`"
             )
         );

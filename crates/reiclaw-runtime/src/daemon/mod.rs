@@ -109,8 +109,8 @@ async fn wait_for_exit_signal(
 pub enum GatewayBindMode {
     /// Address is free (or an ephemeral port): start and supervise our own gateway.
     StartFresh,
-    /// A ZeroClaw gateway already holds the address (e.g. a standalone
-    /// `zeroclaw gateway start`): fail fast rather than start a second gateway
+    /// A ReiClaw gateway already holds the address (e.g. a standalone
+    /// `rei gateway start`): fail fast rather than start a second gateway
     /// on the same port.
     GatewayAlreadyRunning,
     /// Address is held by some other process: fail fast rather than degrade into
@@ -148,7 +148,7 @@ fn gateway_health_probe_url(config: &Config, host: &str, port: u16) -> String {
     )
 }
 
-async fn zeroclaw_gateway_responds(config: &Config, host: &str, port: u16) -> bool {
+async fn reiclaw_gateway_responds(config: &Config, host: &str, port: u16) -> bool {
     let url = gateway_health_probe_url(config, host, port);
     let Ok(client) = reqwest::Client::builder()
         .redirect(reqwest::redirect::Policy::none())
@@ -209,7 +209,7 @@ async fn classify_gateway_bind_outcome(
             GatewayBindMode::StartFresh
         }
         Err(e) if e.kind() == std::io::ErrorKind::AddrInUse => {
-            if zeroclaw_gateway_responds(config, host, port).await {
+            if reiclaw_gateway_responds(config, host, port).await {
                 GatewayBindMode::GatewayAlreadyRunning
             } else {
                 GatewayBindMode::PortOccupied
@@ -535,7 +535,7 @@ fn record_daemon_started(config: &Config, host: &str, port: u16) {
                 "pairing_enabled": config.gateway.require_pairing,
                 "stop_signal": "Ctrl+C or SIGTERM",
             })),
-        "ZeroClaw daemon started"
+        "ReiClaw daemon started"
     );
 }
 

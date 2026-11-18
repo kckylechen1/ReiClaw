@@ -1,38 +1,33 @@
 # NixOS
 
-ZeroClaw ships a multi-instance NixOS module at
-[`nix/module.nix`](https://github.com/zeroclaw-labs/zeroclaw/blob/master/nix/module.nix).
+ReiClaw ships a multi-instance NixOS module at
+[`nix/module.nix`](https://github.com/kckylechen1/ReiClaw/blob/master/nix/module.nix).
 It runs one or more agents under systemd with hardening defaults appropriate
 for an internet-facing process, modelled on `services.restic.backups`.
 
 ## The package
 
-The module invokes `${pkgs.zeroclaw}/bin/zeroclaw daemon`. `pkgs.zeroclaw` is
-not yet in nixpkgs; it is tracked in
-[#5987](https://github.com/zeroclaw-labs/zeroclaw/issues/5987). Until it lands,
-build the binary yourself and point the module at it with the `package` option:
+The module invokes `${pkgs.reiclaw}/bin/rei daemon`. `pkgs.reiclaw` is
+not in nixpkgs; build the binary from this flake or point the module at it with
+the `package` option:
 
 <div class="os-tabs-src">
 
 #### nix
 
 ```nix
-services.zeroclaw.instances.me.package =
-  pkgs.callPackage ./zeroclaw.nix { };
+services.reiclaw.instances.me.package =
+  pkgs.callPackage ./reiclaw.nix { };
 ```
 
 </div>
 
-For the same reason, `nix run github:zeroclaw-labs/zeroclaw` does not launch the
-agent. `nix run` resolves `apps.<system>.default` then `packages.<system>.default`;
-this flake defines no `apps`, and its `packages.default` is the Rust toolchain
-(for the dev shell), so the command would run the toolchain derivation, not
-ZeroClaw. On any other platform, [`install.sh`](./linux.md) is the supported
-path.
+You can also run it directly from the flake: `nix run github:kckylechen1/ReiClaw`.
+On any other platform, [`install.sh`](./linux.md) is the supported path.
 
 ## Single instance
 
-Membership in `services.zeroclaw.instances.<name>` is the activation signal;
+Membership in `services.reiclaw.instances.<name>` is the activation signal;
 there is no top-level `enable`. Each instance gets its own systemd unit, state
 directory, and system user.
 
@@ -42,12 +37,12 @@ directory, and system user.
 
 ```nix
 { config, pkgs, ... }: {
-  imports = [ ./path/to/zeroclaw/nix/module.nix ];
+  imports = [ ./path/to/ReiClaw/nix/module.nix ];
 
-  age.secrets.zeroclaw-bot-token.file = ./secrets/zeroclaw-bot-token.age;
+  age.secrets.reiclaw-bot-token.file = ./secrets/reiclaw-bot-token.age;
 
-  services.zeroclaw.instances.me = {
-    environmentFile = config.age.secrets.zeroclaw-bot-token.path;
+  services.reiclaw.instances.me = {
+    environmentFile = config.age.secrets.reiclaw-bot-token.path;
     settings = {
       providers.models.anthropic.home.model = "claude-sonnet-4-6";
       agents.assistant = {
@@ -68,7 +63,7 @@ directory, and system user.
 
 </div>
 
-`settings` mirrors `~/.zeroclaw/config.toml` as a Nix attrset, rendered to
+`settings` mirrors `~/.rei/config.toml` as a Nix attrset, rendered to
 `${dataDir}/config.toml` (mode `0600`). Secrets travel through
 `environmentFile`, never `settings`: the unit's `ExecStartPre` runs `envsubst`
 so `$VAR` references resolve at start, keeping the `/nix/store` copy free of
@@ -86,7 +81,7 @@ as one. Instances may share a user when exactly one creates it and the rest set
 #### nix
 
 ```nix
-services.zeroclaw.instances = {
+services.reiclaw.instances = {
   alice = { environmentFile = "/run/secrets/alice/identity.env"; settings = { /* … */ }; };
   bob   = { environmentFile = "/run/secrets/bob/identity.env";   settings = { /* … */ }; };
 };

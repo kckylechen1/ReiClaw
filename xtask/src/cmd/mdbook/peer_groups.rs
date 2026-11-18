@@ -224,7 +224,7 @@ fn config_section_label(path: &str) -> anyhow::Result<String> {
 
 /// Render a secret-field setter widget. Secrets are stored encrypted; they must
 /// never be hand-written into `config.toml`. Tabs cover only the surfaces that
-/// encrypt on write: the gateway dashboard and `zeroclaw config set`
+/// encrypt on write: the gateway dashboard and `rei config set`
 /// (masked input). The arg is the full dotted path to the secret field.
 fn render_secret_config(path: &str) -> String {
     let path = path.trim();
@@ -242,10 +242,10 @@ fn render_secret_config(path: &str) -> String {
 
 Open [`/config/{section}`](http://127.0.0.1:42617/config/{section}) and set the `{display_path}` field there.
 
-#### zeroclaw config
+#### rei config
 
 ```sh
-zeroclaw config set {path}    # prompts for masked input, stores encrypted
+rei config set {path}    # prompts for masked input, stores encrypted
 ```
 
 </div>"#,
@@ -253,7 +253,7 @@ zeroclaw config set {path}    # prompts for masked input, stores encrypted
 }
 
 /// Render a set-it-any-surface widget for a single non-secret config field.
-/// Same tabs as `secret-config` (gateway dashboard, `zeroclaw config set`) minus the masked-secret framing. The arg is the full
+/// Same tabs as `secret-config` (gateway dashboard, `rei config set`) minus the masked-secret framing. The arg is the full
 /// dotted path to the field, e.g. `channels.git.<alias>.app_id`. Used by setup
 /// guides that walk each required field individually.
 fn render_config_set(path: &str) -> String {
@@ -267,10 +267,10 @@ fn render_config_set(path: &str) -> String {
 
 Open [`/config/{section}`](http://127.0.0.1:42617/config/{section}) and set the `{display_path}` field there.
 
-#### zeroclaw config
+#### rei config
 
 ```sh
-zeroclaw config set {path} <value>
+rei config set {path} <value>
 ```
 
 </div>"#,
@@ -344,11 +344,11 @@ Set the thread behavior on any surface:
 
 Open [`/config/{section}`](http://127.0.0.1:42617/config/{section}) and toggle the `{display_path}` field.
 
-#### zeroclaw config
+#### rei config
 
 ```sh
-zeroclaw config set {p} true     # thread replies on
-zeroclaw config set {p} false    # replies at the channel root
+rei config set {p} true     # thread replies on
+rei config set {p} false    # replies at the channel root
 ```
 
 </div>"#
@@ -359,7 +359,7 @@ zeroclaw config set {p} false    # replies at the channel root
 
     Ok(format!(
         r#"When a {channel} conversation happens in a thread, that thread is its own
-conversation. ZeroClaw derives a distinct session key per thread, so every
+conversation. ReiClaw derives a distinct session key per thread, so every
 thread carries an independent context window and history: messages in one
 thread never bleed into another, and the agent does not see a sibling thread's
 earlier turns.{toggle}
@@ -428,10 +428,10 @@ Set it on any surface:
 
 Open [`/config/{section}`](http://127.0.0.1:42617/config/{section}) and set the `{display_path}` field.
 
-#### zeroclaw config
+#### rei config
 
 ```sh
-zeroclaw config set {p} <value>
+rei config set {p} <value>
 ```
 
 </div>"#
@@ -513,7 +513,7 @@ fn render_example(p: &PeerParams) -> String {
     format!(
         "A {key} peer group named e.g. `my_{key}_group` sets `channel = \"{key}\"`, \
 allows `{example}` in `external_peers`, names {agents}{ignore}. Set it through \
-the gateway dashboard or `zeroclaw config set`.",
+the gateway dashboard or `rei config set`.",
         key = p.key,
         agents = agents,
         example = p.sender_example,
@@ -765,12 +765,12 @@ fn render_model_provider_fields() -> String {
 }
 
 fn env_form(path: &str) -> String {
-    format!("ZEROCLAW_{}", path.replace('.', "__"))
+    format!("REI_{}", path.replace('.', "__"))
 }
 
 /// Render the `## Examples` code block from the curated, schema-validated rows
 /// in the `example` group. Comments become `#` lines; each row becomes one
-/// `ZEROCLAW_...=value` line. No env-var name is literal in the page — every
+/// `REI_...=value` line. No env-var name is literal in the page — every
 /// one is derived from a validated schema path.
 fn render_env_var_block(vars: &[EnvVarParams], group: &str) -> anyhow::Result<String> {
     let mut body = String::new();
@@ -908,7 +908,7 @@ mod generated_prose_gate {
         let rendered = super::render_secret_config("channels.telegram.<alias>.bot_token");
 
         assert!(rendered.contains("`channels.telegram.<alias>.bot_token`"));
-        assert!(rendered.contains("zeroclaw config set channels.telegram.<alias>.bot_token"));
+        assert!(rendered.contains("rei config set channels.telegram.<alias>.bot_token"));
     }
 
     #[test]
@@ -923,13 +923,9 @@ mod generated_prose_gate {
         .expect("streaming context should render");
 
         assert!(thread.contains("`channels.matrix.<alias>.reply_in_thread`"));
-        assert!(
-            thread.contains("zeroclaw config set channels.matrix.<alias>.reply_in_thread true")
-        );
+        assert!(thread.contains("rei config set channels.matrix.<alias>.reply_in_thread true"));
         assert!(streaming.contains("`channels.slack.<alias>.stream_drafts`"));
-        assert!(
-            streaming.contains("zeroclaw config set channels.slack.<alias>.stream_drafts <value>")
-        );
+        assert!(streaming.contains("rei config set channels.slack.<alias>.stream_drafts <value>"));
     }
 
     #[test]

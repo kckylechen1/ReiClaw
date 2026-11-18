@@ -1,8 +1,8 @@
 #!/bin/sh
 set -eu
 
-# ── ZeroClaw installer ───────────────────────────────────────────
-# Builds and installs ZeroClaw from source.
+# ── ReiClaw installer ────────────────────────────────────────────
+# Builds and installs ReiClaw from source.
 # All feature lists and version info read from Cargo.toml — nothing hardcoded.
 # POSIX sh — no bash required. Works on Alpine, Debian, macOS, everywhere.
 
@@ -132,7 +132,7 @@ selected_feature_enabled() {
 list_features() {
   parse_cargo_toml "$1"
   echo
-  printf "%s — available build features\n" "$(bold "ZeroClaw v${VERSION}")"
+  printf "%s — available build features\n" "$(bold "ReiClaw v${VERSION}")"
   echo
 
   printf "  %s\n" "$(bold "Default") (included unless --minimal):"
@@ -213,10 +213,7 @@ require_fork_origin() {
   case "$origin" in
   https://github.com/kckylechen1/ReiClaw | https://github.com/kckylechen1/ReiClaw.git | \
     git@github.com:kckylechen1/ReiClaw | git@github.com:kckylechen1/ReiClaw.git | \
-    ssh://git@github.com/kckylechen1/ReiClaw | ssh://git@github.com/kckylechen1/ReiClaw.git | \
-    https://github.com/kckylechen1/zeroclaw | https://github.com/kckylechen1/zeroclaw.git | \
-    git@github.com:kckylechen1/zeroclaw | git@github.com:kckylechen1/zeroclaw.git | \
-    ssh://git@github.com/kckylechen1/zeroclaw | ssh://git@github.com/kckylechen1/zeroclaw.git) ;;
+    ssh://git@github.com/kckylechen1/ReiClaw | ssh://git@github.com/kckylechen1/ReiClaw.git) ;;
   *) die "Source origin is not this fork. Clone $REPO_URL into a new directory and run ./install.sh --source there. Existing checkout was not changed." ;;
   esac
 }
@@ -225,7 +222,7 @@ require_fork_origin() {
 
 usage() {
   cat <<EOF
-$(bold "ZeroClaw installer")
+$(bold "ReiClaw installer")
 
 Usage: $0 [options]
 
@@ -245,10 +242,10 @@ Options:
   --prefix PATH        Install everything under PATH (default: \$HOME)
                        Sets CARGO_HOME, RUSTUP_HOME, source checkout, config
   --dry-run            Show what would happen without building or installing
-  --no-modify-path     Don't add ZeroClaw to PATH in your shell profile; just
+  --no-modify-path     Don't add ReiClaw to PATH in your shell profile; just
                        print the line to add manually
   --skip-quickstart       Skip the post-install quickstart prompt
-  --uninstall          Remove ZeroClaw binary and optionally config/data
+  --uninstall          Remove ReiClaw binary and optionally config/data
   -h, --help           Show this help
   -V, --version        Show version from Cargo.toml
 
@@ -260,13 +257,13 @@ Examples:
   $0 --source --preset full                   # all heavyweight extras (no preset adds channels)
   $0 --full                                    # same as --preset full
   $0 --skip-quickstart                            # install only, configure later
-  $0 --prefix /tmp/zc-test --skip-quickstart      # isolated test install
+  $0 --prefix /tmp/rei-test --skip-quickstart     # isolated test install
   $0 --dry-run --source                       # preview without installing
-  $0 --uninstall                               # remove ZeroClaw
+  $0 --uninstall                               # remove ReiClaw
 
 Environment:
-  ZEROCLAW_INSTALL_DIR   Source checkout override (default: PREFIX/.zeroclaw/src)
-  ZEROCLAW_CARGO_FEATURES  Extra cargo features (legacy; prefer --features)
+  REI_INSTALL_DIR      Source checkout override (default: PREFIX/.rei/src)
+  REI_CARGO_FEATURES   Extra cargo features (legacy; prefer --features)
 EOF
 }
 
@@ -274,18 +271,18 @@ EOF
 
 do_uninstall() {
   if [ "$DRY_RUN" = true ]; then
-    info "[dry-run] Would stop and uninstall the service, then remove $CARGO_HOME/bin/zeroclaw if present"
-    info "[dry-run] Would preserve configuration/data at $PREFIX/.zeroclaw unless you confirm removal during an interactive uninstall"
+    info "[dry-run] Would stop and uninstall the service, then remove $CARGO_HOME/bin/rei if present"
+    info "[dry-run] Would preserve configuration/data at $PREFIX/.rei unless you confirm removal during an interactive uninstall"
     info "[dry-run] Would remove the installer PATH block from $(detect_shell_profile)"
     info "[dry-run] No service, binary, configuration, or shell profile was changed"
     exit 0
   fi
 
   echo
-  printf "%s\n" "$(bold "Uninstalling ZeroClaw")"
+  printf "%s\n" "$(bold "Uninstalling ReiClaw")"
   echo
 
-  local bin="$CARGO_HOME/bin/zeroclaw"
+  local bin="$CARGO_HOME/bin/rei"
 
   if [ -f "$bin" ]; then
     "$bin" service stop 2>/dev/null || true
@@ -296,7 +293,7 @@ do_uninstall() {
     warn "Binary not found at $bin"
   fi
 
-  local config_dir="$PREFIX/.zeroclaw"
+  local config_dir="$PREFIX/.rei"
   if [ -d "$config_dir" ]; then
     if [ -t 0 ]; then
       printf "  Remove config and data (%s)? [y/N] " "$config_dir"
@@ -316,44 +313,44 @@ do_uninstall() {
   # Strip the PATH marker block this installer may have added to the profile.
   local profile
   profile=$(detect_shell_profile)
-  if [ -f "$profile" ] && grep -q "# >>> zeroclaw >>>" "$profile" 2>/dev/null; then
+  if [ -f "$profile" ] && grep -q "# >>> rei >>>" "$profile" 2>/dev/null; then
     local tmp_profile
     tmp_profile=$(mktemp)
-    if sed '/# >>> zeroclaw >>>/,/# <<< zeroclaw <<</d' "$profile" >"$tmp_profile" 2>/dev/null &&
+    if sed '/# >>> rei >>>/,/# <<< rei <<</d' "$profile" >"$tmp_profile" 2>/dev/null &&
       cat "$tmp_profile" >"$profile" 2>/dev/null; then
       info "Removed PATH entry from $profile"
     else
-      warn "Could not edit $profile — remove the zeroclaw PATH block manually"
+      warn "Could not edit $profile — remove the rei PATH block manually"
     fi
     rm -f "$tmp_profile"
   fi
 
-  # Check if another zeroclaw still lurks in PATH
+  # Check if another rei still lurks in PATH
   local other_bin
-  other_bin=$(PATH="$ORIGINAL_PATH" command -v zeroclaw 2>/dev/null || true)
+  other_bin=$(PATH="$ORIGINAL_PATH" command -v rei 2>/dev/null || true)
   if [ -n "$other_bin" ]; then
     local other_version
     other_version=$("$other_bin" --version 2>/dev/null | awk '{print $NF}' || echo "unknown")
     echo
-    warn "Another zeroclaw found at $other_bin (v$other_version)"
+    warn "Another rei found at $other_bin (v$other_version)"
     warn "Remove it manually if you want a full uninstall"
   fi
 
   echo
-  info "ZeroClaw uninstalled"
+  info "ReiClaw uninstalled"
   exit 0
 }
 
 # ── Quickstart-needed status check ───────────────────────────────
 #
-# Detect whether the operator already has a configured ZeroClaw so the
+# Detect whether the operator already has a configured ReiClaw so the
 # 3-way "how would you like to complete setup?" prompt can skip silently
 # on a re-install. We treat setup as complete when a config file exists
 # at the expected path AND it contains at least one `[providers.models.*]`
 # or `[providers.fallback]` line — i.e. some provider is configured.
 # Empty or default config files still trigger the prompt.
 quickstart_needed() {
-  cfg="$PREFIX/.zeroclaw/config.toml"
+  cfg="$PREFIX/.rei/config.toml"
   [ -f "$cfg" ] || return 0 # no config → run quickstart
   # Already-configured signal: any of these patterns means a provider was set.
   if grep -qE '^\[providers\.models\.|^fallback *=|^default_provider *=' "$cfg" 2>/dev/null; then
@@ -459,13 +456,13 @@ interactive_feature_picker() {
 resolve_web_data_dir() {
   case "$(uname -s)" in
   Darwin)
-    printf '%s' "${HOME}/Library/Application Support/zeroclaw/web/dist"
+    printf '%s' "${HOME}/Library/Application Support/reiclaw/web/dist"
     ;;
   MINGW* | CYGWIN* | MSYS*)
-    printf '%s' "${LOCALAPPDATA}/zeroclaw/web/dist"
+    printf '%s' "${LOCALAPPDATA}/reiclaw/web/dist"
     ;;
   *)
-    printf '%s' "${XDG_DATA_HOME:-${PREFIX}/.local/share}/zeroclaw/web/dist"
+    printf '%s' "${XDG_DATA_HOME:-${PREFIX}/.local/share}/reiclaw/web/dist"
     ;;
   esac
 }
@@ -580,8 +577,8 @@ PRESET=""       # ""=unset, "minimal"=alias for --minimal, "full"=default-featur
 WITH_GATEWAY="" # ""=unset (preset/feature default applies), "true"/"false"=explicit toggle
 
 # Support legacy env var
-if [ -n "${ZEROCLAW_CARGO_FEATURES:-}" ]; then
-  USER_FEATURES="${USER_FEATURES:+$USER_FEATURES,}$ZEROCLAW_CARGO_FEATURES"
+if [ -n "${REI_CARGO_FEATURES:-}" ]; then
+  USER_FEATURES="${USER_FEATURES:+$USER_FEATURES,}$REI_CARGO_FEATURES"
 fi
 
 while [ $# -gt 0 ]; do
@@ -632,7 +629,7 @@ while [ $# -gt 0 ]; do
   -V | --version)
     if [ -f "Cargo.toml" ]; then
       parse_cargo_toml "Cargo.toml"
-      echo "install.sh for ZeroClaw v$VERSION"
+      echo "install.sh for ReiClaw v$VERSION"
     else
       echo "install.sh (version unknown — not in repo)"
     fi
@@ -647,7 +644,7 @@ done
 
 CARGO_HOME="${CARGO_HOME:-$PREFIX/.cargo}"
 RUSTUP_HOME="${RUSTUP_HOME:-$PREFIX/.rustup}"
-INSTALL_DIR="${ZEROCLAW_INSTALL_DIR:-$PREFIX/.zeroclaw/src}"
+INSTALL_DIR="${REI_INSTALL_DIR:-$PREFIX/.rei/src}"
 ORIGINAL_PATH="$PATH"
 PATH="$CARGO_HOME/bin:$PATH"
 export CARGO_HOME RUSTUP_HOME PATH
@@ -671,13 +668,13 @@ fi
 
 {
   echo
-  printf "%s\n" "$(bold "ZeroClaw — source install")"
+  printf "%s\n" "$(bold "ReiClaw — source install")"
   if [ "$PREFIX" != "$HOME" ]; then
     printf "  prefix: %s\n" "$(bold "$PREFIX")"
   fi
   echo
 
-  if [ -f "Cargo.toml" ] && grep -qE "reiclaw|zeroclaw" "Cargo.toml" 2>/dev/null; then
+  if [ -f "Cargo.toml" ] && grep -qE "reiclaw" "Cargo.toml" 2>/dev/null; then
     INSTALL_DIR="$(pwd)"
     require_fork_origin "$INSTALL_DIR"
     info "Building from $INSTALL_DIR"
@@ -693,7 +690,7 @@ fi
     cd "$INSTALL_DIR"
   else
     [ ! -e "$INSTALL_DIR" ] ||
-      die "Source directory exists but is not a verified checkout: $INSTALL_DIR. Choose an empty ZEROCLAW_INSTALL_DIR."
+      die "Source directory exists but is not a verified checkout: $INSTALL_DIR. Choose an empty REI_INSTALL_DIR."
     if [ "$DRY_RUN" = true ]; then
       info "[dry-run] Would clone $REPO_URL into $INSTALL_DIR"
       info "[dry-run] Would install from source with the requested features after reading that checkout's Cargo.toml"
@@ -736,7 +733,7 @@ fi
   if [ "$DRY_RUN" != true ]; then
     RUST_VERSION=$(rustc --version | awk '{print $2}')
     if ! version_gte "$RUST_VERSION" "$MSRV"; then
-      die "Rust $RUST_VERSION is too old. ZeroClaw requires $MSRV+ (edition $EDITION). Run: rustup update stable"
+      die "Rust $RUST_VERSION is too old. ReiClaw requires $MSRV+ (edition $EDITION). Run: rustup update stable"
     fi
     info "Rust $RUST_VERSION (>= $MSRV)"
   fi
@@ -795,7 +792,7 @@ See all available features:
     if [ "$DRY_RUN" = true ]; then
       info "[dry-run] Would resolve the full preset with: cargo generate features --selection all"
       info "[dry-run] Would run: cargo install --path . --locked --force --no-default-features --features <resolved-full-preset-and-requested-features>"
-      info "[dry-run] Would also run: cargo install --path bridges/acp --locked --force --bin zeroclaw-acp-bridge when the resolved root feature closure enables agent-runtime"
+      info "[dry-run] Would also run: cargo install --path bridges/acp --locked --force --bin rei-acp-bridge when the resolved root feature closure enables agent-runtime"
       info "[dry-run] Would build/install the dashboard when the resolved features enable it, then apply the requested PATH settings"
       info "[dry-run] Feature resolution is deferred because it can compile xtask; no checkout, toolchain, binary, or profile was changed"
       exit 0
@@ -847,12 +844,12 @@ See all available features:
 
   # ── Detect existing installs ──────────────────────────────────────
 
-  PATH_BIN=$(PATH="$ORIGINAL_PATH" command -v zeroclaw 2>/dev/null || true)
+  PATH_BIN=$(PATH="$ORIGINAL_PATH" command -v rei 2>/dev/null || true)
   if [ -n "$PATH_BIN" ]; then
     PATH_VERSION=$("$PATH_BIN" --version 2>/dev/null | awk '{print $NF}' || echo "unknown")
-    TARGET_BIN="$CARGO_HOME/bin/zeroclaw"
+    TARGET_BIN="$CARGO_HOME/bin/rei"
     if [ "$PATH_BIN" != "$TARGET_BIN" ]; then
-      warn "zeroclaw found at $PATH_BIN (v$PATH_VERSION)"
+      warn "rei found at $PATH_BIN (v$PATH_VERSION)"
       warn "This install targets $TARGET_BIN"
       warn "The old binary will shadow the new one unless removed or PATH is reordered"
     else
@@ -887,7 +884,7 @@ See all available features:
   fi
 
   echo
-  printf "%s\n" "$(bold "Building ZeroClaw v$VERSION")"
+  printf "%s\n" "$(bold "Building ReiClaw v$VERSION")"
   if [ -n "$CARGO_FLAGS" ]; then
     info "Feature flags: $CARGO_FLAGS"
   else
@@ -915,9 +912,9 @@ See all available features:
   fi
   if source_installs_acp_bridge "Cargo.toml"; then
     if [ "$DRY_RUN" = true ]; then
-      info "[dry-run] Would run: cargo install --path bridges/acp --locked --force --bin zeroclaw-acp-bridge"
+      info "[dry-run] Would run: cargo install --path bridges/acp --locked --force --bin rei-acp-bridge"
     else
-      cargo install --path bridges/acp --locked --force --bin zeroclaw-acp-bridge
+      cargo install --path bridges/acp --locked --force --bin rei-acp-bridge
     fi
   fi
   # >>> end generated:source-cargo-install <<<
@@ -953,18 +950,18 @@ See all available features:
   # ── Summary ───────────────────────────────────────────────────────
 
   if [ "$DRY_RUN" != true ]; then
-    BIN="$CARGO_HOME/bin/zeroclaw"
+    BIN="$CARGO_HOME/bin/rei"
     if [ -f "$BIN" ]; then
       SIZE=$(du -h "$BIN" | awk '{print $1}')
       NEW_VERSION=$("$BIN" --version 2>/dev/null | awk '{print $NF}' || echo "$VERSION")
       echo
       info "Installed: $BIN (v$NEW_VERSION, $SIZE)"
 
-      ACTIVE_BIN=$(PATH="$ORIGINAL_PATH" command -v zeroclaw 2>/dev/null || true)
+      ACTIVE_BIN=$(PATH="$ORIGINAL_PATH" command -v rei 2>/dev/null || true)
       if [ -n "$ACTIVE_BIN" ] && [ "$ACTIVE_BIN" != "$BIN" ]; then
         ACTIVE_VERSION=$("$ACTIVE_BIN" --version 2>/dev/null | awk '{print $NF}' || echo "unknown")
         echo
-        warn "$(bold "WARNING:") zeroclaw in your PATH is $ACTIVE_BIN (v$ACTIVE_VERSION)"
+        warn "$(bold "WARNING:") rei in your PATH is $ACTIVE_BIN (v$ACTIVE_VERSION)"
         warn "It will shadow the v$NEW_VERSION binary you just installed at $BIN"
         warn "Fix: remove the old binary or put $CARGO_HOME/bin earlier in your PATH"
       fi
@@ -975,7 +972,7 @@ See all available features:
 
 } # end source build block
 
-BIN="$CARGO_HOME/bin/zeroclaw"
+BIN="$CARGO_HOME/bin/rei"
 
 # ── PATH setup ────────────────────────────────────────────────────
 
@@ -1009,9 +1006,9 @@ elif [ "$MODIFY_PATH" = true ] && [ "$PREFIX" = "$HOME" ]; then
   if [ "$DRY_RUN" = true ]; then
     info "[dry-run] Would add $CARGO_HOME/bin to PATH in $PROFILE"
   elif {
-    printf '\n# >>> zeroclaw >>>\n'
+    printf '\n# >>> rei >>>\n'
     printf '%s\n' "$EXPORT_LINE"
-    printf '# <<< zeroclaw <<<\n'
+    printf '# <<< rei <<<\n'
   } >>"$PROFILE" 2>/dev/null; then
     info "Added $CARGO_HOME/bin to PATH in $PROFILE"
     printf "    Reload your shell or run: source %s\n" "$PROFILE"
@@ -1028,53 +1025,53 @@ fi
 
 if [ "$SKIP_QUICKSTART" = false ] && [ "$DRY_RUN" != true ] && [ -f "$BIN" ]; then
   # Skip the prompt entirely when the operator already has a configured
-  # ZeroClaw — re-installs should not re-prompt.
+  # ReiClaw — re-installs should not re-prompt.
   if ! quickstart_needed; then
-    info "Existing ZeroClaw config detected at $PREFIX/.zeroclaw/config.toml — skipping setup prompt."
-    info "Run 'zeroclaw quickstart' to reconfigure."
+    info "Existing ReiClaw config detected at $PREFIX/.rei/config.toml — skipping setup prompt."
+    info "Run 'rei quickstart' to reconfigure."
   elif [ -t 0 ]; then
     # 3-way setup choice. Bare Enter accepts the [1] CLI quickstart default;
     # option [2] foregrounds the daemon so the operator can finish in the
     # browser and Ctrl+C to return; [3] skips and prints a follow-up hint.
     # Non-TTY runs fall through to the silent skip in the else branch.
     echo
-    printf "%s\n" "$(bold "ZeroClaw installed. How would you like to complete setup?")"
-    printf "  [1] CLI quickstart  (zeroclaw quickstart)\n"
-    printf "  [2] Open gateway in browser (zeroclaw daemon + dashboard)\n"
+    printf "%s\n" "$(bold "ReiClaw installed. How would you like to complete setup?")"
+    printf "  [1] CLI quickstart  (rei quickstart)\n"
+    printf "  [2] Open gateway in browser (rei daemon + dashboard)\n"
     printf "  [3] Skip for now\n"
     printf "  Choice [1-3, default 1]: "
     read -r quickstart_choice
     case "${quickstart_choice:-1}" in
     1 | "")
       echo
-      "$BIN" quickstart || warn "Quickstart exited with an error — run 'zeroclaw quickstart' manually"
+      "$BIN" quickstart || warn "Quickstart exited with an error — run 'rei quickstart' manually"
       ;;
     2)
       echo
       info "Starting gateway daemon for browser-based setup..."
       info "Open the dashboard in your browser; pair with the code shown in logs."
-      info "Stop the daemon with Ctrl+C when done; then run 'zeroclaw service install' for always-on."
-      "$BIN" daemon || warn "Daemon exited with an error — run 'zeroclaw daemon' manually"
+      info "Stop the daemon with Ctrl+C when done; then run 'rei service install' for always-on."
+      "$BIN" daemon || warn "Daemon exited with an error — run 'rei daemon' manually"
       ;;
     3)
-      info "Skipped setup. Run 'zeroclaw quickstart' (CLI) or 'zeroclaw daemon' (browser) when ready."
+      info "Skipped setup. Run 'rei quickstart' (CLI) or 'rei daemon' (browser) when ready."
       ;;
     *)
-      warn "Unknown choice '$quickstart_choice' — skipping. Run 'zeroclaw quickstart' to configure."
+      warn "Unknown choice '$quickstart_choice' — skipping. Run 'rei quickstart' to configure."
       ;;
     esac
   else
-    info "Non-interactive — skipping setup prompt. Run 'zeroclaw quickstart' to configure."
+    info "Non-interactive — skipping setup prompt. Run 'rei quickstart' to configure."
   fi
 fi
 
 echo
 # Next-step hint: point at the daemon + web dashboard when the binary has
 # one, otherwise fall back to a one-off CLI agent run.
-if [ -f "$CARGO_HOME/bin/zeroclaw" ] && "$CARGO_HOME/bin/zeroclaw" --help 2>/dev/null | grep -q '\bdaemon\b'; then
-  info "Done. Run $(bold "zeroclaw daemon") for the always-on daemon + web dashboard,"
-  info "or $(bold "zeroclaw agent") for a one-off CLI chat."
+if [ -f "$CARGO_HOME/bin/rei" ] && "$CARGO_HOME/bin/rei" --help 2>/dev/null | grep -q '\bdaemon\b'; then
+  info "Done. Run $(bold "rei daemon") for the always-on daemon + web dashboard,"
+  info "or $(bold "rei agent") for a one-off CLI chat."
 else
-  info "Done. Run $(bold "zeroclaw agent") to start chatting."
+  info "Done. Run $(bold "rei agent") to start chatting."
 fi
 echo

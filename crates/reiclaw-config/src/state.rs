@@ -19,7 +19,7 @@ pub struct SharedStringMap(std::sync::RwLock<HashMap<String, String>>);
 /// Alias for on-disk external secret reference (`op://`, `vault:`) snapshots.
 pub type ExternalRefSnapshots = SharedStringMap;
 
-/// Alias for pre-override plaintext snapshots captured when `ZEROCLAW_*` env vars apply.
+/// Alias for pre-override plaintext snapshots captured when `REI_*` env vars apply.
 pub type PreOverrideSnapshots = SharedStringMap;
 
 impl SharedStringMap {
@@ -163,7 +163,7 @@ impl Eq for SharedStringMap {}
 #[derive(Default)]
 pub struct SharedStringSet(std::sync::RwLock<std::collections::HashSet<String>>);
 
-/// Alias for tracked `ZEROCLAW_*` env-overridden property paths.
+/// Alias for tracked `REI_*` env-overridden property paths.
 pub type EnvOverriddenPaths = SharedStringSet;
 
 impl SharedStringSet {

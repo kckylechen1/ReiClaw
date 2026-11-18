@@ -1,16 +1,16 @@
-# services.zeroclaw — multi-instance NixOS module for the ZeroClaw agent.
+# services.reiclaw — multi-instance NixOS module for the ReiClaw agent.
 #
 # Design memo: see ./README.md for usage; the upstream PR body links the full
 # design rationale.
 #
 # Layout:
-#   - `services.zeroclaw.instances.<name>` is an attrset of instances.
+#   - `services.reiclaw.instances.<name>` is an attrset of instances.
 #     Membership in the attrset is the activation signal — there is no
 #     top-level `enable`. Mirrors `services.restic.backups.<name>`.
 #   - Each instance gets:
-#       * a dedicated systemd unit          `zeroclaw-<name>.service`
-#       * a dedicated state directory       `/var/lib/zeroclaw-<name>`
-#       * a dedicated system user / group   `zeroclaw-<name>`
+#       * a dedicated systemd unit          `reiclaw-<name>.service`
+#       * a dedicated state directory       `/var/lib/reiclaw-<name>`
+#       * a dedicated system user / group   `reiclaw-<name>`
 #       * a rendered config file            `${dataDir}/config.toml`
 #   - `settings` is a TOML-typed attrset rendered via `pkgs.formats.toml`
 #     per RFC-42. `extraConfig` (raw TOML) is the documented escape hatch.
@@ -21,15 +21,15 @@
 #     start. The world-readable copy in `/nix/store` only ever contains the
 #     literal placeholders; the resolved file lives at `${dataDir}/config.toml`
 #     mode `0600`, owned by the per-instance user.
-#     This substitution is a property of *this module*, not of ZeroClaw —
-#     ZeroClaw itself reads `config.toml` verbatim plus a handful of named
-#     env-var overrides documented in `crates/zeroclaw-config/src/schema.rs`
-#     (e.g. `OPENROUTER_API_KEY`, `ZEROCLAW_PROVIDER`).
+#     This substitution is a property of *this module*, not of ReiClaw —
+#     ReiClaw itself reads `config.toml` verbatim plus a handful of named
+#     env-var overrides documented in `crates/reiclaw-config/src/schema.rs`
+#     (e.g. `OPENROUTER_API_KEY`, `REI_PROVIDER`).
 #
 # Single-instance usage (laptop / single-host case):
 #
-#   services.zeroclaw.instances.me = {
-#     environmentFile = "/run/agenix/zeroclaw-bot-token";
+#   services.reiclaw.instances.me = {
+#     environmentFile = "/run/agenix/reiclaw-bot-token";
 #     settings = {
 #       providers.models.anthropic.home.model = "claude-sonnet-4-6";
 #       agents.assistant = {
@@ -48,7 +48,7 @@
 #
 # Multi-instance usage (one box, N tenants — shape mirrors restic.backups):
 #
-#   services.zeroclaw.instances = lib.genAttrs slots (n: {
+#   services.reiclaw.instances = lib.genAttrs slots (n: {
 #     environmentFile = "/run/secrets/${n}/identity.env";
 #     settings = (import ./shared-settings.nix) { slot = n; };
 #   });
@@ -73,7 +73,7 @@ let
     literalExpression
     ;
 
-  cfg = config.services.zeroclaw;
+  cfg = config.services.reiclaw;
 
   # `pkgs.formats.toml` is the canonical RFC-42 shape: it both type-checks
   # the `settings` attrset at evaluation time and serialises it to TOML at
@@ -89,12 +89,12 @@ let
     { name, ... }:
     {
       options = {
-        package = mkPackageOption pkgs "zeroclaw" { };
+        package = mkPackageOption pkgs "reiclaw" { };
 
         user = mkOption {
           type = types.str;
-          default = "zeroclaw-${name}";
-          defaultText = literalExpression ''"zeroclaw-''${name}"'';
+          default = "reiclaw-${name}";
+          defaultText = literalExpression ''"reiclaw-''${name}"'';
           description = ''
             System user the instance runs as. Created by the module unless
             {option}`createUser` is `false`.
@@ -103,8 +103,8 @@ let
 
         group = mkOption {
           type = types.str;
-          default = "zeroclaw-${name}";
-          defaultText = literalExpression ''"zeroclaw-''${name}"'';
+          default = "reiclaw-${name}";
+          defaultText = literalExpression ''"reiclaw-''${name}"'';
           description = ''
             System group the instance runs as. Created by the module unless
             {option}`createUser` is `false`.
@@ -123,16 +123,16 @@ let
 
         dataDir = mkOption {
           type = types.path;
-          default = "/var/lib/zeroclaw-${name}";
-          defaultText = literalExpression ''"/var/lib/zeroclaw-''${name}"'';
+          default = "/var/lib/reiclaw-${name}";
+          defaultText = literalExpression ''"/var/lib/reiclaw-''${name}"'';
           description = ''
             State directory. Holds `config.toml`, the workspace at
-            `''${dataDir}/workspace`, and ZeroClaw's SQLite databases.
+            `''${dataDir}/workspace`, and ReiClaw's SQLite databases.
 
             Created by `systemd-tmpfiles` at activation time with mode `0750`
             owned by {option}`user`:{option}`group`, so any absolute path is
-            valid — `/var/lib/zeroclaw-me`, `/srv/zeroclaw-me`, or a nested
-            location like `/var/lib/zeroclaw/me` all work and are created
+            valid — `/var/lib/reiclaw-me`, `/srv/reiclaw-me`, or a nested
+            location like `/var/lib/reiclaw/me` all work and are created
             on a fresh machine before the unit's `ExecStartPre` runs.
           '';
         };
@@ -141,7 +141,7 @@ let
           type = types.submodule {
             # RFC-42 shape: typed options for the popular knobs go here later
             # once the surface stabilises; `freeformType` lets every other
-            # ZeroClaw config key flow through with TOML's value-model
+            # ReiClaw config key flow through with TOML's value-model
             # validation. No string-of-doom escape hatch needed for the
             # common case.
             #
@@ -172,7 +172,7 @@ let
             }
           '';
           description = ''
-            ZeroClaw configuration as a Nix attrset. Rendered to TOML in the
+            ReiClaw configuration as a Nix attrset. Rendered to TOML in the
             Nix store at build time, then `envsubst`'d into
             `''${dataDir}/config.toml` (mode `0600`) by the unit's
             `ExecStartPre`.
@@ -185,15 +185,15 @@ let
             resolved file in `''${dataDir}/config.toml` is locked to
             {option}`user`:{option}`group` mode `0600`.
 
-            The substitution is performed by this module, not by ZeroClaw.
-            ZeroClaw reads `config.toml` verbatim and overlays a handful of
+            The substitution is performed by this module, not by ReiClaw.
+            ReiClaw reads `config.toml` verbatim and overlays a handful of
             named environment-variable overrides on top (e.g.
-            `OPENROUTER_API_KEY`, `OPENAI_API_KEY`, `ZEROCLAW_PROVIDER`,
-            `ZEROCLAW_MODEL`); any other secret-bearing field — Telegram
+            `OPENROUTER_API_KEY`, `OPENAI_API_KEY`, `REI_PROVIDER`,
+            `REI_MODEL`); any other secret-bearing field — Telegram
             `bot_token`, webhook `secret`, etc. — needs the
             `envsubst` path to avoid living in `/nix/store`.
 
-            See ZeroClaw's `config.toml.example` upstream for the full key
+            See ReiClaw's `config.toml.example` upstream for the full key
             surface; only the shape we render here is module-contractual.
           '';
         };
@@ -201,7 +201,7 @@ let
         environmentFile = mkOption {
           type = types.nullOr types.path;
           default = null;
-          example = "/run/agenix/zeroclaw-bot-token";
+          example = "/run/agenix/reiclaw-bot-token";
           description = ''
             Path to a file containing `KEY=VALUE` lines, loaded into the
             unit's environment via systemd `EnvironmentFile=` (see
@@ -227,7 +227,7 @@ let
           '';
           description = ''
             Raw TOML appended verbatim after the rendered {option}`settings`
-            block. Documented escape hatch (per RFC-42) for ZeroClaw config
+            block. Documented escape hatch (per RFC-42) for ReiClaw config
             keys whose shape isn't yet covered by the typed `settings`
             surface — most things should go through `settings` instead.
           '';
@@ -238,7 +238,7 @@ let
           default = { };
           example = literalExpression ''
             {
-              "/var/lib/zeroclaw-me/workspace/skills/git" = "/etc/zeroclaw-skills/git";
+              "/var/lib/reiclaw-me/workspace/skills/git" = "/etc/reiclaw-skills/git";
             }
           '';
           description = ''
@@ -265,24 +265,24 @@ let
   renderConfigFile =
     name: instanceCfg:
     let
-      # ZeroClaw admits only the current config generation and refuses an
+      # ReiClaw admits only the current config generation and refuses an
       # unversioned file, so the rendered file always declares one. Keep this
       # in step with `CURRENT_SCHEMA_VERSION` in
-      # crates/zeroclaw-config/src/current.rs; an explicit
+      # crates/reiclaw-config/src/current.rs; an explicit
       # `settings.schema_version` still wins.
-      base = tomlFormat.generate "zeroclaw-${name}-config.toml" (
+      base = tomlFormat.generate "reiclaw-${name}-config.toml" (
         { schema_version = 3; } // instanceCfg.settings
       );
     in
     if instanceCfg.extraConfig == "" then
       base
     else
-      pkgs.runCommand "zeroclaw-${name}-config.toml" { } ''
+      pkgs.runCommand "reiclaw-${name}-config.toml" { } ''
         cat ${base} > $out
-        cat <<'ZEROCLAW_EXTRA_CONFIG_EOF' >> $out
+        cat <<'REICLAW_EXTRA_CONFIG_EOF' >> $out
 
         ${instanceCfg.extraConfig}
-        ZEROCLAW_EXTRA_CONFIG_EOF
+        REICLAW_EXTRA_CONFIG_EOF
       '';
 
   # Build one systemd service from one instance entry. Mirrors the shape of
@@ -298,14 +298,14 @@ let
       # a single quoted argument, and a multi-line script keeps the
       # readable error-handling around the empty-output guard.
       configResolveScript = pkgs.writeShellApplication {
-        name = "zeroclaw-${name}-resolve-config";
+        name = "reiclaw-${name}-resolve-config";
         runtimeInputs = [ pkgs.envsubst ];
         text = ''
           set -euo pipefail
           tmp="${instanceCfg.dataDir}/.config.toml.tmp"
           envsubst < ${configFile} > "$tmp"
           if [ ! -s "$tmp" ]; then
-            echo "zeroclaw-${name}: rendered config.toml is empty after envsubst" >&2
+            echo "reiclaw-${name}: rendered config.toml is empty after envsubst" >&2
             rm -f "$tmp"
             exit 1
           fi
@@ -314,8 +314,8 @@ let
         '';
       };
     in
-    nameValuePair "zeroclaw-${name}" {
-      description = "ZeroClaw agent (instance ${name})";
+    nameValuePair "reiclaw-${name}" {
+      description = "ReiClaw agent (instance ${name})";
       wantedBy = [ "multi-user.target" ];
       after = [ "network-online.target" ];
       wants = [ "network-online.target" ];
@@ -329,8 +329,8 @@ let
       };
 
       environment = {
-        ZEROCLAW_CONFIG_DIR = instanceCfg.dataDir;
-        ZEROCLAW_WORKSPACE = "${instanceCfg.dataDir}/workspace";
+        REI_CONFIG_DIR = instanceCfg.dataDir;
+        REI_WORKSPACE = "${instanceCfg.dataDir}/workspace";
       };
 
       serviceConfig = {
@@ -428,13 +428,13 @@ let
 
 in
 {
-  options.services.zeroclaw = {
+  options.services.reiclaw = {
     instances = mkOption {
       type = types.attrsOf (types.submodule instanceModule);
       default = { };
       description = ''
-        ZeroClaw instances to run on this host. Each entry produces a
-        `zeroclaw-<name>.service` systemd unit with its own state
+        ReiClaw instances to run on this host. Each entry produces a
+        `reiclaw-<name>.service` systemd unit with its own state
         directory, system user, and rendered `config.toml`.
 
         Membership IS the activation signal — there is no top-level
@@ -445,7 +445,7 @@ in
       example = literalExpression ''
         {
           me = {
-            environmentFile = "/run/agenix/zeroclaw-bot-token";
+            environmentFile = "/run/agenix/reiclaw-bot-token";
             settings = {
               default_provider = "anthropic";
               default_model = "claude-sonnet-4-6";
@@ -470,7 +470,7 @@ in
         group = instanceCfg.group;
         home = instanceCfg.dataDir;
         createHome = false; # dataDir is created by systemd-tmpfiles.
-        description = "ZeroClaw instance ${name}";
+        description = "ReiClaw instance ${name}";
       }
     ) (filterAttrs (_: i: i.createUser) cfg.instances);
 
@@ -485,10 +485,10 @@ in
     # per-instance user/group, mode 0750. We do this via systemd-tmpfiles
     # (rather than systemd's `StateDirectory=`) because `StateDirectory=`
     # forces the directory under `/var/lib/<basename>`; a caller who sets
-    # `dataDir = "/srv/zeroclaw-me"` would otherwise see `/var/lib/zeroclaw-me`
+    # `dataDir = "/srv/reiclaw-me"` would otherwise see `/var/lib/reiclaw-me`
     # created and the unit would then fail at `WorkingDirectory=/srv/...`.
     # tmpfiles handles arbitrary absolute paths uniformly.
-    systemd.tmpfiles.settings."10-zeroclaw" = mapAttrs' (
+    systemd.tmpfiles.settings."10-reiclaw" = mapAttrs' (
       _: instanceCfg:
       nameValuePair instanceCfg.dataDir {
         d = {
@@ -517,7 +517,7 @@ in
         {
           assertion = badNames == [ ];
           message = ''
-            services.zeroclaw.instances: instance name(s) ${toString badNames}
+            services.reiclaw.instances: instance name(s) ${toString badNames}
             contain characters outside [A-Za-z0-9._-]. Rename them — the
             instance name appears verbatim in the systemd unit name,
             user name, and state directory.
@@ -526,7 +526,7 @@ in
         {
           assertion = lib.length dirs == lib.length (lib.unique dirs);
           message = ''
-            services.zeroclaw.instances: two or more instances declare the
+            services.reiclaw.instances: two or more instances declare the
             same dataDir. Each instance needs a unique state directory or
             its SQLite databases will corrupt under concurrent access.
           '';
@@ -534,7 +534,7 @@ in
         {
           assertion = lib.length createdUsers == lib.length (lib.unique createdUsers);
           message = ''
-            services.zeroclaw.instances: two or more instances declare the
+            services.reiclaw.instances: two or more instances declare the
             same `user` while also setting `createUser = true`. If you intend
             to share a user across instances, set `createUser = false` on all
             but one.

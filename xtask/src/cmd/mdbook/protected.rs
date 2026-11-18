@@ -8,6 +8,7 @@ pub struct ProtectedLiteral {
 }
 
 const DOC_LOCAL_TERMS: &[&str] = &[
+    "ReiClaw",
     "ZeroClaw",
     "ZeroClaw Maturity Framework",
     // Kept protected after the WhatsApp Cloud API channel row left the
@@ -27,6 +28,7 @@ const DOC_LOCAL_TERMS: &[&str] = &[
 const COMMAND_PREFIXES: &[&str] = &[
     "bash",
     "cd",
+    "rei",
     "zeroclaw",
     "cargo",
     "git",

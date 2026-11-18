@@ -1413,18 +1413,15 @@ async fn live_xai_native_tool_images_preserve_ordinary_and_parallel_results() {
         result.unwrap().unwrap()
     }
 
-    assert_eq!(
-        std::env::var("ZEROCLAW_LIVE_TOOL_IMAGES").as_deref(),
-        Ok("1")
-    );
-    let model = std::env::var("ZEROCLAW_LIVE_TOOL_IMAGES_MODEL")
+    assert_eq!(std::env::var("REI_LIVE_TOOL_IMAGES").as_deref(), Ok("1"));
+    let model = std::env::var("REI_LIVE_TOOL_IMAGES_MODEL")
         .expect("an explicitly selected model is required");
-    let key = std::env::var("ZEROCLAW_LIVE_TOOL_IMAGES_API_KEY")
+    let key = std::env::var("REI_LIVE_TOOL_IMAGES_API_KEY")
         .expect("an explicitly supplied API credential is required");
     assert!(!key.trim().is_empty());
-    let base_url = std::env::var("ZEROCLAW_LIVE_TOOL_IMAGES_BASE_URL")
+    let base_url = std::env::var("REI_LIVE_TOOL_IMAGES_BASE_URL")
         .unwrap_or_else(|_| "https://api.openai.com/v1".to_string());
-    let display_name = std::env::var("ZEROCLAW_LIVE_TOOL_IMAGES_DISPLAY_NAME")
+    let display_name = std::env::var("REI_LIVE_TOOL_IMAGES_DISPLAY_NAME")
         .unwrap_or_else(|_| "OpenAI Compatible".to_string());
     let model_id = model
         .rsplit('/')

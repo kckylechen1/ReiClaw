@@ -269,15 +269,15 @@ pub fn field_table(
         let secret_mark = if is_secret { " 🔑" } else { "" };
         let full_path = format!("{prefix}.{key}");
         let set_cmd = if is_secret {
-            format!("zeroclaw config set {full_path}    # masked input, stored encrypted")
+            format!("rei config set {full_path}    # masked input, stored encrypted")
         } else {
-            format!("zeroclaw config set {full_path} <value>")
+            format!("rei config set {full_path} <value>")
         };
-        // Env-var override form: `ZEROCLAW_` + dotted path with `.` -> `__`,
+        // Env-var override form: `REI_` + dotted path with `.` -> `__`,
         // lowercase tail (config-tree override). Mirrors the runtime resolver in
         // `reiclaw_config::env_overrides`, so the rendered example and the value the
         // runtime accepts cannot disagree.
-        let env_var = format!("ZEROCLAW_{}", full_path.replace('.', "__"));
+        let env_var = format!("REI_{}", full_path.replace('.', "__"));
         let full_desc = resolved
             .get("description")
             .and_then(Value::as_str)
@@ -295,7 +295,7 @@ pub fn field_table(
                 "<div class=\"os-tabs-src\">\n\n",
                 "#### Gateway dashboard\n\n",
                 "Open [`/config/{section}`](http://127.0.0.1:42617/config/{section}) and set the `{full_path}` field.\n\n",
-                "#### zeroclaw config\n\n",
+                "#### rei config\n\n",
                 "```sh\n{set_cmd}\n```\n\n",
                 "#### Environment variable\n\n",
                 "Export the override (POSIX shells; drop into `~/.bashrc`, `~/.zshrc`, `.env`, or a Dockerfile). Replace `<alias>` with the literal alias:\n\n",
@@ -394,7 +394,7 @@ pub fn generate(root: &Value) -> String {
     let mut out = String::new();
     out.push_str("# Config Reference\n\n");
     out.push_str(
-        "ZeroClaw is configured via a TOML file. All fields are optional unless noted.\n\n",
+        "ReiClaw is configured via a TOML file. All fields are optional unless noted.\n\n",
     );
 
     let Some(props) = root.get("properties").and_then(Value::as_object) else {

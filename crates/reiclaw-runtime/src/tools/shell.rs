@@ -225,7 +225,7 @@ fn collect_allowed_shell_env_vars(security: &SecurityPolicy) -> Vec<String> {
 
 /// Name of the environment variable that carries the in-flight session key
 /// into shell tools.
-pub(crate) const SESSION_ID_ENV_VAR: &str = "ZEROCLAW_SESSION_ID";
+pub(crate) const SESSION_ID_ENV_VAR: &str = "REI_SESSION_ID";
 
 fn get_session_id() -> Option<String> {
     reiclaw_api::TOOL_LOOP_SESSION_KEY
@@ -744,7 +744,7 @@ mod tests {
         use std::os::unix::process::CommandExt;
         use std::process::{Command, Stdio};
 
-        const CHILD_MODE: &str = "ZEROCLAW_TEST_SHELL_TERMINAL_CHILD";
+        const CHILD_MODE: &str = "REI_TEST_SHELL_TERMINAL_CHILD";
         const TEST_NAME: &str =
             "tools::shell::tests::shell_child_cannot_open_owners_controlling_terminal";
 
@@ -1261,7 +1261,7 @@ mod tests {
     #[tokio::test(flavor = "current_thread")]
     async fn shell_does_not_leak_api_key() {
         let _g1 = EnvGuard::set("API_KEY", "sk-test-secret-12345");
-        let _g2 = EnvGuard::set("ZEROCLAW_API_KEY", "sk-test-secret-67890");
+        let _g2 = EnvGuard::set("REI_API_KEY", "sk-test-secret-67890");
 
         let tool = ShellTool::new(test_security_with_env_cmd(), test_runtime());
         let result = tool
@@ -1275,7 +1275,7 @@ mod tests {
         );
         assert!(
             !result.output.contains("sk-test-secret-67890"),
-            "ZEROCLAW_API_KEY leaked to shell command output"
+            "REI_API_KEY leaked to shell command output"
         );
     }
 
@@ -1319,9 +1319,9 @@ mod tests {
 
     #[tokio::test(flavor = "current_thread")]
     async fn shell_allows_configured_env_passthrough() {
-        let _guard = EnvGuard::set("ZEROCLAW_TEST_PASSTHROUGH", "db://unit-test");
+        let _guard = EnvGuard::set("REI_TEST_PASSTHROUGH", "db://unit-test");
         let tool = ShellTool::new(
-            test_security_with_env_passthrough(&["ZEROCLAW_TEST_PASSTHROUGH"]),
+            test_security_with_env_passthrough(&["REI_TEST_PASSTHROUGH"]),
             test_runtime(),
         );
 
@@ -1332,7 +1332,7 @@ mod tests {
         assert!(result.success);
         assert!(env_output_contains_assignment(
             &result.output,
-            "ZEROCLAW_TEST_PASSTHROUGH",
+            "REI_TEST_PASSTHROUGH",
             "db://unit-test"
         ));
     }

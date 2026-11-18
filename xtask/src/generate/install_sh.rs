@@ -32,9 +32,9 @@ fn render_cargo_install(root: &Path) -> anyhow::Result<String> {
         "  fi",
         "  if source_installs_acp_bridge \"Cargo.toml\"; then",
         "    if [ \"$DRY_RUN\" = true ]; then",
-        "      info \"[dry-run] Would run: cargo install --path bridges/acp --locked --force --bin zeroclaw-acp-bridge\"",
+        "      info \"[dry-run] Would run: cargo install --path bridges/acp --locked --force --bin rei-acp-bridge\"",
         "    else",
-        "      cargo install --path bridges/acp --locked --force --bin zeroclaw-acp-bridge",
+        "      cargo install --path bridges/acp --locked --force --bin rei-acp-bridge",
         "    fi",
         "  fi",
     ]

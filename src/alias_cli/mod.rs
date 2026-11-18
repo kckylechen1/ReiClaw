@@ -1,4 +1,4 @@
-//! CLI for alias CRUD: `zeroclaw {agents,providers,channels}
+//! CLI for alias CRUD: `rei {agents,providers,channels}
 //! {create,list,rename,delete}`.
 
 use anyhow::{Context, Result, bail};

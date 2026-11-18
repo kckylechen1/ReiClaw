@@ -278,8 +278,8 @@ pub fn build_model_provider(
     let dir_candidates: Vec<std::path::PathBuf> = match config_dir {
         Some(d) => vec![std::path::PathBuf::from(d)],
         None => vec![
-            std::path::PathBuf::from(format!("{home}/.zeroclaw")),
-            std::path::PathBuf::from(format!("{home}/.config/zeroclaw")),
+            std::path::PathBuf::from(format!("{home}/.rei")),
+            std::path::PathBuf::from(format!("{home}/.config/rei")),
         ],
     };
     let dir = dir_candidates
@@ -287,7 +287,7 @@ pub fn build_model_provider(
         .find(|d| d.join("config.toml").is_file())
         .ok_or_else(|| {
             anyhow::Error::msg(
-                "config.toml not found (looked under --config-dir / ~/.zeroclaw / ~/.config/zeroclaw)",
+                "config.toml not found (looked under --config-dir / ~/.rei / ~/.config/rei)",
             )
         })?;
 

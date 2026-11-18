@@ -235,11 +235,11 @@ impl LeakDetector {
                 // do not collide.
                 (
                     Regex::new(r"\bzc_[0-9a-f]{64,}").unwrap(),
-                    "ZeroClaw paired token",
+                    "ReiClaw paired token",
                 ),
                 (
                     Regex::new(r"\bzcb_[0-9a-f]{64,}").unwrap(),
-                    "ZeroClaw bridge token",
+                    "ReiClaw bridge token",
                 ),
             ]
         });
@@ -940,7 +940,7 @@ mod tests {
             match result {
                 LeakResult::Detected { patterns, redacted } => {
                     assert!(
-                        patterns.iter().any(|p| p.contains("ZeroClaw")),
+                        patterns.iter().any(|p| p.contains("ReiClaw")),
                         "{label}: patterns: {patterns:?}"
                     );
                     assert!(!redacted.contains(token), "{label}: token survived");
