@@ -2,7 +2,6 @@
 //! Most LLM APIs follow the same `/v1/chat/completions` format.
 //! This module provides a single implementation that works for all of them.
 
-use crate::auth::AuthService;
 use crate::multimodal;
 use crate::openai::{NativeToolFunctionSpec, NativeToolSpec};
 use crate::stream_guard::AbortOnDrop;
@@ -23,8 +22,8 @@ use serde::{Deserialize, Serialize};
 const STREAM_IDLE_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(300);
 
 /// A model_provider that speaks the OpenAI-compatible chat completions API.
-/// Used by: Venice, Vercel AI Gateway, Cloudflare AI Gateway, Moonshot,
-/// Synthetic, `OpenCode` Zen, `OpenCode` Go, `Z.AI`, `GLM`, `MiniMax`, Qianfan, Groq, Mistral, `xAI`, etc.
+/// Used by: `custom`, `MiniMax`, Qwen, Groq, LM Studio, llama.cpp, Osaurus, and
+/// `OpenAI`'s Chat Completions path.
 #[allow(clippy::struct_excessive_bools)]
 #[derive(Clone)]
 pub struct OpenAiCompatibleModelProvider {
@@ -40,9 +39,6 @@ pub struct OpenAiCompatibleModelProvider {
     /// otherwise the clone keeps authenticating with the key that just got
     /// rate-limited.
     pub credential: std::sync::Arc<parking_lot::RwLock<Option<String>>>,
-    auth_service: Option<AuthService>,
-    auth_model_provider: Option<String>,
-    auth_profile_override: Option<String>,
     pub auth_header: AuthStyle,
     supports_vision: bool,
     user_agent: Option<String>,
@@ -104,10 +100,6 @@ pub enum AuthStyle {
     XApiKey,
     /// Custom header name
     Custom(String),
-    /// Zhipu/GLM JWT auth: the credential is `id.secret`, and a short-lived
-    /// JWT (HMAC-SHA256, 3.5 min expiry) is generated per request.
-    /// Used by Z.AI and GLM model_providers.
-    ZhipuJwt,
 }
 
 /// Sanitize a tool-call `arguments` string before it is re-serialized into an
@@ -174,38 +166,6 @@ pub(crate) fn sanitize_tool_arguments(function_name: &str, arguments: &str) -> S
     "{}".to_string()
 }
 
-/// Generate a Zhipu JWT from an `id.secret` API key.
-/// Returns `Authorization: Bearer <jwt>` value. Token is valid for 3.5 minutes.
-fn zhipu_jwt_bearer(credential: &str) -> Result<String, String> {
-    let (id, secret) = credential
-        .split_once('.')
-        .ok_or_else(|| "Zhipu API key must be in 'id.secret' format".to_string())?;
-
-    #[allow(clippy::cast_possible_truncation)] // millis won't exceed u64 until year 584 million
-    let now_ms = std::time::SystemTime::now()
-        .duration_since(std::time::UNIX_EPOCH)
-        .map_err(|e| e.to_string())?
-        .as_millis() as u64;
-    let exp_ms = now_ms + 210_000; // 3.5 minutes
-
-    // Header: {"alg":"HS256","typ":"JWT","sign_type":"SIGN"}
-    let header_b64 = base64url_no_pad(br#"{"alg":"HS256","typ":"JWT","sign_type":"SIGN"}"#);
-    let payload = format!(r#"{{"api_key":"{id}","exp":{exp_ms},"timestamp":{now_ms}}}"#);
-    let payload_b64 = base64url_no_pad(payload.as_bytes());
-
-    let signing_input = format!("{header_b64}.{payload_b64}");
-    let key = ring::hmac::Key::new(ring::hmac::HMAC_SHA256, secret.as_bytes());
-    let sig = ring::hmac::sign(&key, signing_input.as_bytes());
-    let sig_b64 = base64url_no_pad(sig.as_ref());
-
-    Ok(format!("Bearer {signing_input}.{sig_b64}"))
-}
-
-fn base64url_no_pad(data: &[u8]) -> String {
-    use base64::engine::{Engine, general_purpose::URL_SAFE_NO_PAD};
-    URL_SAFE_NO_PAD.encode(data)
-}
-
 /// Apply auth to a request builder (usable from spawned tasks without `&self`).
 /// When `credential` is `None` (e.g. local LLM servers that require no API key),
 /// the request is returned unchanged -- no auth header is added.
@@ -222,10 +182,6 @@ fn apply_auth_to_request(
         AuthStyle::Bearer => req.header("Authorization", format!("Bearer {credential}")),
         AuthStyle::XApiKey => req.header("x-api-key", credential),
         AuthStyle::Custom(header) => req.header(header, credential),
-        AuthStyle::ZhipuJwt => match zhipu_jwt_bearer(credential) {
-            Ok(val) => req.header("Authorization", val),
-            Err(_) => req.header("Authorization", format!("Bearer {credential}")),
-        },
     }
 }
 
@@ -339,9 +295,6 @@ pub struct OpenAiCompatibleBuilder {
     public_model_listing: bool,
     tls_ca_cert_path: Option<String>,
     extra_body: Option<serde_json::Value>,
-    auth_model_provider: Option<String>,
-    auth_service: Option<AuthService>,
-    auth_profile_override: Option<String>,
 }
 
 impl OpenAiCompatibleBuilder {
@@ -508,20 +461,6 @@ impl OpenAiCompatibleBuilder {
         self
     }
 
-    /// Use a stored auth profile as a bearer credential when no explicit
-    /// `api_key` was configured on this provider entry.
-    pub fn auth_profile(
-        mut self,
-        model_provider: &str,
-        auth_service: AuthService,
-        profile_override: Option<String>,
-    ) -> Self {
-        self.auth_model_provider = Some(model_provider.to_string());
-        self.auth_service = Some(auth_service);
-        self.auth_profile_override = profile_override;
-        self
-    }
-
     /// Finalize the builder into a ready provider. Every optional construction
     /// value must be set on this builder; the returned provider has no
     /// post-construction mutators.
@@ -578,9 +517,6 @@ impl OpenAiCompatibleBuilder {
             name,
             base_url,
             credential: std::sync::Arc::new(parking_lot::RwLock::new(self.credential)),
-            auth_service: self.auth_service,
-            auth_model_provider: self.auth_model_provider,
-            auth_profile_override: self.auth_profile_override,
             auth_header: auth_style,
             supports_vision: self.supports_vision,
             user_agent: self.user_agent,
@@ -637,9 +573,6 @@ impl OpenAiCompatibleModelProvider {
             public_model_listing: false,
             tls_ca_cert_path: None,
             extra_body: None,
-            auth_model_provider: None,
-            auth_service: None,
-            auth_profile_override: None,
         }
     }
     /// Add the configured custom CA certificate to a reqwest builder.
@@ -953,17 +886,7 @@ impl OpenAiCompatibleModelProvider {
         {
             return Ok(credential);
         }
-        let (Some(auth), Some(model_provider)) = (&self.auth_service, &self.auth_model_provider)
-        else {
-            return Ok(None);
-        };
-        if model_provider == "xai" {
-            return auth
-                .get_valid_xai_access_token(self.auth_profile_override.as_deref())
-                .await;
-        }
-        auth.get_provider_bearer_token(model_provider, self.auth_profile_override.as_deref())
-            .await
+        Ok(None)
     }
 
     fn assistant_reasoning_value(value: &serde_json::Value) -> Option<&str> {

@@ -110,12 +110,6 @@ group = "bridge_sh"
 prefix = "export "
 
 [[var]]
-path = "providers.models.nearai.tee.api_key"
-value = "\"$NEARAI_API_KEY\""
-group = "bridge_sh"
-prefix = "export "
-
-[[var]]
 path = "gateway.request_timeout_secs"
 value = "\"$GATEWAY_TIMEOUT_SECS\""
 group = "bridge_sh"
@@ -138,9 +132,3 @@ group = "bridge_ps"
 prefix = "$env:"
 assign = " = "
 
-[[var]]
-path = "providers.models.nearai.tee.api_key"
-value = "$env:NEARAI_API_KEY"
-group = "bridge_ps"
-prefix = "$env:"
-assign = " = "

@@ -3510,9 +3510,9 @@ async fn resolve_default_model_picks_first_available() {
     assert_eq!(config.resolve_default_model(), None);
 
     // Add an entry with a model -> first-available wins.
-    config.providers.models.together.insert(
+    config.providers.models.ollama.insert(
         "default".to_string(),
-        TogetherModelProviderConfig {
+        OllamaModelProviderConfig {
             base: ModelProviderConfig {
                 model: Some("tertiary-model".to_string()),
                 ..Default::default()
@@ -6207,11 +6207,11 @@ async fn save_dirty_refuses_to_clobber_wrong_kind_mcp_servers_node() {
 async fn collect_warnings_flags_wire_api_on_fixed_protocol_family() {
     let mut config = Config::default();
     suppress_semantic_memory_warning(&mut config);
-    // mistral has a fixed wire protocol and ignores wire_api.
+    // anthropic has a fixed wire protocol and ignores wire_api.
     config
         .providers
         .models
-        .ensure("mistral", "primary")
+        .ensure("anthropic", "primary")
         .unwrap()
         .wire_api = Some(WireApi::Responses);
     // custom honors wire_api — must NOT warn.
@@ -6223,10 +6223,10 @@ async fn collect_warnings_flags_wire_api_on_fixed_protocol_family() {
         .wire_api = Some(WireApi::Responses);
 
     let warnings = config.collect_warnings();
-    assert_eq!(warnings.len(), 1, "exactly the mistral entry should warn");
+    assert_eq!(warnings.len(), 1, "exactly the anthropic entry should warn");
     let w = &warnings[0];
     assert_eq!(w.code, "wire_api_not_supported_for_family");
-    assert_eq!(w.path, "providers.models.mistral.primary.wire_api");
+    assert_eq!(w.path, "providers.models.anthropic.primary.wire_api");
     assert!(
         !warnings.iter().any(|w| w.path.contains("custom.vllm")),
         "custom honors wire_api and must not warn",
@@ -10847,33 +10847,32 @@ async fn extra_nested_model_provider_tables_flags_dropped_provider_fields() {
         nested: nested.to_string(),
     };
 
-    // serde accepts `[providers.models.zai.default.default]` by treating
+    // serde accepts `[providers.models.groq.default.default]` by treating
     // the first `default` as the provider alias and erasing the second
     // child table. The typed Config therefore looks like an empty
-    // `zai.default` provider and `validate()` accepts it as an
+    // `groq.default` provider and `validate()` accepts it as an
     // in-progress quickstart entry. The raw-TOML detector must preserve
     // that diagnostic signal before deserialization erases the shape.
     let raw = r#"
 schema_version = 3
 
-[providers.models.zai.default.default]
-model = "glm-5.1"
+[providers.models.groq.default.default]
+model = "model-x"
 api_key = "sk-test"
-endpoint = "global"
 
 [risk_profiles.default]
 level = "supervised"
 
 [agents.default]
 enabled = true
-model_provider = "zai.default"
+model_provider = "groq.default"
 risk_profile = "default"
 "#;
     let parsed: Config = toml::from_str(raw).expect("extra nesting must not fail parse");
     let provider = parsed
         .providers
         .models
-        .find("zai", "default")
+        .find("groq", "default")
         .expect("outer alias is still present");
     assert!(
         provider.model.is_none() && provider.api_key.is_none(),
@@ -10884,16 +10883,15 @@ risk_profile = "default"
         .expect("typed validation cannot see the raw extra nesting");
     assert_eq!(
         Config::extra_nested_model_provider_tables(raw),
-        vec![finding("zai", "default", "default")]
+        vec![finding("groq", "default", "default")]
     );
 
     let valid = r#"
 schema_version = 3
 
-[providers.models.zai.default]
-model = "glm-5.1"
+[providers.models.groq.default]
+model = "model-x"
 api_key = "sk-test"
-endpoint = "global"
 "#;
     assert!(
         Config::extra_nested_model_provider_tables(valid).is_empty(),
@@ -14677,9 +14675,9 @@ async fn load_or_init_rejects_retired_model_provider_without_rewriting_file() {
     let _home = EnvValueGuard::set("HOME", home.path());
     let _config_dir = EnvValueGuard::set("ZEROCLAW_CONFIG_DIR", &config_dir);
     let _workspace = EnvValueGuard::remove("ZEROCLAW_WORKSPACE");
-    for family in crate::providers::RETIRED_MODEL_PROVIDER_NAMES {
+    for family in crate::providers::retired_model_provider_names() {
         let raw = format!(
-            "schema_version = 3\n[providers.models.{family}.private_alias]\napi_key = \"private-test-key\"\n"
+            "schema_version = 3\n[providers.models.\"{family}\".private_alias]\napi_key = \"private-test-key\"\n"
         );
         fs::write(&config_path, &raw).await.unwrap();
         let error = Box::pin(Config::load_or_init())

@@ -70,10 +70,6 @@ fn resolve_qwen_oauth_context_returns_none_without_cache() {
 
 #[test]
 fn regional_alias_predicates_cover_expected_variants() {
-    assert!(is_moonshot_alias("moonshot"));
-    assert!(is_moonshot_alias("kimi-global"));
-    assert!(is_glm_alias("glm"));
-    assert!(is_glm_alias("bigmodel"));
     assert!(is_minimax_alias("minimax-io"));
     assert!(is_minimax_alias("minimaxi"));
     assert!(is_minimax_alias("minimax-oauth"));
@@ -83,21 +79,8 @@ fn regional_alias_predicates_cover_expected_variants() {
     assert!(is_qwen_alias("qwen-code"));
     assert!(is_qwen_oauth_alias("qwen-code"));
     assert!(is_qwen_oauth_alias("qwen_oauth"));
-    assert!(is_zai_alias("z.ai"));
-    assert!(is_zai_alias("zai-cn"));
-    assert!(is_qianfan_alias("qianfan"));
-    assert!(is_qianfan_alias("baidu"));
-    assert!(is_doubao_alias("doubao"));
-    assert!(is_doubao_alias("volcengine"));
-    assert!(is_doubao_alias("ark"));
-    assert!(is_doubao_alias("doubao-cn"));
 
-    assert!(!is_moonshot_alias("openrouter"));
-    assert!(!is_glm_alias("openai"));
     assert!(!is_qwen_alias("gemini"));
-    assert!(!is_zai_alias("anthropic"));
-    assert!(!is_qianfan_alias("cohere"));
-    assert!(!is_doubao_alias("deepseek"));
 }
 
 // ── Primary model_providers ────────────────────────────────────
@@ -115,67 +98,21 @@ fn factory_resolves_builtin_families_and_aliases() {
         ("ollama", Some("any-value-here")),
         ("gemini", Some("test-key")),
         ("gemini", None),
-        ("vercel", Some("key")),
-        ("cloudflare", Some("key")),
-        ("moonshot", Some("key")),
-        ("synthetic", Some("key")),
-        ("opencode", Some("key")),
-        ("zai", Some("key")),
-        ("glm", Some("key")),
         ("minimax", Some("key")),
-        ("qianfan", Some("key")),
-        ("doubao", Some("key")),
         ("qwen", Some("key")),
         ("lmstudio", Some("key")),
         ("lmstudio", None),
         ("llamacpp", Some("key")),
         ("llamacpp", None),
-        ("sglang", None),
-        ("sglang", Some("key")),
-        ("vllm", None),
-        ("vllm", Some("key")),
         ("osaurus", None),
         ("osaurus", Some("custom-key")),
-        ("aihubmix", Some("key")),
-        ("siliconflow", Some("key")),
-        ("atomic_chat", Some("key")),
-        ("atomic_chat", None),
         ("groq", Some("key")),
-        ("mistral", Some("key")),
-        ("xai", Some("key")),
-        ("deepseek", Some("key")),
-        ("together", Some("key")),
-        ("fireworks", Some("key")),
-        ("novita", Some("key")),
-        ("perplexity", Some("key")),
-        ("cohere", Some("key")),
-        ("kilo", Some("kilo-test-key")),
-        ("nvidia", Some("nvapi-test")),
-        ("astrai", Some("sk-astrai-test")),
-        ("avian", Some("sk-avian-test")),
-        ("deepmyst", Some("key")),
-        ("morph", Some("sk-morph-test")),
-        ("github_models", Some("ghp_test_token")),
-        ("github-models", Some("ghp_test_token")),
-        ("upstage", Some("up-test-key")),
-        ("featherless", Some("featherless-test")),
-        ("arcee", Some("arcee-test")),
-        ("lambda_ai", Some("lambda-test")),
-        ("lambda-ai", Some("lambda-test")),
-        ("inception", Some("inception-test")), // Aliases resolved onto the families above.
-        ("grok", Some("test-key")),
-        ("kimi", Some("test-key")),
-        ("opencode-go", Some("test-key")),
+        // Aliases resolved onto the families above.
         ("ovhcloud", Some("test-key")),
         ("google", Some("test-key")),
         ("google-gemini", Some("test-key")),
-        ("vercel-ai", Some("test-key")),
-        ("cloudflare-ai", Some("test-key")),
-        ("opencode-zen", Some("test-key")),
         ("lm-studio", None),
         ("llama.cpp", None),
-        ("nvidia-nim", Some("test-key")),
-        ("build.nvidia.com", Some("test-key")),
     ];
     for (name, key) in cases {
         if let Err(e) = create_model_provider(name, *key) {
@@ -193,96 +130,6 @@ fn factory_openai_codex() {
 // ── OpenAI-compatible model_providers ──────────────────────────
 
 #[test]
-fn factory_venice() {
-    let model_provider = create_model_provider("venice", Some("vn-key")).unwrap();
-    assert!(
-        !model_provider.capabilities().native_tool_calling,
-        "Venice should use prompt-guided tools, not native tool calling"
-    );
-}
-
-#[test]
-fn factory_nearai() {
-    let model_provider = create_model_provider("nearai", Some("nearai-key")).unwrap();
-    // NEAR AI Cloud is OpenAI-protocol-compatible: default Bearer auth +
-    // native OpenAI-style tool calling. No .without_native_tools() override.
-    assert!(
-        model_provider.capabilities().native_tool_calling,
-        "NEAR AI Cloud should use OpenAI-compatible native tool calling"
-    );
-}
-
-#[test]
-fn vercel_gateway_base_url_matches_public_gateway_endpoint() {
-    assert_eq!(
-        VERCEL_AI_GATEWAY_BASE_URL,
-        "https://ai-gateway.vercel.sh/v1"
-    );
-}
-
-#[test]
-fn factory_kimi_code_supports_vision() {
-    for alias in ["kimi-code", "kimi_coding", "kimi_for_coding"] {
-        let provider =
-            create_model_provider(alias, Some("key")).expect("legacy kimi-code alias should build");
-        assert!(
-            provider.supports_vision(),
-            "alias `{alias}` should report vision capability"
-        );
-        // Kimi Code moved to api.kimi.com.
-        assert_eq!(
-            moonshot_code_base_url(),
-            "https://api.kimi.com/coding/v1",
-            "alias `{alias}` should resolve to the Kimi Code endpoint"
-        );
-    }
-}
-
-#[test]
-fn factory_kimi_code_preserves_semantics_with_url_overrides() {
-    let custom_url = "https://proxy.example.test/v1";
-
-    let provider = create_model_provider_with_url("kimi-code", Some("key"), Some(custom_url))
-        .expect("legacy kimi-code alias with custom URL should build");
-    assert!(provider.supports_vision());
-
-    let provider = create_model_provider_with_options(
-        "kimi-code",
-        Some("key"),
-        &ModelProviderRuntimeOptions {
-            provider_api_url: Some(custom_url.to_string()),
-            ..ModelProviderRuntimeOptions::default()
-        },
-    )
-    .expect("legacy kimi-code alias with options URL should build");
-    assert!(provider.supports_vision());
-}
-
-#[test]
-fn moonshot_code_endpoint_supports_vision() {
-    use zeroclaw_config::schema::{Config, MoonshotEndpoint, MoonshotModelProviderConfig};
-
-    let mut config = Config::default();
-    config.providers.models.moonshot.insert(
-        "code".to_string(),
-        MoonshotModelProviderConfig {
-            endpoint: MoonshotEndpoint::Code,
-            ..MoonshotModelProviderConfig::default()
-        },
-    );
-    let options = provider_runtime_options_for_alias(&config, "moonshot", "code");
-    assert_eq!(
-        options.provider_api_url.as_deref(),
-        Some(moonshot_code_base_url())
-    );
-
-    let provider =
-        create_model_provider_for_alias(&config, "moonshot", "code", Some("key"), &options)
-            .expect("moonshot code endpoint should build");
-    assert!(provider.supports_vision());
-}
-
-#[test]
 fn factory_minimax_supports_native_tool_calling() {
     let minimax =
         create_model_provider("minimax", Some("key")).expect("model_provider should resolve");
@@ -294,21 +141,6 @@ fn qwen_provider_supports_vision() {
     let model_provider =
         create_model_provider("qwen", Some("key")).expect("qwen model_provider should build");
     assert!(model_provider.supports_vision());
-}
-
-#[test]
-fn glm_provider_supports_vision() {
-    // GLM exposes vision-capable models (e.g. `glm-4.5v`). The provider
-    // must therefore report `supports_vision()` so multimodal routing
-    // can target it; the model field selects the actual variant.
-    for alias in ["glm", "zhipu", "glm-cn", "zhipu-cn"] {
-        let provider =
-            create_model_provider(alias, Some("id.secret")).expect("glm provider should build");
-        assert!(
-            provider.supports_vision(),
-            "alias `{alias}` should report vision capability"
-        );
-    }
 }
 
 #[test]
@@ -442,16 +274,6 @@ fn factory_osaurus_custom_url() {
         Some("http://192.168.1.100:1337/v1"),
     );
     assert!(p.is_ok());
-}
-
-#[test]
-fn atomic_chat_is_listed_as_local_provider() {
-    let providers = list_model_providers();
-    let provider = providers
-        .iter()
-        .find(|p| p.name == "atomic_chat")
-        .expect("atomic_chat must be listed");
-    assert!(provider.local, "atomic_chat must be a local provider");
 }
 
 // ── Extended ecosystem ───────────────────────────────────
@@ -755,57 +577,6 @@ fn routed_primary_alias_kind_does_not_leak_to_canonical_route_provider() {
 }
 
 #[test]
-fn deepseek_provider_keeps_vision_disabled() {
-    let model_provider = create_model_provider("deepseek", Some("key"))
-        .expect("deepseek model_provider should build");
-    assert!(!model_provider.supports_vision());
-}
-
-#[test]
-fn factory_nvidia_supports_vision() {
-    let provider = create_model_provider("nvidia", Some("nvapi-test")).unwrap();
-    assert!(
-        provider.supports_vision(),
-        "nvidia provider must report supports_vision()=true for multimodal models"
-    );
-}
-
-// ── OpenAI-compatible aggregators & inference hosts ──────
-
-#[test]
-fn default_url_matches_compat_spec_for_new_providers() {
-    assert_eq!(
-        default_model_provider_url("morph"),
-        Some("https://api.morphllm.com/v1")
-    );
-    assert_eq!(
-        default_model_provider_url("github_models"),
-        Some("https://models.github.ai/inference")
-    );
-    assert_eq!(
-        default_model_provider_url("upstage"),
-        Some("https://api.upstage.ai/v1")
-    );
-    assert_eq!(
-        default_model_provider_url("featherless"),
-        Some("https://api.featherless.ai/v1")
-    );
-    // Arcee publishes at the non-standard `/api/v1` path.
-    assert_eq!(
-        default_model_provider_url("arcee"),
-        Some("https://api.arcee.ai/api/v1")
-    );
-    assert_eq!(
-        default_model_provider_url("lambda_ai"),
-        Some("https://api.lambda.ai/v1")
-    );
-    assert_eq!(
-        default_model_provider_url("inception"),
-        Some("https://api.inceptionlabs.ai/v1")
-    );
-}
-
-#[test]
 fn factory_custom_with_resolved_uri() {
     let options = ModelProviderRuntimeOptions {
         provider_api_url: Some("https://my-llm.example.com".to_string()),
@@ -1026,36 +797,12 @@ fn factory_all_canonical_model_providers_create_successfully() {
         "openai",
         "ollama",
         "gemini",
-        "venice",
-        "nearai",
-        "vercel",
-        "cloudflare",
-        "moonshot",
-        "synthetic",
-        "opencode",
-        "zai",
-        "glm",
         "minimax",
-        "qianfan",
-        "doubao",
         "qwen",
         "lmstudio",
         "llamacpp",
-        "sglang",
-        "vllm",
         "osaurus",
         "groq",
-        "mistral",
-        "xai",
-        "deepseek",
-        "together",
-        "fireworks",
-        "novita",
-        "perplexity",
-        "cohere",
-        "nvidia",
-        "astrai",
-        "avian",
         "ovh",
     ];
     for name in canonical {
@@ -1331,7 +1078,7 @@ fn api_key_prefix_cross_provider_mismatch() {
 #[test]
 fn factory_rejects_retired_telnyx_credentials_for_retained_providers() {
     let retired_key = "KEY-private-telnyx-fixture";
-    for destination in ["openai", "anthropic", "xai"] {
+    for destination in ["openai", "anthropic", "groq"] {
         assert_eq!(
             check_api_key_prefix(destination, retired_key),
             Some("telnyx")
@@ -1357,7 +1104,7 @@ fn api_key_prefix_correct_match() {
 #[test]
 fn api_key_prefix_unknown_provider_skips() {
     // Providers without known key formats should never flag a mismatch.
-    assert_eq!(check_api_key_prefix("deepseek", "sk-ant-xyz"), None);
+    assert_eq!(check_api_key_prefix("custom", "sk-ant-xyz"), None);
     assert_eq!(check_api_key_prefix("ollama", "anything"), None);
 }
 
@@ -2200,56 +1947,6 @@ fn resilient_alias_allows_openai_external_auth_fallback_without_api_key() {
 }
 
 #[test]
-fn resilient_alias_allows_xai_oauth_fallback_without_api_key() {
-    use zeroclaw_config::schema::{
-        Config, ModelProviderConfig, OpenAIModelProviderConfig, XaiModelProviderConfig,
-    };
-
-    let mut config = Config::default();
-    config.providers.models.openai.insert(
-        "primary".to_string(),
-        OpenAIModelProviderConfig {
-            base: ModelProviderConfig {
-                model: Some("gpt-4o".to_string()),
-                api_key: Some("primary-key".to_string()),
-                fallback: vec![zeroclaw_config::providers::ModelProviderRef::new(
-                    "xai.oauth",
-                )],
-                ..Default::default()
-            },
-        },
-    );
-    config.providers.models.xai.insert(
-        "oauth".to_string(),
-        XaiModelProviderConfig {
-            base: ModelProviderConfig {
-                model: Some("grok-4.3".to_string()),
-                ..Default::default()
-            },
-        },
-    );
-
-    let temp = tempfile::tempdir().expect("temp zeroclaw dir");
-    let result = create_resilient_model_provider_for_alias(
-        &config,
-        "openai",
-        "primary",
-        Some("primary-key"),
-        None,
-        &zeroclaw_config::schema::ReliabilityConfig::default(),
-        &ModelProviderRuntimeOptions {
-            zeroclaw_dir: Some(temp.path().to_path_buf()),
-            ..Default::default()
-        },
-    );
-    assert!(
-        result.is_ok(),
-        "xAI OAuth fallbacks may intentionally omit api_key: {}",
-        result.err().unwrap()
-    );
-}
-
-#[test]
 fn resilient_alias_allows_local_fallback_without_profile_api_key() {
     use zeroclaw_config::schema::{Config, ModelProviderConfig, OllamaModelProviderConfig};
 
@@ -2419,7 +2116,7 @@ fn resilient_alias_deep_acyclic_fallback_does_not_overflow() {
 #[test]
 fn retired_model_providers_fail_before_alias_or_kind_override_can_reroute() {
     let config = zeroclaw_config::schema::Config::default();
-    for retired in zeroclaw_config::providers::RETIRED_MODEL_PROVIDER_NAMES {
+    for retired in zeroclaw_config::providers::retired_model_provider_names() {
         for name in [retired.to_string(), format!("{retired}.private-alias")] {
             let options = ModelProviderRuntimeOptions {
                 provider_kind: Some("openai".to_string()),
@@ -2452,11 +2149,11 @@ fn retired_model_providers_fail_before_alias_or_kind_override_can_reroute() {
             .contains("is retired")
         );
         assert!(crate::catalog::catalog_source_for(retired).is_none());
-        assert!(!canonical_model_provider_slots().contains(retired));
+        assert!(!canonical_model_provider_slots().contains(&retired));
     }
-    // Regular Gemini, its existing OAuth path, and the Kilo HTTP gateway are
-    // distinct consumers and remain covered by the existing adapter tests.
-    for retained in ["anthropic", "openai", "gemini", "google", "xai", "kilo"] {
+    // Regular Gemini and its existing OAuth path are distinct consumers and
+    // remain covered by the existing adapter tests.
+    for retained in ["anthropic", "openai", "gemini", "google", "qwen", "groq"] {
         assert!(
             create_model_provider(retained, Some("provider-test-credential")).is_ok(),
             "{retained}"

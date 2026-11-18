@@ -245,7 +245,7 @@ to one provider.
 | `provider:reliable` | `reliable.rs` |
 | `provider:router` | `router.rs` |
 
-Some provider labels describe provider families that currently share the OpenAI-compatible provider implementation instead of a dedicated source file. Maintainers may apply these manually when an issue or PR is truly about that family: `provider:glm`, `provider:groq`, `provider:kimi`, `provider:minimax`, `provider:moonshot`, and `provider:qwen`. Do not add shared factory or compatible-provider files to these labeler rules; that would over-label unrelated shared changes.
+Some provider labels describe provider families that currently share the OpenAI-compatible provider implementation instead of a dedicated source file. Maintainers may apply these manually when an issue or PR is truly about that family: `provider:groq`, `provider:minimax`, and `provider:qwen`. Do not add shared factory or compatible-provider files to these labeler rules; that would over-label unrelated shared changes.
 
 ### Per-tool-group labels
 

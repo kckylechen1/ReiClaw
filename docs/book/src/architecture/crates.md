@@ -63,7 +63,7 @@ Structure:
 
 - `traits.rs`: re-exports from `zeroclaw-api` plus provider-internal helpers
 - `anthropic.rs`, `openai.rs`, …: one file per native provider
-- `compatible.rs`: a single OpenAI-compatible implementation reused by 20+ providers (Ollama, Groq, Mistral, xAI, Venice, etc.)
+- `compatible.rs`: a single OpenAI-compatible implementation reused by the OpenAI-compatible providers (Ollama, Groq, `custom`, etc.)
 - `router.rs`: hint-based per-call model route selection
 - `reliable.rs`: same-provider retry / backoff / API-key rotation wrapper
 - `streaming.rs`: SSE parsing, token estimation, tool-call deltas

@@ -200,10 +200,10 @@ mod tests {
                 "claude-opus-4-7":   {"id": "claude-opus-4-7"}
             }
         },
-        "xai": {
+        "groq": {
             "models": {
-                "grok-4.3":     {"id": "grok-4.3"},
-                "grok-2-vision":{"id": "grok-2-vision"}
+                "model-b":     {"id": "model-b"},
+                "model-a":{"id": "model-a"}
             }
         },
         "empty": { "models": {} }
@@ -214,14 +214,14 @@ mod tests {
         let catalog = parse_catalog(TINY_CATALOG.as_bytes()).expect("parses");
         assert_eq!(catalog.len(), 3);
         assert!(catalog.contains_key("anthropic"));
-        assert!(catalog.contains_key("xai"));
+        assert!(catalog.contains_key("groq"));
     }
 
     #[test]
     fn filter_returns_sorted_ids() {
         let catalog = parse_catalog(TINY_CATALOG.as_bytes()).unwrap();
-        let ids = filter_models(&catalog, "xai").unwrap();
-        assert_eq!(ids, vec!["grok-2-vision", "grok-4.3"]);
+        let ids = filter_models(&catalog, "groq").unwrap();
+        assert_eq!(ids, vec!["model-a", "model-b"]);
     }
 
     #[test]
@@ -257,7 +257,7 @@ mod tests {
     fn pricing_from_catalog_reads_cost_and_skips_unpriced() {
         // `cost` is USD per 1M tokens; models without it are omitted.
         let raw = r#"{
-            "kilo": {
+            "groq": {
                 "models": {
                     "a": {"id": "minimax-m2.7", "cost": {"input": 0.3, "output": 1.2, "cache_read": 0.06}},
                     "b": {"id": "no-cost-model"}
@@ -265,7 +265,7 @@ mod tests {
             }
         }"#;
         let catalog = parse_catalog(raw.as_bytes()).unwrap();
-        let map = pricing_from_catalog(&catalog, "kilo");
+        let map = pricing_from_catalog(&catalog, "groq");
         let m = map.get("minimax-m2.7").expect("priced");
         assert_eq!(m.input_per_mtok, Some(0.3));
         assert_eq!(m.output_per_mtok, Some(1.2));

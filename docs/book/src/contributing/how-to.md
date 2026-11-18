@@ -94,7 +94,7 @@ Keep feed discovery environment-local:
 Conventional Commits:
 
 ```
-feat(providers): add support for DeepSeek reasoning mode
+feat(providers): add support for Gemini reasoning mode
 fix(channels/matrix): prevent duplicate device sessions after verify
 docs(getting-started): add YOLO-mode quick-start
 refactor(runtime): split agent loop into steps

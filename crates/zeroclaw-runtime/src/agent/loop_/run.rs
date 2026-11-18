@@ -307,7 +307,7 @@ pub async fn run(
         // Resolve api_key and uri from the actual provider being constructed.
         // For dotted aliases (e.g. "openai.shartgpt"), look up the alias-specific
         // config so a -p override does not leak the agent's current provider key
-        // (e.g. an xai key) to a different provider family that doesn't expect it.
+        // (e.g. an anthropic key) to a different provider family that doesn't expect it.
         let (initial_api_key, initial_uri) =
             api_key_and_uri_for_provider(&config, &provider_name, agent_model_provider);
         let model_provider: Box<dyn ModelProvider> =

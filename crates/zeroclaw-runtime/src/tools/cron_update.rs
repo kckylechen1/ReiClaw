@@ -100,7 +100,7 @@ impl Tool for CronUpdateTool {
                         },
                         "model": {
                             "type": "string",
-                            "description": "Model override for agent jobs, e.g. 'x-ai/grok-4-1-fast'"
+                            "description": "Model override for agent jobs, e.g. 'anthropic/claude-sonnet-4-6'"
                         },
                         "allowed_tools": {
                             "type": "array",

@@ -941,36 +941,36 @@ async fn model_catalog_with_config_uses_native_endpoint_when_credentialed() {
     use wiremock::{Mock, MockServer, ResponseTemplate};
 
     // Native /models endpoint advertising a model that is NOT in the
-    // static models.dev snapshot (a freshly released Grok).
+    // static models.dev snapshot (a freshly released model).
     let server = MockServer::start().await;
     Mock::given(method("GET"))
         .and(path("/models"))
         .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({
             "data": [
-                {"id": "grok-4.5-native-only"},
-                {"id": "grok-4.3"}
+                {"id": "native-only-model"},
+                {"id": "listed-model"}
             ]
         })))
         .mount(&server)
         .await;
 
     let mut config = Config::default();
-    config.providers.models.xai.insert(
+    config.providers.models.custom.insert(
         "default".to_string(),
-        zeroclaw_config::schema::XaiModelProviderConfig {
+        zeroclaw_config::schema::CustomModelProviderConfig {
             base: zeroclaw_config::schema::ModelProviderConfig {
-                api_key: Some("xai-test-key".to_string()),
+                api_key: Some("test-key".to_string()),
                 uri: Some(server.uri()),
                 ..Default::default()
             },
         },
     );
 
-    let (models, _pricing, live) = model_catalog_with_config(Some(&config), "xai.default").await;
+    let (models, _pricing, live) = model_catalog_with_config(Some(&config), "custom.default").await;
 
     assert!(live, "credentialed native listing must report live=true");
     assert!(
-        models.iter().any(|m| m == "grok-4.5-native-only"),
+        models.iter().any(|m| m == "native-only-model"),
         "native /models result must surface the freshly-released model \
          that models.dev does not carry; got {models:?}"
     );
@@ -985,29 +985,29 @@ async fn model_catalog_with_config_resolves_named_alias_endpoint() {
     Mock::given(method("GET"))
         .and(path("/models"))
         .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({
-            "data": [{"id": "grok-named-alias-native"}]
+            "data": [{"id": "named-alias-native"}]
         })))
         .mount(&server)
         .await;
 
     let mut config = Config::default();
     // Non-default alias name to prove the dotted ref targets it precisely.
-    config.providers.models.xai.insert(
+    config.providers.models.custom.insert(
         "prod".to_string(),
-        zeroclaw_config::schema::XaiModelProviderConfig {
+        zeroclaw_config::schema::CustomModelProviderConfig {
             base: zeroclaw_config::schema::ModelProviderConfig {
-                api_key: Some("xai-test-key".to_string()),
+                api_key: Some("test-key".to_string()),
                 uri: Some(server.uri()),
                 ..Default::default()
             },
         },
     );
 
-    let (models, _pricing, live) = model_catalog_with_config(Some(&config), "xai.prod").await;
+    let (models, _pricing, live) = model_catalog_with_config(Some(&config), "custom.prod").await;
 
     assert!(live);
     assert!(
-        models.iter().any(|m| m == "grok-named-alias-native"),
+        models.iter().any(|m| m == "named-alias-native"),
         "dotted `<family>.<alias>` selector must resolve that alias's \
          configured endpoint; got {models:?}"
     );

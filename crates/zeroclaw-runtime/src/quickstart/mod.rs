@@ -447,7 +447,7 @@ pub struct QuickstartTypeOption {
 /// Resolve a Quickstart provider-type input to the canonical config family.
 ///
 /// The provider registry remains the source of truth for real config families.
-/// Auth-provider aliases (`openai-codex`, `claude`, `google`, `grok`, ...)
+/// Auth-provider aliases (`openai-codex`, `claude`, `google`, ...)
 /// are accepted as Quickstart conveniences and normalize to existing config
 /// families. Only `openai-codex` preselects a different Quickstart auth mode.
 #[must_use]
@@ -467,7 +467,6 @@ pub fn resolve_model_provider_type(type_key: &str) -> Option<(&'static str, bool
         zeroclaw_providers::auth::AuthProvider::OpenaiCodex => ("openai", true),
         zeroclaw_providers::auth::AuthProvider::Anthropic => ("anthropic", false),
         zeroclaw_providers::auth::AuthProvider::Gemini => ("gemini", false),
-        zeroclaw_providers::auth::AuthProvider::Xai => ("xai", false),
     })
 }
 
