@@ -38,6 +38,7 @@ pub mod rerank;
 pub mod response_cache;
 pub mod retrieval;
 pub mod scanned;
+pub mod sleep_records;
 #[cfg(feature = "tachi")]
 pub mod tachi;
 #[cfg(feature = "tachi")]
@@ -74,6 +75,10 @@ pub use response_cache::ResponseCache;
 #[allow(unused_imports)]
 pub use retrieval::{RetrievalConfig, RetrievalPipeline};
 pub use scanned::ScannedMemory;
+#[allow(unused_imports)]
+pub use sleep_records::{
+    DailyDigest, EpisodeRecord, EpisodeSourceKind, PINNED_DIGEST_MAX_BYTES, PinnedDigest,
+};
 #[cfg(feature = "tachi")]
 pub use tachi::TachiMemory;
 #[cfg(feature = "tachi")]
