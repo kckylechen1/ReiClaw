@@ -306,11 +306,15 @@ enum EstopLevelArg {
     ToolFreeze,
 }
 
-/// `ZeroClaw` - Zero overhead. Zero compromise. 100% Rust.
+/// `ReiClaw` (`rei`) - personal agent controller, originally forked from `zeroclaw-labs/zeroclaw`.
 #[derive(Parser, Debug)]
 #[command(name = "zeroclaw")]
 #[command(author = "theonlyhennygod")]
 #[command(version)]
+#[command(long_version = concat!(
+    env!("CARGO_PKG_VERSION"),
+    "\nReiClaw (rei) - personal agent controller\nOriginally forked from zeroclaw-labs/zeroclaw"
+))]
 // i18n-exempt: clap derive help — framework requires a compile-time literal
 #[command(about = "The fastest, smallest AI assistant.", long_about = None)]
 struct Cli {
@@ -1013,7 +1017,9 @@ enum DeprecatedPropsCommands {
 #[cfg(feature = "agent-runtime")]
 fn runtime_dir_env_is_explicit(name: &str, value: &str) -> bool {
     match name {
-        "ZEROCLAW_CONFIG_DIR" | "ZEROCLAW_DATA_DIR" => !value.trim().is_empty(),
+        "REI_CONFIG_DIR" | "REICLAW_CONFIG_DIR" | "ZEROCLAW_CONFIG_DIR" | "ZEROCLAW_DATA_DIR" => {
+            !value.trim().is_empty()
+        }
         "ZEROCLAW_WORKSPACE" => !value.is_empty(),
         _ => false,
     }
@@ -1025,6 +1031,8 @@ fn resolve_homebrew_onboard_config_dir(
     env_lookup: impl Fn(&str) -> Option<String>,
 ) -> Option<PathBuf> {
     let explicit_runtime_dir = [
+        "REI_CONFIG_DIR",
+        "REICLAW_CONFIG_DIR",
         "ZEROCLAW_CONFIG_DIR",
         "ZEROCLAW_DATA_DIR",
         "ZEROCLAW_WORKSPACE",
@@ -1567,7 +1575,10 @@ fn main() -> Result<()> {
     {
         // SAFETY: this synchronous bootstrap runs before the Tokio runtime (and
         // therefore its worker threads) is constructed.
-        unsafe { std::env::set_var("ZEROCLAW_CONFIG_DIR", config_dir) };
+        unsafe {
+            std::env::set_var("REI_CONFIG_DIR", &config_dir);
+            std::env::set_var("ZEROCLAW_CONFIG_DIR", &config_dir);
+        }
     }
 
     // Startup application of the persisted `[proxy]` config. The
