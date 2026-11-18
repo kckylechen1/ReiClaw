@@ -313,7 +313,7 @@ ZeroClaw holds no model-provider families, provider adapters, or upstream creden
 
 The route is unchanged: consumer-driven slices, each proving parity for a named production path and then deleting the replaced ZeroClaw adapter and credential handling (Migration slices 3–6). A universal gateway is still not built ahead of its consumers; Tachi [#1776](https://github.com/kckylechen1/Tachi/pull/1776) remains the precedent for why.
 
-One reduction does not wait for the broker. Families that are only a URL and header preset over the OpenAI-compatible client carry no protocol behavior of their own, so they collapse into the existing `custom` family with an explicit `base_url` now, together with the unused `xai` family and its OAuth (owner decision, tracked by #688). Families with their own wire protocol, authentication, or quirks (for example `openai` with its Codex OAuth and Responses paths, `anthropic`, `gemini`) leave the body only through broker slices.
+One reduction does not wait for the broker. Families that are only a URL and header preset over the OpenAI-compatible client carry no protocol behavior of their own, so they collapse into the existing `custom` family with an explicit endpoint `uri` now, together with the unused `xai` family and its OAuth (owner decision, tracked by #688). Families with their own wire protocol, authentication, or quirks (for example `openai` with its Codex OAuth and Responses paths, `anthropic`, `gemini`) leave the body only through broker slices.
 
 ### What changes downstream
 

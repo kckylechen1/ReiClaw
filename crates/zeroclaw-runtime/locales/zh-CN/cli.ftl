@@ -644,59 +644,6 @@ history-trim-reason-message-cap = 已超出历史消息数量限制
 history-trim-floor-exceeds-budget = system prompt and tool definitions ({$floor} tokens) alone meet or exceed the context budget ({$budget} tokens); raise [runtime_profiles.<name>] max_context_tokens or reduce the tool surface by disabling unused integrations
 turn-tool-interrupted-before-result = [在此工具产生结果前被用户中断]
 channel-runtime-malformed-tool-output = 我生成了内部工具调用格式错误，无法完成此请求。请重试。
-channel-runtime-new-session = 对话历史已清除。重新开始。
-channel-runtime-stop-sent = 已发送停止信号。
-channel-runtime-stop-no-task = 此发送者范围内没有正在执行的任务。
-channel-runtime-model-empty = 模型 ID 不能为空。请使用 `/model <model-id>`。
-channel-runtime-model-switched = 已切换到模型 `{ $model }`（model_provider：`{ $provider }`）。上下文已保留。
-channel-runtime-agent-scope-rejected = 发送者 `{ $sender }` 无权在 agent `{ $agent }` 上执行 `/model --agent`。请改用 `/model --user { $model }`（仅本次会话生效），或请管理员将 peer group 的 `admin_for_agent_scope` 设为 `true` 并将你列为成员。
-channel-runtime-request-timeout = ⚠️ 等待模型响应超时，请重试。
-channel-runtime-current-model-status =
-    当前 model_provider：`{ $provider }`
-    当前模型：`{ $model }`
-channel-runtime-model-switch-hint = 使用 `/model <model-id>` 或 `/model <hint>` 切换模型。
-channel-runtime-provider-switch-hint = 使用 `/models <model_provider>` 切换 model_provider。
-channel-runtime-available-providers-header = 可用的 model_provider：
-channel-runtime-configured-routes-header = 已配置的模型路由：
-channel-runtime-no-cached-models = 未找到 `{ $provider }` 的缓存模型列表。请让操作者运行 `zeroclaw models refresh --model-provider { $provider }`。
-channel-runtime-cached-model-ids-header = 缓存的模型 ID（前 { $count } 个）：
-channel-runtime-config-switch-hints =
-    使用 `/models <model_provider>` 切换 model_provider。
-    使用 `/model <model-id>` 切换模型。
-channel-runtime-config-block-title =
-    { "*" }模型配置{ "*" }
-    当前：`{ $provider }` / `{ $model }`
-channel-runtime-config-select-provider-placeholder = 选择 model_provider
-channel-runtime-config-select-model-placeholder = 选择模型
-channel-runtime-config-provider-label = *ModelProvider*
-channel-runtime-config-model-label = *模型*
-channel-runtime-scope-user = 用户
-channel-runtime-scope-agent = agent
-channel-runtime-scope-overrides-summary =
-    { "**" }模型覆盖{ "**" }（仅会话内；优先级 user > agent > session > default）：
-    • user：{ $user }
-    • agent：{ $agent }
-    • session（此聊天）：{ $session }
-    • default（配置）：{ $default }
-    使用 `/model --user|--agent <model-id>` 设置范围；设置回默认值即可清除。
-channel-runtime-set-provider-switched =
-    已为此发送者会话切换到 ModelProvider `{ $provider }`。当前模型为 `{ $model }`。
-    使用 `/model <model-id>` 设置与该 provider 兼容的模型。
-channel-runtime-set-provider-init-failed =
-    初始化 model_provider `{ $provider }` 失败。路由未更改。
-    详情：{ $error }
-channel-runtime-provider-ambiguous = ModelProvider `{ $family }` 有多个已配置别名。请用 `/models { $family }.<alias>` 指定其中一个：{ $list }
-channel-runtime-provider-no-alias = 未找到 `{ $provider }` 的已配置 provider 条目。请添加 `[providers.models.{ $provider }]`（含 api_key/uri），或选择一个已配置的 provider；`/models` 会列出有效项。
-channel-runtime-provider-unknown = 未知 model_provider `{ $provider }`。使用 `/models` 查看有效的 model_provider。
-channel-runtime-scoped-model-empty = 模型 ID 不能为空。请使用 `/model --user|--agent <model-id>`。
-channel-runtime-scoped-model-switched = 已为 **{ $scope }** 范围设置模型 `{ $model }`（model_provider：`{ $provider }`）。仅会话内有效，重启后重置。
-channel-runtime-shadow-note = ⚠️ 当前有更高优先级的覆盖生效，因此消息将改用 `{ $model }`（`{ $provider }`）；请查看 `/model`。
-channel-runtime-provider-turn-init-failed =
-    ⚠️ 初始化 model_provider `{ $provider }` 失败。请运行 `/models` 选择另一个 model_provider。
-    详情：{ $error }
-channel-runtime-fallback-footer =
-    ⚡ `{ $requested }` 不可用 — 已由 **{ $actual }**（`{ $model }`）响应
-    切换模型：/models
 cli-alias-list-empty = （{$section} 下无条目）
 cli-alias-created = 已创建 {$section}.{$alias}
 cli-alias-exists = {$section}.{$alias} 已存在（未更改）
@@ -767,8 +714,6 @@ cli-doctor-context-window-unset = {$provider_ref}：未设置 context_window —
 cli-doctor-degraded-security = 安全关键配置节 `{$path}` 无效，已重置为默认值以便守护进程启动；当前运行的安全态势可能弱于预期。运行 `zeroclaw config validate` 查看解析错误，然后修复该文件。
 cli-doctor-degraded-section = 配置节 `{$path}` 格式错误，已重置为默认值；该节中的值当前不生效。运行 `zeroclaw config validate` 查看解析错误，然后修复该文件。
 
-channel-runtime-task-pref-invalid = 任务偏好无效。用法：/task-pref <value|goal|preference|habit|constraint> <semantic-key> <statement...>
-channel-runtime-task-pref-set = 已记录仅本会话生效的任务偏好：{$kind}：{$statement}
 cli-agent-interactive-flags-need-message =
     { $flags } 仅在与 -m/--message 一起使用时生效。交互式 `zeroclaw agent` 会打开 `zeroclaw chat`，并使用为代理 "{ $agent }" 配置的模型。如需用这些覆盖执行单轮任务，请添加 -m "<消息>"，或修改该代理的配置。
 cli-agent-long-about =

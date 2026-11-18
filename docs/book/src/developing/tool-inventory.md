@@ -74,7 +74,9 @@ These first-party tools are no longer part of the model-visible registry on any
 assembly path (ordinary, SubAgent, skill elevation, minimal or full
 composition). The capability moved to a trusted surface or was deleted.
 The `model_routing_config`, `model_switch`, and `proxy_config` implementations
-are deleted; their names remain reserved against tool registration.
+are deleted; their names stay on the retired list, and the registry totality
+test asserts that no built-in assembly path registers them. The list does not
+block an MCP or plugin tool that reuses one of these names.
 
 | Tool(s) | Trusted surface today |
 |---|---|
