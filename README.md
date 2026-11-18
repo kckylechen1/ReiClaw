@@ -221,7 +221,7 @@ One TOML file at `~/.zeroclaw/config.toml`. Pointers:
 - [Provider configuration](docs/book/src/providers/configuration.md): the universal `[providers.models.<type>.<alias>]` schema
 - [Security overview](docs/book/src/security/overview.md): autonomy, sandboxing, tool receipts
 - [Delegation and SubAgents](docs/book/src/agents/delegation.md): `[tachi]` and `[tachi.harnesses]`
-- [Portable memory kernel](docs/book/src/setup/portable-memory.md): optional `memory-tachi` stores and explicit offline upgrades
+- [Portable memory kernel](docs/book/src/setup/portable-memory.md): `memory-tachi` stores, admission and retired legacy stores
 
 A V3 config has at minimum four section headers (`<type>.<alias>` shaped): a provider entry, an agent that references it, and a risk profile the agent gates against. See [Provider Configuration → Minimal working example](docs/book/src/providers/configuration.md#minimal-working-example).
 

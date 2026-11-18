@@ -51,21 +51,6 @@
     ]
   },
   "extra_runs": {
-    "app": [
-      {
-        "name": "memory-kernel-migration",
-        "packages": [
-          "zeroclawlabs"
-        ],
-        "test_targets": [
-          "component"
-        ],
-        "features": [
-          "zeroclawlabs/memory-tachi"
-        ],
-        "filter": "memory_kernel_migration_cli"
-      }
-    ],
     "runtime": [
       {
         "name": "landlock",

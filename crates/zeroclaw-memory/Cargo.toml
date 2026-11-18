@@ -28,11 +28,10 @@ tokio = { version = "1.50", default-features = false, features = ["fs", "io-util
 uuid = { version = "1.22", default-features = false, features = ["v4", "std"] }
 # Jiff time migration on the existing SQLite 3.54.1 / portable-kernel 1.9.0 baseline.
 portable_kernel = { package = "portable-kernel", version = "1.9.0", git = "https://github.com/kckylechen1/Tachi.git", rev = "fe6ab1d215a31b72777dc7c9c314846bd37a7dcf", default-features = false, optional = true }
-tempfile = { version = "3.26", optional = true }
 
 [features]
 voice-surface = ["zeroclaw-api/voice-surface"]
-tachi = ["dep:portable_kernel", "dep:tempfile", "rusqlite/backup", "rusqlite/functions"]
+tachi = ["dep:portable_kernel", "rusqlite/functions"]
 
 [dev-dependencies]
 filetime = "0.2"

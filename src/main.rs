@@ -276,8 +276,8 @@ pub(crate) use gateway_helpers::{t, ta};
 // Re-export so binary modules can use crate::<CommandEnum> while keeping a single source of truth.
 pub use zeroclaw::{
     AgentsCommands, BridgeCommands, ChannelCommands, ChannelsCommands, CronCommands,
-    GatewayCommands, IntegrationCommands, KernelMigrationStoreKind, MigrateCommands,
-    ProvidersCommands, ServiceCommands, SkillBundleCommands, SkillCommands,
+    GatewayCommands, IntegrationCommands, MigrateCommands, ProvidersCommands, ServiceCommands,
+    SkillBundleCommands, SkillCommands,
 };
 
 #[derive(Copy, Clone, Debug, Eq, PartialEq, ValueEnum)]
@@ -1359,33 +1359,6 @@ enum DoctorCommands {
 
 #[derive(Subcommand, Debug)]
 enum MemoryCommands {
-    /// Copy a recognized legacy kernel database to a new, verified database.
-    MigrateKernel {
-        /// Existing standalone memcore database; never modified.
-        #[arg(long)]
-        source: PathBuf,
-        /// New database path; must not exist.
-        #[arg(long)]
-        destination: PathBuf,
-        /// Host-owned store role to admit at the destination.
-        #[arg(long, value_enum)]
-        store: KernelMigrationStoreKind,
-        /// Operator identity recorded in the migration receipt.
-        #[arg(long)]
-        approved_by: String,
-    },
-    /// Convert a quiescent native brain.db database into a new, verified Tachi database.
-    MigrateNative {
-        /// Existing native brain.db database; never modified.
-        #[arg(long)]
-        source: PathBuf,
-        /// New Tachi database path; must not exist.
-        #[arg(long)]
-        destination: PathBuf,
-        /// Operator identity recorded in the migration receipt.
-        #[arg(long)]
-        approved_by: String,
-    },
     /// List memory entries with optional filters
     List {
         #[arg(long)]
@@ -1594,42 +1567,6 @@ fn fetch_locales(locale: &str, catalog: Option<&str>) -> Result<()> {
 
 fn main() -> Result<()> {
     let command = Cli::command();
-
-    // Offline migration needs only its explicit paths and operator identity.
-    // Dispatch before config, proxy, logging, OTP or runtime initialization, so
-    // a missing or malformed agent config cannot block recovery. Use the OS
-    // locale here; resolving the configured locale would read that config.
-    if let Ok(matches) = command.clone().try_get_matches_from(std::env::args_os())
-        && let Commands::Memory { memory_command } = Cli::from_arg_matches(&matches)?.command
-    {
-        match memory_command {
-            MemoryCommands::MigrateKernel {
-                source,
-                destination,
-                store,
-                approved_by,
-            } => {
-                #[cfg(feature = "agent-runtime")]
-                crate::i18n::init(&sys_locale::get_locale().unwrap_or_else(|| "en".to_string()));
-                return memory::cli::handle_kernel_migration(
-                    &source,
-                    &destination,
-                    store,
-                    &approved_by,
-                );
-            }
-            MemoryCommands::MigrateNative {
-                source,
-                destination,
-                approved_by,
-            } => {
-                #[cfg(feature = "agent-runtime")]
-                crate::i18n::init(&sys_locale::get_locale().unwrap_or_else(|| "en".to_string()));
-                return memory::cli::handle_native_migration(&source, &destination, &approved_by);
-            }
-            _ => {}
-        }
-    }
 
     // Locale detection runs while clap builds localized help, so expose the CLI
     // override through the bootstrap env before either i18n or Tokio starts.

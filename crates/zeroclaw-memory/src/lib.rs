@@ -27,16 +27,12 @@ pub mod importance;
 pub mod kernel_store;
 pub mod markdown;
 pub mod merge;
-#[cfg(feature = "tachi")]
-pub mod native_migration;
 pub mod none;
 pub mod normalize;
 #[cfg(feature = "tachi")]
 mod point_scope;
 pub mod policy;
 pub mod policy_gate;
-#[cfg(feature = "tachi")]
-pub mod portable_migration;
 pub mod redact;
 pub mod rerank;
 pub mod response_cache;
@@ -143,9 +139,9 @@ fn retired_backend_error(backend: &str, selector: &str) -> anyhow::Error {
     );
     if matches!(backend, "sqlite" | "lucid") {
         anyhow::Error::msg(format!(
-            "{selector} selects the '{backend}' memory backend, which was removed; run \
-             `zeroclaw memory migrate-native` to migrate existing brain.db data to tachi, \
-             or set {selector} to tachi, markdown, or none"
+            "{selector} selects the '{backend}' memory backend, which was removed together \
+             with its offline brain.db migration tool; existing brain.db data is neither read \
+             nor converted. Set {selector} to tachi, markdown, or none"
         ))
     } else {
         anyhow::Error::msg(format!(

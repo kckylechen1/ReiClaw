@@ -522,8 +522,8 @@ async fn create_memory_for_agent_rejects_retired_backends() {
         );
         if matches!(backend, ConfigBackend::Sqlite | ConfigBackend::Lucid) {
             assert!(
-                err.contains("migrate-native"),
-                "sqlite/lucid retirement error must steer to migrate-native: {err}"
+                err.contains("brain.db") && err.contains("neither read nor converted"),
+                "sqlite/lucid retirement error must say brain.db is not carried over: {err}"
             );
         }
     }
@@ -627,8 +627,8 @@ fn factory_retired_backends_fail_explicitly_never_fall_back() {
         let lower = backend.to_ascii_lowercase();
         if lower.starts_with("sqlite") || lower.starts_with("lucid") {
             assert!(
-                message.contains("migrate-native"),
-                "{backend}: expected migrate-native hint in {message}"
+                message.contains("brain.db") && message.contains("neither read nor converted"),
+                "{backend}: expected brain.db non-conversion notice in {message}"
             );
         }
     }

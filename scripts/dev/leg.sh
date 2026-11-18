@@ -3,7 +3,6 @@
 #
 # The package set, per-leg features and extra filtered runs all come from
 # dev/ci/test-partition.json. Both local checks and ci.yml use this runner.
-# Optional extra-run packages and test_targets limit what Cargo builds.
 # Fixed package/feature combinations avoid unnecessary crate variants in
 # target/ when repeating a leg.
 #
@@ -141,13 +140,6 @@ while IFS= read -r extra_run; do
   name="$(jq -r '.name' <<<"$extra_run")"
   extra="$(jq -r '.features | join(",")' <<<"$extra_run")"
   filter="$(jq -r '.filter' <<<"$extra_run")"
-  extra_args=("${pkg_args[@]}")
-  if jq -e 'has("packages")' <<<"$extra_run" >/dev/null; then
-    mapfile -t extra_args < <(jq -r '.packages[] | "-p", .' <<<"$extra_run")
-  fi
-  while IFS= read -r target; do
-    extra_args+=(--test "$target")
-  done < <(jq -r '.test_targets[]?' <<<"$extra_run")
   echo "--- extra run: $name"
-  run "${run_cmd[@]}" "${extra_args[@]}" --features "${features:+$features,}$extra" -- "$filter"
+  run "${run_cmd[@]}" "${pkg_args[@]}" --features "${features:+$features,}$extra" -- "$filter"
 done < <(jq -c --arg leg "$leg" '.extra_runs[$leg] // [] | .[]' "$PARTITION")
