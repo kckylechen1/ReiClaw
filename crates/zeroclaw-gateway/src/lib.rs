@@ -1431,8 +1431,12 @@ pub async fn run_gateway(
         state.path_prefix.clone(),
         state.shutdown_tx.subscribe(),
     );
-    let delegation_notifications_task =
-        delegation_notifications::start(Arc::clone(&state.config), state.shutdown_tx.subscribe());
+    let delegation_notifications_task = delegation_notifications::start(
+        Arc::clone(&state.config),
+        Some(Arc::clone(&state.mem)),
+        None,
+        state.shutdown_tx.subscribe(),
+    );
     let reminder_notifications_task =
         reminder_notifications::start(Arc::clone(&state.config), state.shutdown_tx.subscribe());
 

@@ -247,6 +247,8 @@ struct StartArgs {
     issue_ref: Option<String>,
     pr_ref: Option<String>,
     flow_id: Option<String>,
+    #[serde(default)]
+    context_brief: Option<String>,
 }
 #[derive(Deserialize)]
 #[serde(deny_unknown_fields)]
@@ -312,6 +314,11 @@ impl Tool for TachiDelegationTool {
                     properties[key] =
                         json!({"type":"string", "description":text("tool-tachi-param-ref")});
                 }
+                properties["context_brief"] = json!({
+                    "type": "string",
+                    "description": "Optional redacted technical context brief (max 4096 bytes). Never include Soul, User Model, credentials, or raw conversation history.",
+                    "maxLength": MAX_TASK_CONTEXT_BRIEF_BYTES,
+                });
                 required.extend(["harness", "task", "staffing_reason"]);
             }
             DelegationAction::Cancel => {
@@ -365,6 +372,7 @@ impl Tool for TachiDelegationTool {
         let Some(request_id) = request_id.filter(|id| valid_request_id(id)) else {
             return Ok(failure("invalid_arguments", &text("tool-tachi-invalid")));
         };
+        let mut outbound_task: Option<String> = None;
         if let Some(start) = &start {
             if start.task.trim().is_empty() || start.task.len() > 16384 {
                 return Ok(failure("invalid_arguments", &text("tool-tachi-invalid")));
@@ -382,6 +390,23 @@ impl Tool for TachiDelegationTool {
                     return Ok(failure("forbidden_content", &category.to_string()));
                 }
             }
+            let prepared =
+                match prepare_outbound_task_with_brief(&start.task, start.context_brief.as_deref())
+                {
+                    Ok(task) => task,
+                    Err(
+                        error @ (TaskBriefError::EmptyTask | TaskBriefError::BriefTooLarge { .. }),
+                    ) => {
+                        return Ok(failure("invalid_arguments", &error.to_string()));
+                    }
+                    Err(
+                        error @ (TaskBriefError::ProtectedIdentityMarker { .. }
+                        | TaskBriefError::Admission(_)),
+                    ) => {
+                        return Ok(failure("forbidden_content", &error.to_string()));
+                    }
+                };
+            outbound_task = Some(prepared);
         }
         let db = match tokio::task::spawn_blocking(move || SqliteSessionBackend::new(&data_dir))
             .await?
@@ -390,6 +415,7 @@ impl Tool for TachiDelegationTool {
             Err(error) => return Ok(failure("storage_error", &error.to_string())),
         };
         if let Some(start) = start {
+            let outbound_task = outbound_task.unwrap_or_else(|| start.task.clone());
             let digest =
                 hash(&json!({"profile":client.profile_for(&start.harness)?, "arguments":args}));
             let claim = {
@@ -438,7 +464,7 @@ impl Tool for TachiDelegationTool {
                 flow_id: start.flow_id,
             };
             let receipt = match client
-                .start(&start.harness, &start.task, start.staffing_reason, &refs)
+                .start(&start.harness, &outbound_task, start.staffing_reason, &refs)
                 .await
             {
                 Ok(receipt) => receipt,
@@ -647,7 +673,9 @@ const PROTECTED_IDENTITY_MARKERS: &[&str] = &[
     "user_model.db",
 ];
 
-fn find_protected_identity_marker(text: &str) -> Option<&'static str> {
+/// Return the first protected Soul or User Model marker found in `text`, if any.
+#[must_use]
+pub fn find_protected_identity_marker(text: &str) -> Option<&'static str> {
     let lower = text.to_ascii_lowercase();
     PROTECTED_IDENTITY_MARKERS
         .iter()
@@ -723,20 +751,9 @@ pub enum ProxyContinuationError {
     Staff(#[from] TachiStaffError),
 }
 
-/// Validate whether automatic proxy continuation is permitted for a verified
-/// canonical [`RunStatus`], current auto-continuation count, and proposed `answer`.
-///
-/// Enforces ADR-025 §8:
-/// - refuses `AUTH_REQUIRED` (in `state`, `closure_kind`, or `read_projection`);
-/// - allows `continue` ONLY when `state == RunState::InputRequired` and
-///   `closure_kind != Some("partial")`;
-/// - refuses once `prior_auto_continuations >= MAX_PROXY_CONTINUATIONS_PER_DISPATCH`;
-/// - rejects empty/whitespace `answer`, forbidden execution/credential content,
-///   and Soul/UserModel markers.
-pub fn validate_proxy_continuation(
+fn validate_proxy_continuation_status(
     status: &RunStatus,
     prior_auto_continuations: u8,
-    answer: &str,
 ) -> Result<(), ProxyContinuationError> {
     if status_indicates_auth_required(status) {
         return Err(ProxyContinuationError::AuthRequired);
@@ -759,6 +776,25 @@ pub fn validate_proxy_continuation(
             max: MAX_PROXY_CONTINUATIONS_PER_DISPATCH,
         });
     }
+    Ok(())
+}
+
+/// Validate whether automatic proxy continuation is permitted for a verified
+/// canonical [`RunStatus`], current auto-continuation count, and proposed `answer`.
+///
+/// Enforces ADR-025 §8:
+/// - refuses `AUTH_REQUIRED` (in `state`, `closure_kind`, or `read_projection`);
+/// - allows `continue` ONLY when `state == RunState::InputRequired` and
+///   `closure_kind != Some("partial")`;
+/// - refuses once `prior_auto_continuations >= MAX_PROXY_CONTINUATIONS_PER_DISPATCH`;
+/// - rejects empty/whitespace `answer`, forbidden execution/credential content,
+///   and Soul/UserModel markers.
+pub fn validate_proxy_continuation(
+    status: &RunStatus,
+    prior_auto_continuations: u8,
+    answer: &str,
+) -> Result<(), ProxyContinuationError> {
+    validate_proxy_continuation_status(status, prior_auto_continuations)?;
     let answer = answer.trim();
     if answer.is_empty() {
         return Err(ProxyContinuationError::EmptyAnswer);
@@ -819,6 +855,18 @@ impl ProxyContinuationGate {
     pub const fn remaining_auto_continuations(&self) -> u8 {
         self.max_auto_continuations
             .saturating_sub(self.prior_auto_continuations)
+    }
+
+    /// Pre-flight check of `status` and loop cap before resolving an answer.
+    /// Returns the canonical `status_revision` when proxy continuation is eligible.
+    pub fn evaluate(&self, status: &RunStatus) -> Result<u64, ProxyContinuationError> {
+        if status.dispatch_id != self.dispatch_id {
+            return Err(TachiStaffError::Protocol("continue dispatch mismatch".to_string()).into());
+        }
+        validate_proxy_continuation_status(status, self.prior_auto_continuations)?;
+        status
+            .revision
+            .ok_or(ProxyContinuationError::MissingRevision)
     }
 
     /// Verify all proxy-continuation invariants for `status` and `answer`,
@@ -916,6 +964,33 @@ pub fn format_redacted_task_with_brief(
     let combined = format!("{TASK_CONTEXT_HEADER}\n{brief}\n\n{task}");
     crate::tachi_admission::scan_text(&combined)?;
     Ok(combined)
+}
+
+/// Scrub credential patterns from an optional caller-supplied context brief and
+/// format the outbound delegated task with `[Task Context]`.
+///
+/// Checks `MAX_TASK_CONTEXT_BRIEF_BYTES` and protected Soul/UserModel markers
+/// on the raw brief before redacting secret tokens via
+/// [`zeroclaw_providers::scrub_secret_patterns`], then enforces
+/// [`format_redacted_task_with_brief`]. Never reads `soul.db` or `user_model.db`.
+pub fn prepare_outbound_task_with_brief(
+    task: &str,
+    context_brief: Option<&str>,
+) -> Result<String, TaskBriefError> {
+    let Some(raw_brief) = context_brief else {
+        return format_redacted_task_with_brief(task, None);
+    };
+    if raw_brief.len() > MAX_TASK_CONTEXT_BRIEF_BYTES {
+        return Err(TaskBriefError::BriefTooLarge {
+            actual: raw_brief.len(),
+            max: MAX_TASK_CONTEXT_BRIEF_BYTES,
+        });
+    }
+    if let Some(marker) = find_protected_identity_marker(raw_brief) {
+        return Err(TaskBriefError::ProtectedIdentityMarker { marker });
+    }
+    let scrubbed = zeroclaw_providers::scrub_secret_patterns(raw_brief);
+    format_redacted_task_with_brief(task, Some(&scrubbed))
 }
 
 #[cfg(test)]
@@ -1073,6 +1148,96 @@ mod continuity_tests {
                     TaskBriefError::Admission(_)
                 ),
                 "expected admission rejection for task `{forbidden_text}`"
+            );
+        }
+    }
+
+    #[test]
+    fn prepare_outbound_task_with_brief_scrubs_secrets_and_blocks_soul_and_user_model() {
+        let prepared = prepare_outbound_task_with_brief(
+            "Check gateway handler",
+            Some(
+                "Using callback https://example.test/cb?token=supersecret and key sk-ant-secret123",
+            ),
+        )
+        .unwrap();
+        assert!(prepared.starts_with("[Task Context]\n"));
+        assert!(prepared.contains("[REDACTED]"));
+        assert!(!prepared.contains("supersecret"));
+        assert!(!prepared.contains("sk-ant-secret123"));
+
+        for bad_brief in [
+            "Read soul.db before answering",
+            "Check user_model.db preferences",
+            "api_key=raw-secret-value",
+            "-----BEGIN PRIVATE KEY-----\nabc",
+        ] {
+            assert!(
+                prepare_outbound_task_with_brief("Check handler", Some(bad_brief)).is_err(),
+                "expected rejection for `{bad_brief}`"
+            );
+        }
+
+        let over = "x".repeat(MAX_TASK_CONTEXT_BRIEF_BYTES + 1);
+        assert!(matches!(
+            prepare_outbound_task_with_brief("Check handler", Some(&over)),
+            Err(TaskBriefError::BriefTooLarge { .. })
+        ));
+    }
+
+    #[test]
+    fn proxy_continuation_gate_evaluate_checks_status_cap_and_revision_before_answer() {
+        let gate = ProxyContinuationGate::new("d-continuity");
+        assert_eq!(
+            gate.evaluate(&status_with(RunState::InputRequired, None, Some(7)))
+                .unwrap(),
+            7
+        );
+        assert_eq!(
+            gate.evaluate(&status_with(RunState::InputRequired, None, None))
+                .unwrap_err(),
+            ProxyContinuationError::MissingRevision
+        );
+        assert_eq!(
+            gate.evaluate(&status_with(
+                RunState::Other("TASK_STATE_AUTH_REQUIRED".into()),
+                None,
+                Some(7)
+            ))
+            .unwrap_err(),
+            ProxyContinuationError::AuthRequired
+        );
+        let capped = ProxyContinuationGate::with_prior_count(
+            "d-continuity",
+            MAX_PROXY_CONTINUATIONS_PER_DISPATCH,
+        );
+        assert_eq!(
+            capped
+                .evaluate(&status_with(RunState::InputRequired, None, Some(7)))
+                .unwrap_err(),
+            ProxyContinuationError::CapExceeded {
+                prior: MAX_PROXY_CONTINUATIONS_PER_DISPATCH,
+                max: MAX_PROXY_CONTINUATIONS_PER_DISPATCH,
+            }
+        );
+    }
+
+    #[test]
+    fn tachi_delegation_never_reads_soul_or_user_model_stores() {
+        let source = include_str!("tachi_delegation.rs");
+        let prod = source
+            .split("#[cfg(test)]")
+            .next()
+            .expect("prod section before cfg(test)");
+        for forbidden in [
+            "SoulProfileStore",
+            "UserModelStore",
+            "soul_profile",
+            "SOUL.md",
+        ] {
+            assert!(
+                !prod.contains(forbidden),
+                "tachi_delegation production code must not reference `{forbidden}`"
             );
         }
     }

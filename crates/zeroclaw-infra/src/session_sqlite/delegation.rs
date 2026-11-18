@@ -40,6 +40,34 @@ pub(super) fn migrate_route_provenance(conn: &mut Connection) -> Result<()> {
         )
         .context("adding delegation notification schema")?;
     }
+    let has_proxy_continuations: bool = tx
+        .query_row(
+            "SELECT COUNT(*) > 0 FROM pragma_table_info('session_delegations') WHERE name = 'proxy_continuations'",
+            [],
+            |row| row.get(0),
+        )
+        .context("inspecting delegation proxy continuation count schema")?;
+    if !has_proxy_continuations {
+        tx.execute(
+            "ALTER TABLE session_delegations ADD COLUMN proxy_continuations INTEGER NOT NULL DEFAULT 0",
+            [],
+        )
+        .context("adding delegation proxy continuation count schema")?;
+    }
+    let has_last_proxy_revision: bool = tx
+        .query_row(
+            "SELECT COUNT(*) > 0 FROM pragma_table_info('session_delegations') WHERE name = 'last_proxy_revision'",
+            [],
+            |row| row.get(0),
+        )
+        .context("inspecting delegation proxy revision schema")?;
+    if !has_last_proxy_revision {
+        tx.execute(
+            "ALTER TABLE session_delegations ADD COLUMN last_proxy_revision INTEGER",
+            [],
+        )
+        .context("adding delegation proxy revision schema")?;
+    }
     tx.commit()
         .context("committing delegation route provenance schema")
 }
@@ -55,6 +83,8 @@ pub struct DispatchBindingRow {
     pub dispatch_id: String,
     pub route_digest: Option<String>,
     pub notified_outcome: Option<String>,
+    pub proxy_continuations: u8,
+    pub last_proxy_revision: Option<u64>,
 }
 
 /// Bounded recovery projection of the existing claims, including uncertain
@@ -279,7 +309,8 @@ impl SqliteSessionBackend {
     ) -> Result<Vec<DispatchBindingRow>> {
         let conn = self.conn.lock();
         let mut query = conn.prepare(
-            "SELECT rowid, agent_alias, request_id, dispatch_id, route_digest, notified_outcome
+            "SELECT rowid, agent_alias, request_id, dispatch_id, route_digest, notified_outcome,
+                    proxy_continuations, last_proxy_revision
              FROM session_delegations
              WHERE dispatch_id IS NOT NULL AND rowid > ?1
              ORDER BY rowid LIMIT ?2",
@@ -305,6 +336,32 @@ impl SqliteSessionBackend {
                     ),
                     None => (scope.clone(), stored_digest),
                 };
+                let raw_count: i64 = row.get(6)?;
+                let proxy_continuations = u8::try_from(raw_count).map_err(|_| {
+                    rusqlite::Error::FromSqlConversionFailure(
+                        6,
+                        rusqlite::types::Type::Integer,
+                        Box::new(std::io::Error::new(
+                            std::io::ErrorKind::InvalidData,
+                            format!("invalid proxy_continuations value: {raw_count}"),
+                        )),
+                    )
+                })?;
+                let raw_rev: Option<i64> = row.get(7)?;
+                let last_proxy_revision = raw_rev
+                    .map(|rev| {
+                        u64::try_from(rev).map_err(|_| {
+                            rusqlite::Error::FromSqlConversionFailure(
+                                7,
+                                rusqlite::types::Type::Integer,
+                                Box::new(std::io::Error::new(
+                                    std::io::ErrorKind::InvalidData,
+                                    format!("invalid last_proxy_revision value: {rev}"),
+                                )),
+                            )
+                        })
+                    })
+                    .transpose()?;
                 Ok(DispatchBindingRow {
                     rowid: row.get(0)?,
                     agent_alias: owner,
@@ -312,6 +369,8 @@ impl SqliteSessionBackend {
                     dispatch_id: row.get(3)?,
                     route_digest,
                     notified_outcome: row.get(5)?,
+                    proxy_continuations,
+                    last_proxy_revision,
                 })
             })
             .context("listing delegation dispatch bindings")?
@@ -361,6 +420,52 @@ impl SqliteSessionBackend {
         )
         .context("marking delegation notification")?;
         Ok(())
+    }
+
+    /// Atomically record an automatic proxy continuation for `rowid` at
+    /// `expected_revision`, updating `proxy_continuations` monotonically to at
+    /// least `new_count`. Returns `Ok(false)` when `expected_revision` matches
+    /// the already-recorded `last_proxy_revision` so crashes/retries cannot
+    /// double-answer or double-count the same revision.
+    pub fn record_proxy_continuation(
+        &self,
+        rowid: i64,
+        expected_revision: u64,
+        new_count: u8,
+    ) -> Result<bool> {
+        use rusqlite::OptionalExtension;
+        let rev_i64 = i64::try_from(expected_revision)
+            .context("proxy continuation revision exceeds SQLite INTEGER range")?;
+        let mut conn = self.conn.lock();
+        let tx = conn.transaction_with_behavior(TransactionBehavior::Immediate)?;
+        let current: Option<(i64, Option<i64>)> = tx
+            .query_row(
+                "SELECT proxy_continuations, last_proxy_revision
+                 FROM session_delegations WHERE rowid = ?1",
+                params![rowid],
+                |row| Ok((row.get(0)?, row.get(1)?)),
+            )
+            .optional()
+            .context("reading proxy continuation state")?;
+        let Some((_, last_rev)) = current else {
+            bail!("delegation binding row {rowid} not found");
+        };
+        if last_rev == Some(rev_i64) {
+            return Ok(false);
+        }
+        tx.execute(
+            "UPDATE session_delegations
+             SET proxy_continuations = MAX(proxy_continuations, ?2),
+                 last_proxy_revision = ?3
+             WHERE rowid = ?1",
+            params![rowid, i64::from(new_count), rev_i64],
+        )
+        .context("recording proxy continuation state")?;
+        tx.commit().context("committing proxy continuation state")?;
+        if let Some(path) = conn.path() {
+            crate::sqlite_perms::harden_sqlite_owner_only(std::path::Path::new(path));
+        }
+        Ok(true)
     }
 
     /// Resolve a stable or uniquely preserved legacy reference. The caller
@@ -1053,5 +1158,122 @@ mod tests {
                 );
             }
         }
+    }
+
+    #[test]
+    fn proxy_continuation_migration_is_idempotent_and_preserves_existing_rows() {
+        let tmp = TempDir::new().unwrap();
+        let store = SqliteSessionBackend::new(tmp.path()).unwrap();
+        {
+            let conn = store.conn.lock();
+            conn.execute_batch(
+                "DROP TABLE session_delegations;
+                CREATE TABLE session_delegations (
+                    agent_alias TEXT NOT NULL,
+                    request_id TEXT NOT NULL,
+                    request_digest TEXT NOT NULL,
+                    dispatch_id TEXT,
+                    route_digest TEXT,
+                    notified_outcome TEXT,
+                    PRIMARY KEY(agent_alias, request_id)
+                );
+                INSERT INTO session_delegations
+                    (agent_alias, request_id, request_digest, dispatch_id, route_digest, notified_outcome)
+                VALUES ('butler', 'req-legacy', 'd', 'disp-legacy', 'route-1', NULL);",
+            )
+            .unwrap();
+        }
+        drop(store);
+
+        let reopened = SqliteSessionBackend::new(tmp.path()).unwrap();
+        let rows = reopened.list_dispatch_bindings_page(0, 10).unwrap();
+        assert_eq!(rows.len(), 1);
+        assert_eq!(rows[0].proxy_continuations, 0);
+        assert_eq!(rows[0].last_proxy_revision, None);
+
+        drop(reopened);
+        let reopened_again = SqliteSessionBackend::new(tmp.path()).unwrap();
+        let rows = reopened_again.list_dispatch_bindings_page(0, 10).unwrap();
+        assert_eq!(rows.len(), 1);
+        assert_eq!(rows[0].proxy_continuations, 0);
+        assert_eq!(rows[0].last_proxy_revision, None);
+    }
+
+    #[test]
+    fn record_proxy_continuation_persists_across_reopen_and_deduplicates_revision() {
+        let tmp = TempDir::new().unwrap();
+        let store = SqliteSessionBackend::new(tmp.path()).unwrap();
+        store
+            .claim_delegation_request("butler", "req-1", "digest", "route")
+            .unwrap();
+        store
+            .bind_delegation_request("butler", "req-1", "digest", "route", "disp-1")
+            .unwrap();
+        let rowid = store.list_dispatch_bindings_page(0, 10).unwrap()[0].rowid;
+
+        assert!(store.record_proxy_continuation(rowid, 5, 1).unwrap());
+        // Same revision must not double-count or overwrite.
+        assert!(!store.record_proxy_continuation(rowid, 5, 2).unwrap());
+
+        let row = store.list_dispatch_bindings_page(0, 10).unwrap().remove(0);
+        assert_eq!(row.proxy_continuations, 1);
+        assert_eq!(row.last_proxy_revision, Some(5));
+
+        drop(store);
+        let reopened = SqliteSessionBackend::new(tmp.path()).unwrap();
+        let row = reopened
+            .list_dispatch_bindings_page(0, 10)
+            .unwrap()
+            .remove(0);
+        assert_eq!(row.proxy_continuations, 1);
+        assert_eq!(row.last_proxy_revision, Some(5));
+        assert!(!reopened.record_proxy_continuation(rowid, 5, 2).unwrap());
+        assert!(reopened.record_proxy_continuation(rowid, 7, 2).unwrap());
+
+        let updated = reopened
+            .list_dispatch_bindings_page(0, 10)
+            .unwrap()
+            .remove(0);
+        assert_eq!(updated.proxy_continuations, 2);
+        assert_eq!(updated.last_proxy_revision, Some(7));
+        assert!(reopened.record_proxy_continuation(999_999, 1, 1).is_err());
+    }
+
+    #[test]
+    fn concurrent_record_proxy_continuation_allows_only_one_winner_per_revision() {
+        let tmp = TempDir::new().unwrap();
+        let first = SqliteSessionBackend::new(tmp.path()).unwrap();
+        let second = SqliteSessionBackend::new(tmp.path()).unwrap();
+        first
+            .claim_delegation_request("butler", "req-race", "digest", "route")
+            .unwrap();
+        first
+            .bind_delegation_request("butler", "req-race", "digest", "route", "disp-race")
+            .unwrap();
+        let rowid = first.list_dispatch_bindings_page(0, 10).unwrap()[0].rowid;
+        let barrier = Arc::new(Barrier::new(2));
+
+        let outcomes: Vec<bool> = [first, second]
+            .into_iter()
+            .map(|store| {
+                let barrier = Arc::clone(&barrier);
+                std::thread::spawn(move || {
+                    barrier.wait();
+                    store.record_proxy_continuation(rowid, 42, 1).unwrap()
+                })
+            })
+            .collect::<Vec<_>>()
+            .into_iter()
+            .map(|h| h.join().unwrap())
+            .collect();
+
+        assert_eq!(outcomes.iter().filter(|recorded| **recorded).count(), 1);
+        let reopened = SqliteSessionBackend::new(tmp.path()).unwrap();
+        let row = reopened
+            .list_dispatch_bindings_page(0, 10)
+            .unwrap()
+            .remove(0);
+        assert_eq!(row.proxy_continuations, 1);
+        assert_eq!(row.last_proxy_revision, Some(42));
     }
 }
