@@ -3824,9 +3824,16 @@ async fn classify_runtime_config_kind_uses_runtime_resolution_source() {
     let _home_guard = EnvValueGuard::set("HOME", &fake_home);
     #[cfg(not(unix))]
     let _home_guard = EnvValueGuard::remove("HOME");
+    let _rei_guard = EnvValueGuard::remove("REI_CONFIG_DIR");
+    let _reiclaw_guard = EnvValueGuard::remove("REICLAW_CONFIG_DIR");
+    let _zc_guard = EnvValueGuard::remove("ZEROCLAW_CONFIG_DIR");
     let _data_guard = EnvValueGuard::remove("ZEROCLAW_DATA_DIR");
     let _workspace_guard = EnvValueGuard::remove("ZEROCLAW_WORKSPACE");
 
+    assert_eq!(
+        classify_runtime_config_kind(&fake_home.join(".rei").join("config.toml")).await,
+        RuntimeConfigKind::Default
+    );
     assert_eq!(
         classify_runtime_config_kind(&fake_home.join(".zeroclaw").join("config.toml")).await,
         RuntimeConfigKind::Default
@@ -3837,6 +3844,102 @@ async fn classify_runtime_config_kind_uses_runtime_resolution_source() {
         classify_runtime_config_kind(&explicit_config_dir.join("config.toml")).await,
         RuntimeConfigKind::Custom
     );
+}
+
+#[test]
+async fn config_dir_env_precedence_prefers_rei_over_reiclaw_over_zeroclaw() {
+    let _env_guard = env_override_lock().await;
+    let base = std::env::temp_dir().join(format!("reiclaw_env_test_{}", uuid::Uuid::new_v4()));
+    let rei_dir = base.join("rei-dir");
+    let reiclaw_dir = base.join("reiclaw-dir");
+    let zeroclaw_dir = base.join("zeroclaw-dir");
+
+    let _rei_guard = EnvValueGuard::remove("REI_CONFIG_DIR");
+    let _reiclaw_guard = EnvValueGuard::remove("REICLAW_CONFIG_DIR");
+    let _zc_guard = EnvValueGuard::remove("ZEROCLAW_CONFIG_DIR");
+    let _data_guard = EnvValueGuard::remove("ZEROCLAW_DATA_DIR");
+    let _workspace_guard = EnvValueGuard::remove("ZEROCLAW_WORKSPACE");
+
+    {
+        let _zc = EnvValueGuard::set("ZEROCLAW_CONFIG_DIR", &zeroclaw_dir);
+        let (cfg, data) = resolve_runtime_dirs().await.unwrap();
+        assert_eq!(cfg, zeroclaw_dir);
+        assert_eq!(data, zeroclaw_dir.join("data"));
+        assert_eq!(
+            ftl_locale_dir("zh-CN").unwrap(),
+            zeroclaw_dir.join("data").join("ftl").join("zh-CN")
+        );
+
+        let _reiclaw = EnvValueGuard::set("REICLAW_CONFIG_DIR", &reiclaw_dir);
+        let (cfg, data) = resolve_runtime_dirs().await.unwrap();
+        assert_eq!(cfg, reiclaw_dir);
+        assert_eq!(data, reiclaw_dir.join("data"));
+        assert_eq!(
+            default_path_under_config_dir("estop-state.json"),
+            reiclaw_dir.join("estop-state.json").to_string_lossy()
+        );
+
+        let _rei = EnvValueGuard::set("REI_CONFIG_DIR", &rei_dir);
+        let (cfg, data) = resolve_runtime_dirs().await.unwrap();
+        assert_eq!(cfg, rei_dir);
+        assert_eq!(data, rei_dir.join("data"));
+        assert_eq!(
+            ftl_locale_dir("en").unwrap(),
+            rei_dir.join("data").join("ftl").join("en")
+        );
+    }
+
+    // Blank REI_CONFIG_DIR falls back cleanly to REICLAW_CONFIG_DIR.
+    let _rei_blank = EnvValueGuard::set("REI_CONFIG_DIR", "   ");
+    let _reiclaw = EnvValueGuard::set("REICLAW_CONFIG_DIR", &reiclaw_dir);
+    let (cfg, _) = resolve_runtime_dirs().await.unwrap();
+    assert_eq!(cfg, reiclaw_dir);
+}
+
+#[test]
+async fn default_config_dir_uses_rei_and_falls_back_to_existing_zeroclaw() {
+    let _env_guard = env_override_lock().await;
+    let temp_home =
+        std::env::temp_dir().join(format!("reiclaw_home_test_{}", uuid::Uuid::new_v4()));
+    let _home_guard = EnvValueGuard::set("HOME", &temp_home);
+    let _rei_guard = EnvValueGuard::remove("REI_CONFIG_DIR");
+    let _reiclaw_guard = EnvValueGuard::remove("REICLAW_CONFIG_DIR");
+    let _zc_guard = EnvValueGuard::remove("ZEROCLAW_CONFIG_DIR");
+    let _data_guard = EnvValueGuard::remove("ZEROCLAW_DATA_DIR");
+    let _workspace_guard = EnvValueGuard::remove("ZEROCLAW_WORKSPACE");
+
+    // Fresh home (neither ~/.rei nor ~/.zeroclaw exists) defaults to ~/.rei.
+    let (cfg, data) = resolve_runtime_dirs().await.unwrap();
+    assert_eq!(cfg, temp_home.join(".rei"));
+    assert_eq!(data, temp_home.join(".rei").join("data"));
+    assert_eq!(
+        ftl_locale_dir("en").unwrap(),
+        temp_home.join(".rei").join("data").join("ftl").join("en")
+    );
+
+    // Legacy install: ~/.zeroclaw exists and ~/.rei does not -> falls back to ~/.zeroclaw.
+    fs::create_dir_all(temp_home.join(".zeroclaw"))
+        .await
+        .unwrap();
+    let (cfg, data) = resolve_runtime_dirs().await.unwrap();
+    assert_eq!(cfg, temp_home.join(".zeroclaw"));
+    assert_eq!(data, temp_home.join(".zeroclaw").join("data"));
+    assert_eq!(
+        ftl_locale_dir("zh-CN").unwrap(),
+        temp_home
+            .join(".zeroclaw")
+            .join("data")
+            .join("ftl")
+            .join("zh-CN")
+    );
+
+    // When both ~/.rei and ~/.zeroclaw exist, ~/.rei takes precedence.
+    fs::create_dir_all(temp_home.join(".rei")).await.unwrap();
+    let (cfg, data) = resolve_runtime_dirs().await.unwrap();
+    assert_eq!(cfg, temp_home.join(".rei"));
+    assert_eq!(data, temp_home.join(".rei").join("data"));
+
+    let _ = fs::remove_dir_all(&temp_home).await;
 }
 
 #[test]

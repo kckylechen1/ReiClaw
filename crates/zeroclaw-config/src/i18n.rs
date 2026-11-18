@@ -356,24 +356,42 @@ fn normalized_env_locale(raw: &str) -> Option<String> {
     Some(normalize_locale(trimmed))
 }
 
-fn read_config_table() -> Option<toml::Table> {
-    if let Ok(custom) = std::env::var("ZEROCLAW_CONFIG_DIR") {
-        let trimmed = custom.trim();
-        if !trimmed.is_empty() {
-            let path = std::path::PathBuf::from(trimmed).join("config.toml");
-            return std::fs::read_to_string(&path)
-                .ok()
-                .and_then(|c| c.parse().ok());
+fn config_candidates_with_home(
+    home: Option<&std::path::Path>,
+    xdg_config: Option<&std::path::Path>,
+) -> Vec<std::path::PathBuf> {
+    let mut candidates = Vec::new();
+    if let Some(home) = home {
+        let rei_dir = home.join(".rei");
+        let zeroclaw_dir = home.join(".zeroclaw");
+        if rei_dir.exists() {
+            candidates.push(rei_dir.join("config.toml"));
+        } else if zeroclaw_dir.exists() {
+            candidates.push(zeroclaw_dir.join("config.toml"));
+        } else {
+            candidates.push(rei_dir.join("config.toml"));
+            candidates.push(zeroclaw_dir.join("config.toml"));
         }
     }
-
-    let mut candidates: Vec<std::path::PathBuf> = Vec::new();
-    if let Some(base) = directories::BaseDirs::new() {
-        candidates.push(base.home_dir().join(".zeroclaw/config.toml"));
-        candidates.push(base.config_dir().join("zeroclaw/config.toml"));
+    if let Some(config_dir) = xdg_config {
+        candidates.push(config_dir.join("rei/config.toml"));
+        candidates.push(config_dir.join("zeroclaw/config.toml"));
     }
-    for path in &candidates {
-        if let Ok(contents) = std::fs::read_to_string(path) {
+    candidates
+}
+
+fn read_config_table() -> Option<toml::Table> {
+    if let Some((_name, custom)) = crate::load::env_config_dir_override() {
+        let path = crate::load::expand_tilde_path(&custom).join("config.toml");
+        return std::fs::read_to_string(&path)
+            .ok()
+            .and_then(|c| c.parse().ok());
+    }
+
+    let home = crate::load::resolve_home_dir();
+    let xdg_config = directories::BaseDirs::new().map(|b| b.config_dir().to_path_buf());
+    for path in config_candidates_with_home(home.as_deref(), xdg_config.as_deref()) {
+        if let Ok(contents) = std::fs::read_to_string(&path) {
             return contents.parse().ok();
         }
     }
@@ -987,5 +1005,48 @@ mod tests {
                 "{locale}: cli-agent-context-bar has unformatted placeholder in: {bar_formatted}"
             );
         }
+    }
+
+    #[test]
+    fn config_candidates_prefer_rei_and_fallback_to_existing_zeroclaw() {
+        let tmp = tempfile::tempdir().expect("tempdir");
+        let home = tmp.path();
+        let xdg = home.join(".config");
+
+        // Fresh home: checks ~/.rei before ~/.zeroclaw, then XDG dirs.
+        let fresh = config_candidates_with_home(Some(home), Some(&xdg));
+        assert_eq!(
+            fresh,
+            vec![
+                home.join(".rei/config.toml"),
+                home.join(".zeroclaw/config.toml"),
+                xdg.join("rei/config.toml"),
+                xdg.join("zeroclaw/config.toml"),
+            ]
+        );
+
+        // Legacy install: only ~/.zeroclaw exists -> falls back cleanly to ~/.zeroclaw.
+        std::fs::create_dir_all(home.join(".zeroclaw")).expect("create .zeroclaw");
+        let legacy = config_candidates_with_home(Some(home), Some(&xdg));
+        assert_eq!(
+            legacy,
+            vec![
+                home.join(".zeroclaw/config.toml"),
+                xdg.join("rei/config.toml"),
+                xdg.join("zeroclaw/config.toml"),
+            ]
+        );
+
+        // Both exist: ~/.rei takes precedence over ~/.zeroclaw.
+        std::fs::create_dir_all(home.join(".rei")).expect("create .rei");
+        let migrated = config_candidates_with_home(Some(home), Some(&xdg));
+        assert_eq!(
+            migrated,
+            vec![
+                home.join(".rei/config.toml"),
+                xdg.join("rei/config.toml"),
+                xdg.join("zeroclaw/config.toml"),
+            ]
+        );
     }
 }

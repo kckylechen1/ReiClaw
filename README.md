@@ -1,11 +1,15 @@
 <p align="center">
-  <img src="docs/assets/zeroclaw-banner.png" alt="ZeroClaw" width="600" />
+  <img src="docs/assets/zeroclaw-banner.png" alt="ReiClaw" width="600" />
 </p>
 
-<h1 align="center">🦀 ZeroClaw: Personal AI Assistant</h1>
+<h1 align="center">ReiClaw (<code>rei</code>): Personal AI Controller</h1>
 
 <p align="center">
   <strong>You own the agent. You own the data. You own the machine it runs on.</strong>
+</p>
+
+<p align="center">
+  Originally forked from <a href="https://github.com/zeroclaw-labs/zeroclaw">zeroclaw-labs/zeroclaw</a>
 </p>
 
 <p align="center">
@@ -23,15 +27,18 @@
 
 ---
 
-> **Independent fork.** This repository (`kckylechen1/zeroclaw`) is an
-> independently maintained fork, **not** the official ZeroClaw Labs repository
-> or release. See [Official upstream and fork identity](#official-upstream-and-fork-identity).
+> **Independent fork (`ReiClaw` / `rei`).** Originally forked from
+> [zeroclaw-labs/zeroclaw](https://github.com/zeroclaw-labs/zeroclaw). This
+> repository (`kckylechen1/zeroclaw`) is an independently maintained fork,
+> **not** the official ZeroClaw Labs repository or release. See
+> [Official upstream and fork identity](#official-upstream-and-fork-identity).
 
 ## What this fork is
 
-This fork turns upstream ZeroClaw into a **personal controller**: one agent with
-a lasting identity and memory that acts for its owner, and that manages
-authorized external agent harnesses, tools, and edge devices as one package.
+ReiClaw (`rei`) turns upstream ZeroClaw into a **personal controller**: one
+agent with a lasting identity and memory that acts for its owner, and that
+manages authorized external agent harnesses, tools, and edge devices as one
+package.
 
 It is built around three ideas:
 
@@ -171,11 +178,14 @@ Platform-specific notes: [Linux](docs/book/src/setup/linux.md) · [macOS](docs/b
 ## Quick start
 
 ```bash
-zeroclaw quickstart               # one-shot setup: pick a provider, write a working config
-zeroclaw chat -a <alias>          # chat with the [agents.<alias>] entry through the gateway
-zeroclaw service install          # register as systemd/launchctl/Windows Service
-zeroclaw service start            # run it always-on in the background
+rei quickstart                    # one-shot setup: pick a provider, write a working config
+rei chat -a <alias>               # chat with the [agents.<alias>] entry through the gateway
+rei service install               # register as systemd/launchctl/Windows Service
+rei service start                 # run it always-on in the background
 ```
+
+The `zeroclaw` compatibility binary alias remains installed alongside `rei` so
+existing automation scripts keep working.
 
 Full walkthrough: [Quick start](docs/book/src/getting-started/quickstart.md); or skip the safety gates with [YOLO mode](docs/book/src/getting-started/yolo.md) for dev boxes.
 
@@ -215,7 +225,9 @@ To try a local read-only Node, build with the `nodes` feature and follow
 
 ## Configuration
 
-One TOML file at `~/.zeroclaw/config.toml`. Pointers:
+One TOML file at `~/.rei/config.toml` (existing `~/.zeroclaw/config.toml`
+installations are detected automatically as a fallback; env override precedence:
+`REI_CONFIG_DIR` > `REICLAW_CONFIG_DIR` > `ZEROCLAW_CONFIG_DIR`). Pointers:
 
 - [Provider configuration](docs/book/src/providers/configuration.md): the universal `[providers.models.<type>.<alias>]` schema
 - [Security overview](docs/book/src/security/overview.md): autonomy, sandboxing, tool receipts
@@ -260,7 +272,7 @@ Target topology; the Status section above identifies the remaining acceptance:
 ```mermaid
 flowchart TD
   Clients["CLI, Web, bridges and device Clients"] --> Gateway["Gateway"]
-  subgraph Body["ZeroClaw body: one process"]
+  subgraph Body["ReiClaw body: one process"]
     Gateway --> Agent["Agent loop"]
     Agent --> State["Soul, User Model and memory"]
     Agent --> Local["L0 tools and L1 reasoning"]
@@ -297,8 +309,9 @@ Do not file public issues for security vulnerabilities. See [SECURITY.md](SECURI
 
 ## Official upstream and fork identity
 
-The official upstream ZeroClaw Labs repository is
-<https://github.com/zeroclaw-labs/zeroclaw>.
+ReiClaw (`rei`) is originally forked from
+[zeroclaw-labs/zeroclaw](https://github.com/zeroclaw-labs/zeroclaw) (official
+upstream repository: <https://github.com/zeroclaw-labs/zeroclaw>).
 
 This repository (`kckylechen1/zeroclaw`) is an independent fork and does
 **not** claim to be an official ZeroClaw Labs distribution or to be

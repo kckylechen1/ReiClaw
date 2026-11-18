@@ -52,31 +52,62 @@ pub(crate) fn default_config_and_data_dirs() -> Result<(PathBuf, PathBuf)> {
     Ok((config_dir.clone(), config_dir.join("data")))
 }
 
-fn default_config_dir() -> Result<PathBuf> {
-    if let Ok(custom) = std::env::var("ZEROCLAW_CONFIG_DIR") {
-        let custom = custom.trim();
-        if !custom.is_empty() {
-            return Ok(expand_tilde_path(custom));
+/// Ordered config-directory override env vars, highest precedence first.
+const CONFIG_DIR_ENV_VARS: &[&str] = &[
+    "REI_CONFIG_DIR",
+    "REICLAW_CONFIG_DIR",
+    "ZEROCLAW_CONFIG_DIR",
+];
+
+pub(crate) fn env_config_dir_override() -> Option<(&'static str, String)> {
+    for &name in CONFIG_DIR_ENV_VARS {
+        if let Ok(value) = std::env::var(name) {
+            let trimmed = value.trim();
+            if !trimmed.is_empty() {
+                return Some((name, trimmed.to_owned()));
+            }
         }
     }
+    None
+}
 
+pub(crate) fn resolve_home_dir() -> Option<PathBuf> {
     if let Ok(home) = std::env::var("HOME")
         && !home.is_empty()
     {
-        return Ok(PathBuf::from(home).join(".zeroclaw"));
+        return Some(PathBuf::from(home));
     }
 
-    let home = UserDirs::new()
-        .map(|u| u.home_dir().to_path_buf())
-        .context("Could not find home directory")?;
-    Ok(home.join(".zeroclaw"))
+    UserDirs::new().map(|u| u.home_dir().to_path_buf())
+}
+
+fn default_home_config_dir(home: &Path) -> PathBuf {
+    let rei_dir = home.join(".rei");
+    if rei_dir.exists() {
+        return rei_dir;
+    }
+    let zeroclaw_dir = home.join(".zeroclaw");
+    if zeroclaw_dir.exists() {
+        return zeroclaw_dir;
+    }
+    rei_dir
+}
+
+fn default_config_dir() -> Result<PathBuf> {
+    if let Some((_name, custom)) = env_config_dir_override() {
+        return Ok(expand_tilde_path(&custom));
+    }
+
+    let home = resolve_home_dir().context("Could not find home directory")?;
+    Ok(default_home_config_dir(&home))
 }
 
 /// Canonical on-disk directory for a locale's runtime FTL catalogues:
 /// `<config_dir>/data/ftl/<locale>/`. This is where `zeroclaw locales fetch`
 /// restores bundled translations and where the runtime i18n loader reads them.
-/// `<config_dir>` honors `ZEROCLAW_CONFIG_DIR` and otherwise defaults to
-/// `~/.zeroclaw`.
+/// `<config_dir>` honors `REI_CONFIG_DIR`, `REICLAW_CONFIG_DIR`, and
+/// `ZEROCLAW_CONFIG_DIR`, and otherwise defaults to `~/.rei` (falling back to
+/// an existing `~/.zeroclaw`).
 pub fn ftl_locale_dir(locale: &str) -> Result<PathBuf> {
     Ok(default_config_dir()?.join("data").join("ftl").join(locale))
 }
@@ -89,10 +120,10 @@ pub const FTL_CATALOGS: &[(&str, &str)] = &[("cli", "cli.ftl"), ("tools", "tools
 
 /// Build a default path string by joining `relative` onto the resolved
 /// platform config dir. The form sees the resolved absolute path
-/// (`/home/<user>/.zeroclaw/<relative>` on Linux,
-/// `C:\Users\<user>\.zeroclaw\<relative>` on Windows, etc.) instead of a
+/// (`/home/<user>/.rei/<relative>` on Linux,
+/// `C:\Users\<user>\.rei\<relative>` on Windows, etc.) instead of a
 /// literal `~/...` token that doesn't expand on Windows. Falls back to
-/// `~/.zeroclaw/<relative>` if the platform dir can't be resolved (rare —
+/// `~/.rei/<relative>` if the platform dir can't be resolved (rare —
 /// e.g. no HOME and `directories::UserDirs` returns None); the runtime's
 /// `expand_tilde_path()` handles that literal at use-time.
 ///
@@ -103,7 +134,7 @@ pub const FTL_CATALOGS: &[(&str, &str)] = &[("cli", "cli.ftl"), ("tools", "tools
 pub(crate) fn default_path_under_config_dir(relative: &str) -> String {
     match default_config_dir() {
         Ok(dir) => dir.join(relative).to_string_lossy().into_owned(),
-        Err(_) => format!("~/.zeroclaw/{relative}"),
+        Err(_) => format!("~/.rei/{relative}"),
     }
 }
 
@@ -145,13 +176,29 @@ pub async fn classify_runtime_config_kind(config_path: &Path) -> RuntimeConfigKi
         return RuntimeConfigKind::Custom;
     };
 
-    if !paths_equal_lexically(config_path, &resolved_config_dir.join("config.toml")) {
-        return RuntimeConfigKind::Custom;
-    }
-
     match source {
-        ConfigResolutionSource::DefaultConfigDir | ConfigResolutionSource::HomebrewConfigDir => {
-            RuntimeConfigKind::Default
+        ConfigResolutionSource::DefaultConfigDir => {
+            let matches_resolved =
+                paths_equal_lexically(config_path, &resolved_config_dir.join("config.toml"));
+            let matches_known_home_default = resolve_home_dir().is_some_and(|home| {
+                paths_equal_lexically(config_path, &home.join(".rei").join("config.toml"))
+                    || paths_equal_lexically(
+                        config_path,
+                        &home.join(".zeroclaw").join("config.toml"),
+                    )
+            });
+            if matches_resolved || matches_known_home_default {
+                RuntimeConfigKind::Default
+            } else {
+                RuntimeConfigKind::Custom
+            }
+        }
+        ConfigResolutionSource::HomebrewConfigDir => {
+            if paths_equal_lexically(config_path, &resolved_config_dir.join("config.toml")) {
+                RuntimeConfigKind::Default
+            } else {
+                RuntimeConfigKind::Custom
+            }
         }
         ConfigResolutionSource::EnvConfigDir
         | ConfigResolutionSource::EnvDataDir
@@ -162,8 +209,8 @@ pub async fn classify_runtime_config_kind(config_path: &Path) -> RuntimeConfigKi
 /// Resolve the current runtime config/data directories.
 ///
 /// This mirrors the same precedence used by `Config::load_or_init()`:
-/// `ZEROCLAW_CONFIG_DIR` > `ZEROCLAW_DATA_DIR` > `ZEROCLAW_WORKSPACE`
-/// (deprecated) > defaults.
+/// `REI_CONFIG_DIR` > `REICLAW_CONFIG_DIR` > `ZEROCLAW_CONFIG_DIR` >
+/// `ZEROCLAW_DATA_DIR` > `ZEROCLAW_WORKSPACE` (deprecated) > defaults.
 pub async fn resolve_runtime_dirs() -> Result<(PathBuf, PathBuf)> {
     let (default_zeroclaw_dir, default_data_dir) = default_config_and_data_dirs()?;
     let (config_dir, data_dir, _) =
@@ -295,53 +342,54 @@ pub(crate) async fn resolve_runtime_config_dirs(
     default_zeroclaw_dir: &Path,
     default_data_dir: &Path,
 ) -> Result<(PathBuf, PathBuf, ConfigResolutionSource)> {
-    if let Ok(custom_config_dir) = std::env::var("ZEROCLAW_CONFIG_DIR") {
-        let custom_config_dir = custom_config_dir.trim();
-        if !custom_config_dir.is_empty() {
-            // If the operator ALSO set ZEROCLAW_DATA_DIR or
-            // ZEROCLAW_WORKSPACE, CONFIG_DIR wins; surface the
-            // collision so they know which one took effect.
-            if std::env::var("ZEROCLAW_DATA_DIR")
-                .ok()
-                .filter(|v| !v.trim().is_empty())
-                .is_some()
-            {
-                ::zeroclaw_log::record!(
-                    WARN,
-                    ::zeroclaw_log::Event::new(
-                        crate::schema::CONFIG_SCHEMA_LOG_TARGET,
-                        ::zeroclaw_log::Action::Note
-                    )
-                    .with_outcome(::zeroclaw_log::EventOutcome::Unknown),
-                    "ZEROCLAW_CONFIG_DIR is set; ZEROCLAW_DATA_DIR is ignored \
+    if let Some((env_name, custom_config_dir)) = env_config_dir_override() {
+        // If the operator ALSO set ZEROCLAW_DATA_DIR or
+        // ZEROCLAW_WORKSPACE, CONFIG_DIR wins; surface the
+        // collision so they know which one took effect.
+        if std::env::var("ZEROCLAW_DATA_DIR")
+            .ok()
+            .filter(|v| !v.trim().is_empty())
+            .is_some()
+        {
+            ::zeroclaw_log::record!(
+                WARN,
+                ::zeroclaw_log::Event::new(
+                    crate::schema::CONFIG_SCHEMA_LOG_TARGET,
+                    ::zeroclaw_log::Action::Note
+                )
+                .with_outcome(::zeroclaw_log::EventOutcome::Unknown),
+                &format!(
+                    "{env_name} is set; ZEROCLAW_DATA_DIR is ignored \
                      (CONFIG_DIR pins both the config directory and the data \
                      directory under it)."
-                );
-            }
-            if std::env::var("ZEROCLAW_WORKSPACE")
-                .ok()
-                .filter(|v| !v.is_empty())
-                .is_some()
-            {
-                ::zeroclaw_log::record!(
-                    WARN,
-                    ::zeroclaw_log::Event::new(
-                        crate::schema::CONFIG_SCHEMA_LOG_TARGET,
-                        ::zeroclaw_log::Action::Note
-                    )
-                    .with_outcome(::zeroclaw_log::EventOutcome::Unknown),
-                    "ZEROCLAW_CONFIG_DIR is set; ZEROCLAW_WORKSPACE (deprecated) \
+                )
+            );
+        }
+        if std::env::var("ZEROCLAW_WORKSPACE")
+            .ok()
+            .filter(|v| !v.is_empty())
+            .is_some()
+        {
+            ::zeroclaw_log::record!(
+                WARN,
+                ::zeroclaw_log::Event::new(
+                    crate::schema::CONFIG_SCHEMA_LOG_TARGET,
+                    ::zeroclaw_log::Action::Note
+                )
+                .with_outcome(::zeroclaw_log::EventOutcome::Unknown),
+                &format!(
+                    "{env_name} is set; ZEROCLAW_WORKSPACE (deprecated) \
                      is ignored. ZEROCLAW_WORKSPACE will be removed in a future \
                      release; switch any remaining references to ZEROCLAW_DATA_DIR."
-                );
-            }
-            let zeroclaw_dir = expand_tilde_path(custom_config_dir);
-            return Ok((
-                zeroclaw_dir.clone(),
-                zeroclaw_dir.join("data"),
-                ConfigResolutionSource::EnvConfigDir,
-            ));
+                )
+            );
         }
+        let zeroclaw_dir = expand_tilde_path(&custom_config_dir);
+        return Ok((
+            zeroclaw_dir.clone(),
+            zeroclaw_dir.join("data"),
+            ConfigResolutionSource::EnvConfigDir,
+        ));
     }
 
     if let Ok(custom_data) = std::env::var("ZEROCLAW_DATA_DIR")
