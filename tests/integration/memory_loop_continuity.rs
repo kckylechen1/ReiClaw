@@ -400,12 +400,14 @@ async fn consolidation_extracts_facts_to_memory() {
         r#"{"history_entry": "User shared project deadline info", "memory_update": "Project deadline is April 15th 2026"}"#,
     )]);
 
-    let result = zeroclaw::memory::consolidation::consolidate_turn(
+    let result = zeroclaw::agent::sleep_compactor::consolidate_turn_via_sleep(
         &model_provider,
         "test-model",
         None,
-        mem.as_ref(),
+        Arc::clone(&mem),
         &MemoryConfig::default(),
+        "default",
+        "default",
         "The project deadline is April 15th 2026",
         "Got it, I'll remember the deadline is April 15th.",
     )
@@ -432,27 +434,33 @@ async fn memory_survives_rapid_consolidation() {
             r#"{{"history_entry": "Turn {i} conversation", "memory_update": null}}"#,
         ))]);
 
-        let _ = zeroclaw::memory::consolidation::consolidate_turn(
+        let _ = zeroclaw::agent::sleep_compactor::consolidate_turn_via_sleep(
             &model_provider,
             "test-model",
             None,
-            mem.as_ref(),
+            Arc::clone(&mem),
             &MemoryConfig::default(),
+            "default",
+            "default",
             &format!("User message {i}"),
             &format!("Assistant response {i}"),
         )
         .await;
     }
 
-    // All daily entries should exist
+    // Episodes (tachi) or fallback daily entries (markdown) should be persisted.
+    let episodes = mem
+        .read_episodes_in_window("default", None, None, None, 20)
+        .await
+        .unwrap();
     let entries = mem
         .recall("conversation", 20, None, None, None)
         .await
         .unwrap();
+    let total = episodes.len() + entries.len();
     assert!(
-        entries.len() >= 5,
-        "At least 5 of 10 consolidation entries should be recallable, got {}",
-        entries.len()
+        total >= 5,
+        "At least 5 of 10 consolidation records should be persisted, got {total}"
     );
 }
 

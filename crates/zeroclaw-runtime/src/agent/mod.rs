@@ -22,6 +22,7 @@ pub mod prompt_helpers;
 mod routed_approval;
 mod session_model_provider;
 pub mod side_query;
+pub mod sleep_compactor;
 pub mod soul_check;
 pub mod soul_reflection;
 pub mod system_prompt;

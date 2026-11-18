@@ -43,12 +43,14 @@ impl MemoryStrategy for DefaultMemoryStrategy {
         model: &str,
         temperature: Option<f64>,
     ) -> anyhow::Result<()> {
-        zeroclaw_memory::consolidation::consolidate_turn(
+        crate::agent::sleep_compactor::consolidate_turn_via_sleep(
             provider,
             model,
             temperature,
-            self.memory.as_ref(),
+            Arc::clone(&self.memory),
             &self.memory_config,
+            "default",
+            "default",
             user_message,
             assistant_response,
         )

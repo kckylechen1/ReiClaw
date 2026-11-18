@@ -13,10 +13,10 @@
 //!   the shared install store (one DB per install). The ≤16-row / 12h window
 //!   makes cross-agent budget negligible; identity fields remain untouchable
 //!   through `update_enrichment_fields`.
-//! - **Gateway WS path:** `zeroclaw-gateway` calls `consolidation::consolidate_turn`
-//!   directly (`ws.rs`) and therefore never triggers enrichment — known
-//!   limitation. The orchestrator / `DefaultMemoryStrategy` path is the
-//!   supported cadence.
+//! - **Gateway WS path:** `zeroclaw-gateway` runs `sleep_compactor` watermark
+//!   compaction (`ws.rs`) rather than `DefaultMemoryStrategy::consolidate_turn`.
+//!   The orchestrator / `DefaultMemoryStrategy` path is the supported cadence for
+//!   12h raw-memory enrichment.
 
 use parking_lot::Mutex;
 use portable_kernel::MemoryStore;

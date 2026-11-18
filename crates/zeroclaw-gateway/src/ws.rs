@@ -2432,35 +2432,6 @@ fn is_observability_telemetry(event: &serde_json::Value) -> bool {
     event.get("source").and_then(serde_json::Value::as_str) == Some("observability")
 }
 
-/// Provider, model, and temperature for turn-end memory consolidation,
-/// built from the agent's live `<family>.<alias>` reference and model as
-/// they stand after the turn. A mid-session model switch changes the agent's
-/// provider and model together, so consolidation follows that pair instead of
-/// the gateway's boot default: the turn's content only goes to the provider
-/// that already saw it. An empty model falls back to the entry's configured
-/// model. `None` when the reference no longer resolves (for example after a
-/// config reload removed the entry); consolidation is then skipped, never
-/// routed to another provider.
-fn ws_consolidation_model(
-    config: &zeroclaw_config::schema::Config,
-    provider_ref: &str,
-    model: &str,
-) -> Option<(
-    Box<dyn zeroclaw_api::model_provider::ModelProvider>,
-    String,
-    Option<f64>,
-)> {
-    let (family, alias) = provider_ref.split_once('.')?;
-    let temperature = config.providers.models.find(family, alias)?.temperature;
-    let (provider, _, model) = zeroclaw_runtime::agent::agent::build_session_model_provider(
-        config,
-        provider_ref,
-        Some(model),
-    )
-    .ok()?;
-    Some((provider, model, temperature))
-}
-
 /// Run one chat turn through the conversation's agent and publish its
 /// frames to every subscriber. Uses [`Agent::turn_streamed`] so that
 /// intermediate text chunks, tool calls, and tool results reach the clients
@@ -2828,7 +2799,7 @@ async fn process_chat_message(
                 );
             }
 
-            // Fire-and-forget curated-memory consolidation (sqlite Memory).
+            // Non-blocking sleep-time watermark compaction & checkpoint promotion (ADR-025).
             // Companion capture is a separate seam and already ran above.
             if state.auto_save
                 && !scope
@@ -2841,37 +2812,25 @@ async fn process_chat_message(
                     // gateway-wide boot default (upstream #10637).
                     let (_, live_provider_ref, live_model) = agent.attribution_fields();
                     let live_config = Arc::clone(&state.config);
-                    let memory_config = state.config.read().memory.clone();
-                    let user_msg = content.to_string();
-                    let assistant_resp = outcome.response.clone();
+                    let session_backend = state.session_backend.clone();
+                    let alias = turn_alias.clone();
+                    let key = session_key.to_string();
+                    let budget = usize::try_from(max_context_tokens).unwrap_or(usize::MAX);
                     zeroclaw_spawn::spawn!(async move {
                         let config = live_config.read().clone();
-                        let Some((model_provider, model, temperature)) =
-                            ws_consolidation_model(&config, &live_provider_ref, &live_model)
-                        else {
-                            ::zeroclaw_log::record!(
-                                DEBUG,
-                                ::zeroclaw_log::Event::new(
-                                    module_path!(),
-                                    ::zeroclaw_log::Action::Note
-                                )
-                                .with_attrs(::serde_json::json!({
-                                    "model_provider": &live_provider_ref,
-                                })),
-                                "WS memory consolidation skipped: provider no longer resolves"
-                            );
-                            return;
-                        };
-                        if let Err(e) = zeroclaw_memory::consolidation::consolidate_turn(
-                            model_provider.as_ref(),
-                            &model,
-                            temperature,
-                            mem.as_ref(),
-                            &memory_config,
-                            &user_msg,
-                            &assistant_resp,
-                        )
-                        .await
+                        if let Err(e) =
+                            zeroclaw_runtime::agent::sleep_compactor::maybe_compact_ws_turn(
+                                &config,
+                                session_backend.as_ref(),
+                                Some(&mem),
+                                &alias,
+                                &key,
+                                &live_provider_ref,
+                                &live_model,
+                                budget,
+                                last_input_tokens,
+                            )
+                            .await
                         {
                             ::zeroclaw_log::record!(
                                 DEBUG,
@@ -2880,7 +2839,7 @@ async fn process_chat_message(
                                     ::zeroclaw_log::Action::Note
                                 )
                                 .with_attrs(::serde_json::json!({"error": format!("{}", e)})),
-                                "WS memory consolidation skipped"
+                                "WS sleep watermark compaction skipped"
                             );
                         }
                     });
@@ -2888,7 +2847,7 @@ async fn process_chat_message(
                     ::zeroclaw_log::record!(
                         DEBUG,
                         ::zeroclaw_log::Event::new(module_path!(), ::zeroclaw_log::Action::Note),
-                        "WS memory consolidation skipped"
+                        "WS sleep watermark compaction skipped"
                     );
                 }
             }
@@ -3043,10 +3002,10 @@ mod tests {
     use super::*;
     use axum::http::HeaderMap;
 
-    /// Consolidation follows the agent's live provider reference, with that
+    /// Sleep compaction follows the agent's live provider reference, with that
     /// entry's model and temperature, not the install-wide default.
     #[test]
-    fn ws_consolidation_model_follows_the_live_provider_reference() {
+    fn ws_sleep_model_follows_the_live_provider_reference() {
         use zeroclaw_api::attribution::Attributable as _;
         use zeroclaw_config::schema::{
             ModelProviderConfig, OllamaModelProviderConfig, OpenAIModelProviderConfig,
@@ -3073,30 +3032,54 @@ mod tests {
             },
         );
 
-        let (provider, model, temperature) =
-            ws_consolidation_model(&config, "ollama.local", "llama3").unwrap();
-        assert_eq!(provider.alias(), "local");
-        assert_eq!(model, "llama3");
-        assert_eq!(temperature, Some(0.3));
+        let resolved = zeroclaw_runtime::agent::sleep_compactor::resolve_fast_sleep_model(
+            &config,
+            "ollama.local",
+            "llama3",
+        )
+        .unwrap();
+        assert_eq!(resolved.provider.alias(), "local");
+        assert_eq!(resolved.model, "llama3");
+        assert_eq!(resolved.temperature, Some(0.3));
 
-        let (provider, model, temperature) =
-            ws_consolidation_model(&config, "ollama.local", "").unwrap();
-        assert_eq!(provider.alias(), "local");
-        assert_eq!(model, "local-model");
-        assert_eq!(temperature, Some(0.3));
+        let fallback = zeroclaw_runtime::agent::sleep_compactor::resolve_fast_sleep_model(
+            &config,
+            "ollama.local",
+            "",
+        )
+        .unwrap();
+        assert_eq!(fallback.provider.alias(), "local");
+        assert_eq!(fallback.model, "local-model");
+        assert_eq!(fallback.temperature, Some(0.3));
 
         // A reference that no longer resolves is skipped, not rerouted.
-        assert!(ws_consolidation_model(&config, "ollama.removed", "llama3").is_none());
-        assert!(ws_consolidation_model(&config, "not-dotted", "llama3").is_none());
+        assert!(
+            zeroclaw_runtime::agent::sleep_compactor::resolve_fast_sleep_model(
+                &config,
+                "ollama.removed",
+                "llama3",
+            )
+            .is_none()
+        );
+        assert!(
+            zeroclaw_runtime::agent::sleep_compactor::resolve_fast_sleep_model(
+                &config,
+                "not-dotted",
+                "llama3",
+            )
+            .is_none()
+        );
     }
 
     #[test]
-    fn consolidation_does_not_use_the_gateway_boot_provider() {
+    fn sleep_compaction_does_not_use_the_gateway_boot_provider() {
         let src = process_chat_message_src();
-        let consolidation = src.find("consolidate_turn").expect("consolidation call");
-        let block = &src[src[..consolidation].rfind("if state.auto_save").unwrap()..consolidation];
+        let compaction = src
+            .find("maybe_compact_ws_turn")
+            .expect("sleep compaction call");
+        let block = &src[src[..compaction].rfind("if state.auto_save").unwrap()..compaction];
         assert!(!block.contains("state.model_provider"), "{block}");
-        assert!(block.contains("ws_consolidation_model"), "{block}");
+        assert!(block.contains("attribution_fields"), "{block}");
     }
 
     fn process_chat_message_src() -> &'static str {
