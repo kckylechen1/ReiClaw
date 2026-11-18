@@ -49,7 +49,7 @@ impl PointScope {
     }
 }
 
-#[cfg(feature = "tachi")]
+#[cfg(feature = "memorycore")]
 impl PointRow for crate::traits::MemoryEntry {
     fn is_conversation(&self) -> bool {
         self.category == crate::traits::MemoryCategory::Conversation

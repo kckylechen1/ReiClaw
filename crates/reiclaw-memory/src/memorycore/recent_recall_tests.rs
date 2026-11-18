@@ -11,7 +11,7 @@ fn row(
     let category = MemoryCategory::Daily;
     portable_kernel::MemoryEntry {
         id: id.into(),
-        path: TachiMemory::storage_path(agent, namespace, &category, id),
+        path: MemoryCore::storage_path(agent, namespace, &category, id),
         summary: format!("Summary for {id}"),
         text: format!("{id}: {}", "retained body ".repeat(160)),
         importance: 0.7,
@@ -24,7 +24,7 @@ fn row(
         persons: vec![],
         entities: vec![],
         location: String::new(),
-        source: "zeroclaw".into(),
+        source: "reiclaw".into(),
         scope: "general".into(),
         archived: false,
         access_count: 7,
@@ -35,7 +35,7 @@ fn row(
         vector: None,
         retention_policy: None,
         domain: None,
-        metadata: TachiMemory::build_metadata(
+        metadata: MemoryCore::build_metadata(
             id,
             &category,
             session,
@@ -56,7 +56,7 @@ fn ids(entries: &[MemoryEntry]) -> Vec<&str> {
 #[tokio::test]
 async fn host_scope_filters_precede_the_recent_limit() {
     let tmp = TempDir::new().unwrap();
-    let memory = TachiMemory::new("tachi", tmp.path()).unwrap();
+    let memory = MemoryCore::new("memorycore", tmp.path()).unwrap();
     let expected = {
         let mut store = memory.store_handle().lock();
         for index in 0..96 {
@@ -104,7 +104,7 @@ async fn host_scope_filters_precede_the_recent_limit() {
         archived.archived = true;
         store.upsert(&archived).unwrap();
         ["eligible-a", "eligible-b", "eligible-c"]
-            .map(|id| TachiMemory::memcore_to_zeroclaw(store.get(id).unwrap().unwrap(), Some(1.0)))
+            .map(|id| MemoryCore::memcore_to_zeroclaw(store.get(id).unwrap().unwrap(), Some(1.0)))
             .to_vec()
     };
 
@@ -140,7 +140,7 @@ async fn host_scope_filters_precede_the_recent_limit() {
 #[tokio::test]
 async fn namespace_selection_and_legacy_defaults_keep_host_semantics() {
     let tmp = TempDir::new().unwrap();
-    let memory = TachiMemory::new("tachi", tmp.path()).unwrap();
+    let memory = MemoryCore::new("memorycore", tmp.path()).unwrap();
     {
         let mut store = memory.store_handle().lock();
         for index in 0..32 {
@@ -208,7 +208,7 @@ async fn namespace_selection_and_legacy_defaults_keep_host_semantics() {
 #[tokio::test]
 async fn large_agent_allowlists_merge_batches_before_the_global_limit() {
     let tmp = TempDir::new().unwrap();
-    let memory = TachiMemory::new("tachi", tmp.path()).unwrap();
+    let memory = MemoryCore::new("memorycore", tmp.path()).unwrap();
     let mut agents: Vec<String> = (0..300).map(|index| format!("agent-{index:03}")).collect();
     agents.push(agents[0].clone());
     {
@@ -318,7 +318,7 @@ async fn large_agent_allowlists_merge_batches_before_the_global_limit() {
 #[tokio::test]
 async fn recent_time_bounds_honor_inclusive_rfc3339_instants_literal_fallback_and_zero_limit() {
     let tmp = TempDir::new().unwrap();
-    let memory = TachiMemory::new("tachi", tmp.path()).unwrap();
+    let memory = MemoryCore::new("memorycore", tmp.path()).unwrap();
     {
         let mut store = memory.store_handle().lock();
         for (id, timestamp) in [

@@ -3,9 +3,9 @@ use crate::AgentScopedMemory;
 use reiclaw_api::TOOL_LOOP_MEMORY_SESSIONS;
 use tempfile::TempDir;
 
-fn temp_memory() -> (TempDir, TachiMemory) {
+fn temp_memory() -> (TempDir, MemoryCore) {
     let tmp = TempDir::new().unwrap();
-    let memory = TachiMemory::new("tachi", tmp.path()).unwrap();
+    let memory = MemoryCore::new("memorycore", tmp.path()).unwrap();
     (tmp, memory)
 }
 
@@ -161,14 +161,13 @@ async fn legacy_unscoped_path_keeps_identity_and_governance_on_restore() {
         let mut legacy = store.get(&id).unwrap().unwrap();
         // Fixture from the former adapter: metadata has session authority,
         // but the physical path has no session component.
-        legacy.path =
-            TachiMemory::storage_path(None, None, &MemoryCategory::Conversation, "legacy");
+        legacy.path = MemoryCore::storage_path(None, None, &MemoryCategory::Conversation, "legacy");
         legacy.keywords = vec!["retained governance".into()];
         legacy.access_count = 7;
         store.upsert(&legacy).unwrap();
     }
     drop(memory);
-    let memory = TachiMemory::new("tachi", tmp.path()).unwrap();
+    let memory = MemoryCore::new("memorycore", tmp.path()).unwrap();
     memory
         .store(
             "legacy",

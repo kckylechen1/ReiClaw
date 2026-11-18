@@ -49,10 +49,11 @@ pub enum MemoryBackendKind {
     /// (`crates/reiclaw-memory/src/lucid.rs`). Retired — same contract as
     /// [`Self::Postgres`].
     Lucid,
-    /// Embedded Tachi portable kernel (`crates/reiclaw-memory/src/tachi.rs`).
+    /// Embedded MemoryCore portable kernel (`crates/reiclaw-memory/src/memorycore.rs`).
     /// Default for new agents.
     #[default]
-    Tachi,
+    #[serde(rename = "memorycore")]
+    MemoryCore,
 }
 
 /// Per-agent workspace and cross-agent access configuration.
@@ -81,7 +82,7 @@ pub struct AgentWorkspaceConfig {
 #[prefix = "agent_memory"]
 #[serde(default)]
 pub struct AgentMemoryConfig {
-    /// The backend kind this agent uses. Defaults to `Tachi` for new
+    /// The backend kind this agent uses. Defaults to `MemoryCore` for new
     /// agents; once an agent has on-disk data the value is locked.
     pub backend: MemoryBackendKind,
 }
@@ -292,7 +293,7 @@ external_peers = ["@user_1", "@user_2"]
             (MemoryBackendKind::Qdrant, "\"qdrant\""),
             (MemoryBackendKind::Markdown, "\"markdown\""),
             (MemoryBackendKind::Lucid, "\"lucid\""),
-            (MemoryBackendKind::Tachi, "\"tachi\""),
+            (MemoryBackendKind::MemoryCore, "\"memorycore\""),
         ];
         for (kind, expected) in cases {
             let json = serde_json::to_string(&kind).unwrap();
@@ -344,10 +345,10 @@ gamma = "read_write"
     }
 
     #[test]
-    fn agent_memory_config_default_is_tachi() {
+    fn agent_memory_config_default_is_memorycore() {
         assert_eq!(
             AgentMemoryConfig::default().backend,
-            MemoryBackendKind::Tachi
+            MemoryBackendKind::MemoryCore
         );
     }
 

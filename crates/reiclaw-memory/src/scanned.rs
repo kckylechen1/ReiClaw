@@ -766,10 +766,10 @@ impl<M: Memory> Memory for ScannedMemory<M> {
     }
 }
 
-#[cfg(all(test, feature = "tachi"))]
+#[cfg(all(test, feature = "memorycore"))]
 mod tests {
     use super::*;
-    use crate::tachi::TachiMemory;
+    use crate::memorycore::MemoryCore;
     use std::sync::{Arc, Mutex};
     use tempfile::TempDir;
 
@@ -784,8 +784,8 @@ mod tests {
         }
     }
 
-    fn scanned(tmp: &TempDir, policy: &MemoryPolicyConfig) -> ScannedMemory<TachiMemory> {
-        ScannedMemory::new(TachiMemory::new("tachi", tmp.path()).unwrap(), policy)
+    fn scanned(tmp: &TempDir, policy: &MemoryPolicyConfig) -> ScannedMemory<MemoryCore> {
+        ScannedMemory::new(MemoryCore::new("memorycore", tmp.path()).unwrap(), policy)
     }
 
     #[tokio::test]

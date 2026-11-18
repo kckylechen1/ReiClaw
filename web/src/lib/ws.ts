@@ -112,7 +112,7 @@ export class WebSocketClient {
     params.set('surface', 'web');
     const url = `${this.baseUrl}${basePath}/ws/chat?${params.toString()}`;
 
-    const protocols: string[] = ['zeroclaw.v1'];
+    const protocols: string[] = ['reiclaw.v1'];
     if (token) protocols.push(`bearer.${token}`);
     this.ws = new WebSocket(url, protocols);
 

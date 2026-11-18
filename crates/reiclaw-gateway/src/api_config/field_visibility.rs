@@ -4,7 +4,7 @@ use reiclaw_config::schema::Config;
 
 fn memory_backend_excludes(backend: &str) -> Vec<&'static str> {
     let mut out = Vec::new();
-    if backend != "tachi" {
+    if backend != "memorycore" {
         out.push("conversation-retention-days");
     }
     out
@@ -13,7 +13,7 @@ fn memory_backend_excludes(backend: &str) -> Vec<&'static str> {
 pub(super) fn excluded_paths(cfg: &Config, prefix: &str) -> Vec<String> {
     if prefix == "memory" || prefix.is_empty() {
         let backend = if cfg.memory.backend.is_empty() {
-            "tachi"
+            "memorycore"
         } else {
             cfg.memory.backend.as_str()
         };
@@ -52,8 +52,8 @@ mod tests {
     use super::*;
 
     #[test]
-    fn memory_excludes_hide_non_tachi_retention_knobs() {
-        let ex = memory_backend_excludes("tachi");
+    fn memory_excludes_hide_non_memorycore_retention_knobs() {
+        let ex = memory_backend_excludes("memorycore");
         assert!(!ex.contains(&"conversation-retention-days"));
 
         let ex = memory_backend_excludes("markdown");

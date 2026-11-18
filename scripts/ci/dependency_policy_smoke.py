@@ -234,9 +234,9 @@ def main():
     args = parser.parse_args()
     config = args.config.resolve(strict=True)
     cargo = str(Path(args.cargo).resolve()) if os.sep in args.cargo else args.cargo
-    # Route B enables memory-tachi by default on reiclaw; keep the lean
+    # Route B enables memory-core by default on reiclaw; keep the lean
     # core profiles (--no-default-features, slim-control, and reiclaw-memory
-    # without `tachi`) strictly AGPL-free.
+    # without `memorycore`) strictly AGPL-free.
     check_graph(cargo, repo, allow_reviewed_agpl=True)
     check_graph(cargo, repo, extra_args=("--no-default-features",),
                 scope_label="minimal (--no-default-features)")

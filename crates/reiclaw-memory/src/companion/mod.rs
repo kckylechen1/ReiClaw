@@ -1,6 +1,6 @@
 //! Companion-memory PortableKernel store.
 //!
-//! Sibling of the generic [`crate::Memory`] backend. `TachiMemory` must never
+//! Sibling of the generic [`crate::Memory`] backend. `MemoryCore` must never
 //! open this file. Runtime opens always deny schema migration, and legacy
 //! stores are refused: the offline conversion tool was retired.
 
@@ -8,18 +8,18 @@ use std::sync::Arc;
 
 use reiclaw_config::schema::Config;
 
-#[cfg(feature = "tachi")]
+#[cfg(feature = "memorycore")]
 mod store;
-#[cfg(feature = "tachi")]
+#[cfg(feature = "memorycore")]
 pub use store::CompanionStore;
 
-#[cfg(not(feature = "tachi"))]
+#[cfg(not(feature = "memorycore"))]
 mod stub;
-#[cfg(not(feature = "tachi"))]
+#[cfg(not(feature = "memorycore"))]
 pub use stub::CompanionStore;
 
 mod identity;
-#[cfg(all(test, feature = "tachi"))]
+#[cfg(all(test, feature = "memorycore"))]
 #[path = "tests/legacy_capture.rs"]
 mod legacy_capture;
 mod outbox;
@@ -64,7 +64,7 @@ pub use user_model_scope::{ApplicabilityContext, Scope};
 /// Construct the companion store from config.
 ///
 /// Returns `Ok(None)` when `[companion_memory].enable` is false, or when this
-/// build was compiled without the `tachi` feature (no memcore / no AGPL).
+/// build was compiled without the `memorycore` feature (no memcore / no AGPL).
 ///
 /// # Errors
 /// Returns when enable is true, memcore is available, and the PortableKernel
@@ -74,20 +74,20 @@ pub fn create_companion_store(config: &Config) -> anyhow::Result<Option<Arc<Comp
         return Ok(None);
     }
 
-    #[cfg(not(feature = "tachi"))]
+    #[cfg(not(feature = "memorycore"))]
     {
         ::reiclaw_log::record!(
             WARN,
             ::reiclaw_log::Event::new(module_path!(), ::reiclaw_log::Action::Note)
                 .with_outcome(::reiclaw_log::EventOutcome::Unknown),
             "companion_memory.enable is true but this build was compiled without \
-             `memory-tachi`; companion store stays closed. Rebuild with \
-             `--features memory-tachi` to open it."
+             `memory-core`; companion store stays closed. Rebuild with \
+             `--features memory-core` to open it."
         );
         Ok(None)
     }
 
-    #[cfg(feature = "tachi")]
+    #[cfg(feature = "memorycore")]
     {
         let path = config.companion_memory.db_path(&config.data_dir);
         let store = CompanionStore::open_runtime(&path)?;
@@ -163,9 +163,9 @@ mod tests {
         assert!(!config.companion_memory.db_path(tmp.path()).exists());
     }
 
-    #[cfg(not(feature = "tachi"))]
+    #[cfg(not(feature = "memorycore"))]
     #[test]
-    fn enable_true_without_tachi_feature_returns_none() {
+    fn enable_true_without_memorycore_feature_returns_none() {
         let tmp = TempDir::new().unwrap();
         let config = cfg_with(tmp.path(), true);
         let store = create_companion_store(&config).expect("feature-off factory");
@@ -191,7 +191,7 @@ mod tests {
         }
     }
 
-    #[cfg(feature = "tachi")]
+    #[cfg(feature = "memorycore")]
     #[test]
     fn enabled_daemon_composition_injects_one_arc_without_second_create() {
         let tmp = TempDir::new().unwrap();

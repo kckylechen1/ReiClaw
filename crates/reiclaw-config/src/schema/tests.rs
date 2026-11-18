@@ -1507,7 +1507,7 @@ default_temperature = 0.7
 #[test]
 async fn memory_config_default_hygiene_settings() {
     let m = MemoryConfig::default();
-    assert_eq!(m.backend, "tachi");
+    assert_eq!(m.backend, "memorycore");
     assert!(m.auto_save);
     assert!(m.hygiene_enabled);
     assert_eq!(m.archive_after_days, 7);
@@ -12379,23 +12379,23 @@ async fn validate_rejects_read_memory_from_cross_backend() {
 }
 
 #[test]
-async fn validate_rejects_typed_memory_flags_on_non_tachi_global_backend() {
+async fn validate_rejects_typed_memory_flags_on_non_memorycore_global_backend() {
     let mut config = multi_agent_test_config();
     config.memory.types.enabled = true;
     config.memory.backend = "markdown.work".to_string();
 
     let err = config
         .validate()
-        .expect_err("typed memory on a non-sqlite global backend must fail validation");
+        .expect_err("typed memory on a non-memorycore global backend must fail validation");
     let msg = err.to_string();
     assert!(
-        msg.contains("memory.types.enabled") && msg.contains("Tachi-only"),
-        "expected Tachi-only explanation naming the flag, got: {msg}"
+        msg.contains("memory.types.enabled") && msg.contains("MemoryCore-only"),
+        "expected MemoryCore-only explanation naming the flag, got: {msg}"
     );
 }
 
 #[test]
-async fn validate_rejects_typed_memory_flags_on_non_tachi_agent_backend() {
+async fn validate_rejects_typed_memory_flags_on_non_memorycore_agent_backend() {
     let mut config = multi_agent_test_config();
     config.memory.consolidation_extract_facts = true;
 
@@ -12412,13 +12412,13 @@ async fn validate_rejects_typed_memory_flags_on_non_tachi_agent_backend() {
 
     let err = config
         .validate()
-        .expect_err("typed memory with a non-tachi agent backend must fail validation");
+        .expect_err("typed memory with a non-memorycore agent backend must fail validation");
     let msg = err.to_string();
     assert!(
         msg.contains("memory.consolidation_extract_facts")
             && msg.contains("agents.beta.memory.backend")
             && msg.contains("Markdown"),
-        "expected Tachi-only explanation naming the agent, got: {msg}"
+        "expected MemoryCore-only explanation naming the agent, got: {msg}"
     );
 }
 
@@ -12439,35 +12439,35 @@ async fn validate_rejects_typed_memory_flags_on_retired_sqlite_backend() {
 }
 
 #[test]
-async fn validate_accepts_typed_memory_flags_on_mixed_case_tachi() {
+async fn validate_accepts_typed_memory_flags_on_mixed_case_memorycore() {
     // The runtime classifies backends case-insensitively
-    // (`backend_kind_from_dotted` lowercases), so the Tachi-only gate
-    // must accept every spelling the runtime resolves to tachi.
+    // (`backend_kind_from_dotted` lowercases), so the MemoryCore-only gate
+    // must accept every spelling the runtime resolves to memorycore.
     let mut config = multi_agent_test_config();
     config.memory.types.enabled = true;
-    config.memory.backend = " TaChI.default ".to_string();
+    config.memory.backend = " MeMoRyCoRe.default ".to_string();
 
     config
         .validate()
-        .expect("mixed-case tachi spellings the runtime accepts must pass the typed gate");
+        .expect("mixed-case memorycore spellings the runtime accepts must pass the typed gate");
 }
 
 #[test]
-async fn validate_accepts_typed_memory_flags_on_tachi() {
+async fn validate_accepts_typed_memory_flags_on_memorycore() {
     let mut config = multi_agent_test_config();
     config.memory.types.enabled = true;
     config.memory.consolidation_extract_facts = true;
-    config.memory.backend = "tachi".to_string();
+    config.memory.backend = "memorycore".to_string();
     let alpha = config.agents.get_mut("alpha").unwrap();
-    alpha.memory.backend = crate::multi_agent::MemoryBackendKind::Tachi;
+    alpha.memory.backend = crate::multi_agent::MemoryBackendKind::MemoryCore;
 
     config
         .validate()
-        .expect("typed memory on tachi everywhere must pass validation");
+        .expect("typed memory on memorycore everywhere must pass validation");
 }
 
 #[test]
-async fn validate_allows_non_tachi_backend_when_typed_memory_flags_off() {
+async fn validate_allows_non_memorycore_backend_when_typed_memory_flags_off() {
     let mut config = multi_agent_test_config();
     config.memory.backend = "markdown.work".to_string();
     let alpha = config.agents.get_mut("alpha").unwrap();
@@ -13738,7 +13738,7 @@ fn suppress_semantic_memory_warning(config: &mut Config) {
 }
 
 #[test]
-async fn collect_warnings_flags_tachi_hybrid_without_embedder() {
+async fn collect_warnings_flags_memorycore_hybrid_without_embedder() {
     let config = Config::default();
 
     let warnings = warnings_with_code(&config, SEMANTIC_MEMORY_WARNING);
@@ -13746,8 +13746,8 @@ async fn collect_warnings_flags_tachi_hybrid_without_embedder() {
     let warning = &warnings[0];
     assert_eq!(warning.path, "memory.search_mode");
     assert!(
-        warning.message.contains("tachi"),
-        "warning should name tachi memory: {}",
+        warning.message.contains("memorycore"),
+        "warning should name memorycore memory: {}",
         warning.message
     );
     assert!(
@@ -13758,7 +13758,7 @@ async fn collect_warnings_flags_tachi_hybrid_without_embedder() {
 }
 
 #[test]
-async fn collect_warnings_flags_tachi_embedding_without_embedder() {
+async fn collect_warnings_flags_memorycore_embedding_without_embedder() {
     let mut config = Config::default();
     config.memory.search_mode = SearchMode::Embedding;
 
@@ -13834,7 +13834,7 @@ async fn collect_warnings_silent_for_bm25_without_embedder() {
 }
 
 #[test]
-async fn collect_warnings_silent_for_non_tachi_without_embedder() {
+async fn collect_warnings_silent_for_non_memorycore_without_embedder() {
     let mut config = Config::default();
     config.memory.backend = "markdown.default".to_string();
 

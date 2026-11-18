@@ -7,7 +7,7 @@ use std::sync::Arc;
 
 use axum::{Router, extract::State, routing::post};
 use reiclaw_config::schema::{AliasedAgentConfig, Config, RiskProfileConfig};
-use reiclaw_memory::{MemoryCategory, TACHI_COMPILED, create_memory};
+use reiclaw_memory::{MEMORYCORE_COMPILED, MemoryCategory, create_memory};
 use reiclaw_runtime::agent::loop_::AgentRunOverrides;
 use tempfile::TempDir;
 use tokio::sync::Mutex as AsyncMutex;
@@ -137,7 +137,7 @@ fn body_advertises_memory_tool(body: &str) -> bool {
 
 #[tokio::test]
 async fn uses_memory_false_cron_run_has_no_memory_backend_or_tools() {
-    if !TACHI_COMPILED {
+    if !MEMORYCORE_COMPILED {
         return;
     }
     let tmp = TempDir::new().unwrap();
@@ -173,7 +173,7 @@ async fn uses_memory_false_cron_run_has_no_memory_backend_or_tools() {
 
 #[tokio::test]
 async fn uses_memory_true_cron_run_keeps_memory_tools() {
-    if !TACHI_COMPILED {
+    if !MEMORYCORE_COMPILED {
         return;
     }
     // Control: the identical setup with a live backend (`uses_memory = true`)

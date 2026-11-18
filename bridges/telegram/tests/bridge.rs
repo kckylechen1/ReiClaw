@@ -243,7 +243,7 @@ fn fake_gateway(listener: TcpListener) -> FakeGateway {
                     } else {
                         let query = req.uri().query().unwrap_or_default().to_string();
                         assert_eq!(query, "agent=assistant&session_id=main");
-                        "zeroclaw.v1"
+                        "reiclaw.v1"
                     };
                     resp.headers_mut()
                         .insert("sec-websocket-protocol", protocol.parse().unwrap());

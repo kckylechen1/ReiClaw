@@ -187,7 +187,7 @@ fn discover_probe_request() -> JsonRpcRequest {
             "_meta": {
                 "io.modelcontextprotocol/protocolVersion": MCP_MODERN_PROTOCOL_VERSION,
                 "io.modelcontextprotocol/clientInfo": {
-                    "name": "zeroclaw",
+                    "name": "reiclaw",
                     "version": env!("CARGO_PKG_VERSION")
                 },
                 "io.modelcontextprotocol/clientCapabilities": {}
@@ -253,7 +253,7 @@ async fn handshake(
             "protocolVersion": MCP_PROTOCOL_VERSION,
             "capabilities": { "resources": {}, "prompts": {} },
             "clientInfo": {
-                "name": "zeroclaw",
+                "name": "reiclaw",
                 "version": env!("CARGO_PKG_VERSION")
             }
         }),

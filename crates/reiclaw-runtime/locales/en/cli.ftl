@@ -147,7 +147,7 @@ cli-memory-list-about = List memory entries with optional filters
 cli-memory-get-about = Get a specific memory entry by key
 cli-memory-stats-about = Show memory backend statistics and health
 cli-memory-clear-about = Clear memories by category, by key, or clear all
-cli-memory-clear-unsupported-backend = memory clear is unsupported for append-only backend '{$backend}'; switch to a deletable backend (tachi)
+cli-memory-clear-unsupported-backend = memory clear is unsupported for append-only backend '{$backend}'; switch to a deletable backend (memorycore)
 
 cli-estop-status-about = Print current estop status
 cli-estop-resume-about = Resume from an engaged estop level
@@ -527,7 +527,7 @@ cli-quickstart-error-completion-flag = failed to flip quickstart-completed: {$er
 cli-quickstart-error-persist-config = failed to persist config: {$err}
 cli-quickstart-error-not-type-alias-ref = `{$reference}` is not a `<type>.<alias>` reference
 cli-quickstart-error-no-configured-path = no `{$path}` configured
-cli-quickstart-error-tachi-not-compiled = memory backend 'tachi' requires a build with `memory-tachi` enabled
+cli-quickstart-error-memorycore-not-compiled = memory backend 'memorycore' requires a build with `memory-core` enabled
 cli-quickstart-error-provider-required = provider type, alias, and model are required
 cli-quickstart-error-unknown-provider-type = unknown model provider type `{$provider}` — pick one from the provider list
 cli-quickstart-error-unknown-openai-auth-mode = unknown OpenAI auth mode `{$mode}` — pick `api_key` or `codex`

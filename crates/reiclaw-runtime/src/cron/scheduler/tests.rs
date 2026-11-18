@@ -71,7 +71,7 @@ async fn test_config(tmp: &TempDir) -> Config {
         config_path: tmp.path().join("config.toml"),
         ..Config::default()
     };
-    if !reiclaw_memory::TACHI_COMPILED {
+    if !reiclaw_memory::MEMORYCORE_COMPILED {
         config.memory.backend = "markdown".into();
     }
     config.risk_profiles.insert(

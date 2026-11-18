@@ -30,7 +30,7 @@ class Wire:
                 f"GET {path} HTTP/1.1\r\nHost: {authority}:{port}\r\n"
                 "Upgrade: websocket\r\nConnection: Upgrade\r\n"
                 f"Sec-WebSocket-Key: {key}\r\nSec-WebSocket-Version: 13\r\n"
-                "Sec-WebSocket-Protocol: zeroclaw.v1\r\n"
+                "Sec-WebSocket-Protocol: reiclaw.v1\r\n"
                 f"Authorization: Bearer {token}\r\n\r\n"
             )
             writer.write(headers.encode("ascii"))
@@ -52,7 +52,7 @@ class Wire:
             if (
                 lines[0].split()[:2] != ["HTTP/1.1", "101"]
                 or fields.get("sec-websocket-accept") != base64.b64encode(digest).decode()
-                or fields.get("sec-websocket-protocol") != "zeroclaw.v1"
+                or fields.get("sec-websocket-protocol") != "reiclaw.v1"
                 or fields.get("upgrade", "").lower() != "websocket"
                 or "upgrade" not in [v.strip().lower() for v in fields.get("connection", "").split(",")]
                 or "sec-websocket-extensions" in fields

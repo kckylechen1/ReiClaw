@@ -31,7 +31,7 @@ portable_kernel = { package = "portable-kernel", version = "1.9.0", git = "https
 
 [features]
 voice-surface = ["reiclaw-api/voice-surface"]
-tachi = ["dep:portable_kernel", "rusqlite/functions"]
+memorycore = ["dep:portable_kernel", "rusqlite/functions"]
 
 [dev-dependencies]
 filetime = "0.2"

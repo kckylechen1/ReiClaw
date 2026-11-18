@@ -166,17 +166,17 @@ impl Tool for MemoryExportTool {
 mod tests {
     use super::*;
     use reiclaw_config::schema::{MemoryConfig, MemoryPolicyConfig};
-    use reiclaw_memory::{MemoryEntry, NoneMemory, TACHI_COMPILED, create_memory};
+    use reiclaw_memory::{MEMORYCORE_COMPILED, MemoryEntry, NoneMemory, create_memory};
     use std::sync::atomic::{AtomicUsize, Ordering};
     use tempfile::TempDir;
 
     fn try_test_mem() -> Option<(TempDir, Arc<dyn Memory>)> {
-        if !TACHI_COMPILED {
+        if !MEMORYCORE_COMPILED {
             return None;
         }
         let tmp = TempDir::new().unwrap();
         let cfg = MemoryConfig {
-            backend: "tachi".into(),
+            backend: "memorycore".into(),
             hygiene_enabled: false,
             embedding_provider: "none".into(),
             ..MemoryConfig::default()
@@ -555,7 +555,7 @@ mod tests {
 
     #[tokio::test]
     async fn export_tool_omits_rows_withheld_by_read_policy() {
-        if !TACHI_COMPILED {
+        if !MEMORYCORE_COMPILED {
             return;
         }
         let tmp = TempDir::new().unwrap();
@@ -564,7 +564,7 @@ mod tests {
             ..MemoryPolicyConfig::default()
         };
         let cfg = MemoryConfig {
-            backend: "tachi".into(),
+            backend: "memorycore".into(),
             hygiene_enabled: false,
             embedding_provider: "none".into(),
             policy,

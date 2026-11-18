@@ -18,7 +18,7 @@ use tokio_tungstenite::tungstenite::{Message, Utf8Bytes};
 use tokio_tungstenite::{MaybeTlsStream, WebSocketStream};
 
 /// The chat sub-protocol the gateway speaks.
-pub const PROTOCOL: &str = "zeroclaw.v1";
+pub const PROTOCOL: &str = "reiclaw.v1";
 
 /// Where and as whom to attach.
 #[derive(Debug, Clone)]

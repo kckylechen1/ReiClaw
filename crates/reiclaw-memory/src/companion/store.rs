@@ -498,12 +498,12 @@ mod tests {
     }
 
     #[test]
-    fn tachi_backend_and_companion_use_distinct_files() {
+    fn memorycore_backend_and_companion_use_distinct_files() {
         use crate::traits::{Memory, MemoryCategory};
 
         let tmp = TempDir::new().unwrap();
         let mut config = enabled_config(tmp.path());
-        config.memory.backend = "tachi".into();
+        config.memory.backend = "memorycore".into();
 
         let companion = create_companion_store(&config)
             .expect("companion")
@@ -514,12 +514,13 @@ mod tests {
             .upsert(&probe_entry("companion-only", "only in companion"))
             .expect("companion upsert");
 
-        let tachi = crate::tachi::TachiMemory::new("tachi", tmp.path()).expect("tachi open");
+        let memorycore =
+            crate::memorycore::MemoryCore::new("memorycore", tmp.path()).expect("memorycore open");
         let companion_path = companion.path().to_path_buf();
-        let tachi_path = tmp.path().join("memory").join("tachi.db");
-        assert_ne!(companion_path, tachi_path);
+        let memorycore_path = tmp.path().join("memory").join("memorycore.db");
+        assert_ne!(companion_path, memorycore_path);
         assert!(companion_path.exists());
-        assert!(tachi_path.exists());
+        assert!(memorycore_path.exists());
         assert!(
             !companion_path.starts_with(tmp.path().join("memory")),
             "companion must not live under memory/"
@@ -530,12 +531,17 @@ mod tests {
             .build()
             .unwrap();
         rt.block_on(async {
-            tachi
-                .store("tachi-only", "only in tachi", MemoryCategory::Core, None)
+            memorycore
+                .store(
+                    "memorycore-only",
+                    "only in memorycore",
+                    MemoryCategory::Core,
+                    None,
+                )
                 .await
-                .expect("tachi store");
+                .expect("memorycore store");
         });
-        drop(tachi);
+        drop(memorycore);
         drop(companion);
 
         fn text_hits(db: &Path, needle: &str) -> i64 {
@@ -549,9 +555,9 @@ mod tests {
         }
 
         assert_eq!(text_hits(&companion_path, "only in companion"), 1);
-        assert_eq!(text_hits(&companion_path, "only in tachi"), 0);
-        assert_eq!(text_hits(&tachi_path, "only in tachi"), 1);
-        assert_eq!(text_hits(&tachi_path, "only in companion"), 0);
+        assert_eq!(text_hits(&companion_path, "only in memorycore"), 0);
+        assert_eq!(text_hits(&memorycore_path, "only in memorycore"), 1);
+        assert_eq!(text_hits(&memorycore_path, "only in companion"), 0);
     }
 
     #[cfg(unix)]

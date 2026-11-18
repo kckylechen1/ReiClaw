@@ -216,7 +216,7 @@ impl tokio_tungstenite::tungstenite::handshake::server::Callback for ChatProtoco
     > {
         response.headers_mut().insert(
             header::SEC_WEBSOCKET_PROTOCOL,
-            HeaderValue::from_static("zeroclaw.v1"),
+            HeaderValue::from_static("reiclaw.v1"),
         );
         Ok(response)
     }

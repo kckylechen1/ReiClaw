@@ -40,7 +40,7 @@ impl Attributable for InMemorySleepStore {
 #[async_trait]
 impl Memory for InMemorySleepStore {
     fn name(&self) -> &str {
-        "tachi"
+        "memorycore"
     }
 
     async fn store(
@@ -466,7 +466,7 @@ fn split_model_routing_uses_hint_fast_when_configured_and_falls_back_to_primary(
             enabled: true,
             model_provider: "openai.flagship".into(),
             memory: AgentMemoryConfig {
-                backend: MemoryBackendKind::Tachi,
+                backend: MemoryBackendKind::MemoryCore,
             },
             ..Default::default()
         },
@@ -1210,29 +1210,29 @@ async fn soul_namespace_isolation_refuses_soul_targets() {
     assert!(err.to_string().contains("Soul"));
 }
 
-#[cfg(feature = "memory-tachi")]
+#[cfg(feature = "memory-core")]
 #[tokio::test]
-async fn tachi_end_to_end_sleep_compactor_parity() {
+async fn memorycore_end_to_end_sleep_compactor_parity() {
     let dir = TempDir::new().unwrap();
-    let tachi = Arc::new(reiclaw_memory::TachiMemory::new("tachi", dir.path()).unwrap());
-    let mem: Arc<dyn Memory> = tachi;
+    let mc = Arc::new(reiclaw_memory::MemoryCore::new("memorycore", dir.path()).unwrap());
+    let mem: Arc<dyn Memory> = mc;
     let mut cfg = MemoryConfig::default();
     cfg.types.enabled = true;
     cfg.consolidation_extract_facts = true;
 
     let provider = ScriptedNativeProvider::new(
-        "tachi-parity",
+        "memorycore-parity",
         vec![ChatResponse {
             text: None,
             tool_calls: vec![ToolCall {
                 id: "c1".into(),
                 name: "episode_commit".into(),
                 arguments: serde_json::json!({
-                    "summary": "Adopted ADR-025 sleep compactor on TachiMemory",
+                    "summary": "Adopted ADR-025 sleep compactor on MemoryCore",
                     "why_and_tradeoffs": ["Single SQLite store avoids handle drift"],
-                    "settled_decisions": ["Use TachiMemory sleep traits"],
+                    "settled_decisions": ["Use MemoryCore sleep traits"],
                     "rejected_options": ["Dual SQLite stores"],
-                    "primary_memory_update": "TachiMemory hosts sleep records",
+                    "primary_memory_update": "MemoryCore hosts sleep records",
                     "primary_kind": "decision",
                     "core_facts": [{"content": "Dual SQLite stores were rejected", "kind": "fact"}]
                 })
@@ -1250,27 +1250,27 @@ async fn tachi_end_to_end_sleep_compactor_parity() {
         Arc::clone(&mem),
         &cfg,
         "nova",
-        "sess_tachi",
-        "Let's keep sleep records in TachiMemory",
-        "Agreed, single TachiMemory handle.",
+        "sess_mc",
+        "Let's keep sleep records in MemoryCore",
+        "Agreed, single MemoryCore handle.",
     )
     .await
     .unwrap();
 
     let eps = mem
-        .read_episodes_in_window("nova", None, None, Some("sess_tachi"), 5)
+        .read_episodes_in_window("nova", None, None, Some("sess_mc"), 5)
         .await
         .unwrap();
     assert_eq!(eps.len(), 1);
     assert_eq!(
         eps[0].settled_decisions,
-        vec!["Use TachiMemory sleep traits"]
+        vec!["Use MemoryCore sleep traits"]
     );
     let cores = mem.list(Some(&MemoryCategory::Core), None).await.unwrap();
     assert!(
         cores
             .iter()
-            .any(|c| c.content == "TachiMemory hosts sleep records")
+            .any(|c| c.content == "MemoryCore hosts sleep records")
     );
     assert!(
         cores

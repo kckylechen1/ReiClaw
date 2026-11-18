@@ -477,7 +477,7 @@ enum Commands {
         #[arg(long, hide = true)]
         model: Option<String>,
 
-        /// Memory backend (tachi, markdown, none).
+        /// Memory backend (memorycore, markdown, none).
         #[arg(long, hide = true)]
         memory: Option<String>,
 

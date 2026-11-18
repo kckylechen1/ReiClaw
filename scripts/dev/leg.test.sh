@@ -43,8 +43,8 @@ check() {
   diff -u "$fixture/expected" "$TEST_LEG_TRACE"
 }
 
-runtime='-p reiclaw-runtime --features reiclaw-runtime/heavy-tests\,reiclaw-runtime/memory-tachi'
-landlock='-p reiclaw-runtime --features reiclaw-runtime/heavy-tests\,reiclaw-runtime/memory-tachi\,reiclaw-runtime/sandbox-landlock -- landlock'
+runtime='-p reiclaw-runtime --features reiclaw-runtime/heavy-tests\,reiclaw-runtime/memory-core'
+landlock='-p reiclaw-runtime --features reiclaw-runtime/heavy-tests\,reiclaw-runtime/memory-core\,reiclaw-runtime/sandbox-landlock -- landlock'
 for LEG_RUNNER in test nextest; do
   prefix=test
   [[ "$LEG_RUNNER" == test ]] || prefix='nextest run'
@@ -96,8 +96,8 @@ run bash scripts/dev/leg.sh app
 check 0 'test --locked -p reiclaw -p reiclaw-config --features reiclaw/nodes'
 run bash scripts/dev/leg.sh channels
 check 0 \
-  'test --locked -p reiclaw-gateway --features reiclaw-gateway/nodes\,reiclaw-gateway/memory-tachi' \
-  'test --locked -p reiclaw-gateway --features reiclaw-gateway/nodes\,reiclaw-gateway/memory-tachi\,reiclaw-gateway/voice-surface -- ws::tests::'
+  'test --locked -p reiclaw-gateway --features reiclaw-gateway/nodes\,reiclaw-gateway/memory-core' \
+  'test --locked -p reiclaw-gateway --features reiclaw-gateway/nodes\,reiclaw-gateway/memory-core\,reiclaw-gateway/voice-surface -- ws::tests::'
 
 # Run the actual CI step's shell (its env is set as in the workflow), not a copy
 # of its command construction. No YAML dependency is needed for this block.
@@ -165,7 +165,7 @@ jq '.extra_runs.runtime += [{"name":"following","features":["following"],"filter
 mv "$fixture/partition.json" dev/ci/test-partition.json
 main="nextest run --locked $runtime"
 extra="nextest run --locked $landlock"
-following='nextest run --locked -p reiclaw-runtime --features reiclaw-runtime/heavy-tests\,reiclaw-runtime/memory-tachi\,following -- following'
+following='nextest run --locked -p reiclaw-runtime --features reiclaw-runtime/heavy-tests\,reiclaw-runtime/memory-core\,following -- following'
 run bash scripts/dev/leg.sh runtime
 check 0 "$main" "$extra" "$following"
 TEST_LEG_FAIL_EVENT="$extra" run bash scripts/dev/leg.sh runtime

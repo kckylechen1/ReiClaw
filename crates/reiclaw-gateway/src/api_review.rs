@@ -1,7 +1,7 @@
 //! Unified owner review view. Soul and User Model stores remain canonical;
 //! review actions use their existing operator-gated endpoints.
 //! Collaborative DailyDigest edits and sleep action-candidate confirmations
-//! persist to `tachi.db` via the gateway's `Memory` handle.
+//! persist to `memorycore.db` via the gateway's `Memory` handle.
 
 use crate::AppState;
 use axum::{

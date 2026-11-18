@@ -109,8 +109,8 @@ fn fresh_submission(agent_name: &str) -> BuilderSubmission {
         }),
         risk_profile: SelectorChoice::Fresh("balanced".into()),
         runtime_profile: SelectorChoice::Fresh("balanced".into()),
-        memory: SelectorChoice::Fresh(if reiclaw_memory::TACHI_COMPILED {
-            MemoryChoice::Tachi
+        memory: SelectorChoice::Fresh(if reiclaw_memory::MEMORYCORE_COMPILED {
+            MemoryChoice::MemoryCore
         } else {
             MemoryChoice::Markdown
         }),
@@ -199,30 +199,33 @@ fn memory_storage_refs_from_snapshot_are_accepted() {
 }
 
 #[test]
-fn quickstart_fresh_tachi_memory_uses_bare_backend_and_gates_on_feature() {
+fn quickstart_fresh_memorycore_memory_uses_bare_backend_and_gates_on_feature() {
     let mut cfg = Config::default();
     let snapshot = snapshot_state(&cfg);
     assert_eq!(
-        snapshot.memory_kinds.iter().any(|kind| kind == "tachi"),
-        reiclaw_memory::TACHI_COMPILED
+        snapshot
+            .memory_kinds
+            .iter()
+            .any(|kind| kind == "memorycore"),
+        reiclaw_memory::MEMORYCORE_COMPILED
     );
 
-    let choice = SelectorChoice::Fresh(MemoryChoice::Tachi);
+    let choice = SelectorChoice::Fresh(MemoryChoice::MemoryCore);
     let mut errors = Vec::new();
     let applied = apply_memory(&mut cfg, &choice, &mut errors, None);
 
-    if reiclaw_memory::TACHI_COMPILED {
+    if reiclaw_memory::MEMORYCORE_COMPILED {
         assert!(errors.is_empty(), "apply_memory errors: {errors:?}");
-        assert_eq!(applied.as_deref(), Some("tachi"));
-        assert_eq!(cfg.memory.backend, "tachi");
+        assert_eq!(applied.as_deref(), Some("memorycore"));
+        assert_eq!(cfg.memory.backend, "memorycore");
         assert!(
             cfg.validate().is_ok(),
-            "Config with bare tachi memory backend must validate"
+            "Config with bare memorycore memory backend must validate"
         );
 
         let mut builder_cfg = Config::default();
-        let mut submission = fresh_submission("tachi_bot");
-        submission.memory = SelectorChoice::Fresh(MemoryChoice::Tachi);
+        let mut submission = fresh_submission("mc_bot");
+        submission.memory = SelectorChoice::Fresh(MemoryChoice::MemoryCore);
         let mut staged = Vec::new();
         let mut submit_errors = Vec::new();
         let applied_agent = apply_into(
@@ -237,13 +240,11 @@ fn quickstart_fresh_tachi_memory_uses_bare_backend_and_gates_on_feature() {
             "apply_into errors: {submit_errors:?}"
         );
         assert!(applied_agent.is_some());
-        assert_eq!(builder_cfg.memory.backend, "tachi");
+        assert_eq!(builder_cfg.memory.backend, "memorycore");
     } else {
         assert!(applied.is_none());
         assert!(
-            errors
-                .iter()
-                .any(|err| err.message.contains("memory-tachi")),
+            errors.iter().any(|err| err.message.contains("memory-core")),
             "expected feature-gate QuickstartError, got {errors:?}"
         );
     }

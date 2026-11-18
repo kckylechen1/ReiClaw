@@ -6,18 +6,18 @@ mod tests {
     use crate::memory::audit::AuditedMemory;
     use crate::memory::conflict;
     use crate::memory::importance;
+    #[cfg(feature = "memory-core")]
+    use crate::memory::memorycore::MemoryCore;
     use crate::memory::policy::{PolicyEnforcer, PolicyViolation};
     use crate::memory::retrieval::{RetrievalConfig, RetrievalPipeline};
-    #[cfg(feature = "memory-tachi")]
-    use crate::memory::tachi::TachiMemory;
     use crate::memory::traits::{Memory, MemoryCategory, MemoryEntry};
     use std::sync::Arc;
     use tempfile::TempDir;
 
-    #[cfg(feature = "memory-tachi")]
-    fn temp_tachi() -> (TempDir, TachiMemory) {
+    #[cfg(feature = "memory-core")]
+    fn temp_tachi() -> (TempDir, MemoryCore) {
         let tmp = TempDir::new().unwrap();
-        let mem = TachiMemory::new("test", tmp.path()).unwrap();
+        let mem = MemoryCore::new("test", tmp.path()).unwrap();
         (tmp, mem)
     }
 
@@ -25,7 +25,7 @@ mod tests {
     // Phase 1: Multi-stage retrieval pipeline
     // ═══════════════════════════════════════════════════════════════
 
-    #[cfg(feature = "memory-tachi")]
+    #[cfg(feature = "memory-core")]
     #[tokio::test]
     async fn retrieval_pipeline_caches_tachi_results() {
         let (_tmp, mem) = temp_tachi();
@@ -64,7 +64,7 @@ mod tests {
         assert_eq!(r2[0].content, r1[0].content);
     }
 
-    #[cfg(feature = "memory-tachi")]
+    #[cfg(feature = "memory-core")]
     #[tokio::test]
     async fn retrieval_pipeline_invalidation_forces_fresh_results() {
         let (_tmp, mem) = temp_tachi();
@@ -97,7 +97,7 @@ mod tests {
         assert_eq!(pipeline.cache_size(), 0);
     }
 
-    #[cfg(feature = "memory-tachi")]
+    #[cfg(feature = "memory-core")]
     #[tokio::test]
     async fn retrieval_pipeline_respects_limit() {
         let (_tmp, mem) = temp_tachi();
@@ -121,7 +121,7 @@ mod tests {
         assert!(results.len() <= 3);
     }
 
-    #[cfg(feature = "memory-tachi")]
+    #[cfg(feature = "memory-core")]
     #[tokio::test]
     async fn retrieval_pipeline_empty_query_works() {
         let (_tmp, mem) = temp_tachi();
@@ -138,7 +138,7 @@ mod tests {
         assert_eq!(results.len(), 1);
     }
 
-    #[cfg(feature = "memory-tachi")]
+    #[cfg(feature = "memory-core")]
     #[tokio::test]
     async fn retrieval_pipeline_with_namespace_filter() {
         let (_tmp, mem) = temp_tachi();
@@ -177,7 +177,7 @@ mod tests {
     // Phase 2: Namespace isolation
     // ═══════════════════════════════════════════════════════════════
 
-    #[cfg(feature = "memory-tachi")]
+    #[cfg(feature = "memory-core")]
     #[tokio::test]
     async fn namespace_isolation_between_agents() {
         let (_tmp, mem) = temp_tachi();
@@ -239,7 +239,7 @@ mod tests {
         assert!(results.is_empty(), "agent-a should not see agent-b data");
     }
 
-    #[cfg(feature = "memory-tachi")]
+    #[cfg(feature = "memory-core")]
     #[tokio::test]
     async fn namespace_default_assignment() {
         let (_tmp, mem) = temp_tachi();
@@ -254,7 +254,7 @@ mod tests {
         );
     }
 
-    #[cfg(feature = "memory-tachi")]
+    #[cfg(feature = "memory-core")]
     #[tokio::test]
     async fn namespace_with_special_characters() {
         let (_tmp, mem) = temp_tachi();
@@ -271,7 +271,7 @@ mod tests {
         assert_eq!(results[0].namespace, ns);
     }
 
-    #[cfg(feature = "memory-tachi")]
+    #[cfg(feature = "memory-core")]
     #[tokio::test]
     async fn namespace_empty_string_works() {
         let (_tmp, mem) = temp_tachi();
@@ -336,7 +336,7 @@ mod tests {
         );
     }
 
-    #[cfg(feature = "memory-tachi")]
+    #[cfg(feature = "memory-core")]
     #[tokio::test]
     async fn importance_persists_in_tachi() {
         let (_tmp, mem) = temp_tachi();
@@ -495,7 +495,7 @@ mod tests {
         );
     }
 
-    #[cfg(feature = "memory-tachi")]
+    #[cfg(feature = "memory-core")]
     #[tokio::test]
     async fn superseded_entries_hidden_from_recall() {
         let (_tmp, mem) = temp_tachi();
@@ -530,7 +530,7 @@ mod tests {
         assert_eq!(all[0].key, "new_pref");
     }
 
-    #[cfg(feature = "memory-tachi")]
+    #[cfg(feature = "memory-core")]
     #[tokio::test]
     async fn superseded_entry_still_accessible_via_get() {
         let (_tmp, mem) = temp_tachi();
@@ -599,11 +599,11 @@ mod tests {
         assert_eq!(audited.audit_count().unwrap(), 2);
     }
 
-    #[cfg(feature = "memory-tachi")]
+    #[cfg(feature = "memory-core")]
     #[tokio::test]
     async fn audit_wrapping_tachi_backend() {
         let tmp = TempDir::new().unwrap();
-        let inner = TachiMemory::new("test", tmp.path()).unwrap();
+        let inner = MemoryCore::new("test", tmp.path()).unwrap();
         let audited = AuditedMemory::new(inner, tmp.path()).unwrap();
 
         // Full round-trip through audited tachi
@@ -754,7 +754,7 @@ mod tests {
     // Cross-phase integration tests
     // ═══════════════════════════════════════════════════════════════
 
-    #[cfg(feature = "memory-tachi")]
+    #[cfg(feature = "memory-core")]
     #[tokio::test]
     async fn full_lifecycle_store_recall_supersede() {
         let (_tmp, mem) = temp_tachi();
@@ -806,11 +806,11 @@ mod tests {
         assert!((results[0].importance.unwrap() - 0.85).abs() < 0.01);
     }
 
-    #[cfg(feature = "memory-tachi")]
+    #[cfg(feature = "memory-core")]
     #[tokio::test]
     async fn pipeline_with_audited_tachi() {
         let tmp = TempDir::new().unwrap();
-        let tachi = TachiMemory::new("test", tmp.path()).unwrap();
+        let tachi = MemoryCore::new("test", tmp.path()).unwrap();
         let audited = AuditedMemory::new(tachi, tmp.path()).unwrap();
         let audited = Arc::new(audited);
 
@@ -837,7 +837,7 @@ mod tests {
         assert!(audited.audit_count().unwrap() >= 2);
     }
 
-    #[cfg(feature = "memory-tachi")]
+    #[cfg(feature = "memory-core")]
     #[tokio::test]
     async fn namespace_isolation_with_session_id_cross_filter() {
         let (_tmp, mem) = temp_tachi();
@@ -887,7 +887,7 @@ mod tests {
         assert_eq!(results[0].key, "k1");
     }
 
-    #[cfg(feature = "memory-tachi")]
+    #[cfg(feature = "memory-core")]
     #[tokio::test]
     async fn many_namespaces_sequential_writes() {
         let (_tmp, mem) = temp_tachi();
@@ -945,14 +945,14 @@ mod tests {
         assert_eq!(merged[1].id, "b");
     }
 
-    #[cfg(feature = "memory-tachi")]
+    #[cfg(feature = "memory-core")]
     #[tokio::test]
     async fn tachi_persistence_and_reopen_idempotent() {
         let tmp = TempDir::new().unwrap();
 
         // First open: creates store and writes metadata
         {
-            let mem = TachiMemory::new("test", tmp.path()).unwrap();
+            let mem = MemoryCore::new("test", tmp.path()).unwrap();
             mem.store_with_metadata(
                 "persist_key",
                 "persisted data",
@@ -967,7 +967,7 @@ mod tests {
 
         // Second open: reopens existing store cleanly
         {
-            let mem = TachiMemory::new("test", tmp.path()).unwrap();
+            let mem = MemoryCore::new("test", tmp.path()).unwrap();
             let entry = mem.get("persist_key").await.unwrap().unwrap();
             assert_eq!(entry.content, "persisted data");
             assert_eq!(entry.namespace, "test-ns");
@@ -976,7 +976,7 @@ mod tests {
 
         // Third open: still fine
         {
-            let mem = TachiMemory::new("test", tmp.path()).unwrap();
+            let mem = MemoryCore::new("test", tmp.path()).unwrap();
             assert!(mem.health_check().await);
             assert_eq!(mem.count().await.unwrap(), 1);
         }
@@ -986,7 +986,7 @@ mod tests {
     // Edge cases and stress tests
     // ═══════════════════════════════════════════════════════════════
 
-    #[cfg(feature = "memory-tachi")]
+    #[cfg(feature = "memory-core")]
     #[tokio::test]
     async fn importance_survives_upsert() {
         let (_tmp, mem) = temp_tachi();
@@ -1013,7 +1013,7 @@ mod tests {
         assert_eq!(mem.count().await.unwrap(), 1);
     }
 
-    #[cfg(feature = "memory-tachi")]
+    #[cfg(feature = "memory-core")]
     #[tokio::test]
     async fn namespace_survives_upsert() {
         let (_tmp, mem) = temp_tachi();
@@ -1031,7 +1031,7 @@ mod tests {
         assert_eq!(entry.content, "v2");
     }
 
-    #[cfg(feature = "memory-tachi")]
+    #[cfg(feature = "memory-core")]
     #[tokio::test]
     async fn forget_cleans_up_namespaced_entry() {
         let (_tmp, mem) = temp_tachi();
@@ -1053,7 +1053,7 @@ mod tests {
         assert_eq!(mem.count().await.unwrap(), 0);
     }
 
-    #[cfg(feature = "memory-tachi")]
+    #[cfg(feature = "memory-core")]
     #[tokio::test]
     async fn empty_namespace_recall_returns_nothing() {
         let (_tmp, mem) = temp_tachi();

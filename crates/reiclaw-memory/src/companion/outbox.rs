@@ -40,12 +40,12 @@ pub fn probe_companion_outbox_health(config: &Config) -> CompanionOutboxHealth {
         return CompanionOutboxHealth::not_configured();
     }
 
-    #[cfg(not(feature = "tachi"))]
+    #[cfg(not(feature = "memorycore"))]
     {
         CompanionOutboxHealth::not_configured()
     }
 
-    #[cfg(feature = "tachi")]
+    #[cfg(feature = "memorycore")]
     {
         let path = config.companion_memory.db_path(&config.data_dir);
         if !path.exists() {
@@ -113,7 +113,7 @@ fn warn_if_stale_pending(health: &CompanionOutboxHealth) {
     );
 }
 
-#[cfg(feature = "tachi")]
+#[cfg(feature = "memorycore")]
 fn health_of(store: &CompanionStore) -> CompanionOutboxHealth {
     match store.with_store(|mem| mem.outbox_health()) {
         Ok(raw) => CompanionOutboxHealth::pending(
@@ -137,12 +137,12 @@ fn health_of(store: &CompanionStore) -> CompanionOutboxHealth {
     }
 }
 
-#[cfg(not(feature = "tachi"))]
+#[cfg(not(feature = "memorycore"))]
 fn health_of(_store: &CompanionStore) -> CompanionOutboxHealth {
     CompanionOutboxHealth::not_configured()
 }
 
-#[cfg(feature = "tachi")]
+#[cfg(feature = "memorycore")]
 fn age_secs_from_rfc3339(stamp: &str) -> Option<u64> {
     let parsed = reiclaw_api::time::parse_rfc3339(stamp).ok()?;
     let age = jiff::Timestamp::now().duration_since(parsed);
@@ -193,7 +193,7 @@ mod tests {
         assert!(!config.companion_memory.db_path(tmp.path()).exists());
     }
 
-    #[cfg(feature = "tachi")]
+    #[cfg(feature = "memorycore")]
     mod with_store {
         use super::*;
         use crate::companion::create_companion_store;

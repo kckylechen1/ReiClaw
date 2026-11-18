@@ -805,7 +805,7 @@ mod tests {
             config_path: workspace.path().join("config.toml"),
             ..Config::default()
         };
-        if !reiclaw_memory::TACHI_COMPILED {
+        if !reiclaw_memory::MEMORYCORE_COMPILED {
             config.memory.backend = "markdown".into();
         }
         config.memory.backend = "none".into();
@@ -1229,7 +1229,7 @@ mod tests {
             config_path: workspace.path().join("config.toml"),
             ..Config::default()
         };
-        if !reiclaw_memory::TACHI_COMPILED {
+        if !reiclaw_memory::MEMORYCORE_COMPILED {
             config.memory.backend = "markdown".into();
         }
         config.cost = CostConfig {

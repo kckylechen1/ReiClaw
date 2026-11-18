@@ -1,6 +1,7 @@
 import assert from 'node:assert/strict';
 const values = new Map([['zeroclaw_session_id.web', 'shared']]);
 const urls: string[] = [];
+const protocolOffers: (string | string[] | undefined)[] = [];
 type SentFrame = Record<string, unknown>;
 const sent: SentFrame[] = [];
 let socket: { readyState: number; onopen: (() => void) | null; onmessage: ((ev: { data: string }) => void) | null; send: (data: string) => void; close: () => void } | null = null;
@@ -9,8 +10,9 @@ class Socket {
   readyState = 0;
   onopen: (() => void) | null = null;
   onmessage: ((ev: { data: string }) => void) | null = null;
-  constructor(url: string) {
+  constructor(url: string, protocols?: string | string[]) {
     urls.push(url);
+    protocolOffers.push(protocols);
     socket = this as never;
   }
   send(data: string) {
@@ -30,6 +32,7 @@ client.disconnect();
 client.connect();
 client.disconnect();
 assert.equal(urls.length, 2);
+assert.deepEqual(protocolOffers, [['reiclaw.v1'], ['reiclaw.v1']]);
 for (const url of urls) {
   const parsed = new URL(url);
   assert.equal(parsed.protocol, 'wss:');

@@ -32,7 +32,7 @@ allow = [
 ]
 unused-allowed-license = "allow"
 
-# ADR-017 section 6 accepts the `memory-tachi` feature (enabled by default in
+# ADR-017 section 6 accepts the `memory-core` feature (enabled by default in
 # this fork) and its AGPL distribution boundary. The three AGPL packages share
 # the Tachi source pinned in reiclaw-memory/Cargo.toml; no license is added
 # to the global allowlist. dependency_policy_smoke.py verifies that lean/core

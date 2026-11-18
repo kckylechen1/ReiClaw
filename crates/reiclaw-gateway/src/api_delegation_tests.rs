@@ -66,7 +66,7 @@ async fn mcp(
                 }}))
                 .into_response();
             }
-            assert_eq!(headers["x-tachi-agent-identity"], "zeroclaw:edge_tasks");
+            assert_eq!(headers["x-tachi-agent-identity"], "reiclaw:edge_tasks");
             let args = body["params"]["arguments"].clone();
             fake.calls.lock().unwrap().push(args.clone());
             let result = match args["action"].as_str().unwrap() {

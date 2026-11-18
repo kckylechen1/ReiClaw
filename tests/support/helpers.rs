@@ -95,8 +95,8 @@ pub fn build_agent_with_memory(
     tools: Vec<Box<dyn Tool>>,
     temp_dir: &std::path::Path,
 ) -> Agent {
-    let backend = if reiclaw::memory::TACHI_COMPILED {
-        "tachi"
+    let backend = if reiclaw::memory::MEMORYCORE_COMPILED {
+        "memorycore"
     } else {
         "markdown"
     };

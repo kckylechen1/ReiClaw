@@ -5,8 +5,8 @@
 pub const MEMORY_CONTEXT_OPEN: &str = "[Memory context]";
 /// Closing delimiter for recalled memory injected into provider context.
 pub const MEMORY_CONTEXT_CLOSE: &str = "[/Memory context]";
-/// Whether this build includes the embedded Tachi `portable-kernel` backend.
-pub const TACHI_COMPILED: bool = cfg!(feature = "tachi");
+/// Whether this build includes the embedded MemoryCore `portable-kernel` backend.
+pub const MEMORYCORE_COMPILED: bool = cfg!(feature = "memorycore");
 
 pub mod admissibility;
 pub mod agent_scoped;
@@ -21,13 +21,21 @@ pub mod dedup;
 pub mod embeddings;
 pub mod hygiene;
 pub mod importance;
-#[cfg(feature = "tachi")]
+#[cfg(feature = "memorycore")]
 pub mod kernel_store;
 pub mod markdown;
+#[cfg(feature = "memorycore")]
+pub mod memorycore;
+#[cfg(feature = "memorycore")]
+mod memorycore_enrichment;
+#[cfg(feature = "memorycore")]
+pub mod memorycore_governance;
+#[cfg(all(test, feature = "memorycore"))]
+mod memorycore_scenarios;
 pub mod merge;
 pub mod none;
 pub mod normalize;
-#[cfg(feature = "tachi")]
+#[cfg(feature = "memorycore")]
 mod point_scope;
 pub mod policy;
 pub mod policy_gate;
@@ -37,14 +45,6 @@ pub mod response_cache;
 pub mod retrieval;
 pub mod scanned;
 pub mod sleep_records;
-#[cfg(feature = "tachi")]
-pub mod tachi;
-#[cfg(feature = "tachi")]
-mod tachi_enrichment;
-#[cfg(feature = "tachi")]
-pub mod tachi_governance;
-#[cfg(all(test, feature = "tachi"))]
-mod tachi_scenarios;
 pub mod threat;
 pub mod traits;
 pub mod vector;
@@ -65,6 +65,10 @@ pub use companion::{
 #[allow(unused_imports)]
 pub use embeddings::EmbeddingIdentity;
 pub use markdown::MarkdownMemory;
+#[cfg(feature = "memorycore")]
+pub use memorycore::MemoryCore;
+#[cfg(feature = "memorycore")]
+pub use memorycore_governance::{MemoryCoreGovernanceReport, run_memorycore_governance};
 pub use none::NoneMemory;
 #[allow(unused_imports)]
 pub use policy::PolicyEnforcer;
@@ -77,10 +81,6 @@ pub use scanned::ScannedMemory;
 pub use sleep_records::{
     DailyDigest, EpisodeRecord, EpisodeSourceKind, PINNED_DIGEST_MAX_BYTES, PinnedDigest,
 };
-#[cfg(feature = "tachi")]
-pub use tachi::TachiMemory;
-#[cfg(feature = "tachi")]
-pub use tachi_governance::{TachiGovernanceReport, run_tachi_governance};
 pub use traits::Memory;
 
 /// Run [`Memory::run_llm_enrichment`] when the 12h enrichment cadence is due.
@@ -144,12 +144,12 @@ fn retired_backend_error(backend: &str, selector: &str) -> anyhow::Error {
         anyhow::Error::msg(format!(
             "{selector} selects the '{backend}' memory backend, which was removed together \
              with its offline brain.db migration tool; existing brain.db data is neither read \
-             nor converted. Set {selector} to tachi, markdown, or none"
+             nor converted. Set {selector} to memorycore, markdown, or none"
         ))
     } else {
         anyhow::Error::msg(format!(
             "{selector} selects the '{backend}' memory backend, which was removed; set it to \
-             tachi, markdown or none (existing data is not migrated automatically)"
+             memorycore, markdown or none (existing data is not migrated automatically)"
         ))
     }
 }
@@ -203,10 +203,10 @@ fn create_memory_with_policy(
             workspace_dir,
             audit_enabled,
         ),
-        #[cfg(feature = "tachi")]
-        MemoryBackendKind::Tachi => {
+        #[cfg(feature = "memorycore")]
+        MemoryBackendKind::MemoryCore => {
             anyhow::bail!(
-                "tachi backend requires embedding config; \
+                "memorycore backend requires embedding config; \
                  call create_memory_with_storage_and_routes instead of create_memory_with_policy"
             )
         }
@@ -229,7 +229,7 @@ fn create_memory_with_policy(
 }
 
 /// Extract the backend kind from a V3 dotted reference (`<kind>.<alias>`).
-/// Bare names (`"tachi"`) are returned as-is. Returned lowercase.
+/// Bare names (`"memorycore"`) are returned as-is. Returned lowercase.
 pub fn backend_kind_from_dotted(memory_backend: &str) -> String {
     memory_backend
         .trim()
@@ -538,8 +538,8 @@ pub fn create_memory_with_storage_and_routes(
         resolve_embedding_config(config, embedding_routes, api_key, providers);
 
     // Same 12h cadence as hygiene — capture before `run_if_due` writes state so
-    // tachi light-sleep can share the window without a second due-check race.
-    #[cfg(feature = "tachi")]
+    // memorycore light-sleep can share the window without a second due-check race.
+    #[cfg(feature = "memorycore")]
     let light_sleep_due = config.hygiene_enabled && hygiene::is_due(workspace_dir).unwrap_or(true);
 
     // Best-effort memory hygiene/retention pass (throttled by state file).
@@ -557,8 +557,8 @@ pub fn create_memory_with_storage_and_routes(
         return Err(retired_backend_error(backend, "memory.backend"));
     }
 
-    #[cfg(feature = "tachi")]
-    if matches!(backend_kind, MemoryBackendKind::Tachi) {
+    #[cfg(feature = "memorycore")]
+    if matches!(backend_kind, MemoryBackendKind::MemoryCore) {
         let embedder: Arc<dyn embeddings::EmbeddingProvider> =
             Arc::from(embeddings::create_embedding_provider(
                 &_resolved_embedding.model_provider,
@@ -566,8 +566,8 @@ pub fn create_memory_with_storage_and_routes(
                 &_resolved_embedding.model,
                 _resolved_embedding.dimensions,
             ));
-        let mem = TachiMemory::with_embedder(
-            "tachi",
+        let mem = MemoryCore::with_embedder(
+            "memorycore",
             workspace_dir,
             embedder,
             config.vector_weight as f32,
@@ -581,17 +581,17 @@ pub fn create_memory_with_storage_and_routes(
                 ::reiclaw_log::Event::new(module_path!(), ::reiclaw_log::Action::Note)
                     .with_outcome(::reiclaw_log::EventOutcome::Unknown)
                     .with_attrs(::serde_json::json!({"error": format!("{}", e)})),
-                "tachi light-sleep governance skipped"
+                "memorycore light-sleep governance skipped"
             );
         }
         return wrap_scanned_and_audit(mem, &config.policy, workspace_dir, config.audit_enabled);
     }
 
-    #[cfg(not(feature = "tachi"))]
-    if backend_name == "tachi" {
+    #[cfg(not(feature = "memorycore"))]
+    if backend_name == "memorycore" {
         anyhow::bail!(
-            "memory backend 'tachi' requested but this build was compiled without \
-             `memory-tachi`; rebuild with `--features memory-tachi`"
+            "memory backend 'memorycore' requested but this build was compiled without \
+             `memory-core`; rebuild with `--features memory-core`"
         );
     }
 
@@ -608,7 +608,7 @@ pub fn create_memory_for_migration(config: &Config) -> anyhow::Result<Box<dyn Me
     let backend = backend_kind_from_dotted(&config.memory.backend);
     if matches!(classify_memory_backend(&backend), MemoryBackendKind::None) {
         anyhow::bail!(
-            "memory backend 'none' disables persistence; choose tachi or markdown before migration"
+            "memory backend 'none' disables persistence; choose memorycore or markdown before migration"
         );
     }
 
@@ -626,17 +626,20 @@ pub fn create_memory_for_migration(config: &Config) -> anyhow::Result<Box<dyn Me
         ..MemoryPolicyConfig::default()
     };
 
-    #[cfg(feature = "tachi")]
-    if matches!(classify_memory_backend(&backend), MemoryBackendKind::Tachi) {
-        let mem = TachiMemory::new("tachi", &config.data_dir)?;
+    #[cfg(feature = "memorycore")]
+    if matches!(
+        classify_memory_backend(&backend),
+        MemoryBackendKind::MemoryCore
+    ) {
+        let mem = MemoryCore::new("memorycore", &config.data_dir)?;
         return wrap_scanned_and_audit(mem, &policy, &config.data_dir, false);
     }
 
-    #[cfg(not(feature = "tachi"))]
-    if backend == "tachi" {
+    #[cfg(not(feature = "memorycore"))]
+    if backend == "memorycore" {
         anyhow::bail!(
-            "memory backend 'tachi' requested but this build was compiled without \
-             `memory-tachi`; rebuild with `--features memory-tachi`"
+            "memory backend 'memorycore' requested but this build was compiled without \
+             `memory-core`; rebuild with `--features memory-core`"
         );
     }
 
@@ -730,15 +733,15 @@ pub async fn create_memory_for_agent(
             "memory.consolidation_extract_facts"
         };
         let global_kind = backend_kind_from_dotted(&config.memory.backend);
-        if global_kind != "tachi" {
+        if global_kind != "memorycore" {
             anyhow::bail!(
-                "{flag} = true requires memory.backend = \"tachi\" (typed memory storage is Tachi-only), but memory.backend = {:?}",
+                "{flag} = true requires memory.backend = \"memorycore\" (typed memory storage is MemoryCore-only), but memory.backend = {:?}",
                 config.memory.backend
             );
         }
-        if !matches!(backend_kind, ConfigBackend::Tachi) {
+        if !matches!(backend_kind, ConfigBackend::MemoryCore) {
             anyhow::bail!(
-                "{flag} = true requires every agent on the tachi memory backend (typed memory storage is Tachi-only), but agents.{agent_alias}.memory.backend = {backend_kind:?}"
+                "{flag} = true requires every agent on the memorycore memory backend (typed memory storage is MemoryCore-only), but agents.{agent_alias}.memory.backend = {backend_kind:?}"
             );
         }
     }
@@ -797,7 +800,7 @@ pub async fn create_memory_for_agent(
     let agent_backend_name = match backend_kind {
         ConfigBackend::Sqlite => "sqlite",
         ConfigBackend::Lucid => "lucid",
-        ConfigBackend::Tachi => "tachi",
+        ConfigBackend::MemoryCore => "memorycore",
         ConfigBackend::Markdown => "markdown",
         ConfigBackend::None => "none",
         ConfigBackend::Postgres => "postgres",

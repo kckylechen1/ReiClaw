@@ -90,7 +90,7 @@ default = ["schema-export"]
 # The `[nodes]` / `[nodes.mdns]` config types stay unconditional in
 # reiclaw-config (schema.rs is a hot upstream file — not worth the churn).
 nodes = ["dep:ring"]
-memory-tachi = ["reiclaw-memory/tachi"]
+memory-core = ["reiclaw-memory/memorycore"]
 observability-prometheus = ["reiclaw-runtime/observability-prometheus"]
 # Explicit opt-in to spoken-text presentation; no audio transport.
 voice-surface = ["reiclaw-memory/voice-surface"]

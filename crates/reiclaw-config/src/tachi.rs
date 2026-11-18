@@ -14,8 +14,8 @@
 //! endpoint is refused at validation rather than merely warned about. There
 //! is no override in v1.
 //!
-//! This section is unrelated to the `tachi` memory backend
-//! (`[memory] backend = "tachi"`), which links memcore in-process and never
+//! This section is unrelated to the `memorycore` memory backend
+//! (`[memory] backend = "memorycore"`), which links memcore in-process and never
 //! talks to the daemon.
 
 use std::collections::HashMap;
@@ -30,8 +30,8 @@ pub const DEFAULT_TACHI_POLL_SECS: u64 = 15;
 /// Upper bound on `poll_secs`; a slower poll would make "is it done yet"
 /// answers stale enough to mislead the owner.
 pub const MAX_TACHI_POLL_SECS: u64 = 3600;
-/// Prefix of the derived agent identity (`zeroclaw:<agent alias>`).
-pub const TACHI_AGENT_IDENTITY_PREFIX: &str = "zeroclaw:";
+/// Prefix of the derived agent identity (`reiclaw:<agent alias>`).
+pub const TACHI_AGENT_IDENTITY_PREFIX: &str = "reiclaw:";
 /// Longest agent identity Tachi accepts in `x-tachi-agent-identity`.
 pub const MAX_TACHI_AGENT_IDENTITY_LEN: usize = 160;
 
@@ -59,7 +59,7 @@ pub struct TachiConfig {
     #[serde(default = "default_endpoint")]
     pub endpoint: String,
     /// Identity sent as `x-tachi-agent-identity`. Unset means
-    /// `zeroclaw:<agent alias>`. Allowed characters: ASCII letters, digits,
+    /// `reiclaw:<agent alias>`. Allowed characters: ASCII letters, digits,
     /// `-`, `_`, `.`, `:` (at most 160).
     #[serde(skip_serializing_if = "Option::is_none")]
     pub agent_identity: Option<String>,
@@ -165,7 +165,7 @@ impl TachiConfig {
     /// The identity sent as `x-tachi-agent-identity` for `agent_alias`.
     ///
     /// The configured value wins. Otherwise the identity is
-    /// `zeroclaw:<alias>`, with every character Tachi would refuse replaced
+    /// `reiclaw:<alias>`, with every character Tachi would refuse replaced
     /// by `_` and the result cut to Tachi's length limit.
     #[must_use]
     pub fn resolved_agent_identity(&self, agent_alias: &str) -> String {
@@ -437,12 +437,12 @@ mod tests {
     #[test]
     fn agent_identity_defaults_to_sanitized_alias() {
         let config = TachiConfig::default();
-        assert_eq!(config.resolved_agent_identity("home"), "zeroclaw:home");
+        assert_eq!(config.resolved_agent_identity("home"), "reiclaw:home");
         assert_eq!(
             config.resolved_agent_identity("my agent/1"),
-            "zeroclaw:my_agent_1"
+            "reiclaw:my_agent_1"
         );
-        assert_eq!(config.resolved_agent_identity(""), "zeroclaw:default");
+        assert_eq!(config.resolved_agent_identity(""), "reiclaw:default");
         assert!(is_valid_tachi_agent_identity(
             &config.resolved_agent_identity(&"x".repeat(400))
         ));

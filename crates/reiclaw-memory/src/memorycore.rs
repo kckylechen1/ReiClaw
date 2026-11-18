@@ -1,11 +1,11 @@
-//! ZeroClaw memory adapter over the shared portable kernel (feature `tachi`).
+//! ReiClaw MemoryCore adapter over the shared portable kernel (feature `memorycore`).
 //!
 //! # Licensing
 //!
 //! `portable-kernel` / `memcore` is licensed under **AGPL-3.0**. Any distributed
-//! binary built with the `memory-tachi` / `tachi` feature is therefore
+//! binary built with the `memory-core` / `memorycore` feature is therefore
 //! AGPL-affected. Keep that feature off for releases that must remain under
-//! ZeroClaw's own license terms alone.
+//! ReiClaw's own license terms alone.
 //!
 //! # Store ownership
 //!
@@ -48,13 +48,13 @@ use uuid::Uuid;
 mod recent;
 mod sleep;
 
-const METADATA_ZC_KEY: &str = "zeroclaw_key";
-pub(crate) const METADATA_ZC_CATEGORY: &str = "zeroclaw_category";
-// pub(crate): tachi_governance partitions near-dup on these same keys; a
+const METADATA_ZC_KEY: &str = "reiclaw_key";
+pub(crate) const METADATA_ZC_CATEGORY: &str = "reiclaw_category";
+// pub(crate): memorycore_governance partitions near-dup on these same keys; a
 // rename drifting between the two files would silently re-enable
 // cross-agent/namespace merges.
-pub(crate) const METADATA_ZC_NAMESPACE: &str = "zeroclaw_namespace";
-pub(crate) const METADATA_ZC_AGENT: &str = "zeroclaw_agent";
+pub(crate) const METADATA_ZC_NAMESPACE: &str = "reiclaw_namespace";
+pub(crate) const METADATA_ZC_AGENT: &str = "reiclaw_agent";
 const METADATA_SESSION_ID: &str = "session_id";
 const METADATA_TENANT_ID: &str = "tenant_id";
 const METADATA_PINNED: &str = "pinned";
@@ -72,7 +72,7 @@ const MAX_LIST_GROW: usize = 1_048_576;
 /// agent/session/key identity. Metadata remains authoritative for legacy rows.
 /// Point get/forget follows the same host session rules as SQLite.
 #[derive(Clone)]
-pub struct TachiMemory {
+pub struct MemoryCore {
     alias: String,
     db_path: PathBuf,
     store: Arc<Mutex<MemoryStore>>,
@@ -85,7 +85,7 @@ pub struct TachiMemory {
     max_list_grow: usize,
 }
 
-impl TachiMemory {
+impl MemoryCore {
     pub fn new(alias: &str, workspace_dir: &Path) -> anyhow::Result<Self> {
         Self::with_embedder(
             alias,
@@ -125,7 +125,7 @@ impl TachiMemory {
         list_page_size: usize,
         max_list_grow: usize,
     ) -> anyhow::Result<Self> {
-        let db_path = workspace_dir.join("memory").join("tachi.db");
+        let db_path = workspace_dir.join("memory").join("memorycore.db");
         if let Some(parent) = db_path.parent() {
             std::fs::create_dir_all(parent)?;
         }
@@ -138,12 +138,12 @@ impl TachiMemory {
         let store = MemoryStore::open_with_context(
             db_path
                 .to_str()
-                .context("tachi memory db path is not valid UTF-8")?,
+                .context("memorycore memory db path is not valid UTF-8")?,
             &context,
         )
         .map_err(|e| {
             anyhow::Error::msg(format!(
-                "failed to open tachi memory db: {e}; runtime opens never migrate or adopt \
+                "failed to open memorycore memory db: {e}; runtime opens never migrate or adopt \
                  a store identity, and {LEGACY_STORE_UNSUPPORTED}."
             ))
         })?;
@@ -168,8 +168,8 @@ impl TachiMemory {
     /// Run light-sleep governance and return counters (tests / observability).
     pub(crate) fn run_light_sleep_governance_report(
         &self,
-    ) -> anyhow::Result<crate::tachi_governance::TachiGovernanceReport> {
-        crate::tachi_governance::run_tachi_governance_on_handle(self.store_handle())
+    ) -> anyhow::Result<crate::memorycore_governance::MemoryCoreGovernanceReport> {
+        crate::memorycore_governance::run_memorycore_governance_on_handle(self.store_handle())
     }
 
     fn hybrid_weights(&self) -> HybridWeights {
@@ -860,7 +860,7 @@ impl TachiMemory {
                 persons: Vec::new(),
                 entities: Vec::new(),
                 location: String::new(),
-                source: "zeroclaw".into(),
+                source: "reiclaw".into(),
                 scope: scope_c,
                 archived: false,
                 access_count,
@@ -1344,7 +1344,7 @@ impl TachiMemory {
 }
 
 #[async_trait]
-impl Memory for TachiMemory {
+impl Memory for MemoryCore {
     fn name(&self) -> &str {
         &self.alias
     }
@@ -1376,7 +1376,8 @@ impl Memory for TachiMemory {
         provider: &dyn reiclaw_api::model_provider::ModelProvider,
         model: &str,
     ) -> anyhow::Result<usize> {
-        crate::tachi_enrichment::run_enrichment_pass(self.store_handle(), provider, model).await
+        crate::memorycore_enrichment::run_enrichment_pass(self.store_handle(), provider, model)
+            .await
     }
 
     async fn store(
@@ -1950,7 +1951,7 @@ impl Memory for TachiMemory {
     }
 
     async fn commit_episode(&self, episode: &EpisodeRecord) -> anyhow::Result<String> {
-        TachiMemory::commit_episode(self, episode).await
+        MemoryCore::commit_episode(self, episode).await
     }
 
     async fn read_episodes_in_window(
@@ -1961,7 +1962,7 @@ impl Memory for TachiMemory {
         session_id: Option<&str>,
         limit: usize,
     ) -> anyhow::Result<Vec<EpisodeRecord>> {
-        TachiMemory::read_episodes_in_window(self, agent_id, since, until, session_id, limit).await
+        MemoryCore::read_episodes_in_window(self, agent_id, since, until, session_id, limit).await
     }
 
     async fn supersede_fact(
@@ -1972,19 +1973,19 @@ impl Memory for TachiMemory {
         new_content: &str,
         namespace: Option<&str>,
     ) -> anyhow::Result<String> {
-        TachiMemory::supersede_fact(self, agent_id, old_key, new_key, new_content, namespace).await
+        MemoryCore::supersede_fact(self, agent_id, old_key, new_key, new_content, namespace).await
     }
 
     async fn publish_pinned_digest(&self, digest: &PinnedDigest) -> anyhow::Result<String> {
-        TachiMemory::publish_pinned_digest(self, digest).await
+        MemoryCore::publish_pinned_digest(self, digest).await
     }
 
     async fn load_pinned_digest(&self, agent_id: &str) -> anyhow::Result<Option<PinnedDigest>> {
-        TachiMemory::load_pinned_digest(self, agent_id).await
+        MemoryCore::load_pinned_digest(self, agent_id).await
     }
 
     async fn publish_daily_digest(&self, digest: &DailyDigest) -> anyhow::Result<String> {
-        TachiMemory::publish_daily_digest(self, digest).await
+        MemoryCore::publish_daily_digest(self, digest).await
     }
 
     async fn load_daily_digests(
@@ -1992,11 +1993,11 @@ impl Memory for TachiMemory {
         agent_id: &str,
         limit: usize,
     ) -> anyhow::Result<Vec<DailyDigest>> {
-        TachiMemory::load_daily_digests(self, agent_id, limit).await
+        MemoryCore::load_daily_digests(self, agent_id, limit).await
     }
 }
 
-impl ::reiclaw_api::attribution::Attributable for TachiMemory {
+impl ::reiclaw_api::attribution::Attributable for MemoryCore {
     fn role(&self) -> ::reiclaw_api::attribution::Role {
         ::reiclaw_api::attribution::Role::Memory(::reiclaw_api::attribution::MemoryKind::Plugin)
     }
@@ -2006,23 +2007,23 @@ impl ::reiclaw_api::attribution::Attributable for TachiMemory {
     }
 }
 
-#[cfg(all(test, feature = "tachi"))]
+#[cfg(all(test, feature = "memorycore"))]
 mod key_lookup_tests;
 
-#[cfg(all(test, feature = "tachi"))]
+#[cfg(all(test, feature = "memorycore"))]
 mod recent_recall_tests;
 
-#[cfg(all(test, feature = "tachi"))]
+#[cfg(all(test, feature = "memorycore"))]
 mod session_scope_tests;
 
-#[cfg(all(test, feature = "tachi"))]
+#[cfg(all(test, feature = "memorycore"))]
 mod tests {
     use super::*;
     use tempfile::TempDir;
 
-    fn temp_tachi() -> (TempDir, TachiMemory) {
+    fn temp_tachi() -> (TempDir, MemoryCore) {
         let tmp = TempDir::new().unwrap();
-        let mem = TachiMemory::new("tachi", tmp.path()).unwrap();
+        let mem = MemoryCore::new("memorycore", tmp.path()).unwrap();
         (tmp, mem)
     }
 
@@ -2130,10 +2131,10 @@ mod tests {
         );
     }
 
-    fn temp_tachi_small_page() -> (TempDir, TachiMemory) {
+    fn temp_tachi_small_page() -> (TempDir, MemoryCore) {
         let tmp = TempDir::new().unwrap();
-        let mem = TachiMemory::with_embedder_and_page_size(
-            "tachi",
+        let mem = MemoryCore::with_embedder_and_page_size(
+            "memorycore",
             tmp.path(),
             Arc::new(super::super::embeddings::NoopEmbedding),
             0.7,
@@ -2146,7 +2147,7 @@ mod tests {
     }
 
     fn encoded_segment_for(value: &str) -> String {
-        TachiMemory::encode_path_segment(value)
+        MemoryCore::encode_path_segment(value)
     }
 
     #[tokio::test]
@@ -2575,7 +2576,7 @@ mod tests {
         // rows force a full page at the cap.
         let tmp = TempDir::new().unwrap();
         {
-            let mem = TachiMemory::new("tachi", tmp.path()).unwrap();
+            let mem = MemoryCore::new("memorycore", tmp.path()).unwrap();
             for i in 0..3 {
                 mem.store(
                     &format!("row_{i}"),
@@ -2587,8 +2588,8 @@ mod tests {
                 .unwrap();
             }
         }
-        let mem = TachiMemory::with_embedder_and_page_size(
-            "tachi",
+        let mem = MemoryCore::with_embedder_and_page_size(
+            "memorycore",
             tmp.path(),
             Arc::new(super::super::embeddings::NoopEmbedding),
             0.7,
@@ -2920,7 +2921,7 @@ mod tests {
 
         // Case B: two legacy unscoped Conversation rows sharing the exact same
         // storage_path across distinct sessions — only the matching session gets bumped.
-        let shared_path = TachiMemory::storage_path(
+        let shared_path = MemoryCore::storage_path(
             None,
             None,
             &MemoryCategory::Conversation,
@@ -2952,7 +2953,7 @@ mod tests {
                     persons: Vec::new(),
                     entities: Vec::new(),
                     location: String::new(),
-                    source: "zeroclaw".into(),
+                    source: "reiclaw".into(),
                     scope: "general".into(),
                     archived: false,
                     access_count: 0,
@@ -2963,7 +2964,7 @@ mod tests {
                     vector: None,
                     retention_policy: None,
                     domain: None,
-                    metadata: TachiMemory::build_metadata(
+                    metadata: MemoryCore::build_metadata(
                         "shared_legacy_key",
                         &MemoryCategory::Conversation,
                         Some(session),
@@ -3002,7 +3003,7 @@ mod tests {
     #[tokio::test]
     async fn concurrent_cross_handle_delete_never_substitutes_filtered_candidate_access() {
         let (tmp, handle_a) = temp_tachi();
-        let handle_b = TachiMemory::new("tachi", tmp.path()).unwrap();
+        let handle_b = MemoryCore::new("memorycore", tmp.path()).unwrap();
 
         handle_a
             .store_with_options(
@@ -3078,17 +3079,17 @@ mod tests {
     /// Seed a default-scope core row through the kernel's public snapshot
     /// import, carrying sub-millisecond created/updated instants the way
     /// imported history does (ordinary stores stamp the current instant).
-    fn import_core_row(mem: &TachiMemory, id: &str, key: &str, content: &str, created: &str) {
+    fn import_core_row(mem: &MemoryCore, id: &str, key: &str, content: &str, created: &str) {
         let instant = reiclaw_api::time::parse_stored_timestamp(created).unwrap();
-        let nanos = TachiMemory::format_utc_nanos(instant);
-        let millis = TachiMemory::format_utc_millis(instant);
+        let nanos = MemoryCore::format_utc_nanos(instant);
+        let millis = MemoryCore::format_utc_millis(instant);
         let category = MemoryCategory::Core;
         let options = StoreOptions {
             namespace: Some("default".into()),
             importance: Some(0.5),
             ..StoreOptions::default()
         };
-        let mut metadata = TachiMemory::build_metadata(
+        let mut metadata = MemoryCore::build_metadata(
             key,
             &category,
             None,
@@ -3107,7 +3108,7 @@ mod tests {
         );
         let entry = portable_kernel::MemoryEntry {
             id: id.into(),
-            path: TachiMemory::scoped_storage_path(
+            path: MemoryCore::scoped_storage_path(
                 Some("default"),
                 Some("default"),
                 &category,
@@ -3120,14 +3121,14 @@ mod tests {
             timestamp: millis.clone(),
             valid_from: millis,
             valid_until: None,
-            category: TachiMemory::category_to_memcore(&category),
+            category: MemoryCore::category_to_memcore(&category),
             topic: String::new(),
             keywords: Vec::new(),
             persons: Vec::new(),
             entities: Vec::new(),
             location: String::new(),
-            source: "external:zeroclaw".into(),
-            scope: TachiMemory::scope_for_namespace(Some("default")),
+            source: "external:reiclaw".into(),
+            scope: MemoryCore::scope_for_namespace(Some("default")),
             archived: false,
             access_count: 0,
             scored_count: 0,
@@ -3176,7 +3177,7 @@ mod tests {
             let mut store = mem.store.lock();
             let raw = portable_kernel::MemoryEntry {
                 id: "r-low".into(),
-                path: TachiMemory::storage_path(None, None, &MemoryCategory::Core, "k-low"),
+                path: MemoryCore::storage_path(None, None, &MemoryCategory::Core, "k-low"),
                 summary: "raw millis row".into(),
                 text: "raw millis row".into(),
                 importance: 0.7,
@@ -3189,7 +3190,7 @@ mod tests {
                 persons: Vec::new(),
                 entities: Vec::new(),
                 location: String::new(),
-                source: "zeroclaw".into(),
+                source: "reiclaw".into(),
                 scope: "general".into(),
                 archived: false,
                 access_count: 0,
@@ -3200,7 +3201,7 @@ mod tests {
                 vector: None,
                 retention_policy: None,
                 domain: None,
-                metadata: TachiMemory::build_metadata(
+                metadata: MemoryCore::build_metadata(
                     "k-low",
                     &MemoryCategory::Core,
                     None,
@@ -3244,7 +3245,7 @@ mod tests {
         // Part 1: Hybrid widening — another handle rewrites `safe_a` to flagged
         // content while keeping `safe_a.id` unchanged between widening rounds.
         let (tmp_hybrid, hybrid_a) = temp_tachi();
-        let hybrid_b = TachiMemory::new("tachi", tmp_hybrid.path()).unwrap();
+        let hybrid_b = MemoryCore::new("memorycore", tmp_hybrid.path()).unwrap();
 
         hybrid_a
             .store_with_options(
@@ -3352,12 +3353,12 @@ mod tests {
         // Part 2: Recent widening — another handle rewrites `recent_a`'s namespace
         // while keeping `recent_a.id` unchanged between recent widening rounds.
         let (tmp_recent, recent_a) = temp_tachi();
-        let recent_b = TachiMemory::new("tachi", tmp_recent.path()).unwrap();
+        let recent_b = MemoryCore::new("memorycore", tmp_recent.path()).unwrap();
 
         let seed_recent = |store: &Mutex<MemoryStore>, id: &str, key: &str, ts: &str| {
             let raw = portable_kernel::MemoryEntry {
                 id: id.into(),
-                path: TachiMemory::storage_path(None, None, &MemoryCategory::Core, key),
+                path: MemoryCore::storage_path(None, None, &MemoryCategory::Core, key),
                 summary: format!("recent {key}"),
                 text: format!("recent {key}"),
                 importance: 0.7,
@@ -3370,7 +3371,7 @@ mod tests {
                 persons: Vec::new(),
                 entities: Vec::new(),
                 location: String::new(),
-                source: "zeroclaw".into(),
+                source: "reiclaw".into(),
                 scope: "general".into(),
                 archived: false,
                 access_count: 0,
@@ -3381,7 +3382,7 @@ mod tests {
                 vector: None,
                 retention_policy: None,
                 domain: None,
-                metadata: TachiMemory::build_metadata(
+                metadata: MemoryCore::build_metadata(
                     key,
                     &MemoryCategory::Core,
                     None,
@@ -3467,18 +3468,18 @@ mod tests {
             use_rrf: true,
         };
         let bm25_best =
-            TachiMemory::calibrated_relevance_score(0.0, 1.0, 0.0, 0.016, &weights, false);
+            MemoryCore::calibrated_relevance_score(0.0, 1.0, 0.0, 0.016, &weights, false);
         let bm25_weaker =
-            TachiMemory::calibrated_relevance_score(0.0, 0.72, 0.0, 0.015, &weights, false);
+            MemoryCore::calibrated_relevance_score(0.0, 0.72, 0.0, 0.015, &weights, false);
         assert!((bm25_best - 1.0).abs() < f64::EPSILON);
         assert!((bm25_weaker - 0.72).abs() < f64::EPSILON);
         assert!(bm25_best > bm25_weaker);
 
-        let hybrid = TachiMemory::calibrated_relevance_score(0.8, 1.0, 0.0, 0.018, &weights, true);
+        let hybrid = MemoryCore::calibrated_relevance_score(0.8, 1.0, 0.0, 0.018, &weights, true);
         assert!((hybrid - 0.86).abs() < 1e-12);
 
         let sym_fallback =
-            TachiMemory::calibrated_relevance_score(0.0, 0.0, 0.65, 0.01, &weights, false);
+            MemoryCore::calibrated_relevance_score(0.0, 0.0, 0.65, 0.01, &weights, false);
         assert!((sym_fallback - 0.65).abs() < f64::EPSILON);
     }
 }

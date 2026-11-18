@@ -1555,8 +1555,8 @@ mod tests {
         let items = memory_picker(&cfg);
         // Mirrors reiclaw_memory::selectable_memory_backends() exactly.
         let keys: Vec<&str> = items.iter().map(|i| i.key.as_str()).collect();
-        if reiclaw_memory::TACHI_COMPILED {
-            assert!(keys.contains(&"tachi"));
+        if reiclaw_memory::MEMORYCORE_COMPILED {
+            assert!(keys.contains(&"memorycore"));
         }
         assert!(keys.contains(&"markdown"));
         assert!(keys.contains(&"none"));

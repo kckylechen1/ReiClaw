@@ -403,7 +403,7 @@ fn backup_target_memory(workspace_dir: &Path) -> Result<Option<PathBuf>> {
     fs::create_dir_all(&backup_root)?;
 
     let files_to_copy = [
-        workspace_dir.join("memory").join("tachi.db"),
+        workspace_dir.join("memory").join("memorycore.db"),
         workspace_dir.join("memory").join("brain.db"),
         workspace_dir.join("MEMORY.md"),
     ];
@@ -456,7 +456,7 @@ mod tests {
             data_dir: workspace.to_path_buf(),
             config_path: workspace.join("config.toml"),
             memory: MemoryConfig {
-                backend: "tachi".to_string(),
+                backend: "memorycore".to_string(),
                 ..MemoryConfig::default()
             },
             ..Config::default()
@@ -507,7 +507,7 @@ mod tests {
 
     #[tokio::test]
     async fn migration_renames_conflicting_key() {
-        if !reiclaw_memory::TACHI_COMPILED {
+        if !reiclaw_memory::MEMORYCORE_COMPILED {
             return;
         }
         let source = TempDir::new().unwrap();
@@ -551,7 +551,7 @@ mod tests {
 
     #[tokio::test]
     async fn dry_run_does_not_write() {
-        if !reiclaw_memory::TACHI_COMPILED {
+        if !reiclaw_memory::MEMORYCORE_COMPILED {
             return;
         }
         let source = TempDir::new().unwrap();
@@ -580,7 +580,7 @@ mod tests {
 
     #[tokio::test]
     async fn migration_reindex_uses_same_dotted_tachi_backend_as_import() {
-        if !reiclaw_memory::TACHI_COMPILED {
+        if !reiclaw_memory::MEMORYCORE_COMPILED {
             return;
         }
         let source = TempDir::new().unwrap();
@@ -599,7 +599,7 @@ mod tests {
         .unwrap();
 
         let mut config = test_config(target.path());
-        config.memory.backend = "tachi.default".to_string();
+        config.memory.backend = "memorycore.default".to_string();
         migrate_openclaw_memory(&config, Some(source.path().to_path_buf()), false, true)
             .await
             .unwrap();

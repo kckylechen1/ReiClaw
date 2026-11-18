@@ -90,22 +90,22 @@ else
 fi
 
 # ═══════════════════════════════════════════════════════════════════════
-# TEST 3: Memory Persistence (tachi.db exists)
+# TEST 3: Memory Persistence (memorycore.db exists)
 # ═══════════════════════════════════════════════════════════════════════
 echo ""
-echo "=== Test 3: Memory Persistence (tachi.db) ==="
+echo "=== Test 3: Memory Persistence (memorycore.db) ==="
 
-TACHI_DB="/zeroclaw-data/workspace/memory/tachi.db"
-if [ -f "$TACHI_DB" ]; then
-    SIZE=$(stat -c%s "$TACHI_DB" 2>/dev/null || stat -f%z "$TACHI_DB" 2>/dev/null || echo "?")
-    pass "tachi.db exists (${SIZE} bytes)"
+MEMORYCORE_DB="/zeroclaw-data/workspace/memory/memorycore.db"
+if [ -f "$MEMORYCORE_DB" ]; then
+    SIZE=$(stat -c%s "$MEMORYCORE_DB" 2>/dev/null || stat -f%z "$MEMORYCORE_DB" 2>/dev/null || echo "?")
+    pass "memorycore.db exists (${SIZE} bytes)"
 else
     # Check alternate locations
-    FOUND=$(find /zeroclaw-data -name "tachi.db" 2>/dev/null | head -1)
+    FOUND=$(find /zeroclaw-data -name "memorycore.db" 2>/dev/null | head -1)
     if [ -n "$FOUND" ]; then
-        pass "tachi.db found at $FOUND"
+        pass "memorycore.db found at $FOUND"
     else
-        fail "tachi.db not found anywhere under /zeroclaw-data"
+        fail "memorycore.db not found anywhere under /zeroclaw-data"
     fi
 fi
 

@@ -517,7 +517,7 @@ impl Config {
         warnings
     }
 
-    /// Surface tachi semantic/hybrid search with no effective embedder. The
+    /// Surface memorycore semantic/hybrid search with no effective embedder. The
     /// runtime treats `NoopEmbedding` as dimensions 0 and silently skips the
     /// vector path, so derive this from the canonical memory settings instead
     /// of storing another effective-mode field.
@@ -525,7 +525,7 @@ impl Config {
         &self,
         warnings: &mut Vec<crate::validation_warnings::ValidationWarning>,
     ) {
-        if !Self::memory_backend_is_tachi(&self.memory.backend) {
+        if !Self::memory_backend_is_memorycore(&self.memory.backend) {
             return;
         }
         if !matches!(
@@ -546,7 +546,7 @@ impl Config {
         warnings.push(crate::validation_warnings::ValidationWarning::new(
             "memory_semantic_search_without_embedder",
             format!(
-                "memory.search_mode is {search_mode:?} on tachi memory, but no effective \
+                "memory.search_mode is {search_mode:?} on memorycore memory, but no effective \
                  embedding provider is configured; vector search is skipped and \
                  recall falls back to keyword-only behavior. Configure \
                  memory.embedding_provider or a valid memory.embedding_model \
@@ -556,13 +556,13 @@ impl Config {
         ));
     }
 
-    fn memory_backend_is_tachi(backend: &str) -> bool {
+    fn memory_backend_is_memorycore(backend: &str) -> bool {
         let trimmed = backend.trim();
         let family = trimmed
             .split_once('.')
             .map_or(trimmed, |(family, _)| family)
             .trim();
-        family.eq_ignore_ascii_case("tachi")
+        family.eq_ignore_ascii_case("memorycore")
     }
 
     fn memory_has_effective_embedder(&self) -> bool {
@@ -1194,24 +1194,24 @@ impl Config {
                 .next()
                 .unwrap_or_default()
                 .to_ascii_lowercase();
-            if backend_kind != "tachi" {
+            if backend_kind != "memorycore" {
                 validation_bail!(
                     InvalidFormat,
                     flag_path,
-                    "{flag_path} = true requires memory.backend = \"tachi\" (typed memory storage is Tachi-only), but memory.backend = {:?}",
+                    "{flag_path} = true requires memory.backend = \"memorycore\" (typed memory storage is MemoryCore-only), but memory.backend = {:?}",
                     self.memory.backend
                 );
             }
             for (alias, agent) in &self.agents {
                 if !matches!(
                     agent.memory.backend,
-                    crate::multi_agent::MemoryBackendKind::Tachi
+                    crate::multi_agent::MemoryBackendKind::MemoryCore
                 ) {
                     let agent_backend = agent.memory.backend;
                     validation_bail!(
                         InvalidFormat,
                         format!("agents.{alias}.memory.backend"),
-                        "{flag_path} = true requires every agent on the tachi memory backend (typed memory storage is Tachi-only), but agents.{alias}.memory.backend = {agent_backend:?}",
+                        "{flag_path} = true requires every agent on the memorycore memory backend (typed memory storage is MemoryCore-only), but agents.{alias}.memory.backend = {agent_backend:?}",
                     );
                 }
             }

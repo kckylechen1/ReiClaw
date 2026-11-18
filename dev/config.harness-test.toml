@@ -7,7 +7,7 @@ allow_public_bind = true
 require_pairing = false
 
 [memory]
-backend = "tachi"
+backend = "memorycore"
 auto_save = true
 hygiene_enabled = true
 archive_after_days = 7

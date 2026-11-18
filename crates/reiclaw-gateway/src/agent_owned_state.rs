@@ -425,11 +425,11 @@ mod archive_tests {
     use super::*;
     use reiclaw_api::memory_traits::MemoryCategory;
     use reiclaw_config::schema::MemoryConfig;
-    use reiclaw_memory::{TACHI_COMPILED, create_memory};
+    use reiclaw_memory::{MEMORYCORE_COMPILED, create_memory};
 
     #[tokio::test]
     async fn failed_archive_keeps_memory_and_reports_independent_store_results() {
-        if !TACHI_COMPILED {
+        if !MEMORYCORE_COMPILED {
             return;
         }
         let directory = tempfile::tempdir().unwrap();
@@ -438,7 +438,7 @@ mod archive_tests {
             ..Config::default()
         };
         let mem_cfg = MemoryConfig {
-            backend: "tachi".into(),
+            backend: "memorycore".into(),
             hygiene_enabled: false,
             ..MemoryConfig::default()
         };

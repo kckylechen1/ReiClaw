@@ -195,7 +195,7 @@ async fn connect(cfg: &Config, session: &str) -> Result<(Socket, String)> {
         );
         request.headers_mut().insert(
             header::SEC_WEBSOCKET_PROTOCOL,
-            HeaderValue::from_static("zeroclaw.v1"),
+            HeaderValue::from_static("reiclaw.v1"),
         );
         let config = tokio_tungstenite::tungstenite::protocol::WebSocketConfig::default()
             .max_message_size(Some(MAX_LINE))
@@ -208,7 +208,7 @@ async fn connect(cfg: &Config, session: &str) -> Result<(Socket, String)> {
             .headers()
             .get(header::SEC_WEBSOCKET_PROTOCOL)
             .and_then(|h| h.to_str().ok())
-            != Some("zeroclaw.v1")
+            != Some("reiclaw.v1")
         {
             return Err("GATEWAY_PROTOCOL");
         }

@@ -61,18 +61,18 @@ pub const TACHI_TASK_TOOL: &str = "tachi_task";
 pub const TACHI_AGENT_EVAL_TOOL: &str = "tachi_agent_eval";
 
 /// Frozen `execution_origin` for Staff L2 mirror rows (#509).
-pub const MIRROR_EXECUTION_ORIGIN: &str = "zeroclaw_tachi_staff";
+pub const MIRROR_EXECUTION_ORIGIN: &str = "reiclaw_tachi_staff";
 /// Frozen `lifecycle_owner` for Staff L2 mirror rows (#509).
 pub const MIRROR_LIFECYCLE_OWNER: &str = "tachi";
 /// Frozen `harness` carrier label for Staff L2 mirror rows (#509).
-pub const MIRROR_HARNESS: &str = "zeroclaw_tachi_staff";
+pub const MIRROR_HARNESS: &str = "reiclaw_tachi_staff";
 /// Per mirror MCP call timeout. Constant; no `[tachi]` config key this slice.
 const MIRROR_CALL_TIMEOUT_SECS: u64 = 5;
 
-/// Tool profile header. ZeroClaw always asks for the ordinary `standard`
+/// Tool profile header. ReiClaw always asks for the ordinary `standard`
 /// profile; privileged Tachi profiles need a local proxy capability.
 pub const HEADER_PROFILE: &str = "x-tachi-profile";
-/// Caller identity header (`zeroclaw:<agent alias>` unless configured).
+/// Caller identity header (`reiclaw:<agent alias>` unless configured).
 pub const HEADER_AGENT_IDENTITY: &str = "x-tachi-agent-identity";
 /// Client product header.
 pub const HEADER_CLIENT: &str = "x-tachi-client";
@@ -80,7 +80,7 @@ pub const HEADER_CLIENT: &str = "x-tachi-client";
 pub const HEADER_PROJECT: &str = "x-tachi-project";
 
 const PROFILE_STANDARD: &str = "standard";
-const CLIENT_NAME: &str = "zeroclaw";
+const CLIENT_NAME: &str = "reiclaw";
 /// Budget for one Tachi call. A start provisions an environment before it
 /// returns its receipt, so it gets more room than a read.
 const CALL_TIMEOUT_SECS: u64 = 120;
@@ -1051,7 +1051,7 @@ impl MirrorCallSite {
 /// Synthetic `frozen_contract_ref` for an accepted Staff work item.
 #[must_use]
 pub fn mirror_frozen_contract_ref(dispatch_id: &str) -> String {
-    format!("zeroclaw:staff:{dispatch_id}")
+    format!("reiclaw:staff:{dispatch_id}")
 }
 
 /// Opaque Staff result pointer used on observe.
@@ -1186,7 +1186,7 @@ mod mirror_contract_tests {
         assert_eq!(args["lifecycle_owner"], MIRROR_LIFECYCLE_OWNER);
         assert_eq!(args["harness"], MIRROR_HARNESS);
         assert_eq!(args["native_child_id"], "disp-abc");
-        assert_eq!(args["frozen_contract_ref"], "zeroclaw:staff:disp-abc");
+        assert_eq!(args["frozen_contract_ref"], "reiclaw:staff:disp-abc");
         assert_ne!(args["execution_origin"], "host_native_subagent");
         assert_ne!(args["lifecycle_owner"], "host");
         assert!(args.get("requested_model").is_none());
@@ -1270,7 +1270,7 @@ mod mirror_contract_tests {
             "execution_origin": MIRROR_EXECUTION_ORIGIN,
             "lifecycle_owner": MIRROR_LIFECYCLE_OWNER,
             "harness": MIRROR_HARNESS,
-            "frozen_contract_ref": "zeroclaw:staff:d-1",
+            "frozen_contract_ref": "reiclaw:staff:d-1",
             "eval_run_id": "11111111-1111-1111-1111-111111111111"
         });
         assert!(mirror_registration_matches(&ok, "d-1"));
@@ -1279,7 +1279,7 @@ mod mirror_contract_tests {
             "execution_origin": "host_native_subagent",
             "lifecycle_owner": "host",
             "harness": "claude_code_task_tool",
-            "frozen_contract_ref": "zeroclaw:staff:d-1",
+            "frozen_contract_ref": "reiclaw:staff:d-1",
         });
         assert!(!mirror_registration_matches(&host, "d-1"));
     }

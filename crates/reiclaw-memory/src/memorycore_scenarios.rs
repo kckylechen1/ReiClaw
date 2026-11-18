@@ -20,18 +20,18 @@
 //! namespaces (`user:*` vs `default`) on a single default agent, with
 //! `recall_namespaced` isolation.
 
-#[cfg(all(test, feature = "tachi"))]
+#[cfg(all(test, feature = "memorycore"))]
 mod tests {
-    use crate::tachi::TachiMemory;
+    use crate::memorycore::MemoryCore;
     use crate::traits::{Memory, MemoryCategory};
     use portable_kernel::{MemoryEntry, MemoryStore};
     use std::sync::Arc;
     use tempfile::TempDir;
 
-    fn temp_tachi() -> (TempDir, TachiMemory) {
+    fn temp_tachi() -> (TempDir, MemoryCore) {
         let tmp = TempDir::new().unwrap();
-        let mem = TachiMemory::with_embedder(
-            "tachi",
+        let mem = MemoryCore::with_embedder(
+            "memorycore",
             tmp.path(),
             Arc::new(crate::embeddings::NoopEmbedding),
             0.7,
@@ -285,7 +285,7 @@ mod tests {
             seed_raw_scoped(
                 &mut store,
                 "ns-user",
-                &TachiMemory::storage_path(
+                &MemoryCore::storage_path(
                     Some("default"),
                     Some("user:kyle"),
                     &MemoryCategory::Core,
@@ -300,7 +300,7 @@ mod tests {
             seed_raw_scoped(
                 &mut store,
                 "ns-default",
-                &TachiMemory::storage_path(
+                &MemoryCore::storage_path(
                     Some("default"),
                     Some("default"),
                     &MemoryCategory::Core,
@@ -360,7 +360,7 @@ mod tests {
             seed_raw_scoped(
                 &mut store,
                 "explicit-default",
-                &TachiMemory::storage_path(
+                &MemoryCore::storage_path(
                     Some("default"),
                     Some("default"),
                     &MemoryCategory::Core,
@@ -417,7 +417,7 @@ mod tests {
             seed_raw_scoped(
                 &mut store,
                 "char-alice",
-                &TachiMemory::storage_path(
+                &MemoryCore::storage_path(
                     Some("char_alice"),
                     Some("default"),
                     &MemoryCategory::Core,
@@ -432,7 +432,7 @@ mod tests {
             seed_raw_scoped(
                 &mut store,
                 "char-bob",
-                &TachiMemory::storage_path(
+                &MemoryCore::storage_path(
                     Some("char_bob"),
                     Some("default"),
                     &MemoryCategory::Core,
@@ -483,7 +483,7 @@ mod tests {
             persons: Vec::new(),
             entities: Vec::new(),
             location: String::new(),
-            source: "zeroclaw-scenario".into(),
+            source: "reiclaw-scenario".into(),
             scope: "general".into(),
             archived: false,
             access_count: 0,
@@ -495,10 +495,10 @@ mod tests {
             retention_policy: None,
             domain: None,
             metadata: serde_json::json!({
-                "zeroclaw_key": key,
-                "zeroclaw_category": "core",
-                "zeroclaw_namespace": namespace,
-                "zeroclaw_agent": agent,
+                "reiclaw_key": key,
+                "reiclaw_category": "core",
+                "reiclaw_namespace": namespace,
+                "reiclaw_agent": agent,
             }),
             recall_count: 0,
             query_diversity: 0,

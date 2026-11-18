@@ -70,7 +70,7 @@ struct ConnectParams {
 }
 
 /// The sub-protocol we support for the chat WebSocket.
-const WS_PROTOCOL: &str = "zeroclaw.v1";
+const WS_PROTOCOL: &str = "reiclaw.v1";
 
 /// Prefix used in `Sec-WebSocket-Protocol` to carry a bearer token.
 const BEARER_SUBPROTO_PREFIX: &str = "bearer.";
@@ -3178,7 +3178,7 @@ mod tests {
         let mut headers = HeaderMap::new();
         headers.insert(
             "sec-websocket-protocol",
-            "zeroclaw.v1, bearer.zc_sub456".parse().unwrap(),
+            "reiclaw.v1, bearer.zc_sub456".parse().unwrap(),
         );
         assert_eq!(extract_ws_token(&headers, None), Some("zc_sub456"));
     }
@@ -3237,7 +3237,7 @@ mod tests {
         let mut headers = HeaderMap::new();
         headers.insert(
             "sec-websocket-protocol",
-            "zeroclaw.v1, bearer.zc_tok, other".parse().unwrap(),
+            "reiclaw.v1, bearer.zc_tok, other".parse().unwrap(),
         );
         assert_eq!(extract_ws_token(&headers, None), Some("zc_tok"));
     }
@@ -3255,7 +3255,7 @@ mod tests {
         );
         assert!(!client_offers_chat_protocol(&nodes_only));
         let mut chat = HeaderMap::new();
-        chat.insert("sec-websocket-protocol", "zeroclaw.v1".parse().unwrap());
+        chat.insert("sec-websocket-protocol", "reiclaw.v1".parse().unwrap());
         assert!(client_offers_chat_protocol(&chat));
     }
 
@@ -3331,7 +3331,7 @@ mod tests {
             ..Config::default()
         };
         std::fs::create_dir_all(&config.data_dir).unwrap();
-        config.memory.backend = "tachi".to_string();
+        config.memory.backend = "memorycore".to_string();
 
         let mut agent = AliasedAgentConfig::default();
         agent.memory.backend = MemoryBackendKind::None;

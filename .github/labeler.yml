@@ -255,7 +255,7 @@
           - "crates/reiclaw-memory/src/backend.rs"
           - "crates/reiclaw-memory/src/markdown.rs"
           - "crates/reiclaw-memory/src/none.rs"
-          - "crates/reiclaw-memory/src/tachi.rs"
+          - "crates/reiclaw-memory/src/memorycore.rs"
 
 "security":
   - changed-files:

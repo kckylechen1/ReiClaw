@@ -309,13 +309,13 @@ fn make_memory() -> Arc<dyn Memory> {
     Arc::from(reiclaw_memory::create_memory(&cfg, &std::env::temp_dir(), None).unwrap())
 }
 
-fn try_tachi_memory() -> Option<(Arc<dyn Memory>, tempfile::TempDir)> {
-    if !reiclaw_memory::TACHI_COMPILED {
+fn try_memorycore_memory() -> Option<(Arc<dyn Memory>, tempfile::TempDir)> {
+    if !reiclaw_memory::MEMORYCORE_COMPILED {
         return None;
     }
     let tmp = tempfile::TempDir::new().unwrap();
     let cfg = MemoryConfig {
-        backend: "tachi".into(),
+        backend: "memorycore".into(),
         hygiene_enabled: false,
         embedding_provider: "none".into(),
         ..MemoryConfig::default()
@@ -774,7 +774,7 @@ async fn history_trims_after_max_messages() {
 
 #[tokio::test]
 async fn auto_save_stores_only_user_messages_in_memory() {
-    let Some((mem, _tmp)) = try_tachi_memory() else {
+    let Some((mem, _tmp)) = try_memorycore_memory() else {
         return;
     };
     let model_provider = Box::new(ScriptedModelProvider::new(vec![text_response(
@@ -814,7 +814,7 @@ async fn auto_save_stores_only_user_messages_in_memory() {
 
 #[tokio::test]
 async fn auto_save_disabled_does_not_store() {
-    let Some((mem, _tmp)) = try_tachi_memory() else {
+    let Some((mem, _tmp)) = try_memorycore_memory() else {
         return;
     };
     let model_provider = Box::new(ScriptedModelProvider::new(vec![text_response("hello")]));

@@ -528,18 +528,18 @@ pub fn snapshot_state(cfg: &Config) -> QuickstartState {
 /// the wire key so there's no parallel mapping.
 fn memory_kind_keys() -> Vec<String> {
     use reiclaw_config::multi_agent::MemoryBackendKind as M;
-    [M::Tachi, M::Markdown, M::None]
+    [M::MemoryCore, M::Markdown, M::None]
         .into_iter()
         .filter_map(|k| {
             // Exhaustiveness guard: adding a new variant forces this match to fail
             // to compile until the contributor decides whether the new backend
             // belongs in the quickstart picker. Retired variants only parse for
-            // legacy configs and are never offered; tachi is offered only when
-            // this build includes `memory-tachi`.
+            // legacy configs and are never offered; memorycore is offered only when
+            // this build includes `memory-core`.
             match k {
                 M::Markdown | M::None => (),
-                M::Tachi if reiclaw_memory::TACHI_COMPILED => (),
-                M::Tachi | M::Sqlite | M::Lucid | M::Postgres | M::Qdrant => return None,
+                M::MemoryCore if reiclaw_memory::MEMORYCORE_COMPILED => (),
+                M::MemoryCore | M::Sqlite | M::Lucid | M::Postgres | M::Qdrant => return None,
             }
             serde_json::to_value(k)
                 .ok()
@@ -1358,19 +1358,19 @@ fn apply_memory(
                 .ok()
                 .and_then(|v| v.as_str().map(str::to_string))
                 .unwrap_or_else(|| format!("{kind:?}").to_lowercase());
-            if matches!(kind, MemoryChoice::Tachi) && !reiclaw_memory::TACHI_COMPILED {
+            if matches!(kind, MemoryChoice::MemoryCore) && !reiclaw_memory::MEMORYCORE_COMPILED {
                 errors.push(QuickstartError::for_surface(
                     ctx,
                     QuickstartStep::Memory,
                     "backend",
-                    "memory backend 'tachi' requires a build with `memory-tachi` enabled"
+                    "memory backend 'memorycore' requires a build with `memory-core` enabled"
                         .to_string(),
-                    "cli-quickstart-error-tachi-not-compiled",
+                    "cli-quickstart-error-memorycore-not-compiled",
                     &[],
                 ));
                 return None;
             }
-            if matches!(kind, MemoryChoice::None | MemoryChoice::Tachi) {
+            if matches!(kind, MemoryChoice::None | MemoryChoice::MemoryCore) {
                 if let Err(err) = config.set_prop_persistent("memory.backend", &kind_name) {
                     errors.push(QuickstartError::new(
                         QuickstartStep::Memory,

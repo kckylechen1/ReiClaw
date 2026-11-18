@@ -177,7 +177,7 @@ default = [
     "agent-runtime",
     "default-channels",
     "gateway",
-    "memory-tachi",
+    "memory-core",
     "observability-prometheus",
     "schema-export",
 ]
@@ -232,7 +232,7 @@ channel-acp-server = []
 # package needs this forward so targets that construct `gateway::AppState`
 # (e.g. the `component` test) can cfg-gate the node-only fields.
 nodes = ["reiclaw-gateway?/nodes"]
-memory-tachi = ["reiclaw-memory/tachi", "reiclaw-runtime?/memory-tachi", "reiclaw-gateway?/memory-tachi"]
+memory-core = ["reiclaw-memory/memorycore", "reiclaw-runtime?/memory-core", "reiclaw-gateway?/memory-core"]
 
 # Backends and platform flags — each forwards to ONE crate
 observability-prometheus = [
@@ -255,7 +255,7 @@ ci-all = [
     "voice-surface",
     "agent-runtime",
     "channels-full",
-    "memory-tachi",
+    "memory-core",
     "observability-prometheus",
     "sandbox-landlock", "sandbox-bubblewrap",
     "reiclaw-runtime/heavy-tests",

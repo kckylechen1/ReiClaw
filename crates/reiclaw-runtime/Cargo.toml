@@ -90,7 +90,7 @@ sandbox-landlock = ["dep:landlock"]
 schema-export = ["dep:schemars", "reiclaw-config/schema-export"]
 
 
-memory-tachi = ["reiclaw-memory/tachi"]
+memory-core = ["reiclaw-memory/memorycore"]
 sandbox-bubblewrap = []
 # Heavy agent behavioral suites. Gated so lib-test
 # iteration does not compile them; CI runtime leg enables this feature.

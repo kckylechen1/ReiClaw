@@ -231,7 +231,7 @@ impl<M: Memory> AuditedMemory<M> {
         Ok(count as usize)
     }
 
-    #[cfg(all(test, feature = "tachi"))]
+    #[cfg(all(test, feature = "memorycore"))]
     pub(crate) fn inner(&self) -> &M {
         &self.inner
     }
@@ -757,11 +757,11 @@ mod tests {
     use crate::none::NoneMemory;
     use tempfile::TempDir;
 
-    #[cfg(feature = "tachi")]
+    #[cfg(feature = "memorycore")]
     #[test]
     fn refresh_embedder_forwards_to_inner_backend() {
         let tmp = TempDir::new().unwrap();
-        let inner = crate::tachi::TachiMemory::new("tachi", tmp.path()).unwrap();
+        let inner = crate::memorycore::MemoryCore::new("memorycore", tmp.path()).unwrap();
         let audited = AuditedMemory::new(inner, tmp.path()).unwrap();
         assert_eq!(audited.inner().embedder_dimensions(), 0);
 
@@ -898,11 +898,11 @@ mod tests {
         assert_eq!(audited.count().await.unwrap(), 0);
     }
 
-    #[cfg(feature = "tachi")]
+    #[cfg(feature = "memorycore")]
     #[tokio::test]
     async fn audited_memory_logs_store_with_options_and_forwards() {
         let tmp = TempDir::new().unwrap();
-        let inner = crate::tachi::TachiMemory::new("tachi", tmp.path()).unwrap();
+        let inner = crate::memorycore::MemoryCore::new("memorycore", tmp.path()).unwrap();
         let audited = AuditedMemory::new(inner, tmp.path()).unwrap();
 
         audited
@@ -924,11 +924,11 @@ mod tests {
         );
     }
 
-    #[cfg(feature = "tachi")]
+    #[cfg(feature = "memorycore")]
     #[tokio::test]
     async fn audited_memory_purge_session_logs_and_forwards() {
         let tmp = TempDir::new().unwrap();
-        let inner = crate::tachi::TachiMemory::new("tachi", tmp.path()).unwrap();
+        let inner = crate::memorycore::MemoryCore::new("memorycore", tmp.path()).unwrap();
         let audited = AuditedMemory::new(inner, tmp.path()).unwrap();
 
         audited
@@ -955,11 +955,11 @@ mod tests {
     /// `supersede` and `stats` have inert trait defaults (no-op / empty);
     /// the decorator must forward both so wrapping a backend does not
     /// silently disable conflict supersede or zero out telemetry.
-    #[cfg(feature = "tachi")]
+    #[cfg(feature = "memorycore")]
     #[tokio::test]
     async fn audited_memory_forwards_supersede_and_stats() {
         let tmp = TempDir::new().unwrap();
-        let inner = crate::tachi::TachiMemory::new("tachi", tmp.path()).unwrap();
+        let inner = crate::memorycore::MemoryCore::new("memorycore", tmp.path()).unwrap();
         let audited = AuditedMemory::new(inner, tmp.path()).unwrap();
 
         audited
