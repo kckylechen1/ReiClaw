@@ -1,6 +1,6 @@
 //! TG1: ModelProvider End-to-End Resolution Tests
 
-use zeroclaw::providers::create_model_provider_with_url;
+use reiclaw::providers::create_model_provider_with_url;
 
 /// Helper: assert model_provider creation succeeds
 fn assert_provider_ok(name: &str, key: Option<&str>, url: Option<&str>) {

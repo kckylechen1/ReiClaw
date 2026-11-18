@@ -2,9 +2,9 @@
 
 use anyhow::Result;
 use async_trait::async_trait;
+use reiclaw::providers::traits::{ChatMessage, TokenUsage};
+use reiclaw::providers::{ChatRequest, ChatResponse, ModelProvider, ToolCall};
 use std::sync::{Arc, Mutex};
-use zeroclaw::providers::traits::{ChatMessage, TokenUsage};
-use zeroclaw::providers::{ChatRequest, ChatResponse, ModelProvider, ToolCall};
 
 use super::trace::{LlmTrace, TraceResponse};
 
@@ -56,13 +56,11 @@ impl ModelProvider for MockModelProvider {
         Ok(guard.remove(0))
     }
 }
-impl ::zeroclaw_api::attribution::Attributable for MockModelProvider {
-    fn role(&self) -> ::zeroclaw_api::attribution::Role {
-        ::zeroclaw_api::attribution::Role::Provider(
-            ::zeroclaw_api::attribution::ProviderKind::Model(
-                ::zeroclaw_api::attribution::ModelProviderKind::Custom,
-            ),
-        )
+impl ::reiclaw_api::attribution::Attributable for MockModelProvider {
+    fn role(&self) -> ::reiclaw_api::attribution::Role {
+        ::reiclaw_api::attribution::Role::Provider(::reiclaw_api::attribution::ProviderKind::Model(
+            ::reiclaw_api::attribution::ModelProviderKind::Custom,
+        ))
     }
     fn alias(&self) -> &str {
         "MockModelProvider"
@@ -121,13 +119,11 @@ impl ModelProvider for RecordingModelProvider {
         Ok(guard.remove(0))
     }
 }
-impl ::zeroclaw_api::attribution::Attributable for RecordingModelProvider {
-    fn role(&self) -> ::zeroclaw_api::attribution::Role {
-        ::zeroclaw_api::attribution::Role::Provider(
-            ::zeroclaw_api::attribution::ProviderKind::Model(
-                ::zeroclaw_api::attribution::ModelProviderKind::Custom,
-            ),
-        )
+impl ::reiclaw_api::attribution::Attributable for RecordingModelProvider {
+    fn role(&self) -> ::reiclaw_api::attribution::Role {
+        ::reiclaw_api::attribution::Role::Provider(::reiclaw_api::attribution::ProviderKind::Model(
+            ::reiclaw_api::attribution::ModelProviderKind::Custom,
+        ))
     }
     fn alias(&self) -> &str {
         "RecordingModelProvider"
@@ -226,13 +222,11 @@ impl ModelProvider for TraceLlmModelProvider {
         }
     }
 }
-impl ::zeroclaw_api::attribution::Attributable for TraceLlmModelProvider {
-    fn role(&self) -> ::zeroclaw_api::attribution::Role {
-        ::zeroclaw_api::attribution::Role::Provider(
-            ::zeroclaw_api::attribution::ProviderKind::Model(
-                ::zeroclaw_api::attribution::ModelProviderKind::Custom,
-            ),
-        )
+impl ::reiclaw_api::attribution::Attributable for TraceLlmModelProvider {
+    fn role(&self) -> ::reiclaw_api::attribution::Role {
+        ::reiclaw_api::attribution::Role::Provider(::reiclaw_api::attribution::ProviderKind::Model(
+            ::reiclaw_api::attribution::ModelProviderKind::Custom,
+        ))
     }
     fn alias(&self) -> &str {
         "TraceLlmModelProvider"

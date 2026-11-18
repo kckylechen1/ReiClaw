@@ -152,13 +152,13 @@ fn protected_terms() -> &'static [String] {
             .map(|term| (*term).to_string())
             .collect();
 
-        for provider in zeroclaw_providers::list_model_providers() {
+        for provider in reiclaw_providers::list_model_providers() {
             if is_protected_registry_term(provider.display_name) {
                 terms.insert(provider.display_name.to_string());
             }
         }
 
-        for channel in zeroclaw_config::schema::Config::default()
+        for channel in reiclaw_config::schema::Config::default()
             .channels
             .channels()
         {

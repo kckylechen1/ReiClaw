@@ -1,0 +1,1330 @@
+//! System prompt construction for the agent loop and channel subsystem.
+//! These functions were originally in `channels/mod.rs` but live here to
+//! break a circular dependency between the channels and agent modules.
+
+use crate::identity;
+use crate::security::AutonomyLevel;
+use crate::skills::Skill;
+
+/// Maximum characters per injected workspace file (matches `OpenClaw` default).
+pub const BOOTSTRAP_MAX_CHARS: usize = 20_000;
+/// Per-file cap applied to every injected workspace bootstrap file while
+/// compact context is on. Shared by the turn paths and `zeroclaw doctor`
+/// so both report the same budget.
+pub const COMPACT_BOOTSTRAP_MAX_CHARS: usize = 6_000;
+pub const NO_TOOLS_TASK_FRAMING: &str = "No tools are available for this turn";
+pub const NATIVE_TOOLS_TASK_FRAMING: &str = "Use tools when the request requires action";
+
+use crate::agent::persona_projection::{LegacyPersonaFiles, STORY_HEADING};
+use crate::agent::personality::{NOTES_FILES, NOTES_FRAMING_LINE, NOTES_HEADING};
+
+/// Workspace files `doctor` scans (plus the conditional `BOOTSTRAP.md` /
+/// `MEMORY.md`) so its report matches what the prompt builder caps. The
+/// model-writable ones render last under [`NOTES_HEADING`].
+pub const BOOTSTRAP_FILES: &[&str] =
+    &["AGENTS.md", "SOUL.md", "TOOLS.md", "IDENTITY.md", "USER.md"];
+
+fn load_openclaw_bootstrap_files(
+    prompt: &mut String,
+    workspace_dir: &std::path::Path,
+    max_chars_per_file: usize,
+    inject_memory: bool,
+    compact_context: bool,
+    legacy_persona_files: LegacyPersonaFiles,
+) {
+    prompt.push_str(
+        "The following workspace files define your identity, behavior, and context. They are ALREADY injected below—do NOT suggest reading them with file_read.\n\n",
+    );
+
+    for filename in BOOTSTRAP_FILES {
+        if NOTES_FILES.contains(filename) || legacy_persona_files.skips(filename) {
+            continue;
+        }
+        inject_workspace_file(
+            prompt,
+            workspace_dir,
+            filename,
+            max_chars_per_file,
+            compact_context,
+        );
+    }
+
+    // BOOTSTRAP.md — only if it exists (first-run ritual)
+    let bootstrap_path = workspace_dir.join("BOOTSTRAP.md");
+    if bootstrap_path.exists() {
+        inject_workspace_file(
+            prompt,
+            workspace_dir,
+            "BOOTSTRAP.md",
+            max_chars_per_file,
+            compact_context,
+        );
+    }
+
+    // Model-writable notes (ADR-018 §6) render last, under one fixed heading,
+    // so they read as the agent's own notes and never as part of the Soul.
+    // MEMORY.md is curated long-term memory (main session only): skipped
+    // when the agent runs without persistent memory (e.g. ACP sessions) so
+    // that stale long-term memory does not leak into isolated contexts.
+    let mut notes = String::new();
+    for filename in NOTES_FILES {
+        if *filename == "MEMORY.md" && !inject_memory {
+            continue;
+        }
+        if workspace_dir.join(filename).is_file() {
+            inject_workspace_file(
+                &mut notes,
+                workspace_dir,
+                filename,
+                max_chars_per_file,
+                compact_context,
+            );
+        }
+    }
+    if !notes.is_empty() {
+        prompt.push_str(NOTES_HEADING);
+        prompt.push_str("\n\n");
+        prompt.push_str(NOTES_FRAMING_LINE);
+        prompt.push_str("\n\n");
+        prompt.push_str(&notes);
+    }
+}
+
+pub fn build_system_prompt(
+    workspace_dir: &std::path::Path,
+    model_name: &str,
+    tools: &[(&str, &str)],
+    skills: &[Skill],
+    identity_config: Option<&reiclaw_config::schema::IdentityConfig>,
+    bootstrap_max_chars: Option<usize>,
+) -> String {
+    build_system_prompt_with_mode(
+        workspace_dir,
+        model_name,
+        tools,
+        skills,
+        identity_config,
+        bootstrap_max_chars,
+        false,
+        reiclaw_config::schema::SkillsPromptInjectionMode::Full,
+        AutonomyLevel::default(),
+    )
+}
+
+/// Like [`build_system_prompt`] but accepts `show_tool_calls` to control
+/// whether the system prompt instructs the model to hide tool narration.
+pub fn build_system_prompt_with_tool_calls(
+    workspace_dir: &std::path::Path,
+    model_name: &str,
+    tools: &[(&str, &str)],
+    skills: &[Skill],
+    identity_config: Option<&reiclaw_config::schema::IdentityConfig>,
+    bootstrap_max_chars: Option<usize>,
+    show_tool_calls: bool,
+) -> String {
+    build_system_prompt_with_mode_and_autonomy(
+        workspace_dir,
+        model_name,
+        tools,
+        skills,
+        identity_config,
+        bootstrap_max_chars,
+        Some(&reiclaw_config::schema::RiskProfileConfig::default()),
+        false,
+        reiclaw_config::schema::SkillsPromptInjectionMode::Full,
+        false,
+        0,
+        true,
+        show_tool_calls,
+    )
+}
+
+pub fn build_system_prompt_with_mode(
+    workspace_dir: &std::path::Path,
+    model_name: &str,
+    tools: &[(&str, &str)],
+    skills: &[Skill],
+    identity_config: Option<&reiclaw_config::schema::IdentityConfig>,
+    bootstrap_max_chars: Option<usize>,
+    native_tool_specs_present: bool,
+    skills_prompt_mode: reiclaw_config::schema::SkillsPromptInjectionMode,
+    autonomy_level: AutonomyLevel,
+) -> String {
+    let autonomy_cfg = reiclaw_config::schema::RiskProfileConfig {
+        level: autonomy_level,
+        ..Default::default()
+    };
+    build_system_prompt_with_mode_and_autonomy(
+        workspace_dir,
+        model_name,
+        tools,
+        skills,
+        identity_config,
+        bootstrap_max_chars,
+        Some(&autonomy_cfg),
+        native_tool_specs_present,
+        skills_prompt_mode,
+        false,
+        0,
+        true,
+        false,
+    )
+}
+
+#[allow(clippy::too_many_arguments)]
+pub fn build_system_prompt_with_mode_and_autonomy(
+    workspace_dir: &std::path::Path,
+    model_name: &str,
+    tools: &[(&str, &str)],
+    skills: &[Skill],
+    identity_config: Option<&reiclaw_config::schema::IdentityConfig>,
+    bootstrap_max_chars: Option<usize>,
+    autonomy_config: Option<&reiclaw_config::schema::RiskProfileConfig>,
+    native_tool_specs_present: bool,
+    skills_prompt_mode: reiclaw_config::schema::SkillsPromptInjectionMode,
+    compact_context: bool,
+    max_system_prompt_chars: usize,
+    // When `false`, `MEMORY.md` is omitted from the injected bootstrap files.
+    // Set to `false` for isolated / ACP sessions that use `exclude_memory`.
+    inject_memory: bool,
+    // When `true`, the model is allowed to narrate tool usage in its
+    // response. When `false` (default), the system prompt instructs
+    // the model to treat tool calls as invisible infrastructure.
+    show_tool_calls: bool,
+) -> String {
+    build_system_prompt_with_persona(
+        workspace_dir,
+        model_name,
+        tools,
+        skills,
+        identity_config,
+        bootstrap_max_chars,
+        autonomy_config,
+        native_tool_specs_present,
+        skills_prompt_mode,
+        compact_context,
+        max_system_prompt_chars,
+        inject_memory,
+        show_tool_calls,
+        None,
+        LegacyPersonaFiles::Inject,
+    )
+}
+
+/// Like [`build_system_prompt_with_mode_and_autonomy`] but additionally
+/// accepts a pre-rendered persona `## Tone` section
+/// ([`reiclaw_config::persona::PersonaKnobs::to_prompt_section`]).
+/// `persona_section: None` (the case `build_system_prompt_with_mode_and_autonomy`
+/// always passes) produces byte-identical output to before this section
+/// existed.
+#[allow(clippy::too_many_arguments)]
+pub fn build_system_prompt_with_persona(
+    workspace_dir: &std::path::Path,
+    model_name: &str,
+    tools: &[(&str, &str)],
+    skills: &[Skill],
+    identity_config: Option<&reiclaw_config::schema::IdentityConfig>,
+    bootstrap_max_chars: Option<usize>,
+    autonomy_config: Option<&reiclaw_config::schema::RiskProfileConfig>,
+    native_tool_specs_present: bool,
+    skills_prompt_mode: reiclaw_config::schema::SkillsPromptInjectionMode,
+    compact_context: bool,
+    max_system_prompt_chars: usize,
+    inject_memory: bool,
+    show_tool_calls: bool,
+    // Governed Soul projection ending in Tone and Story, or a standalone Tone
+    // section. Hard honesty blocks precede it. The optional Tone-and-Story
+    // tail yields first when the assembled prompt exceeds its budget; other
+    // layers keep their existing placement and bounds.
+    persona_section: Option<&str>,
+    // Which legacy persona files are still injected: `SOUL.md` / `IDENTITY.md`
+    // retire once the owner has written a governed Identity (ADR-015 §2),
+    // `USER.md` once the User Model holds an owner-authorized revision
+    // (ADR-018 §6).
+    legacy_persona_files: LegacyPersonaFiles,
+) -> String {
+    use std::fmt::Write;
+    let mut prompt = String::with_capacity(8192);
+    let has_tools = !tools.is_empty() || native_tool_specs_present;
+
+    // ── 0. Anti-narration (top priority) ───────────────────────
+    // When show_tool_calls is true, the model is allowed to describe
+    // its tool usage so channel users see what tools are being called.
+    if has_tools && !show_tool_calls {
+        prompt.push_str(
+            "## CRITICAL: No Tool Narration\n\n\
+             NEVER narrate, announce, describe, or explain your tool usage to the user. \
+             Do NOT say things like 'Let me check...', 'I will use http_request to...', \
+             'I'll fetch that for you', 'Searching now...', or 'Using the web_search tool'. \
+             The user must ONLY see the final answer. Tool calls are invisible infrastructure — \
+             never reference them. If you catch yourself starting a sentence about what tool \
+             you are about to use or just used, DELETE it and give the answer directly.\n\n",
+        );
+    }
+
+    // ── 0b. Tool Honesty ───────────────────────────────────────
+    if has_tools {
+        prompt.push_str(
+            "## CRITICAL: Tool Honesty\n\n\
+             - NEVER fabricate, invent, or guess tool results. If a tool returns empty results, say \"No results found.\"\n\
+             - If a tool call fails, report the error — never make up data to fill the gap.\n\
+             - When unsure whether a tool call succeeded, ask the user rather than guessing.\n\n",
+        );
+    }
+
+    // ── 0c. Tone (persona dials) ────────────────────────────────
+    // Must sit after the two hard behavioural blocks above (a persona dial
+    // must never be able to displace anti-narration or tool honesty) and
+    // before the tools list below. If the prompt exceeds its budget, discard
+    // the optional tail first, lowest precedence first (ADR-018 §2): Story,
+    // then Tone if still over budget, so style and shared history cannot
+    // displace safety, approval guidance or the governed Identity/Principles
+    // layers.
+    let mut tone_range = None;
+    let mut story_range = None;
+    if let Some(section) = persona_section
+        && !section.is_empty()
+    {
+        let tone_start = if section.starts_with("## Tone\n") {
+            Some(0)
+        } else {
+            section.rfind("\n## Tone\n")
+        };
+        let story_start = section.find(&format!("\n{STORY_HEADING}\n"));
+        let start = prompt.len();
+        prompt.push_str(section);
+        prompt.push('\n');
+        let end = prompt.len();
+        story_range = story_start.map(|offset| start + offset..end - 1);
+        tone_range = tone_start.map(|offset| {
+            let tone_end = story_start.map_or(end - usize::from(offset > 0), |story| start + story);
+            start + offset..tone_end
+        });
+    }
+
+    // ── 1. Tooling ──────────────────────────────────────────────
+    if !tools.is_empty() && !native_tool_specs_present {
+        prompt.push_str("## Tools\n\n");
+        if compact_context {
+            // Compact mode: tool names only, no descriptions/schemas
+            prompt.push_str("Available tools: ");
+            let names: Vec<&str> = tools.iter().map(|(name, _)| *name).collect();
+            prompt.push_str(&names.join(", "));
+            prompt.push_str("\n\n");
+        } else {
+            prompt.push_str("You have access to the following tools:\n\n");
+            for (name, desc) in tools {
+                let _ = writeln!(prompt, "- **{name}**: {desc}");
+            }
+            prompt.push('\n');
+        }
+    }
+
+    // ── 1d. Tool Authorization (Full autonomy) ──────────────────────
+    // At Full autonomy the user has explicitly opted into letting the model
+    // act without per-call approval. The generic Safety block alone isn't
+    // enough to overcome model safety-priors that produce simulated
+    // refusal text without ever dispatching a tool call.
+    // Name the power tools the autonomy policy authorizes and tell the model
+    // it is authorized to *call/attempt* them (not that they are exempt from
+    // policy): command policy, forbidden_commands, forbidden_paths, and OS
+    // sandboxing may still reject a real call, so the model must not
+    // self-refuse merely because the request uses these tools.
+    if has_tools && autonomy_config.map(|cfg| cfg.level) == Some(AutonomyLevel::Full) {
+        let power_tools: Vec<&str> = ["shell", "file_write", "file_edit"]
+            .into_iter()
+            .filter(|name| tools.iter().any(|(t, _)| t == name))
+            .collect();
+        if !power_tools.is_empty() {
+            prompt.push_str(
+                "## Tool Authorization\n\n\
+                 The runtime autonomy policy is set to `full`. The user has granted the agent permission to act without per-call approval, so the following tools are registered and authorized to call (to attempt) under Full autonomy: ",
+            );
+            prompt.push_str(&power_tools.join(", "));
+            prompt.push_str(
+                ".\n\
+                 When the user asks you to run a shell command, write or edit a file, or otherwise act through these tools, CALL the tool directly — do NOT self-refuse with simulated text such as \"blocked by security policy\" or \"restricted in this environment\" merely because the request uses shell or file-write tooling.\n\
+                 Full autonomy removes the approval prompt, not the runtime safeguards: command policy, `forbidden_commands`, `forbidden_paths`, and OS sandboxing still apply, and a call can still return a real tool error. If such an error occurs, it is reported as a tool error in the conversation; only then should you explain what was blocked. Never invent a block that did not happen.\n\n",
+            );
+        }
+    }
+
+    // ── 1c. Action instruction (avoid meta-summary) ───────────────
+    if !has_tools {
+        prompt.push_str(
+            "## Your Task\n\n\
+             When the user sends a message, respond naturally and answer directly from conversation context.\n\
+             ",
+        );
+        prompt.push_str(NO_TOOLS_TASK_FRAMING);
+        prompt.push_str(
+            ", so do not emit tool calls or describe unavailable actions.\n\
+             Do NOT: summarize this configuration, describe your capabilities, or output step-by-step meta-commentary.\n\n",
+        );
+    } else if native_tool_specs_present {
+        prompt.push_str(
+            "## Your Task\n\n\
+             When the user sends a message, respond naturally. ",
+        );
+        prompt.push_str(NATIVE_TOOLS_TASK_FRAMING);
+        prompt.push_str(
+            " (running commands, reading files, etc.).\n\
+             For questions, explanations, or follow-ups about prior messages, answer directly from conversation context — do NOT ask the user to repeat themselves.\n\
+             Do NOT: summarize this configuration, describe your capabilities, or output step-by-step meta-commentary.\n\n",
+        );
+    } else {
+        prompt.push_str(
+            "## Your Task\n\n\
+             When the user sends a message, ACT on it. Use the tools to fulfill their request.\n\
+             Do NOT: summarize this configuration, describe your capabilities, respond with meta-commentary, or output step-by-step instructions (e.g. \"1. First... 2. Next...\").\n\
+             Instead: emit actual <tool_call> tags when you need to act. Just do what they ask.\n\n",
+        );
+    }
+
+    // ── 2. Safety ───────────────────────────────────────────────
+    prompt.push_str("## Safety\n\n");
+    prompt.push_str("- Do not exfiltrate private data.\n");
+    if autonomy_config.map(|cfg| cfg.level) != Some(crate::security::AutonomyLevel::Full) {
+        prompt.push_str(
+            "- Do not run destructive commands without asking.\n\
+             - Do not bypass oversight or approval mechanisms.\n",
+        );
+    }
+    prompt.push_str("- Prefer `trash` over `rm` (recoverable beats gone forever).\n");
+    prompt.push_str(match autonomy_config.map(|cfg| cfg.level) {
+        Some(crate::security::AutonomyLevel::Full) => {
+            "- Respect the runtime autonomy policy: if a tool or action is allowed, execute it directly instead of asking the user for extra approval.\n\
+             - If a tool or action is blocked by policy or unavailable, explain that concrete restriction instead of simulating an approval dialog.\n"
+        }
+        Some(crate::security::AutonomyLevel::ReadOnly) => {
+            "- Respect the runtime autonomy policy: this runtime is read-only for side effects unless a tool explicitly reports otherwise.\n\
+             - If a requested action is blocked by policy, explain the restriction directly instead of simulating an approval dialog.\n"
+        }
+        _ => {
+            "- When in doubt, ask before acting externally.\n\
+             - Respect the runtime autonomy policy: ask for approval only when the current runtime policy actually requires it.\n\
+             - If a tool or action is blocked by policy or unavailable, explain that concrete restriction instead of simulating an approval dialog.\n"
+        }
+    });
+    prompt.push('\n');
+
+    // ── 3. Skills (full or compact, based on config) ─────────────
+    if !skills.is_empty() {
+        prompt.push_str(&crate::skills::skills_to_prompt_with_mode(
+            skills,
+            workspace_dir,
+            skills_prompt_mode,
+        ));
+        prompt.push_str("\n\n");
+    }
+
+    // ── 4. Workspace ────────────────────────────────────────────
+    let _ = writeln!(
+        prompt,
+        "## Workspace\n\nWorking directory: `{}`\n",
+        workspace_dir.display()
+    );
+
+    // ── 5. Bootstrap files (injected into context) ──────────────
+    prompt.push_str("## Project Context\n\n");
+
+    // Check if AIEOS identity is configured
+    if let Some(config) = identity_config {
+        if identity::is_aieos_configured(config) {
+            // Load AIEOS identity
+            match identity::load_aieos_identity(config, workspace_dir) {
+                Ok(Some(aieos_identity)) => {
+                    let aieos_prompt = identity::aieos_to_system_prompt(&aieos_identity);
+                    if !aieos_prompt.is_empty() {
+                        prompt.push_str(&aieos_prompt);
+                        prompt.push_str("\n\n");
+                    }
+                }
+                Ok(None) => {
+                    // No AIEOS identity loaded (shouldn't happen if is_aieos_configured returned true)
+                    // Fall back to OpenClaw bootstrap files
+                    let max_chars = bootstrap_max_chars.unwrap_or(BOOTSTRAP_MAX_CHARS);
+                    load_openclaw_bootstrap_files(
+                        &mut prompt,
+                        workspace_dir,
+                        max_chars,
+                        inject_memory,
+                        compact_context,
+                        legacy_persona_files,
+                    );
+                }
+                Err(e) => {
+                    // Log error but don't fail - fall back to OpenClaw
+                    eprintln!(
+                        "Warning: Failed to load AIEOS identity: {e}. Using OpenClaw format."
+                    );
+                    let max_chars = bootstrap_max_chars.unwrap_or(BOOTSTRAP_MAX_CHARS);
+                    load_openclaw_bootstrap_files(
+                        &mut prompt,
+                        workspace_dir,
+                        max_chars,
+                        inject_memory,
+                        compact_context,
+                        legacy_persona_files,
+                    );
+                }
+            }
+        } else {
+            // OpenClaw format
+            let max_chars = bootstrap_max_chars.unwrap_or(BOOTSTRAP_MAX_CHARS);
+            load_openclaw_bootstrap_files(
+                &mut prompt,
+                workspace_dir,
+                max_chars,
+                inject_memory,
+                compact_context,
+                legacy_persona_files,
+            );
+        }
+    } else {
+        // No identity config - use OpenClaw format
+        let max_chars = bootstrap_max_chars.unwrap_or(BOOTSTRAP_MAX_CHARS);
+        load_openclaw_bootstrap_files(
+            &mut prompt,
+            workspace_dir,
+            max_chars,
+            inject_memory,
+            compact_context,
+            legacy_persona_files,
+        );
+    }
+
+    // ── 6. Date ─────────────────────────────────────────────────
+    let now = jiff::Zoned::now();
+    let _ = writeln!(
+        prompt,
+        "## Current Date\n\n{} ({})\n",
+        now.strftime("%Y-%m-%d"),
+        now.strftime("%:z")
+    );
+
+    // ── 7. Runtime ──────────────────────────────────────────────
+    let host =
+        hostname::get().map_or_else(|_| "unknown".into(), |h| h.to_string_lossy().to_string());
+    let _ = writeln!(
+        prompt,
+        "## Runtime\n\nHost: {host} | OS: {} | Model: {model_name}\n",
+        std::env::consts::OS,
+    );
+
+    // ── 8. Channel Capabilities (skipped in compact_context mode) ──
+    if !compact_context {
+        prompt.push_str("## Channel Capabilities\n\n");
+        prompt.push_str("- You are running as a messaging bot. Your response is automatically sent back to the user's channel.\n");
+        prompt
+            .push_str("- You do NOT need to ask permission to respond — just respond directly.\n");
+        prompt.push_str(match autonomy_config.map(|cfg| cfg.level) {
+        Some(crate::security::AutonomyLevel::Full) => {
+            "- If the runtime policy already allows a tool, use it directly; do not ask the user for extra approval.\n\
+             - Never pretend you are waiting for a human approval click or confirmation when the runtime policy already permits the action.\n\
+             - If the runtime policy blocks an action, say that directly instead of simulating an approval flow.\n"
+        }
+        Some(crate::security::AutonomyLevel::ReadOnly) => {
+            "- This runtime may reject write-side effects; if that happens, explain the policy restriction directly instead of simulating an approval flow.\n"
+        }
+        _ => {
+            "- Ask for approval only when the runtime policy actually requires it.\n\
+             - If there is no approval path for this channel or the runtime blocks an action, explain that restriction directly instead of simulating an approval flow.\n"
+        }
+    });
+        prompt.push_str("- NEVER repeat, describe, or echo credentials, tokens, API keys, or secrets in your responses.\n");
+        prompt.push_str("- If a tool output contains credentials, they have already been redacted — do not mention them.\n");
+        prompt.push_str("- When a user sends a voice note, it is automatically transcribed to text. Your text reply is automatically converted to a voice note and sent back. Do NOT attempt to generate audio yourself — TTS is handled by the channel.\n");
+        if !show_tool_calls {
+            prompt.push_str("- NEVER narrate or describe your tool usage. Do NOT say 'Let me fetch...', 'I will use...', 'Searching...', or similar. Give the FINAL ANSWER only — no intermediate steps, no tool mentions, no progress updates.\n");
+        }
+        prompt.push_str("- Calibration note: agents in this system currently err on the side of silence when a response would be appropriate, which users find frustrating. Skew toward replying. Memory is supplementary context that informs how you respond, not a gate on whether you respond.\n\n");
+    } // end if !compact_context (Channel Capabilities)
+
+    // ── 9. Truncation (max_system_prompt_chars budget) ──────────
+    // Story renders after Tone, so removing it first leaves the Tone range
+    // valid.
+    for range in [story_range, tone_range].into_iter().flatten() {
+        if max_system_prompt_chars > 0 && prompt.len() > max_system_prompt_chars {
+            prompt.replace_range(range, "");
+        }
+    }
+    if max_system_prompt_chars > 0 && prompt.len() > max_system_prompt_chars {
+        // Truncate on a char boundary, keeping the top portion (identity + safety).
+        let mut end = max_system_prompt_chars;
+        // Ensure we don't split a multi-byte UTF-8 character.
+        while !prompt.is_char_boundary(end) && end > 0 {
+            end -= 1;
+        }
+        prompt.truncate(end);
+        prompt.push_str("\n\n[System prompt truncated to fit context budget]\n");
+    }
+
+    if prompt.is_empty() {
+        "You are ZeroClaw, a fast and efficient AI assistant built in Rust. Be helpful, concise, and direct."
+            .to_string()
+    } else {
+        prompt
+    }
+}
+
+/// Hard cap on distinct truncation-WARN keys held per process. The
+/// once-per-file gate keys on (workspace, file); a host serving many
+/// workspaces would otherwise grow the set without bound. At the cap
+/// the generation resets: files from the previous generation may warn
+/// again, which is the declared policy ("once per file per
+/// generation"), never silent growth.
+const MAX_TRUNCATION_WARN_KEYS: usize = 4096;
+
+/// Inject a single workspace file into the prompt with truncation and missing-file markers.
+/// Emit the operator-facing truncation WARN once per file per process
+/// generation. The turn paths inject bootstrap files on every turn; warning once
+/// keeps the signal discoverable in logs (`agent.bootstrap_file_truncated`)
+/// without spamming every turn. `zeroclaw doctor` re-checks offline.
+fn warn_bootstrap_truncation_once(
+    workspace_dir: &std::path::Path,
+    filename: &str,
+    max_chars: usize,
+    total_chars: usize,
+    compact_context: bool,
+) -> bool {
+    use std::collections::HashSet;
+    use std::path::PathBuf;
+    use std::sync::{LazyLock, Mutex};
+
+    static WARNED: LazyLock<Mutex<HashSet<(PathBuf, String)>>> =
+        LazyLock::new(|| Mutex::new(HashSet::new()));
+
+    let mut seen = WARNED
+        .lock()
+        .unwrap_or_else(std::sync::PoisonError::into_inner);
+    let key = (workspace_dir.to_path_buf(), filename.to_string());
+    if !seen.insert(key.clone()) {
+        return false;
+    }
+    if seen.len() > MAX_TRUNCATION_WARN_KEYS {
+        seen.clear();
+        seen.insert(key);
+    }
+
+    let discarded = total_chars.saturating_sub(max_chars);
+    ::reiclaw_log::record!(
+        WARN,
+        ::reiclaw_log::Event::new(module_path!(), ::reiclaw_log::Action::Note)
+            .with_outcome(::reiclaw_log::EventOutcome::Unknown)
+            .with_attrs(::serde_json::json!({
+                "error_key": "agent.bootstrap_file_truncated",
+                "file": filename,
+                "injected": max_chars,
+                "total": total_chars,
+                "discarded": discarded,
+                "compact_context": compact_context,
+            })),
+        &format!(
+            "{filename}: injected {max_chars} of {total_chars} chars \
+             ({discarded} discarded, compact_context={compact_context})"
+        )
+    );
+    true
+}
+
+fn inject_workspace_file(
+    prompt: &mut String,
+    workspace_dir: &std::path::Path,
+    filename: &str,
+    max_chars: usize,
+    compact_context: bool,
+) {
+    use std::fmt::Write;
+
+    let path = workspace_dir.join(filename);
+    match std::fs::read_to_string(&path) {
+        Ok(content) => {
+            let trimmed = content.trim();
+            if trimmed.is_empty() {
+                return;
+            }
+            let _ = writeln!(prompt, "### {filename}\n");
+            // Use character-boundary-safe truncation for UTF-8
+            let truncated = if trimmed.chars().count() > max_chars {
+                trimmed
+                    .char_indices()
+                    .nth(max_chars)
+                    .map(|(idx, _)| &trimmed[..idx])
+                    .unwrap_or(trimmed)
+            } else {
+                trimmed
+            };
+            if truncated.len() < trimmed.len() {
+                // Operator-facing visibility for the cap: the marker below
+                // tells the model, this WARN tells the person who wrote
+                // the file.
+                let _ = warn_bootstrap_truncation_once(
+                    workspace_dir,
+                    filename,
+                    max_chars,
+                    trimmed.chars().count(),
+                    compact_context,
+                );
+                prompt.push_str(truncated);
+                let _ = writeln!(
+                    prompt,
+                    "\n\n[... truncated at {max_chars} chars — use `read` for full file]\n"
+                );
+            } else {
+                prompt.push_str(trimmed);
+                prompt.push_str("\n\n");
+            }
+        }
+        Err(_) => {
+            // Missing-file marker (matches OpenClaw behavior)
+            let _ = writeln!(prompt, "### {filename}\n\n[File not found: {filename}]\n");
+        }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use reiclaw_config::schema::SkillsPromptInjectionMode;
+
+    // These fixtures inspect multiple calls across the process-global WARNED
+    // cache. Keep a generation reset from splitting another fixture's calls.
+    static TRUNCATION_WARN_TEST_LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
+
+    #[test]
+    fn bootstrap_truncation_warns_once_per_workspace_file() {
+        let _cache_guard = TRUNCATION_WARN_TEST_LOCK
+            .lock()
+            .expect("warning-cache test lock");
+        let dir = tempfile::TempDir::new().expect("tempdir");
+        let first = warn_bootstrap_truncation_once(dir.path(), "AGENTS.md", 6000, 13985, true);
+        assert!(first, "first truncation of a workspace file must warn");
+        let second = warn_bootstrap_truncation_once(dir.path(), "AGENTS.md", 6000, 13985, true);
+        assert!(
+            !second,
+            "same workspace+file must not warn twice per process"
+        );
+        let other_file = warn_bootstrap_truncation_once(dir.path(), "SOUL.md", 6000, 9000, false);
+        assert!(other_file, "a different file still warns");
+    }
+
+    #[test]
+    fn truncation_warn_cache_is_bounded_per_generation() {
+        let _cache_guard = TRUNCATION_WARN_TEST_LOCK
+            .lock()
+            .expect("warning-cache test lock");
+        // Distinct keys fill the cache up to the hard cap; the next
+        // distinct key starts a new generation (warns again), and a key
+        // from the previous generation may then warn again too — once
+        // per file per generation, never unbounded growth.
+        let dir = tempfile::TempDir::new().expect("tempdir");
+        for index in 0..MAX_TRUNCATION_WARN_KEYS {
+            let warned = warn_bootstrap_truncation_once(
+                dir.path(),
+                &format!("f{index}.md"),
+                6000,
+                7000,
+                true,
+            );
+            assert!(warned, "generation member {index} must warn");
+        }
+        let opener = warn_bootstrap_truncation_once(dir.path(), "next-gen.md", 6000, 7000, true);
+        assert!(opener, "the key past the cap must warn and reset");
+        let again = warn_bootstrap_truncation_once(dir.path(), "f0.md", 6000, 7000, true);
+        assert!(
+            again,
+            "after the generation reset the earlier key warns again"
+        );
+        let suppressed = warn_bootstrap_truncation_once(dir.path(), "f0.md", 6000, 7000, true);
+        assert!(
+            !suppressed,
+            "within the new generation the once-per-file rule holds"
+        );
+    }
+
+    #[test]
+    fn bootstrap_warning_uses_explicit_mode_with_independent_file_cap() {
+        let _cache_guard = TRUNCATION_WARN_TEST_LOCK
+            .lock()
+            .expect("warning-cache test lock");
+        let _writer_guard = reiclaw_log::__private_test_writer_lock();
+        let _hook_guard = reiclaw_log::__private_test_hook_lock();
+        reiclaw_log::try_install_capture_subscriber();
+        let mut rx = reiclaw_log::subscribe_or_install();
+        let identities = [
+            None,
+            Some(reiclaw_config::schema::IdentityConfig::default()),
+            Some(reiclaw_config::schema::IdentityConfig {
+                format: "aieos".into(),
+                aieos_inline: Some("not valid json".into()),
+                ..Default::default()
+            }),
+        ];
+        for (identity_index, identity) in identities.iter().enumerate() {
+            for (case_index, (cap, compact)) in [
+                (Some(COMPACT_BOOTSTRAP_MAX_CHARS), false),
+                (Some(1234), true),
+                (None, true),
+                (Some(0), false),
+            ]
+            .into_iter()
+            .enumerate()
+            {
+                let dir = tempfile::tempdir().unwrap();
+                let retained = cap.unwrap_or(BOOTSTRAP_MAX_CHARS);
+                let total = BOOTSTRAP_MAX_CHARS + 111 + identity_index * 10 + case_index;
+                std::fs::write(dir.path().join("AGENTS.md"), "中".repeat(total)).unwrap();
+                let prompt = build_system_prompt_with_mode_and_autonomy(
+                    dir.path(),
+                    "test-model",
+                    &[],
+                    &[],
+                    identity.as_ref(),
+                    cap,
+                    None,
+                    false,
+                    reiclaw_config::schema::SkillsPromptInjectionMode::Full,
+                    compact,
+                    0,
+                    false,
+                    false,
+                );
+                let event = std::iter::from_fn(|| rx.try_recv().ok())
+                    .find(|event| {
+                        event["attributes"]["error_key"] == "agent.bootstrap_file_truncated"
+                            && event["attributes"]["file"] == "AGENTS.md"
+                            && event["attributes"]["total"] == total
+                    })
+                    .expect("public prompt builder must emit the truncation warning");
+                let attrs = &event["attributes"];
+                assert_eq!(
+                    attrs["compact_context"], compact,
+                    "identity {identity_index}, cap {cap:?}"
+                );
+                assert_eq!(attrs["injected"], retained);
+                assert_eq!(attrs["discarded"], total - retained);
+                assert_eq!(prompt.contains("## Channel Capabilities"), !compact);
+                assert!(prompt.contains(&"中".repeat(retained)));
+                assert!(!prompt.contains(&"中".repeat(retained + 1)));
+            }
+        }
+        reiclaw_log::clear_broadcast_hook();
+    }
+
+    fn build_with_autonomy(tools: &[(&str, &str)], level: AutonomyLevel) -> String {
+        let workspace = tempfile::TempDir::new().expect("tempdir");
+        let autonomy = reiclaw_config::schema::RiskProfileConfig {
+            level,
+            ..Default::default()
+        };
+        build_system_prompt_with_mode_and_autonomy(
+            workspace.path(),
+            "test-model",
+            tools,
+            &[],
+            None,
+            Some(512),
+            Some(&autonomy),
+            false,
+            SkillsPromptInjectionMode::Full,
+            false,
+            0,
+            true,
+            false,
+        )
+    }
+
+    #[test]
+    fn full_autonomy_authorizes_shell_when_registered() {
+        let tools = [
+            ("shell", "Run a shell command"),
+            ("file_read", "Read a file"),
+        ];
+        let prompt = build_with_autonomy(&tools, AutonomyLevel::Full);
+        assert!(
+            prompt.contains("## Tool Authorization"),
+            "expected Tool Authorization section at Full autonomy when shell is registered"
+        );
+        assert!(prompt.contains("shell"));
+        assert!(prompt.contains("authorized to call"));
+        assert!(prompt.contains("simulated"));
+    }
+
+    #[test]
+    fn full_autonomy_authorization_is_attempt_scoped_not_unconditional() {
+        // Regression guard: the Full-autonomy block must authorize the model to
+        // *attempt* the registered tools without self-refusing, but must NOT
+        // claim the tools are exempt from security policy. Full autonomy removes
+        // the approval prompt, not forbidden_commands/forbidden_paths/sandbox.
+        let tools = [
+            ("shell", "Run a shell command"),
+            ("file_write", "Write a file"),
+        ];
+        let prompt = build_with_autonomy(&tools, AutonomyLevel::Full);
+        let auth = prompt
+            .split("## Tool Authorization")
+            .nth(1)
+            .expect("Tool Authorization section present");
+        let auth = auth.split("\n## ").next().unwrap_or(auth);
+
+        // Must authorize attempting, not exempt from policy.
+        assert!(
+            auth.contains("authorized to call") || auth.contains("authorized to call (to attempt)"),
+            "Full-autonomy block must authorize *attempting* the tool"
+        );
+        assert!(
+            auth.contains("not self-refuse") || auth.contains("do NOT self-refuse"),
+            "block must tell the model not to self-refuse merely for using shell/file tooling"
+        );
+        // Must keep the runtime safeguards explicit.
+        assert!(
+            auth.contains("forbidden_commands") && auth.contains("forbidden_paths"),
+            "block must state forbidden_commands/forbidden_paths still apply"
+        );
+        assert!(
+            auth.contains("sandbox"),
+            "block must state OS sandboxing still applies"
+        );
+        // Must NOT regress to the overbroad claim.
+        assert!(
+            !auth.contains("NOT blocked by any security policy")
+                && !auth.contains("not blocked by any security policy"),
+            "block must not claim the tools are exempt from all security policy"
+        );
+    }
+
+    #[test]
+    fn full_autonomy_authorization_lists_only_registered_power_tools() {
+        let tools = [("shell", "Run a shell command")];
+        let prompt = build_with_autonomy(&tools, AutonomyLevel::Full);
+        let auth_section = prompt
+            .split("## Tool Authorization")
+            .nth(1)
+            .expect("Tool Authorization section present");
+        let auth_section = auth_section.split("## ").next().unwrap_or(auth_section);
+        assert!(auth_section.contains("shell"));
+        assert!(
+            !auth_section.contains("file_write"),
+            "file_write should not be named when it isn't registered"
+        );
+        assert!(
+            !auth_section.contains("file_edit"),
+            "file_edit should not be named when it isn't registered"
+        );
+    }
+
+    #[test]
+    fn non_full_autonomy_skips_tool_authorization_block() {
+        let tools = [("shell", "Run a shell command")];
+        for level in [AutonomyLevel::Supervised, AutonomyLevel::ReadOnly] {
+            let prompt = build_with_autonomy(&tools, level);
+            assert!(
+                !prompt.contains("## Tool Authorization"),
+                "Tool Authorization should not appear at {level:?} autonomy"
+            );
+        }
+    }
+
+    #[test]
+    fn full_autonomy_skips_block_when_no_power_tools_registered() {
+        let tools = [("file_read", "Read a file"), ("calculator", "Math")];
+        let prompt = build_with_autonomy(&tools, AutonomyLevel::Full);
+        assert!(
+            !prompt.contains("## Tool Authorization"),
+            "Tool Authorization should be skipped when no power tools (shell/file_write/file_edit) are registered"
+        );
+    }
+
+    fn build_with_persona(tools: &[(&str, &str)], persona_section: Option<&str>) -> String {
+        let workspace = tempfile::TempDir::new().expect("tempdir");
+        let autonomy = reiclaw_config::schema::RiskProfileConfig::default();
+        build_system_prompt_with_persona(
+            workspace.path(),
+            "test-model",
+            tools,
+            &[],
+            None,
+            Some(512),
+            Some(&autonomy),
+            false,
+            SkillsPromptInjectionMode::Full,
+            false,
+            0,
+            true,
+            false,
+            persona_section,
+            LegacyPersonaFiles::Inject,
+        )
+    }
+
+    fn build_in(workspace: &std::path::Path, legacy: LegacyPersonaFiles) -> String {
+        let autonomy = reiclaw_config::schema::RiskProfileConfig::default();
+        build_system_prompt_with_persona(
+            workspace,
+            "test-model",
+            &[],
+            &[],
+            None,
+            Some(4096),
+            Some(&autonomy),
+            false,
+            SkillsPromptInjectionMode::Full,
+            false,
+            0,
+            true,
+            false,
+            Some("## Identity\n\nYou are Nova.\n"),
+            legacy,
+        )
+    }
+
+    /// Once the owner has written a governed Identity, the legacy persona
+    /// files must not reach the prompt; every other workspace file still does.
+    #[test]
+    fn suppressed_legacy_persona_files_are_left_out_of_the_prompt() {
+        let workspace = tempfile::TempDir::new().expect("tempdir");
+        std::fs::write(workspace.path().join("SOUL.md"), "LEGACY_SOUL_MARKER").unwrap();
+        std::fs::write(
+            workspace.path().join("IDENTITY.md"),
+            "LEGACY_IDENTITY_MARKER",
+        )
+        .unwrap();
+        std::fs::write(workspace.path().join("USER.md"), "USER_MARKER").unwrap();
+        std::fs::write(workspace.path().join("AGENTS.md"), "AGENTS_MARKER").unwrap();
+
+        let injected = build_in(workspace.path(), LegacyPersonaFiles::Inject);
+        assert!(injected.contains("LEGACY_SOUL_MARKER"));
+        assert!(injected.contains("LEGACY_IDENTITY_MARKER"));
+
+        let suppressed = build_in(workspace.path(), LegacyPersonaFiles::Suppress);
+        assert!(!suppressed.contains("LEGACY_SOUL_MARKER"), "{suppressed}");
+        assert!(!suppressed.contains("LEGACY_IDENTITY_MARKER"));
+        assert!(suppressed.contains("USER_MARKER"));
+        assert!(suppressed.contains("AGENTS_MARKER"));
+        assert!(suppressed.contains("You are Nova."));
+    }
+
+    /// `## Tone` must land after both hard behavioural blocks (anti-narration,
+    /// tool honesty) and before the tools list — a persona dial must never be
+    /// able to displace either, and truncation keeps only the top of the
+    /// prompt, so tone has to sit high enough to survive it.
+    #[test]
+    fn tone_section_lands_after_honesty_blocks_and_before_tools() {
+        let tools = [("shell", "Run a shell command")];
+        let prompt = build_with_persona(&tools, Some("## Tone\n\n- Be terse.\n"));
+
+        let narration_pos = prompt
+            .find("## CRITICAL: No Tool Narration")
+            .expect("anti-narration block present");
+        let honesty_pos = prompt
+            .find("## CRITICAL: Tool Honesty")
+            .expect("tool honesty block present");
+        let tone_pos = prompt.find("## Tone").expect("Tone section present");
+        let tools_pos = prompt.find("## Tools").expect("Tools section present");
+
+        assert!(
+            narration_pos < tone_pos && honesty_pos < tone_pos,
+            "Tone must come after both anti-narration and tool-honesty blocks"
+        );
+        assert!(tone_pos < tools_pos, "Tone must come before the tools list");
+    }
+
+    #[test]
+    fn tone_yields_to_capped_prompt_without_displacing_governed_identity_or_safety() {
+        let workspace = tempfile::TempDir::new().unwrap();
+        let policy = reiclaw_config::schema::RiskProfileConfig::default();
+        let config = reiclaw_config::schema::Config {
+            data_dir: workspace.path().to_path_buf(),
+            ..Default::default()
+        };
+        // Story renders after Tone and is dropped first when the budget bites.
+        // Tone exemplars sit inside the Tone range and leave with it.
+        let store = reiclaw_memory::companion::SoulProfileStore::shared(&config.data_dir).unwrap();
+        store
+            .set_tone_exemplars(
+                "nova",
+                reiclaw_memory::companion::SoulToneExemplars {
+                    exemplars: vec![reiclaw_memory::companion::ToneExemplar {
+                        situation: "主人下班后很累".into(),
+                        owner_line: "今天好累。".into(),
+                        agent_line: "辛苦了,先歇一会儿。".into(),
+                    }],
+                },
+                0,
+                1,
+            )
+            .unwrap();
+        store
+            .set_story(
+                "nova",
+                reiclaw_memory::companion::SoulStory {
+                    entries: vec![reiclaw_memory::companion::StoryEntry {
+                        kind: reiclaw_memory::companion::StoryKind::Bond,
+                        text: "Fridays are ship day.".into(),
+                    }],
+                },
+                0,
+                1,
+            )
+            .unwrap();
+        let with_tone = crate::agent::persona_projection::persona_projection(&config, "nova")
+            .section
+            .unwrap();
+        assert!(with_tone.contains("\n\n## Our story so far\n"));
+        let exemplar_block = format!(
+            "{}\n\n- Situation: 主人下班后很累\n  Owner: 今天好累。\n  You: 辛苦了,先歇一会儿。\n",
+            crate::agent::persona_projection::TONE_EXEMPLARS_FRAMING_LINE
+        );
+        let tone_at = with_tone.find("## Tone\n").unwrap();
+        let exemplars_at = with_tone.find(&exemplar_block).unwrap();
+        let story_at = with_tone.find("## Our story so far").unwrap();
+        assert!(
+            tone_at < exemplars_at && exemplars_at < story_at,
+            "{with_tone}"
+        );
+        let (governed, _) = with_tone.split_once("\n\n## Tone\n").unwrap();
+        // The canonical projection joins trimmed layers and appends one newline.
+        let identity = format!("{governed}\n");
+        let tone = reiclaw_config::persona::PersonaKnobs::default()
+            .to_prompt_section()
+            .unwrap();
+        let render = |persona: &str, cap| {
+            build_system_prompt_with_persona(
+                workspace.path(),
+                "test-model",
+                &[("shell", "Run a shell command")],
+                &[],
+                None,
+                Some(4096),
+                Some(&policy),
+                false,
+                SkillsPromptInjectionMode::Full,
+                false,
+                cap,
+                true,
+                false,
+                Some(persona),
+                LegacyPersonaFiles::Suppress,
+            )
+        };
+        let baseline = render(&identity, 0);
+        assert!(baseline.contains("## Safety"));
+        for cap in [4000, baseline.len()] {
+            assert_eq!(render(&with_tone, cap), render(&identity, cap));
+            assert!(
+                render(&with_tone, cap)
+                    .contains(crate::agent::persona_projection::IDENTITY_HONESTY_LINE)
+            );
+        }
+        assert!(render(&with_tone, 0).contains(&tone));
+        assert!(render(&with_tone, 0).contains(&exemplar_block));
+        assert!(render(&with_tone, 0).contains("- Between us: Fridays are ship day.\n"));
+        // A budget that fits Tone but not Story drops Story only.
+        let (before_story, _) = with_tone.split_once("\n\n## Our story so far\n").unwrap();
+        let tone_only = format!("{before_story}\n");
+        let cap = render(&tone_only, 0).len();
+        assert_eq!(render(&with_tone, cap), render(&tone_only, cap));
+        assert!(render(&with_tone, cap).contains(&tone));
+        assert!(render(&with_tone, cap).contains(&exemplar_block));
+        assert!(!render(&with_tone, cap).contains("Fridays are ship day."));
+        assert!(!render(&with_tone, 4000).contains("Fridays are ship day."));
+        // Still over budget after Story: Tone goes, exemplars with it.
+        assert!(!render(&with_tone, 4000).contains(&exemplar_block));
+        assert!(!render(&with_tone, 4000).contains("Examples of how you sound."));
+    }
+
+    /// Regression guard: `build_system_prompt_with_mode_and_autonomy` (every
+    /// caller that predates persona wiring) must never emit `## Tone` —
+    /// its `persona_section` is hard-wired to `None`.
+    #[test]
+    fn no_persona_produces_no_tone_section() {
+        let tools = [("shell", "Run a shell command")];
+        let prompt = build_with_persona(&tools, None);
+        assert!(
+            !prompt.contains("## Tone"),
+            "no persona section should mean no Tone heading"
+        );
+    }
+
+    /// Byte-identical regression guard: the pre-existing entry point must
+    /// produce the exact same output before and after persona wiring, since
+    /// it always passes `persona_section: None` through to the new function.
+    #[test]
+    fn build_system_prompt_with_mode_and_autonomy_is_byte_identical_to_persona_none() {
+        let workspace = tempfile::TempDir::new().expect("tempdir");
+        let autonomy = reiclaw_config::schema::RiskProfileConfig::default();
+        let tools = [("shell", "Run a shell command")];
+
+        let via_old_entry_point = build_system_prompt_with_mode_and_autonomy(
+            workspace.path(),
+            "test-model",
+            &tools,
+            &[],
+            None,
+            Some(512),
+            Some(&autonomy),
+            false,
+            SkillsPromptInjectionMode::Full,
+            false,
+            0,
+            true,
+            false,
+        );
+        let via_new_entry_point_with_no_persona = build_system_prompt_with_persona(
+            workspace.path(),
+            "test-model",
+            &tools,
+            &[],
+            None,
+            Some(512),
+            Some(&autonomy),
+            false,
+            SkillsPromptInjectionMode::Full,
+            false,
+            0,
+            true,
+            false,
+            None,
+            LegacyPersonaFiles::Inject,
+        );
+        assert_eq!(via_old_entry_point, via_new_entry_point_with_no_persona);
+    }
+
+    /// `USER.md` retires independently of the Soul-owned files.
+    #[test]
+    fn user_md_is_left_out_independently_of_soul_files() {
+        let workspace = tempfile::TempDir::new().expect("tempdir");
+        std::fs::write(workspace.path().join("SOUL.md"), "LEGACY_SOUL_MARKER").unwrap();
+        std::fs::write(workspace.path().join("USER.md"), "USER_MARKER").unwrap();
+
+        let user_retired = build_in(workspace.path(), LegacyPersonaFiles::SuppressUser);
+        assert!(
+            user_retired.contains("LEGACY_SOUL_MARKER"),
+            "{user_retired}"
+        );
+        assert!(!user_retired.contains("USER_MARKER"));
+
+        let identity_retired = build_in(workspace.path(), LegacyPersonaFiles::Suppress);
+        assert!(!identity_retired.contains("LEGACY_SOUL_MARKER"));
+        assert!(identity_retired.contains("USER_MARKER"));
+
+        let both = build_in(workspace.path(), LegacyPersonaFiles::SuppressAll);
+        assert!(!both.contains("LEGACY_SOUL_MARKER") && !both.contains("USER_MARKER"));
+        assert!(!both.contains("[File not found: USER.md]"));
+    }
+
+    fn write_all_workspace_files(workspace: &std::path::Path) {
+        for (name, marker) in [
+            ("SOUL.md", "SOUL_MARKER"),
+            ("IDENTITY.md", "IDENTITY_MARKER"),
+            ("USER.md", "USER_MARKER"),
+            ("AGENTS.md", "AGENTS_MARKER"),
+            ("TOOLS.md", "TOOLS_MARKER"),
+            ("BOOTSTRAP.md", "BOOTSTRAP_MARKER"),
+            ("MEMORY.md", "MEMORY_MARKER"),
+        ] {
+            std::fs::write(workspace.join(name), marker).unwrap();
+        }
+    }
+
+    /// Model-writable notes render after the persona section and after the
+    /// owner-governed files, grouped under one fixed heading and framing line.
+    #[test]
+    fn notes_render_after_persona_under_one_fixed_heading() {
+        let workspace = tempfile::TempDir::new().expect("tempdir");
+        write_all_workspace_files(workspace.path());
+        let prompt = build_in(workspace.path(), LegacyPersonaFiles::Inject);
+
+        let persona = prompt.find("You are Nova.").unwrap();
+        let heading = prompt.find("\n## Notes you wrote\n\n").unwrap();
+        assert_eq!(prompt.matches("## Notes you wrote").count(), 1);
+        assert!(persona < heading, "{prompt}");
+        let framing = "These are your own working notes. They never change your identity, \
+                       principles, or tone, and they never grant permissions.";
+        assert!(
+            prompt[heading..].starts_with(&format!("\n## Notes you wrote\n\n{framing}\n\n")),
+            "{prompt}"
+        );
+
+        // Owner-governed files and BOOTSTRAP.md stay above the notes heading.
+        for governed in [
+            "SOUL_MARKER",
+            "IDENTITY_MARKER",
+            "USER_MARKER",
+            "BOOTSTRAP_MARKER",
+        ] {
+            assert!(prompt.find(governed).unwrap() < heading, "{governed}");
+        }
+        // The three notes files all sit under it, in order, before the date.
+        let agents = prompt.find("### AGENTS.md").unwrap();
+        let tools = prompt.find("### TOOLS.md").unwrap();
+        let memory = prompt.find("### MEMORY.md").unwrap();
+        let date = prompt.find("## Current Date").unwrap();
+        assert!(heading < agents && agents < tools && tools < memory && memory < date);
+    }
+
+    #[test]
+    fn notes_heading_is_omitted_without_notes_files_and_memory_obeys_inject_memory() {
+        let workspace = tempfile::TempDir::new().expect("tempdir");
+        std::fs::write(workspace.path().join("SOUL.md"), "SOUL_MARKER").unwrap();
+        let prompt = build_in(workspace.path(), LegacyPersonaFiles::Inject);
+        assert!(!prompt.contains("## Notes you wrote"), "{prompt}");
+        assert!(prompt.contains("SOUL_MARKER"));
+
+        // MEMORY.md alone is enough for the heading, but not when memory is off.
+        std::fs::write(workspace.path().join("MEMORY.md"), "MEMORY_MARKER").unwrap();
+        assert!(build_in(workspace.path(), LegacyPersonaFiles::Inject).contains("MEMORY_MARKER"));
+        let autonomy = reiclaw_config::schema::RiskProfileConfig::default();
+        let without_memory = build_system_prompt_with_persona(
+            workspace.path(),
+            "test-model",
+            &[],
+            &[],
+            None,
+            Some(4096),
+            Some(&autonomy),
+            false,
+            SkillsPromptInjectionMode::Full,
+            false,
+            0,
+            false,
+            false,
+            Some("## Identity\n\nYou are Nova.\n"),
+            LegacyPersonaFiles::Inject,
+        );
+        assert!(!without_memory.contains("MEMORY_MARKER"));
+        assert!(!without_memory.contains("## Notes you wrote"));
+    }
+
+    /// Each notes file keeps its own truncation cap and WARN under the heading.
+    #[test]
+    fn notes_files_keep_per_file_truncation() {
+        let workspace = tempfile::TempDir::new().expect("tempdir");
+        std::fs::write(workspace.path().join("AGENTS.md"), "a".repeat(100)).unwrap();
+        std::fs::write(workspace.path().join("TOOLS.md"), "TOOLS").unwrap();
+        let autonomy = reiclaw_config::schema::RiskProfileConfig::default();
+        let prompt = build_system_prompt_with_persona(
+            workspace.path(),
+            "test-model",
+            &[],
+            &[],
+            None,
+            Some(10),
+            Some(&autonomy),
+            false,
+            SkillsPromptInjectionMode::Full,
+            false,
+            0,
+            true,
+            false,
+            None,
+            LegacyPersonaFiles::Inject,
+        );
+        let heading = prompt.find("## Notes you wrote").unwrap();
+        let agents = prompt.find("### AGENTS.md").unwrap();
+        assert!(heading < agents);
+        assert!(prompt.contains(&format!("{}\n\n[... truncated at 10 chars", "a".repeat(10))));
+        assert!(!prompt.contains(&"a".repeat(11)));
+    }
+}

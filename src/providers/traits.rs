@@ -1,4 +1,4 @@
-pub use zeroclaw_api::model_provider::*;
+pub use reiclaw_api::model_provider::*;
 
 #[cfg(test)]
 mod tests {
@@ -40,11 +40,11 @@ mod tests {
             Ok("ok".into())
         }
     }
-    impl ::zeroclaw_api::attribution::Attributable for CapabilityMockModelProvider {
-        fn role(&self) -> ::zeroclaw_api::attribution::Role {
-            ::zeroclaw_api::attribution::Role::Provider(
-                ::zeroclaw_api::attribution::ProviderKind::Model(
-                    ::zeroclaw_api::attribution::ModelProviderKind::Custom,
+    impl ::reiclaw_api::attribution::Attributable for CapabilityMockModelProvider {
+        fn role(&self) -> ::reiclaw_api::attribution::Role {
+            ::reiclaw_api::attribution::Role::Provider(
+                ::reiclaw_api::attribution::ProviderKind::Model(
+                    ::reiclaw_api::attribution::ModelProviderKind::Custom,
                 ),
             )
         }
@@ -278,11 +278,11 @@ mod tests {
             Ok("response".to_string())
         }
     }
-    impl ::zeroclaw_api::attribution::Attributable for MockModelProvider {
-        fn role(&self) -> ::zeroclaw_api::attribution::Role {
-            ::zeroclaw_api::attribution::Role::Provider(
-                ::zeroclaw_api::attribution::ProviderKind::Model(
-                    ::zeroclaw_api::attribution::ModelProviderKind::Custom,
+    impl ::reiclaw_api::attribution::Attributable for MockModelProvider {
+        fn role(&self) -> ::reiclaw_api::attribution::Role {
+            ::reiclaw_api::attribution::Role::Provider(
+                ::reiclaw_api::attribution::ProviderKind::Model(
+                    ::reiclaw_api::attribution::ModelProviderKind::Custom,
                 ),
             )
         }
@@ -376,11 +376,11 @@ mod tests {
             Ok(system.unwrap_or_default().to_string())
         }
     }
-    impl ::zeroclaw_api::attribution::Attributable for EchoSystemModelProvider {
-        fn role(&self) -> ::zeroclaw_api::attribution::Role {
-            ::zeroclaw_api::attribution::Role::Provider(
-                ::zeroclaw_api::attribution::ProviderKind::Model(
-                    ::zeroclaw_api::attribution::ModelProviderKind::Custom,
+    impl ::reiclaw_api::attribution::Attributable for EchoSystemModelProvider {
+        fn role(&self) -> ::reiclaw_api::attribution::Role {
+            ::reiclaw_api::attribution::Role::Provider(
+                ::reiclaw_api::attribution::ProviderKind::Model(
+                    ::reiclaw_api::attribution::ModelProviderKind::Custom,
                 ),
             )
         }
@@ -413,11 +413,11 @@ mod tests {
             Ok(system.unwrap_or_default().to_string())
         }
     }
-    impl ::zeroclaw_api::attribution::Attributable for CustomConvertModelProvider {
-        fn role(&self) -> ::zeroclaw_api::attribution::Role {
-            ::zeroclaw_api::attribution::Role::Provider(
-                ::zeroclaw_api::attribution::ProviderKind::Model(
-                    ::zeroclaw_api::attribution::ModelProviderKind::Custom,
+    impl ::reiclaw_api::attribution::Attributable for CustomConvertModelProvider {
+        fn role(&self) -> ::reiclaw_api::attribution::Role {
+            ::reiclaw_api::attribution::Role::Provider(
+                ::reiclaw_api::attribution::ProviderKind::Model(
+                    ::reiclaw_api::attribution::ModelProviderKind::Custom,
                 ),
             )
         }
@@ -450,11 +450,11 @@ mod tests {
             Ok("should_not_reach".to_string())
         }
     }
-    impl ::zeroclaw_api::attribution::Attributable for InvalidConvertModelProvider {
-        fn role(&self) -> ::zeroclaw_api::attribution::Role {
-            ::zeroclaw_api::attribution::Role::Provider(
-                ::zeroclaw_api::attribution::ProviderKind::Model(
-                    ::zeroclaw_api::attribution::ModelProviderKind::Custom,
+    impl ::reiclaw_api::attribution::Attributable for InvalidConvertModelProvider {
+        fn role(&self) -> ::reiclaw_api::attribution::Role {
+            ::reiclaw_api::attribution::Role::Provider(
+                ::reiclaw_api::attribution::ProviderKind::Model(
+                    ::reiclaw_api::attribution::ModelProviderKind::Custom,
                 ),
             )
         }
@@ -577,11 +577,11 @@ mod tests {
             .boxed()
         }
     }
-    impl ::zeroclaw_api::attribution::Attributable for StreamingChunkOnlyModelProvider {
-        fn role(&self) -> ::zeroclaw_api::attribution::Role {
-            ::zeroclaw_api::attribution::Role::Provider(
-                ::zeroclaw_api::attribution::ProviderKind::Model(
-                    ::zeroclaw_api::attribution::ModelProviderKind::Custom,
+    impl ::reiclaw_api::attribution::Attributable for StreamingChunkOnlyModelProvider {
+        fn role(&self) -> ::reiclaw_api::attribution::Role {
+            ::reiclaw_api::attribution::Role::Provider(
+                ::reiclaw_api::attribution::ProviderKind::Model(
+                    ::reiclaw_api::attribution::ModelProviderKind::Custom,
                 ),
             )
         }

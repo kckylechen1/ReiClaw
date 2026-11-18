@@ -1,0 +1,872 @@
+#![allow(clippy::to_string_in_format_args)]
+//! Memory subsystem: backends, embeddings, retrieval.
+
+/// Opening delimiter for recalled memory injected into provider context.
+pub const MEMORY_CONTEXT_OPEN: &str = "[Memory context]";
+/// Closing delimiter for recalled memory injected into provider context.
+pub const MEMORY_CONTEXT_CLOSE: &str = "[/Memory context]";
+/// Whether this build includes the embedded Tachi `portable-kernel` backend.
+pub const TACHI_COMPILED: bool = cfg!(feature = "tachi");
+
+pub mod admissibility;
+pub mod agent_scoped;
+pub mod agent_scoped_markdown;
+pub mod audit;
+pub mod backend;
+pub mod chunker;
+pub mod companion;
+pub mod conflict;
+pub mod decay;
+pub mod dedup;
+pub mod embeddings;
+pub mod hygiene;
+pub mod importance;
+#[cfg(feature = "tachi")]
+pub mod kernel_store;
+pub mod markdown;
+pub mod merge;
+pub mod none;
+pub mod normalize;
+#[cfg(feature = "tachi")]
+mod point_scope;
+pub mod policy;
+pub mod policy_gate;
+pub mod redact;
+pub mod rerank;
+pub mod response_cache;
+pub mod retrieval;
+pub mod scanned;
+pub mod sleep_records;
+#[cfg(feature = "tachi")]
+pub mod tachi;
+#[cfg(feature = "tachi")]
+mod tachi_enrichment;
+#[cfg(feature = "tachi")]
+pub mod tachi_governance;
+#[cfg(all(test, feature = "tachi"))]
+mod tachi_scenarios;
+pub mod threat;
+pub mod traits;
+pub mod vector;
+
+pub use agent_scoped::AgentScopedMemory;
+pub use agent_scoped_markdown::{AgentScopedMarkdownMemory, MarkdownPeer};
+pub use audit::AuditedMemory;
+#[allow(unused_imports)]
+pub use backend::{
+    MemoryBackendKind, MemoryBackendProfile, RETIRED_MEMORY_BACKENDS, classify_memory_backend,
+    default_memory_backend_key, memory_backend_profile, selectable_memory_backends,
+};
+pub use companion::{
+    CompanionStore, OUTBOX_OBSERVE_INTERVAL_SECS, OUTBOX_PENDING_AGE_WARN_SECS,
+    clone_for_subsystems, companion_outbox_health, create_companion_store,
+    probe_companion_outbox_health, reload_companion_store,
+};
+#[allow(unused_imports)]
+pub use embeddings::EmbeddingIdentity;
+pub use markdown::MarkdownMemory;
+pub use none::NoneMemory;
+#[allow(unused_imports)]
+pub use policy::PolicyEnforcer;
+pub use rerank::{RerankConfig, RerankStrategy};
+pub use response_cache::ResponseCache;
+#[allow(unused_imports)]
+pub use retrieval::{RetrievalConfig, RetrievalPipeline};
+pub use scanned::ScannedMemory;
+#[allow(unused_imports)]
+pub use sleep_records::{
+    DailyDigest, EpisodeRecord, EpisodeSourceKind, PINNED_DIGEST_MAX_BYTES, PinnedDigest,
+};
+#[cfg(feature = "tachi")]
+pub use tachi::TachiMemory;
+#[cfg(feature = "tachi")]
+pub use tachi_governance::{TachiGovernanceReport, run_tachi_governance};
+pub use traits::Memory;
+
+/// Run [`Memory::run_llm_enrichment`] when the 12h enrichment cadence is due.
+///
+/// Advances the enrichment state-file marker after the attempt. If consolidation
+/// (the strategy call site) is never invoked, enrichment never runs — acceptable
+/// without a speculative config key. Non-tachi backends return 0 via the trait
+/// default.
+pub async fn run_llm_enrichment_if_due(
+    memory: &dyn Memory,
+    workspace_dir: &Path,
+    provider: &dyn reiclaw_api::model_provider::ModelProvider,
+    model: &str,
+) -> anyhow::Result<usize> {
+    if !hygiene::enrichment_is_due(workspace_dir)? {
+        return Ok(0);
+    }
+    let n = memory.run_llm_enrichment(provider, model).await?;
+    hygiene::enrichment_mark_ran(workspace_dir)?;
+    Ok(n)
+}
+#[allow(unused_imports)]
+pub use traits::{
+    ExportFilter, MemoryCategory, MemoryEntry, ProceduralMessage, is_recent_recall_query,
+    normalize_recent_recall_query,
+};
+
+use anyhow::Context;
+use reiclaw_config::providers::ModelProviders;
+use reiclaw_config::schema::{
+    ActiveStorage, Config, EmbeddingRouteConfig, MemoryConfig, MemoryPolicyConfig,
+};
+use std::path::Path;
+use std::sync::Arc;
+
+/// Reserved storage namespace for Soul-shaped rows. Ambient memory
+/// surfaces (plain recall, list, get, forget, and plain stores) exclude
+/// and refuse this namespace at the storage layer (sqlite and tachi
+/// backends, agent-scoped wrappers), so no memory tool, RPC, or wrapper
+/// can host or surface Soul-looking content. The live Soul model is the
+/// separate Soul profile store (`soul.db`); this reservation only keeps
+/// the general memory store from becoming a second one.
+pub(crate) const SOUL_NAMESPACE: &str = "soul";
+
+/// Reserved key prefix paired with [`SOUL_NAMESPACE`]: keys under it may
+/// exist only in the reserved namespace, and the reserved namespace
+/// accepts only keys under it.
+pub(crate) const SOUL_KEY_PREFIX: &str = "soul::";
+
+/// Explicit construction error for a removed backend. Selecting one never
+/// falls back to another store: the operator must pick a supported backend.
+fn retired_backend_error(backend: &str, selector: &str) -> anyhow::Error {
+    ::reiclaw_log::record!(
+        ERROR,
+        ::reiclaw_log::Event::new(module_path!(), ::reiclaw_log::Action::Reject)
+            .with_outcome(::reiclaw_log::EventOutcome::Failure)
+            .with_attrs(::serde_json::json!({ "backend": backend, "selector": selector })),
+        "memory backend was removed"
+    );
+    if matches!(backend, "sqlite" | "lucid") {
+        anyhow::Error::msg(format!(
+            "{selector} selects the '{backend}' memory backend, which was removed together \
+             with its offline brain.db migration tool; existing brain.db data is neither read \
+             nor converted. Set {selector} to tachi, markdown, or none"
+        ))
+    } else {
+        anyhow::Error::msg(format!(
+            "{selector} selects the '{backend}' memory backend, which was removed; set it to \
+             tachi, markdown or none (existing data is not migrated automatically)"
+        ))
+    }
+}
+
+/// Wrap the backend in the `AuditedMemory` decorator when
+/// `[memory] audit_enabled = true`; pass it through untouched otherwise
+/// (the default), so the flag-off path is byte-identical to an unwrapped
+/// backend.
+fn wrap_audit<M: Memory + 'static>(
+    memory: M,
+    workspace_dir: &Path,
+    audit_enabled: bool,
+) -> anyhow::Result<Box<dyn Memory>> {
+    if audit_enabled {
+        Ok(Box::new(AuditedMemory::new(memory, workspace_dir)?))
+    } else {
+        Ok(Box::new(memory))
+    }
+}
+
+/// Compose the two install-wide decorators exactly once. Content scanning is
+/// closest to storage; the optional audit wrapper observes the resulting
+/// success or failure without bypassing the security boundary.
+fn wrap_scanned_and_audit<M: Memory + 'static>(
+    memory: M,
+    policy: &MemoryPolicyConfig,
+    workspace_dir: &Path,
+    audit_enabled: bool,
+) -> anyhow::Result<Box<dyn Memory>> {
+    wrap_audit(
+        ScannedMemory::new(memory, policy),
+        workspace_dir,
+        audit_enabled,
+    )
+}
+
+fn create_memory_with_policy(
+    backend_name: &str,
+    workspace_dir: &Path,
+    unknown_context: &str,
+    policy: &MemoryPolicyConfig,
+    audit_enabled: bool,
+) -> anyhow::Result<Box<dyn Memory>> {
+    match classify_memory_backend(backend_name) {
+        MemoryBackendKind::Retired(backend) => {
+            Err(retired_backend_error(backend, "memory.backend"))
+        }
+        MemoryBackendKind::Markdown => wrap_scanned_and_audit(
+            MarkdownMemory::new("markdown", workspace_dir),
+            policy,
+            workspace_dir,
+            audit_enabled,
+        ),
+        #[cfg(feature = "tachi")]
+        MemoryBackendKind::Tachi => {
+            anyhow::bail!(
+                "tachi backend requires embedding config; \
+                 call create_memory_with_storage_and_routes instead of create_memory_with_policy"
+            )
+        }
+        MemoryBackendKind::None => wrap_scanned_and_audit(
+            NoneMemory::new("none"),
+            policy,
+            workspace_dir,
+            audit_enabled,
+        ),
+        MemoryBackendKind::Unknown => {
+            ::reiclaw_log::record!(WARN, ::reiclaw_log::Event::new(module_path!(), ::reiclaw_log::Action::Note).with_outcome(::reiclaw_log::EventOutcome::Unknown).with_attrs(::serde_json::json!({"backend_name": backend_name, "unknown_context": unknown_context})), "Unknown memory backend '', falling back to markdown");
+            wrap_scanned_and_audit(
+                MarkdownMemory::new("markdown", workspace_dir),
+                policy,
+                workspace_dir,
+                audit_enabled,
+            )
+        }
+    }
+}
+
+/// Extract the backend kind from a V3 dotted reference (`<kind>.<alias>`).
+/// Bare names (`"tachi"`) are returned as-is. Returned lowercase.
+pub fn backend_kind_from_dotted(memory_backend: &str) -> String {
+    memory_backend
+        .trim()
+        .split_once('.')
+        .map_or(memory_backend.trim(), |(kind, _)| kind)
+        .to_ascii_lowercase()
+}
+
+/// Legacy auto-save key used for model-authored assistant summaries.
+/// These entries are treated as untrusted context and should not be re-injected.
+pub fn is_assistant_autosave_key(key: &str) -> bool {
+    let normalized = key.trim().to_ascii_lowercase();
+    normalized == "assistant_resp" || normalized.starts_with("assistant_resp_")
+}
+
+pub fn is_user_autosave_key(key: &str) -> bool {
+    let normalized = key.trim().to_ascii_lowercase();
+    normalized == "user_msg" || normalized.starts_with("user_msg_")
+}
+
+/// Filter known synthetic autosave noise patterns that should not be
+/// persisted as user conversation memories.
+pub fn should_skip_autosave_content(content: &str) -> bool {
+    let normalized = content.trim();
+    if normalized.is_empty() {
+        return true;
+    }
+
+    let lowered = normalized.to_ascii_lowercase();
+    lowered.starts_with("[cron:")
+        || lowered.starts_with("[heartbeat task")
+        || lowered.starts_with("[distilled_")
+        || starts_with_ignore_ascii_case(normalized, MEMORY_CONTEXT_OPEN)
+        || lowered.contains("distilled_index_sig:")
+}
+
+fn starts_with_ignore_ascii_case(value: &str, prefix: &str) -> bool {
+    value
+        .get(..prefix.len())
+        .is_some_and(|candidate| candidate.eq_ignore_ascii_case(prefix))
+}
+
+#[derive(Clone, PartialEq, Eq)]
+struct ResolvedEmbeddingConfig {
+    model_provider: String,
+    model: String,
+    dimensions: usize,
+    api_key: Option<String>,
+}
+
+impl std::fmt::Debug for ResolvedEmbeddingConfig {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("ResolvedEmbeddingConfig")
+            .field("model_provider", &self.model_provider)
+            .field("model", &self.model)
+            .field("dimensions", &self.dimensions)
+            .finish_non_exhaustive()
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct EmbeddingSettings {
+    pub model_provider: String,
+    pub model: String,
+    pub dimensions: usize,
+    pub api_key: Option<String>,
+}
+
+pub fn resolve_embedding_settings(
+    config: &MemoryConfig,
+    embedding_routes: &[EmbeddingRouteConfig],
+    api_key: Option<&str>,
+    providers: Option<&ModelProviders>,
+) -> EmbeddingSettings {
+    let resolved = resolve_embedding_config(config, embedding_routes, api_key, providers);
+    EmbeddingSettings {
+        model_provider: resolved.model_provider,
+        model: resolved.model,
+        dimensions: resolved.dimensions,
+        api_key: resolved.api_key,
+    }
+}
+
+fn resolve_embedding_config(
+    config: &MemoryConfig,
+    embedding_routes: &[EmbeddingRouteConfig],
+    api_key: Option<&str>,
+    providers: Option<&ModelProviders>,
+) -> ResolvedEmbeddingConfig {
+    let inherited_api_key = api_key
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+        .map(str::to_string);
+    let configured_api_key = config
+        .embedding_api_key
+        .as_deref()
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+        .map(str::to_string);
+
+    let fallback = || {
+        resolve_provider_ref(
+            config.embedding_provider.trim().to_string(),
+            config.embedding_model.trim().to_string(),
+            config.embedding_dimensions,
+            configured_api_key.clone(),
+            inherited_api_key.clone(),
+            providers,
+        )
+    };
+
+    let Some(hint) = config
+        .embedding_model
+        .strip_prefix("hint:")
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+    else {
+        return fallback();
+    };
+
+    let Some(route) = embedding_routes
+        .iter()
+        .find(|route| route.hint.trim() == hint)
+    else {
+        ::reiclaw_log::record!(
+            WARN,
+            ::reiclaw_log::Event::new(module_path!(), ::reiclaw_log::Action::Note)
+                .with_outcome(::reiclaw_log::EventOutcome::Unknown)
+                .with_attrs(::serde_json::json!({"hint": hint})),
+            "Unknown embedding route hint; falling back to [memory] embedding settings"
+        );
+        return fallback();
+    };
+
+    let model_provider = route.model_provider.trim();
+    let model = route.model.trim();
+    let dimensions = route.dimensions.unwrap_or(config.embedding_dimensions);
+    if model_provider.is_empty() || model.is_empty() || dimensions == 0 {
+        ::reiclaw_log::record!(
+            WARN,
+            ::reiclaw_log::Event::new(module_path!(), ::reiclaw_log::Action::Note)
+                .with_outcome(::reiclaw_log::EventOutcome::Unknown)
+                .with_attrs(::serde_json::json!({"hint": hint})),
+            "Invalid embedding route configuration; falling back to [memory] embedding settings"
+        );
+        return fallback();
+    }
+
+    let routed_api_key = route
+        .api_key
+        .as_deref()
+        .map(str::trim)
+        .filter(|value: &&str| !value.is_empty())
+        .map(|value| value.to_string());
+
+    resolve_provider_ref(
+        model_provider.to_string(),
+        model.to_string(),
+        dimensions,
+        routed_api_key.or(configured_api_key),
+        inherited_api_key,
+        providers,
+    )
+}
+
+fn resolve_provider_ref(
+    model_provider: String,
+    model: String,
+    dimensions: usize,
+    explicit_api_key: Option<String>,
+    inherited_api_key: Option<String>,
+    providers: Option<&ModelProviders>,
+) -> ResolvedEmbeddingConfig {
+    let trimmed = model_provider.trim();
+    let is_dotted_ref =
+        !trimmed.is_empty() && !trimmed.starts_with("custom:") && trimmed.contains('.');
+    if !is_dotted_ref {
+        return ResolvedEmbeddingConfig {
+            model_provider,
+            model,
+            dimensions,
+            api_key: explicit_api_key.or(inherited_api_key),
+        };
+    }
+
+    let reference = trimmed.to_string();
+    let Some((kind, _alias, provider_cfg)) =
+        providers.and_then(|catalog| catalog.find_by_name(&reference))
+    else {
+        ::reiclaw_log::record!(
+            WARN,
+            ::reiclaw_log::Event::new(module_path!(), ::reiclaw_log::Action::Note)
+                .with_outcome(::reiclaw_log::EventOutcome::Failure)
+                .with_attrs(::serde_json::json!({
+                    "error_key": "memory.embedding_route_unresolved",
+                    "provider_ref": reference,
+                })),
+            "Embedding provider reference did not resolve against providers.models; \
+             embeddings disabled (keyword-only) for this profile"
+        );
+        return ResolvedEmbeddingConfig {
+            model_provider,
+            model,
+            dimensions,
+            api_key: explicit_api_key.or(inherited_api_key),
+        };
+    };
+
+    let provider_key = provider_cfg
+        .api_key
+        .as_deref()
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+        .map(str::to_string);
+    let concrete_provider = match provider_cfg
+        .uri
+        .as_deref()
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+    {
+        Some(uri) => Some(format!("custom:{uri}")),
+        None if matches!(kind, "openai" | "openrouter") => Some(kind.to_string()),
+        None => None,
+    };
+    let Some(concrete_provider) = concrete_provider else {
+        ::reiclaw_log::record!(
+            WARN,
+            ::reiclaw_log::Event::new(module_path!(), ::reiclaw_log::Action::Note)
+                .with_outcome(::reiclaw_log::EventOutcome::Failure)
+                .with_attrs(::serde_json::json!({
+                    "error_key": "memory.embedding_route_no_endpoint",
+                    "provider_ref": reference,
+                    "provider_kind": kind,
+                })),
+            "Embedding provider reference resolved but has no usable embeddings \
+             endpoint (set its `uri`, or point the route at an openai/openrouter \
+             compatible profile); embeddings disabled (keyword-only) for this profile"
+        );
+        return ResolvedEmbeddingConfig {
+            model_provider,
+            model,
+            dimensions,
+            api_key: explicit_api_key.or(inherited_api_key),
+        };
+    };
+
+    ResolvedEmbeddingConfig {
+        model_provider: concrete_provider,
+        model,
+        dimensions,
+        api_key: explicit_api_key.or(provider_key).or(inherited_api_key),
+    }
+}
+
+pub fn create_memory(
+    config: &MemoryConfig,
+    workspace_dir: &Path,
+    api_key: Option<&str>,
+) -> anyhow::Result<Box<dyn Memory>> {
+    if config.backend.trim().contains('.') {
+        anyhow::bail!(
+            "memory backend {:?} references a storage alias; construct memory from the full Config so the selected alias is applied",
+            config.backend
+        );
+    }
+
+    create_memory_with_storage_and_routes(
+        config,
+        &[],
+        ActiveStorage::None,
+        workspace_dir,
+        api_key,
+        None,
+    )
+}
+
+/// Construct memory from the canonical loaded configuration.
+///
+/// Config-aware production paths should use this entrypoint so the selected
+/// storage alias, embedding route, and provider settings are applied together.
+pub fn create_memory_from_config(
+    config: &Config,
+    api_key: Option<&str>,
+) -> anyhow::Result<Box<dyn Memory>> {
+    create_memory_with_storage_and_routes(
+        &config.memory,
+        &config.embedding_routes,
+        config.resolve_active_storage(),
+        &config.data_dir,
+        api_key,
+        Some(&config.providers.models),
+    )
+}
+
+pub fn create_memory_with_storage_and_routes(
+    config: &MemoryConfig,
+    embedding_routes: &[EmbeddingRouteConfig],
+    _active_storage: ActiveStorage<'_>,
+    workspace_dir: &Path,
+    api_key: Option<&str>,
+    providers: Option<&ModelProviders>,
+) -> anyhow::Result<Box<dyn Memory>> {
+    let backend_name = backend_kind_from_dotted(&config.backend);
+    let backend_kind = classify_memory_backend(&backend_name);
+    let _resolved_embedding =
+        resolve_embedding_config(config, embedding_routes, api_key, providers);
+
+    // Same 12h cadence as hygiene — capture before `run_if_due` writes state so
+    // tachi light-sleep can share the window without a second due-check race.
+    #[cfg(feature = "tachi")]
+    let light_sleep_due = config.hygiene_enabled && hygiene::is_due(workspace_dir).unwrap_or(true);
+
+    // Best-effort memory hygiene/retention pass (throttled by state file).
+    if let Err(e) = hygiene::run_if_due(config, workspace_dir) {
+        ::reiclaw_log::record!(
+            WARN,
+            ::reiclaw_log::Event::new(module_path!(), ::reiclaw_log::Action::Note)
+                .with_outcome(::reiclaw_log::EventOutcome::Unknown)
+                .with_attrs(::serde_json::json!({"error": format!("{}", e)})),
+            "memory hygiene skipped"
+        );
+    }
+
+    if let MemoryBackendKind::Retired(backend) = backend_kind {
+        return Err(retired_backend_error(backend, "memory.backend"));
+    }
+
+    #[cfg(feature = "tachi")]
+    if matches!(backend_kind, MemoryBackendKind::Tachi) {
+        let embedder: Arc<dyn embeddings::EmbeddingProvider> =
+            Arc::from(embeddings::create_embedding_provider(
+                &_resolved_embedding.model_provider,
+                _resolved_embedding.api_key.as_deref(),
+                &_resolved_embedding.model,
+                _resolved_embedding.dimensions,
+            ));
+        let mem = TachiMemory::with_embedder(
+            "tachi",
+            workspace_dir,
+            embedder,
+            config.vector_weight as f32,
+            config.keyword_weight as f32,
+        )?;
+        // Live cadence: light-sleep on the factory-owned store handle (no
+        // second open). Deleting this call makes near-dup cadence tests RED.
+        if light_sleep_due && let Err(e) = mem.run_light_sleep_governance() {
+            ::reiclaw_log::record!(
+                WARN,
+                ::reiclaw_log::Event::new(module_path!(), ::reiclaw_log::Action::Note)
+                    .with_outcome(::reiclaw_log::EventOutcome::Unknown)
+                    .with_attrs(::serde_json::json!({"error": format!("{}", e)})),
+                "tachi light-sleep governance skipped"
+            );
+        }
+        return wrap_scanned_and_audit(mem, &config.policy, workspace_dir, config.audit_enabled);
+    }
+
+    #[cfg(not(feature = "tachi"))]
+    if backend_name == "tachi" {
+        anyhow::bail!(
+            "memory backend 'tachi' requested but this build was compiled without \
+             `memory-tachi`; rebuild with `--features memory-tachi`"
+        );
+    }
+
+    create_memory_with_policy(
+        &backend_name,
+        workspace_dir,
+        "",
+        &config.policy,
+        config.audit_enabled,
+    )
+}
+
+pub fn create_memory_for_migration(config: &Config) -> anyhow::Result<Box<dyn Memory>> {
+    let backend = backend_kind_from_dotted(&config.memory.backend);
+    if matches!(classify_memory_backend(&backend), MemoryBackendKind::None) {
+        anyhow::bail!(
+            "memory backend 'none' disables persistence; choose tachi or markdown before migration"
+        );
+    }
+
+    // Operator surface (bulk import + CLI management): writes are still
+    // scanned and logged, but flagged rows are persisted rather than
+    // rejected so an import never stops partway through, and read-time
+    // withholding is disabled so `memory list` / `get` show every stored
+    // row for inspection and removal. The runtime factory
+    // (`create_memory_with_storage_and_routes`) applies the configured
+    // `[memory.policy]`, so flagged rows remain withheld from recall
+    // wherever `threat_scan_load_time` is enabled.
+    let policy = MemoryPolicyConfig {
+        threat_scan_on_hit: "block-on-read".into(),
+        threat_scan_load_time: false,
+        ..MemoryPolicyConfig::default()
+    };
+
+    #[cfg(feature = "tachi")]
+    if matches!(classify_memory_backend(&backend), MemoryBackendKind::Tachi) {
+        let mem = TachiMemory::new("tachi", &config.data_dir)?;
+        return wrap_scanned_and_audit(mem, &policy, &config.data_dir, false);
+    }
+
+    #[cfg(not(feature = "tachi"))]
+    if backend == "tachi" {
+        anyhow::bail!(
+            "memory backend 'tachi' requested but this build was compiled without \
+             `memory-tachi`; rebuild with `--features memory-tachi`"
+        );
+    }
+
+    create_memory_with_policy(
+        &backend,
+        &config.data_dir,
+        " during migration",
+        &policy,
+        false,
+    )
+}
+
+/// Wrap an agent memory handle in the [`RetrievalPipeline`] decorator.
+///
+/// The decorator makes one hybrid backend-recall call per query. Its only
+/// add-on is an optional in-process hot cache, enabled when `[memory]
+/// retrieval_stages` names `"cache"`. The default carries no `"cache"`, so
+/// activating the decorator does not change default per-agent recall. The
+/// reserved `"fts"` / `"vector"` names and `fts_early_return_score` are inert
+/// until `Memory` exposes distinct FTS and vector operations.
+fn wrap_in_retrieval_pipeline(memory: Arc<dyn Memory>, config: &MemoryConfig) -> Arc<dyn Memory> {
+    let cache_enabled = config.retrieval_stages.iter().any(|stage| stage == "cache");
+    Arc::new(retrieval::RetrievalPipeline::new(
+        memory,
+        RetrievalConfig {
+            cache_enabled,
+            ..RetrievalConfig::default()
+        },
+    ))
+}
+
+/// Build the per-agent memory wrapper for `agent_alias`.
+///
+/// Wraps the appropriate inner backend with `AgentScopedMemory` (for
+/// SQL-backed agents — single shared backend, agent_id
+/// column distinguishes rows) or `AgentScopedMarkdownMemory` (for
+/// Markdown-backed agents — per-agent dirs, peer set composed from
+/// the resolved `read_memory_from` allowlist). `NoneMemory` agents
+/// pass through unwrapped.
+///
+/// The scoped handle is then wrapped in the [`RetrievalPipeline`] decorator
+/// (outermost), so per-turn injection recall and memory tools share one
+/// `Memory` contract. `NoneMemory` agents skip the decorator.
+///
+/// Cross-backend allowlist entries are rejected at config load, so by
+/// the time we get here every entry on
+/// `agents.<alias>.workspace.read_memory_from` is guaranteed to point
+/// at a sibling on the same backend kind.
+pub async fn create_memory_for_agent(
+    config: &reiclaw_config::schema::Config,
+    agent_alias: &str,
+    api_key: Option<&str>,
+) -> anyhow::Result<Arc<dyn Memory>> {
+    use reiclaw_config::multi_agent::MemoryBackendKind as ConfigBackend;
+    let agent_cfg = config
+        .agents
+        .get(agent_alias)
+        .with_context(|| format!("agents.{agent_alias} is not configured"))?;
+    let backend_kind = agent_cfg.memory.backend;
+    if matches!(
+        backend_kind,
+        ConfigBackend::Postgres
+            | ConfigBackend::Qdrant
+            | ConfigBackend::Sqlite
+            | ConfigBackend::Lucid
+    ) {
+        let backend = match backend_kind {
+            ConfigBackend::Postgres => "postgres",
+            ConfigBackend::Qdrant => "qdrant",
+            ConfigBackend::Sqlite => "sqlite",
+            _ => "lucid",
+        };
+        return Err(retired_backend_error(
+            backend,
+            &format!("agents.{agent_alias}.memory.backend"),
+        ));
+    }
+
+    // Typed-memory producers are Tachi-only. Config::validate already
+    // rejects this combination on every save path, but boot is
+    // deliberately validation-resilient (a hand-edited config still
+    // starts the daemon so the operator can repair it via /config), so
+    // enforce again here: failing agent-memory construction is an
+    // operator-visible startup error and keeps background consolidation
+    // from ever running typed writes into a backend that would reject
+    // them deep inside spawned work.
+    if config.memory.types.enabled || config.memory.consolidation_extract_facts {
+        let flag = if config.memory.types.enabled {
+            "memory.types.enabled"
+        } else {
+            "memory.consolidation_extract_facts"
+        };
+        let global_kind = backend_kind_from_dotted(&config.memory.backend);
+        if global_kind != "tachi" {
+            anyhow::bail!(
+                "{flag} = true requires memory.backend = \"tachi\" (typed memory storage is Tachi-only), but memory.backend = {:?}",
+                config.memory.backend
+            );
+        }
+        if !matches!(backend_kind, ConfigBackend::Tachi) {
+            anyhow::bail!(
+                "{flag} = true requires every agent on the tachi memory backend (typed memory storage is Tachi-only), but agents.{agent_alias}.memory.backend = {backend_kind:?}"
+            );
+        }
+    }
+
+    // Markdown branch: the wrapper composes per-agent dirs, not a
+    // shared backend. Skip the inner-backend factory entirely, but still
+    // apply the install-wide policy decorator to own and peer Markdown
+    // stores before composition.
+    if matches!(backend_kind, ConfigBackend::Markdown) {
+        let own_workspace = config.agent_workspace_dir(agent_alias);
+        let own: Arc<dyn Memory> = Arc::new(ScannedMemory::new(
+            MarkdownMemory::new("markdown", &own_workspace),
+            &config.memory.policy,
+        ));
+        let mut peers: Vec<agent_scoped_markdown::MarkdownPeer> = Vec::new();
+        for peer in &agent_cfg.workspace.read_memory_from {
+            let peer_alias = peer.as_str();
+            let peer_workspace = config.agent_workspace_dir(peer_alias);
+            peers.push(agent_scoped_markdown::MarkdownPeer {
+                alias: peer_alias.to_string(),
+                memory: Arc::new(ScannedMemory::new(
+                    MarkdownMemory::new("markdown", &peer_workspace),
+                    &config.memory.policy,
+                )),
+            });
+        }
+        let scoped = AgentScopedMarkdownMemory::new(agent_alias, own, peers);
+        // Route the composed per-agent wrapper through the same audit
+        // decision as the install-wide factory: with `[memory]
+        // audit_enabled = true` the wrapper's store/recall operations
+        // write `memory/audit.db` rows and emit the `memory.audit` event;
+        // default-off passes it through untouched (byte-identical). The
+        // audit db is rooted at the install `data_dir` (shared across
+        // agents), mirroring how the SQL/Lucid arms compose it.
+        let audited: Arc<dyn Memory> = Arc::from(wrap_audit(
+            scoped,
+            &config.data_dir,
+            config.memory.audit_enabled,
+        )?);
+        return Ok(wrap_in_retrieval_pipeline(audited, &config.memory));
+    }
+
+    // None branch: nothing to scope, no agents-table lookup needed. Still
+    // route through the audit decision so an audit-enabled install records
+    // attempted store/recall operations on the no-op backend; the
+    // install-wide factory wraps `NoneMemory` the same way, and opt-in
+    // audit coverage must not become backend/path-dependent.
+    if matches!(backend_kind, ConfigBackend::None) {
+        return Ok(Arc::from(wrap_audit(
+            NoneMemory::new("none"),
+            &config.data_dir,
+            config.memory.audit_enabled,
+        )?));
+    }
+
+    let agent_backend_name = match backend_kind {
+        ConfigBackend::Sqlite => "sqlite",
+        ConfigBackend::Lucid => "lucid",
+        ConfigBackend::Tachi => "tachi",
+        ConfigBackend::Markdown => "markdown",
+        ConfigBackend::None => "none",
+        ConfigBackend::Postgres => "postgres",
+        ConfigBackend::Qdrant => "qdrant",
+    };
+
+    let inner = if backend_kind == ConfigBackend::default()
+        || backend_kind_from_dotted(&config.memory.backend) == agent_backend_name
+    {
+        create_memory_from_config(config, api_key)?
+    } else {
+        let mut agent_memory = config.memory.clone();
+        agent_memory.backend = agent_backend_name.to_string();
+        create_memory_with_storage_and_routes(
+            &agent_memory,
+            &config.embedding_routes,
+            ActiveStorage::None,
+            &config.data_dir,
+            api_key,
+            Some(&config.providers.models),
+        )?
+    };
+    let inner_arc: Arc<dyn Memory> = Arc::from(inner);
+
+    let bound_id = inner_arc.ensure_agent_uuid(agent_alias).await?;
+    let mut allowlist_ids = Vec::with_capacity(agent_cfg.workspace.read_memory_from.len());
+    for peer in &agent_cfg.workspace.read_memory_from {
+        let uuid = inner_arc.ensure_agent_uuid(peer.as_str()).await?;
+        allowlist_ids.push(uuid);
+    }
+
+    let scoped = AgentScopedMemory::new(inner_arc, bound_id, allowlist_ids);
+    Ok(wrap_in_retrieval_pipeline(Arc::new(scoped), &config.memory))
+}
+
+/// Factory: create an optional response cache from config.
+pub fn create_response_cache(config: &MemoryConfig, workspace_dir: &Path) -> Option<ResponseCache> {
+    if !config.response_cache_enabled {
+        return None;
+    }
+
+    match ResponseCache::new(
+        workspace_dir,
+        config.response_cache_ttl_minutes,
+        config.response_cache_max_entries,
+    ) {
+        Ok(cache) => {
+            ::reiclaw_log::record!(
+                INFO,
+                ::reiclaw_log::Event::new(module_path!(), ::reiclaw_log::Action::Note),
+                &format!(
+                    "💾 Response cache enabled (TTL: {}min, max: {} entries)",
+                    config.response_cache_ttl_minutes, config.response_cache_max_entries
+                )
+            );
+            Some(cache)
+        }
+        Err(e) => {
+            ::reiclaw_log::record!(
+                WARN,
+                ::reiclaw_log::Event::new(module_path!(), ::reiclaw_log::Action::Note)
+                    .with_outcome(::reiclaw_log::EventOutcome::Unknown)
+                    .with_attrs(::serde_json::json!({"error": format!("{}", e)})),
+                "Response cache disabled due to error"
+            );
+            None
+        }
+    }
+}
+
+#[cfg(test)]
+mod tests;

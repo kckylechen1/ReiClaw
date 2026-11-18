@@ -1,2 +1,2 @@
 #[allow(unused_imports)]
-pub use zeroclaw_runtime::approval::*;
+pub use reiclaw_runtime::approval::*;

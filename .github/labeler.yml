@@ -34,7 +34,7 @@
   - changed-files:
       - any-glob-to-any-file:
           - "src/agent/**"
-          - "crates/zeroclaw-runtime/src/agent/**"
+          - "crates/reiclaw-runtime/src/agent/**"
 
 "channel":
   - changed-files:
@@ -46,7 +46,7 @@
   - changed-files:
       - any-glob-to-any-file:
           - "src/channels/mod.rs"
-          - "crates/zeroclaw-api/src/channel.rs"
+          - "crates/reiclaw-api/src/channel.rs"
           - "crates/zeroclaw-channels/src/lib.rs"
           - "crates/zeroclaw-channels/src/orchestrator/**"
 
@@ -56,7 +56,7 @@
           - "docs/book/src/channels/acp.md"
           - "crates/zeroclaw-channels/src/acp_channel.rs"
           - "crates/zeroclaw-channels/src/orchestrator/acp_server.rs"
-          - "crates/zeroclaw-infra/src/acp_session_store.rs"
+          - "crates/reiclaw-infra/src/acp_session_store.rs"
 
 "channel:bluesky":
   - changed-files:
@@ -197,203 +197,203 @@
   - changed-files:
       - any-glob-to-any-file:
           - "src/gateway/**"
-          - "crates/zeroclaw-gateway/src/**"
+          - "crates/reiclaw-gateway/src/**"
 
 "config":
   - changed-files:
       - any-glob-to-any-file:
           - "src/config/**"
-          - "crates/zeroclaw-config/src/**"
-          - "crates/zeroclaw-schema-markdown/**"
+          - "crates/reiclaw-config/src/**"
+          - "crates/reiclaw-schema-markdown/**"
 
 "cron":
   - changed-files:
       - any-glob-to-any-file:
           - "src/cron/**"
-          - "crates/zeroclaw-runtime/src/cron/**"
+          - "crates/reiclaw-runtime/src/cron/**"
 
 "daemon":
   - changed-files:
       - any-glob-to-any-file:
           - "src/daemon/**"
-          - "crates/zeroclaw-runtime/src/daemon/**"
+          - "crates/reiclaw-runtime/src/daemon/**"
 
 "doctor":
   - changed-files:
       - any-glob-to-any-file:
           - "src/doctor/**"
-          - "crates/zeroclaw-runtime/src/doctor/**"
+          - "crates/reiclaw-runtime/src/doctor/**"
 
 "health":
   - changed-files:
       - any-glob-to-any-file:
           - "src/health/**"
-          - "crates/zeroclaw-runtime/src/health/**"
+          - "crates/reiclaw-runtime/src/health/**"
 
 "heartbeat":
   - changed-files:
       - any-glob-to-any-file:
           - "src/heartbeat/**"
-          - "crates/zeroclaw-runtime/src/heartbeat/**"
+          - "crates/reiclaw-runtime/src/heartbeat/**"
 
 "integration":
   - changed-files:
       - any-glob-to-any-file:
           - "src/integrations/**"
-          - "crates/zeroclaw-runtime/src/integrations/**"
+          - "crates/reiclaw-runtime/src/integrations/**"
 
 "memory":
   - changed-files:
       - any-glob-to-any-file:
           - "src/memory/**"
-          - "crates/zeroclaw-memory/src/**"
+          - "crates/reiclaw-memory/src/**"
 
 "memory:backend":
   - changed-files:
       - any-glob-to-any-file:
           - "src/memory/cli.rs"
-          - "crates/zeroclaw-memory/src/backend.rs"
-          - "crates/zeroclaw-memory/src/markdown.rs"
-          - "crates/zeroclaw-memory/src/none.rs"
-          - "crates/zeroclaw-memory/src/tachi.rs"
+          - "crates/reiclaw-memory/src/backend.rs"
+          - "crates/reiclaw-memory/src/markdown.rs"
+          - "crates/reiclaw-memory/src/none.rs"
+          - "crates/reiclaw-memory/src/tachi.rs"
 
 "security":
   - changed-files:
       - any-glob-to-any-file:
           - "src/security/**"
-          - "crates/zeroclaw-runtime/src/security/**"
+          - "crates/reiclaw-runtime/src/security/**"
 
 "security:bubblewrap":
   - changed-files:
       - any-glob-to-any-file:
-          - "crates/zeroclaw-runtime/src/security/bubblewrap.rs"
+          - "crates/reiclaw-runtime/src/security/bubblewrap.rs"
 
 "security:docker":
   - changed-files:
       - any-glob-to-any-file:
-          - "crates/zeroclaw-runtime/src/security/docker.rs"
+          - "crates/reiclaw-runtime/src/security/docker.rs"
 
 "security:leak-detector":
   - changed-files:
       - any-glob-to-any-file:
-          - "crates/zeroclaw-runtime/src/security/leak_detector.rs"
+          - "crates/reiclaw-runtime/src/security/leak_detector.rs"
 
 "security:pairing":
   - changed-files:
       - any-glob-to-any-file:
-          - "crates/zeroclaw-runtime/src/security/pairing.rs"
-          - "crates/zeroclaw-runtime/tests/pairing_contract.rs"
-          - "crates/zeroclaw-config/src/tokens.rs"
-          - "crates/zeroclaw-gateway/src/api_pairing.rs"
+          - "crates/reiclaw-runtime/src/security/pairing.rs"
+          - "crates/reiclaw-runtime/tests/pairing_contract.rs"
+          - "crates/reiclaw-config/src/tokens.rs"
+          - "crates/reiclaw-gateway/src/api_pairing.rs"
           - "web/src/pages/Pairing.tsx"
 
 "security:policy":
   - changed-files:
       - any-glob-to-any-file:
-          - "crates/zeroclaw-runtime/src/security/policy.rs"
-          - "crates/zeroclaw-policy/**"
-          - "crates/zeroclaw-config/src/policy_defaults.rs"
-          - "crates/zeroclaw-api/src/policy.rs"
+          - "crates/reiclaw-runtime/src/security/policy.rs"
+          - "crates/reiclaw-policy/**"
+          - "crates/reiclaw-config/src/policy_defaults.rs"
+          - "crates/reiclaw-api/src/policy.rs"
 
 "security:secrets":
   - changed-files:
       - any-glob-to-any-file:
-          - "crates/zeroclaw-runtime/src/security/secrets.rs"
-          - "crates/zeroclaw-config/src/secrets.rs"
+          - "crates/reiclaw-runtime/src/security/secrets.rs"
+          - "crates/reiclaw-config/src/secrets.rs"
 
 "security:traits":
   - changed-files:
       - any-glob-to-any-file:
-          - "crates/zeroclaw-runtime/src/security/traits.rs"
+          - "crates/reiclaw-runtime/src/security/traits.rs"
 
 "runtime":
   - changed-files:
       - any-glob-to-any-file:
           - "src/runtime/**"
-          - "crates/zeroclaw-runtime/src/**"
+          - "crates/reiclaw-runtime/src/**"
 
 "quickstart":
   - changed-files:
       - any-glob-to-any-file:
-          - "crates/zeroclaw-runtime/src/quickstart/**"
+          - "crates/reiclaw-runtime/src/quickstart/**"
 
 "provider":
   - changed-files:
       - any-glob-to-any-file:
           - "src/providers/**"
-          - "crates/zeroclaw-providers/src/**"
+          - "crates/reiclaw-providers/src/**"
 
 "provider:anthropic":
   - changed-files:
       - any-glob-to-any-file:
           - "src/providers/anthropic.rs"
-          - "crates/zeroclaw-providers/src/anthropic.rs"
+          - "crates/reiclaw-providers/src/anthropic.rs"
 
 "provider:claude-code":
   - changed-files:
       - any-glob-to-any-file:
           - "src/providers/claude_code.rs"
-          - "crates/zeroclaw-providers/src/claude_code.rs"
+          - "crates/reiclaw-providers/src/claude_code.rs"
 
 "provider:compatible":
   - changed-files:
       - any-glob-to-any-file:
           - "src/providers/compatible.rs"
-          - "crates/zeroclaw-providers/src/compatible.rs"
+          - "crates/reiclaw-providers/src/compatible.rs"
 
 "provider:gemini":
   - changed-files:
       - any-glob-to-any-file:
           - "src/providers/gemini.rs"
-          - "crates/zeroclaw-providers/src/gemini.rs"
+          - "crates/reiclaw-providers/src/gemini.rs"
 
 "provider:openai":
   - changed-files:
       - any-glob-to-any-file:
           - "src/providers/openai.rs"
           - "src/providers/openai_codex.rs"
-          - "crates/zeroclaw-providers/src/openai.rs"
-          - "crates/zeroclaw-providers/src/openai_codex.rs"
+          - "crates/reiclaw-providers/src/openai.rs"
+          - "crates/reiclaw-providers/src/openai_codex.rs"
 
 "provider:reliable":
   - changed-files:
       - any-glob-to-any-file:
-          - "crates/zeroclaw-providers/src/reliable.rs"
+          - "crates/reiclaw-providers/src/reliable.rs"
 
 "provider:router":
   - changed-files:
       - any-glob-to-any-file:
-          - "crates/zeroclaw-providers/src/router.rs"
+          - "crates/reiclaw-providers/src/router.rs"
 
 "service":
   - changed-files:
       - any-glob-to-any-file:
           - "src/service/**"
-          - "crates/zeroclaw-runtime/src/service/**"
+          - "crates/reiclaw-runtime/src/service/**"
 
 "skills":
   - changed-files:
       - any-glob-to-any-file:
           - "src/skills/**"
-          - "crates/zeroclaw-runtime/src/skills/**"
+          - "crates/reiclaw-runtime/src/skills/**"
 
 "tool":
   - changed-files:
       - any-glob-to-any-file:
           - "src/tools/**"
-          - "crates/zeroclaw-tools/src/**"
+          - "crates/reiclaw-tools/src/**"
 
 "tool:browser":
   - changed-files:
       - any-glob-to-any-file:
           - "src/tools/screenshot.rs"
-          - "crates/zeroclaw-tools/src/screenshot.rs"
+          - "crates/reiclaw-tools/src/screenshot.rs"
 
 "tool:composio":
   - changed-files:
       - any-glob-to-any-file:
           - "src/tools/composio.rs"
-          - "crates/zeroclaw-tools/src/composio.rs"
+          - "crates/reiclaw-tools/src/composio.rs"
 
 "tool:cron":
   - changed-files:
@@ -404,18 +404,18 @@
           - "src/tools/cron_run.rs"
           - "src/tools/cron_runs.rs"
           - "src/tools/cron_update.rs"
-          - "crates/zeroclaw-runtime/src/tools/cron_add.rs"
-          - "crates/zeroclaw-runtime/src/tools/cron_common.rs"
-          - "crates/zeroclaw-runtime/src/tools/cron_list.rs"
-          - "crates/zeroclaw-runtime/src/tools/cron_remove.rs"
-          - "crates/zeroclaw-runtime/src/tools/cron_run.rs"
-          - "crates/zeroclaw-runtime/src/tools/cron_runs.rs"
-          - "crates/zeroclaw-runtime/src/tools/cron_update.rs"
+          - "crates/reiclaw-runtime/src/tools/cron_add.rs"
+          - "crates/reiclaw-runtime/src/tools/cron_common.rs"
+          - "crates/reiclaw-runtime/src/tools/cron_list.rs"
+          - "crates/reiclaw-runtime/src/tools/cron_remove.rs"
+          - "crates/reiclaw-runtime/src/tools/cron_run.rs"
+          - "crates/reiclaw-runtime/src/tools/cron_runs.rs"
+          - "crates/reiclaw-runtime/src/tools/cron_update.rs"
 
 "tool:delegate":
   - changed-files:
       - any-glob-to-any-file:
-          - "crates/zeroclaw-runtime/src/tools/delegate.rs"
+          - "crates/reiclaw-runtime/src/tools/delegate.rs"
 
 "tool:file":
   - changed-files:
@@ -425,11 +425,11 @@
           - "src/tools/file_write.rs"
           - "src/tools/glob_search.rs"
           - "src/tools/content_search.rs"
-          - "crates/zeroclaw-tools/src/file_edit.rs"
-          - "crates/zeroclaw-runtime/src/tools/file_read.rs"
-          - "crates/zeroclaw-tools/src/file_write.rs"
-          - "crates/zeroclaw-tools/src/glob_search.rs"
-          - "crates/zeroclaw-tools/src/content_search.rs"
+          - "crates/reiclaw-tools/src/file_edit.rs"
+          - "crates/reiclaw-runtime/src/tools/file_read.rs"
+          - "crates/reiclaw-tools/src/file_write.rs"
+          - "crates/reiclaw-tools/src/glob_search.rs"
+          - "crates/reiclaw-tools/src/content_search.rs"
 
 "tool:mcp":
   - changed-files:
@@ -439,11 +439,11 @@
           - "src/tools/mcp_protocol.rs"
           - "src/tools/mcp_tool.rs"
           - "src/tools/mcp_transport.rs"
-          - "crates/zeroclaw-tools/src/mcp_client.rs"
-          - "crates/zeroclaw-tools/src/mcp_deferred.rs"
-          - "crates/zeroclaw-tools/src/mcp_protocol.rs"
-          - "crates/zeroclaw-tools/src/mcp_tool.rs"
-          - "crates/zeroclaw-tools/src/mcp_transport.rs"
+          - "crates/reiclaw-tools/src/mcp_client.rs"
+          - "crates/reiclaw-tools/src/mcp_deferred.rs"
+          - "crates/reiclaw-tools/src/mcp_protocol.rs"
+          - "crates/reiclaw-tools/src/mcp_tool.rs"
+          - "crates/reiclaw-tools/src/mcp_transport.rs"
 
 "tool:memory":
   - changed-files:
@@ -451,17 +451,17 @@
           - "src/tools/memory_forget.rs"
           - "src/tools/memory_recall.rs"
           - "src/tools/memory_store.rs"
-          - "crates/zeroclaw-tools/src/memory_forget.rs"
-          - "crates/zeroclaw-tools/src/memory_recall.rs"
-          - "crates/zeroclaw-tools/src/memory_store.rs"
+          - "crates/reiclaw-tools/src/memory_forget.rs"
+          - "crates/reiclaw-tools/src/memory_recall.rs"
+          - "crates/reiclaw-tools/src/memory_store.rs"
 
 "tool:shell":
   - changed-files:
       - any-glob-to-any-file:
           - "src/tools/shell.rs"
           - "src/tools/cli_discovery.rs"
-          - "crates/zeroclaw-runtime/src/tools/shell.rs"
-          - "crates/zeroclaw-tools/src/cli_discovery.rs"
+          - "crates/reiclaw-runtime/src/tools/shell.rs"
+          - "crates/reiclaw-tools/src/cli_discovery.rs"
 
 "tool:web":
   - changed-files:
@@ -470,33 +470,33 @@
           - "src/tools/web_search_tool.rs"
           - "src/tools/web_search_provider_routing.rs"
           - "src/tools/http_request.rs"
-          - "crates/zeroclaw-tools/src/web_fetch.rs"
-          - "crates/zeroclaw-tools/src/web_search_tool.rs"
-          - "crates/zeroclaw-tools/src/web_search_provider_routing.rs"
-          - "crates/zeroclaw-tools/src/http_request.rs"
+          - "crates/reiclaw-tools/src/web_fetch.rs"
+          - "crates/reiclaw-tools/src/web_search_tool.rs"
+          - "crates/reiclaw-tools/src/web_search_provider_routing.rs"
+          - "crates/reiclaw-tools/src/http_request.rs"
 
 "tunnel":
   - changed-files:
       - any-glob-to-any-file:
           - "src/tunnel/**"
-          - "crates/zeroclaw-runtime/src/tunnel/**"
+          - "crates/reiclaw-runtime/src/tunnel/**"
 
 "observability":
   - changed-files:
       - any-glob-to-any-file:
           - "src/observability/**"
-          - "crates/zeroclaw-runtime/src/observability/**"
+          - "crates/reiclaw-runtime/src/observability/**"
 
 "observability:log":
   - changed-files:
       - any-glob-to-any-file:
-          - "crates/zeroclaw-log/src/**"
-          - "crates/zeroclaw-runtime/src/observability/log.rs"
+          - "crates/reiclaw-log/src/**"
+          - "crates/reiclaw-runtime/src/observability/log.rs"
 
 "observability:prometheus":
   - changed-files:
       - any-glob-to-any-file:
-          - "crates/zeroclaw-runtime/src/observability/prometheus.rs"
+          - "crates/reiclaw-runtime/src/observability/prometheus.rs"
 
 "tests":
   - changed-files:

@@ -8,7 +8,7 @@ If you're running WSL2, you can follow the [Linux setup](./linux.md) instead; `i
 
 This fork installs from its source checkout. `setup.bat` defaults to the
 recommended `dist` source preset. It checks that the checkout's `origin` is
-`kckylechen1/zeroclaw` before installing a toolchain or building. Existing
+`kckylechen1/ReiClaw` (or legacy `kckylechen1/zeroclaw`) before installing a toolchain or building. Existing
 checkouts with a different origin must be kept separate; clone this fork into
 a new directory.
 
@@ -27,8 +27,8 @@ reports that it cannot install the dashboard.
 From a Command Prompt:
 
 ```cmd
-git clone https://github.com/kckylechen1/zeroclaw.git
-cd zeroclaw
+git clone https://github.com/kckylechen1/ReiClaw.git
+cd ReiClaw
 setup.bat --dry-run
 setup.bat
 zeroclaw --version
@@ -51,7 +51,7 @@ build, download an application binary, install files, or change `PATH`.
 The fork has no verified prebuilt binary channel. Upstream release archives,
 and Scoop packages install the upstream product.
 For a Linux environment on Windows, use a separate fork checkout inside WSL
-and the source installer described in the [README](https://github.com/kckylechen1/zeroclaw/blob/master/README.md#install).
+and the source installer described in the [README](https://github.com/kckylechen1/ReiClaw/blob/master/README.md#install).
 
 ## Running as a service
 
@@ -80,7 +80,7 @@ Logs go to `%USERPROFILE%\.zeroclaw\logs\` (specifically, `<config_dir>/logs/` w
 ## Update
 
 Stop the running daemon before replacing its executable. From the fork
-checkout, confirm the configured origin is `kckylechen1/zeroclaw`, then
+checkout, confirm the configured origin is `kckylechen1/ReiClaw`, then
 fast-forward and repeat the source preset used for the original installation:
 
 ```cmd

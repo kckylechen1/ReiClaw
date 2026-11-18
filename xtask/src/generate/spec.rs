@@ -167,12 +167,12 @@ pub fn non_row_features(
 pub fn dist_target_exclusions(
     pkg: &cargo_metadata::Package,
 ) -> anyhow::Result<std::collections::BTreeMap<String, Vec<String>>> {
-    parse_target_exclusions(pkg.metadata.get("zeroclaw"))
+    parse_target_exclusions(pkg.metadata.get("reiclaw"))
 }
 
 fn read_registry_list(pkg: &cargo_metadata::Package, key: &str) -> Vec<String> {
     pkg.metadata
-        .get("zeroclaw")
+        .get("reiclaw")
         .and_then(|z| z.get(key))
         .and_then(|v| v.as_array())
         .map(|a| {
@@ -213,12 +213,12 @@ fn parse_target_exclusions(
     registry: Option<&serde_json::Value>,
 ) -> anyhow::Result<std::collections::BTreeMap<String, Vec<String>>> {
     let value = registry
-        .and_then(|zeroclaw| zeroclaw.get("dist_target_exclusions"))
+        .and_then(|reiclaw| reiclaw.get("dist_target_exclusions"))
         .ok_or_else(|| {
-            anyhow::Error::msg("missing [package.metadata.zeroclaw.dist_target_exclusions]")
+            anyhow::Error::msg("missing [package.metadata.reiclaw.dist_target_exclusions]")
         })?;
     let entries = value.as_object().ok_or_else(|| {
-        anyhow::Error::msg("[package.metadata.zeroclaw.dist_target_exclusions] must be a table")
+        anyhow::Error::msg("[package.metadata.reiclaw.dist_target_exclusions] must be a table")
     })?;
     anyhow::ensure!(
         !entries.is_empty(),

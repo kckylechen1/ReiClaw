@@ -1,6 +1,6 @@
 # CI & Actions
 
-Workflow entrypoints live in `.github/workflows/`. This page describes the fork's source policy and how to verify its coverage. GitHub branch protection, rulesets, Actions permissions, and environment approvals are separate cloud settings; editing this page or a workflow does not save those settings. CI policy and cloud alignment are tracked in [#552](https://github.com/kckylechen1/zeroclaw/issues/552).
+Workflow entrypoints live in `.github/workflows/`. This page describes the fork's source policy and how to verify its coverage. GitHub branch protection, rulesets, Actions permissions, and environment approvals are separate cloud settings; editing this page or a workflow does not save those settings. CI policy and cloud alignment are tracked in [#552](https://github.com/kckylechen1/ReiClaw/issues/552).
 
 ## Automatic workflows
 
@@ -136,7 +136,7 @@ Manual trigger for building release binaries across the full target matrix: Linu
 
 ### Cross-Platform Clippy (`cross-platform-clippy.yml`)
 
-Runs on PRs changing `crates/zeroclaw-runtime/`, `crates/zeroclaw-infra/`, or this workflow, as well as manual dispatch and the weekly schedule. Each selected run checks the workspace's targets on macOS aarch64 and Windows x86_64 with `ci-all` and `-D warnings`. This catches test-only imports and conditional-compilation errors that a normal platform `cargo check` does not cover.
+Runs on PRs changing `crates/reiclaw-runtime/`, `crates/reiclaw-infra/`, or this workflow, as well as manual dispatch and the weekly schedule. Each selected run checks the workspace's targets on macOS aarch64 and Windows x86_64 with `ci-all` and `-D warnings`. This catches test-only imports and conditional-compilation errors that a normal platform `cargo check` does not cover.
 
 Ordinary prose PRs do not trigger this workflow. It remains separate advisory coverage outside `CI Required Gate`; inspect its current-head results when the changed surface needs it. The Linux i686 and minimal-companion checks remain in the main workflow.
 
@@ -223,7 +223,7 @@ github/codeql-action/analyze@*
 Bind inspection to the task's verified repository. For this fork, the read-only checks are:
 
 ```sh
-TARGET_REPO=kckylechen1/zeroclaw
+TARGET_REPO=kckylechen1/ReiClaw
 test "$(gh repo view "$TARGET_REPO" --json nameWithOwner --jq .nameWithOwner)" = "$TARGET_REPO" || exit 1
 gh api "repos/$TARGET_REPO" \
   --jq '{allow_squash_merge, allow_merge_commit, allow_rebase_merge, allow_auto_merge}'

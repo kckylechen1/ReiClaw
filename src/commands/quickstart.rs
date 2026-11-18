@@ -5,7 +5,7 @@ use crate::gateway_helpers::{t, ta};
 
 #[cfg(feature = "agent-runtime")]
 fn qta(key: &str, args: &[(&str, &str)]) -> String {
-    zeroclaw_runtime::i18n::get_required_cli_string_with_args(key, args)
+    reiclaw_runtime::i18n::get_required_cli_string_with_args(key, args)
 }
 
 #[cfg(feature = "agent-runtime")]
@@ -14,14 +14,14 @@ fn quickstart_row(key: &str, glyph: &str, summary: &str) -> String {
 }
 
 #[cfg(feature = "agent-runtime")]
-fn quickstart_step_label(step: zeroclaw_runtime::quickstart::QuickstartStep) -> String {
+fn quickstart_step_label(step: reiclaw_runtime::quickstart::QuickstartStep) -> String {
     t(step.label_key(), step.label())
 }
 
 #[cfg(feature = "agent-runtime")]
 pub(crate) fn quickstart_runtime_profile_for_provider(
     provider_type: &str,
-    providers: &[zeroclaw_runtime::quickstart::QuickstartTypeOption],
+    providers: &[reiclaw_runtime::quickstart::QuickstartTypeOption],
     default_runtime_profile: &str,
 ) -> String {
     providers
@@ -45,7 +45,7 @@ pub(crate) fn quickstart_runtime_profile_for_provider(
 /// "Create new" entry).
 ///
 /// All option lists, field shapes, presets, and the apply path come
-/// directly from `zeroclaw_runtime::quickstart` — the same module the
+/// directly from `reiclaw_runtime::quickstart` — the same module the
 /// gateway and TUI surfaces consume. No RPC, no daemon: the CLI is
 /// compiled in-process with `zeroclaw-runtime` and calls
 /// `snapshot_state` / `field_shape` / `apply_with_surface` as plain
@@ -63,12 +63,12 @@ pub async fn run_quickstart_cli(
     agent: Option<String>,
 ) -> anyhow::Result<()> {
     use dialoguer::{Confirm, Editor, FuzzySelect, Input, Password};
-    use zeroclaw_config::presets::{
+    use reiclaw_config::presets::{
         AgentIdentity, BuilderSubmission, ChannelQuickStart, MemoryChoice, ModelProviderChoice,
         SelectorChoice,
     };
-    use zeroclaw_runtime::quickstart::presets::RISK_PRESETS;
-    use zeroclaw_runtime::quickstart::{
+    use reiclaw_runtime::quickstart::presets::RISK_PRESETS;
+    use reiclaw_runtime::quickstart::{
         FieldSection, QuickstartTypeOption, Surface, apply_with_surface, field_shape,
         snapshot_state,
     };
@@ -98,7 +98,7 @@ pub async fn run_quickstart_cli(
         // `channels_visited == false` is *not* satisfied — the
         // selector still shows `[ ]`.
         channels_visited: bool,
-        peer_groups: Vec<zeroclaw_config::presets::QuickstartPeerGroup>,
+        peer_groups: Vec<reiclaw_config::presets::QuickstartPeerGroup>,
         // Mirrors `channels_visited`: peer groups are optional, so an
         // empty `peer_groups` Vec only counts as satisfied once the
         // user has actually opened the selector and left it. Until
@@ -140,7 +140,7 @@ pub async fn run_quickstart_cli(
     struct AgentChoice {
         name: String,
         system_prompt: String,
-        personality_files: Vec<zeroclaw_config::presets::QuickstartPersonalityFile>,
+        personality_files: Vec<reiclaw_config::presets::QuickstartPersonalityFile>,
     }
 
     impl Form {
@@ -182,7 +182,7 @@ pub async fn run_quickstart_cli(
     if providers.is_empty() {
         anyhow::bail!(
             "Quickstart could not enumerate model providers — \
-             zeroclaw_providers::list_model_providers() returned no entries."
+             reiclaw_providers::list_model_providers() returned no entries."
         );
     }
 
@@ -190,7 +190,7 @@ pub async fn run_quickstart_cli(
 
     if let (Some(mp), Some(m)) = (model_provider.as_deref(), model.as_deref())
         && let Some((canonical_provider, codex_auth)) =
-            zeroclaw_runtime::quickstart::resolve_model_provider_type(mp)
+            reiclaw_runtime::quickstart::resolve_model_provider_type(mp)
         && let Some(found) = providers
             .iter()
             .find(|p| p.kind.eq_ignore_ascii_case(canonical_provider))
@@ -493,7 +493,7 @@ pub async fn run_quickstart_cli(
                     .default("default".to_string())
                     .allow_empty(false)
                     .validate_with(|input: &String| {
-                        zeroclaw_config::helpers::validate_alias_key(input)
+                        reiclaw_config::helpers::validate_alias_key(input)
                     })
                     .interact_text()
                 else {
@@ -528,10 +528,10 @@ pub async fn run_quickstart_cli(
                     let upgraded;
                     let d_used = if d.key.eq_ignore_ascii_case("model") {
                         let (models, _pricing, live) =
-                            zeroclaw_runtime::quickstart::model_catalog(&chosen.kind).await;
+                            reiclaw_runtime::quickstart::model_catalog(&chosen.kind).await;
                         if live && !models.is_empty() {
-                            upgraded = zeroclaw_runtime::quickstart::FieldDescriptor {
-                                kind: zeroclaw_api::config_metadata::PropKind::Enum,
+                            upgraded = reiclaw_runtime::quickstart::FieldDescriptor {
+                                kind: reiclaw_api::config_metadata::PropKind::Enum,
                                 enum_variants: Some(models),
                                 ..d.clone()
                             };
@@ -553,7 +553,7 @@ pub async fn run_quickstart_cli(
                     // its schema identifier — no cherry-picking.
                     if d.key.eq_ignore_ascii_case("model") {
                         model = value;
-                    } else if !value.is_empty() && value != zeroclaw_config::traits::UNSET_DISPLAY {
+                    } else if !value.is_empty() && value != reiclaw_config::traits::UNSET_DISPLAY {
                         field_buf.insert(d.key.clone(), value);
                     }
                 }
@@ -606,7 +606,7 @@ pub async fn run_quickstart_cli(
             }
             Action::Memory => {
                 let mut kinds: Vec<MemoryChoice> = Vec::new();
-                if zeroclaw_memory::TACHI_COMPILED {
+                if reiclaw_memory::TACHI_COMPILED {
                     kinds.push(MemoryChoice::Tachi);
                 }
                 kinds.push(MemoryChoice::Markdown);
@@ -778,8 +778,7 @@ pub async fn run_quickstart_cli(
                                 aborted = true;
                                 break;
                             };
-                            if !value.is_empty() && value != zeroclaw_config::traits::UNSET_DISPLAY
-                            {
+                            if !value.is_empty() && value != reiclaw_config::traits::UNSET_DISPLAY {
                                 extras.insert(d.key.clone(), value);
                             }
                         }
@@ -894,7 +893,7 @@ pub async fn run_quickstart_cli(
                             .filter(|s| !s.is_empty())
                             .collect();
                         form.peer_groups
-                            .push(zeroclaw_config::presets::QuickstartPeerGroup {
+                            .push(reiclaw_config::presets::QuickstartPeerGroup {
                                 name,
                                 channel,
                                 external_peers,
@@ -925,7 +924,7 @@ pub async fn run_quickstart_cli(
                     .with_prompt(t("cli-quickstart-agent-alias-prompt", "Agent alias"))
                     .allow_empty(false)
                     .validate_with(|input: &String| {
-                        zeroclaw_config::helpers::validate_alias_key(input)
+                        reiclaw_config::helpers::validate_alias_key(input)
                     });
                 if !default_name.is_empty() {
                     input = input.default(default_name);
@@ -966,15 +965,14 @@ pub async fn run_quickstart_cli(
                     .unwrap_or_default();
                 // Pre-render the default template set once; the per-file
                 // [t] Use template option seeds the editor from this map.
-                let template_ctx =
-                    zeroclaw_runtime::agent::personality_templates::TemplateContext {
-                        agent: trimmed_agent_name_for_templates(
-                            form.agent.as_ref().map(|a| a.name.as_str()),
-                        ),
-                        ..Default::default()
-                    };
+                let template_ctx = reiclaw_runtime::agent::personality_templates::TemplateContext {
+                    agent: trimmed_agent_name_for_templates(
+                        form.agent.as_ref().map(|a| a.name.as_str()),
+                    ),
+                    ..Default::default()
+                };
                 let templates: std::collections::HashMap<String, String> =
-                    zeroclaw_runtime::agent::personality_templates::render_preset_default(
+                    reiclaw_runtime::agent::personality_templates::render_preset_default(
                         &template_ctx,
                     )
                     .into_iter()
@@ -1108,12 +1106,12 @@ pub async fn run_quickstart_cli(
                     continue;
                 }
                 // Materialize in canonical file order; only files with content.
-                let personality_files: Vec<zeroclaw_config::presets::QuickstartPersonalityFile> =
+                let personality_files: Vec<reiclaw_config::presets::QuickstartPersonalityFile> =
                     files
                         .iter()
                         .filter_map(|filename| {
                             personality_results.get(*filename).map(|content| {
-                                zeroclaw_config::presets::QuickstartPersonalityFile {
+                                reiclaw_config::presets::QuickstartPersonalityFile {
                                     filename: (*filename).to_string(),
                                     content: content.clone(),
                                 }
@@ -1272,17 +1270,17 @@ fn trimmed_agent_name_for_templates(prior_name: Option<&str>) -> String {
         .map(|s| s.trim().to_string())
         .filter(|s| !s.is_empty())
         .unwrap_or_else(|| {
-            zeroclaw_runtime::agent::personality_templates::TemplateContext::default().agent
+            reiclaw_runtime::agent::personality_templates::TemplateContext::default().agent
         })
 }
 
 #[cfg(feature = "agent-runtime")]
 fn prompt_for_field(
-    desc: &zeroclaw_runtime::quickstart::FieldDescriptor,
+    desc: &reiclaw_runtime::quickstart::FieldDescriptor,
     seed: Option<&str>,
 ) -> anyhow::Result<Option<String>> {
     use dialoguer::{FuzzySelect, Input, Password};
-    use zeroclaw_api::config_metadata::PropKind;
+    use reiclaw_api::config_metadata::PropKind;
     if !desc.help.is_empty() {
         println!("  {}", desc.help);
     }
@@ -1326,7 +1324,7 @@ fn prompt_for_field(
         input = input.default(s.to_string());
     } else if let Some(d) = desc.default.as_deref()
         && !d.is_empty()
-        && d != zeroclaw_config::traits::UNSET_DISPLAY
+        && d != reiclaw_config::traits::UNSET_DISPLAY
     {
         // `<unset>` is a display placeholder for an unset Option, not a
         // real default. Seeding it pre-fills the prompt so a bare Enter

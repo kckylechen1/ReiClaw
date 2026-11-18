@@ -27,12 +27,12 @@ Plus two non-test directories:
 #### sh
 
 ```sh
-scripts/dev/cargo-local.sh test -p zeroclaw-runtime --lib
-scripts/dev/cargo-local.sh test -p zeroclaw-runtime --lib --features heavy-tests
-scripts/dev/cargo-local.sh test -p zeroclaw-gateway --lib --features nodes
-scripts/dev/cargo-local.sh test -p zeroclawlabs --test component
-scripts/dev/cargo-local.sh test -p zeroclawlabs --test integration agent
-scripts/dev/cargo-local.sh test -p zeroclawlabs --test system
+scripts/dev/cargo-local.sh test -p reiclaw-runtime --lib
+scripts/dev/cargo-local.sh test -p reiclaw-runtime --lib --features heavy-tests
+scripts/dev/cargo-local.sh test -p reiclaw-gateway --lib --features nodes
+scripts/dev/cargo-local.sh test -p reiclaw --test component
+scripts/dev/cargo-local.sh test -p reiclaw --test integration agent
+scripts/dev/cargo-local.sh test -p reiclaw --test system
 scripts/dev/leg.sh --list                   # CI's package/feature partitions
 scripts/dev/leg.sh app                      # before push: only affected legs
 ./dev/ci.sh test-component                  # component tests in Docker
@@ -64,8 +64,8 @@ or Linux. The sweep also requires Bash 4 or newer; macOS's bundled Bash 3 is
 insufficient.
 
 ```sh
-scripts/dev/cargo-local.sh test -p zeroclaw-memory --lib
-scripts/dev/cargo-local.sh clippy -p zeroclaw-memory --all-targets -- -D warnings
+scripts/dev/cargo-local.sh test -p reiclaw-memory --lib
+scripts/dev/cargo-local.sh clippy -p reiclaw-memory --all-targets -- -D warnings
 ```
 
 Repository Cargo config also disables incremental compilation for bare Cargo.
@@ -76,7 +76,7 @@ are unchanged. Explicit dev/test environment overrides are preserved. Restore
 file/line backtraces for a diagnostic run with:
 
 ```sh
-CARGO_PROFILE_DEV_DEBUG=line-tables-only scripts/dev/cargo-local.sh test -p zeroclaw-config --lib
+CARGO_PROFILE_DEV_DEBUG=line-tables-only scripts/dev/cargo-local.sh test -p reiclaw-config --lib
 ```
 
 Use `CARGO_INCREMENTAL=1` only for a deliberate short edit loop. Turning it off

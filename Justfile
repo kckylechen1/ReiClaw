@@ -43,15 +43,15 @@ build-debug: toolchain
 
 # Build slim personal-agent profile
 build-slim: toolchain
-    cargo build --locked -p zeroclawlabs --bin zeroclaw --no-default-features --features slim-control
+    cargo build --locked -p reiclaw --bin rei --no-default-features --features slim-control
 
 # Check slim personal-agent profile
 check-slim: toolchain
-    cargo check --locked -p zeroclawlabs --all-targets --no-default-features --features slim-control
+    cargo check --locked -p reiclaw --all-targets --no-default-features --features slim-control
 
 # Test slim personal-agent profile
 test-slim: toolchain
-    cargo test --locked -p zeroclawlabs --bin zeroclaw --no-default-features --features slim-control
+    cargo test --locked -p reiclaw --bin rei --no-default-features --features slim-control
 
 # Clean build artifacts
 clean: toolchain

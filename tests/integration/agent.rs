@@ -5,9 +5,9 @@ use crate::support::helpers::{
     tool_response,
 };
 use crate::support::{CountingTool, EchoTool, MockModelProvider, RecordingModelProvider};
+use reiclaw::providers::traits::ChatMessage;
+use reiclaw::providers::{ChatResponse, ConversationMessage, ToolCall};
 use std::sync::Arc;
-use zeroclaw::providers::traits::ChatMessage;
-use zeroclaw::providers::{ChatResponse, ConversationMessage, ToolCall};
 
 // ═════════════════════════════════════════════════════════════════════════════
 // E2E smoke tests — full agent turn cycle

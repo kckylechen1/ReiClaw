@@ -2,11 +2,11 @@
 //! {create,list,rename,delete}`.
 
 use anyhow::{Context, Result, bail};
-use zeroclaw::{AgentsCommands, ChannelsCommands, ProvidersCommands};
-use zeroclaw_config::alias_refs::{
+use reiclaw::{AgentsCommands, ChannelsCommands, ProvidersCommands};
+use reiclaw_config::alias_refs::{
     self, AliasKind, CascadeError, CascadePolicy, ProviderCategory, RenameError,
 };
-use zeroclaw_config::schema::Config;
+use reiclaw_config::schema::Config;
 
 /// Resolve a `cli-*` Fluent key for alias-CRUD CLI output. Under `agent-runtime`
 /// (default + what CI/release build) this routes through Fluent; without it the
@@ -15,7 +15,7 @@ use zeroclaw_config::schema::Config;
 fn mt(key: &str, fallback: &str) -> String {
     #[cfg(feature = "agent-runtime")]
     {
-        zeroclaw_runtime::i18n::get_required_cli_string(key)
+        reiclaw_runtime::i18n::get_required_cli_string(key)
     }
     #[cfg(not(feature = "agent-runtime"))]
     {
@@ -28,7 +28,7 @@ fn mt(key: &str, fallback: &str) -> String {
 fn mta(key: &str, args: &[(&str, &str)], fallback: &str) -> String {
     #[cfg(feature = "agent-runtime")]
     {
-        zeroclaw_runtime::i18n::get_required_cli_string_with_args(key, args)
+        reiclaw_runtime::i18n::get_required_cli_string_with_args(key, args)
     }
     #[cfg(not(feature = "agent-runtime"))]
     {
@@ -369,7 +369,7 @@ pub async fn handle_agents(cmd: AgentsCommands, config: &mut Config) -> Result<(
                 let store_dir = working
                     .companion_memory
                     .resolved_store_dir(&working.data_dir);
-                zeroclaw_memory::companion::invalidate_alias_identity(&store_dir, &alias)
+                reiclaw_memory::companion::invalidate_alias_identity(&store_dir, &alias)
                     .context("agent not created: failed to clear a stale companion identity mapping (repair or remove the companion identity file and retry)")?;
             }
             save(&mut working).await?;
@@ -425,28 +425,25 @@ pub async fn handle_agents(cmd: AgentsCommands, config: &mut Config) -> Result<(
 /// owned-state cascade.
 #[cfg(all(feature = "gateway", feature = "agent-runtime"))]
 type OwnedStateHandles = (
-    std::sync::Arc<dyn zeroclaw_memory::Memory>,
-    Option<std::sync::Arc<dyn zeroclaw_infra::session_backend::SessionBackend>>,
+    std::sync::Arc<dyn reiclaw_memory::Memory>,
+    Option<std::sync::Arc<dyn reiclaw_infra::session_backend::SessionBackend>>,
 );
 
 #[cfg(all(feature = "gateway", feature = "agent-runtime"))]
 fn build_owned_state_handles(config: &Config) -> Result<OwnedStateHandles> {
     use std::sync::Arc;
-    let mem: Arc<dyn zeroclaw_memory::Memory> = if config.agents.is_empty() {
-        Arc::new(zeroclaw_memory::NoneMemory::new("none"))
+    let mem: Arc<dyn reiclaw_memory::Memory> = if config.agents.is_empty() {
+        Arc::new(reiclaw_memory::NoneMemory::new("none"))
     } else {
         Arc::from(
-            zeroclaw_memory::create_memory_from_config(config, None)
+            reiclaw_memory::create_memory_from_config(config, None)
                 .context("open memory backend for the owned-state cascade")?,
         )
     };
     let session_backend = if config.gateway.session_persistence {
         Some(
-            zeroclaw_infra::make_session_backend(
-                &config.data_dir,
-                &config.channels.session_backend,
-            )
-            .context("open session backend for the owned-state cascade")?,
+            reiclaw_infra::make_session_backend(&config.data_dir, &config.channels.session_backend)
+                .context("open session backend for the owned-state cascade")?,
         )
     } else {
         None
@@ -631,7 +628,7 @@ async fn rename_agent(config: &mut Config, from: &str, to: &str) -> Result<()> {
     let store_dir = working
         .companion_memory
         .resolved_store_dir(&working.data_dir);
-    zeroclaw_memory::companion::rename_alias_identity(&store_dir, from, to)?;
+    reiclaw_memory::companion::rename_alias_identity(&store_dir, from, to)?;
     save(&mut working).await?;
     *config = working;
     warn_agent_owned_state();
@@ -796,7 +793,7 @@ pub async fn handle_channels(cmd: ChannelsCommands, config: &mut Config) -> Resu
 #[cfg(test)]
 mod tests {
     use super::*;
-    use zeroclaw_config::schema::AliasedAgentConfig;
+    use reiclaw_config::schema::AliasedAgentConfig;
 
     fn agent_test_config(tmp: &tempfile::TempDir) -> Config {
         let mut config = Config {
@@ -816,10 +813,10 @@ mod tests {
         Box::pin(config.save()).await.unwrap();
         let store_dir = config.companion_memory.resolved_store_dir(&config.data_dir);
         let retired =
-            zeroclaw_memory::companion::resolve_or_mint_agent_identity(&store_dir, "a").unwrap();
-        zeroclaw_memory::companion::rename_alias_identity(&store_dir, "a", "b").unwrap();
+            reiclaw_memory::companion::resolve_or_mint_agent_identity(&store_dir, "a").unwrap();
+        reiclaw_memory::companion::rename_alias_identity(&store_dir, "a", "b").unwrap();
         let identity_path =
-            store_dir.join(zeroclaw_config::companion::COMPANION_AGENT_IDENTITY_FILE);
+            store_dir.join(reiclaw_config::companion::COMPANION_AGENT_IDENTITY_FILE);
         let identities_before = std::fs::read(&identity_path).unwrap();
         let config_before = std::fs::read(&config.config_path).unwrap();
         let blocker = identity_path.with_extension("json.tmp");
@@ -845,7 +842,7 @@ mod tests {
         .await
         .unwrap();
         let fresh =
-            zeroclaw_memory::companion::resolve_or_mint_agent_identity(&store_dir, "a").unwrap();
+            reiclaw_memory::companion::resolve_or_mint_agent_identity(&store_dir, "a").unwrap();
         assert_ne!(fresh, retired);
         Box::pin(handle_agents(
             AgentsCommands::Create { alias: "a".into() },
@@ -854,11 +851,11 @@ mod tests {
         .await
         .unwrap();
         assert_eq!(
-            zeroclaw_memory::companion::peek_agent_identity(&store_dir, "a"),
+            reiclaw_memory::companion::peek_agent_identity(&store_dir, "a"),
             Some(fresh)
         );
         assert_eq!(
-            zeroclaw_memory::companion::peek_agent_identity(&store_dir, "b"),
+            reiclaw_memory::companion::peek_agent_identity(&store_dir, "b"),
             Some(retired)
         );
         let disk: toml::Value =
@@ -878,10 +875,10 @@ mod tests {
         Box::pin(config.save()).await.unwrap();
         let store_dir = config.companion_memory.resolved_store_dir(&config.data_dir);
         let retired =
-            zeroclaw_memory::companion::resolve_or_mint_agent_identity(&store_dir, "a").unwrap();
-        zeroclaw_memory::companion::rename_alias_identity(&store_dir, "a", "b").unwrap();
+            reiclaw_memory::companion::resolve_or_mint_agent_identity(&store_dir, "a").unwrap();
+        reiclaw_memory::companion::rename_alias_identity(&store_dir, "a", "b").unwrap();
         let identity_path =
-            store_dir.join(zeroclaw_config::companion::COMPANION_AGENT_IDENTITY_FILE);
+            store_dir.join(reiclaw_config::companion::COMPANION_AGENT_IDENTITY_FILE);
         let identities_before = std::fs::read(&identity_path).unwrap();
         let config_before = std::fs::read(&config.config_path).unwrap();
 
@@ -931,14 +928,14 @@ mod tests {
         ))
         .await
         .unwrap();
-        let fresh = zeroclaw_memory::companion::peek_agent_identity(&store_dir, "a").unwrap();
+        let fresh = reiclaw_memory::companion::peek_agent_identity(&store_dir, "a").unwrap();
         assert_ne!(fresh, retired);
         assert_eq!(
-            zeroclaw_memory::companion::peek_agent_identity(&store_dir, "c"),
+            reiclaw_memory::companion::peek_agent_identity(&store_dir, "c"),
             Some(fresh)
         );
         assert_eq!(
-            zeroclaw_memory::companion::peek_agent_identity(&store_dir, "b"),
+            reiclaw_memory::companion::peek_agent_identity(&store_dir, "b"),
             Some(retired)
         );
         assert!(config.agents.contains_key("a"));
@@ -981,7 +978,7 @@ mod tests {
         std::fs::write(old_ws.join("USER.md"), "retained workspace").unwrap();
         let blocker = new_ws.parent().unwrap();
         std::fs::write(blocker, "blocks workspace move").unwrap();
-        zeroclaw_runtime::cron::add_job(&config, "from", "* * * * *", "echo hi").unwrap();
+        reiclaw_runtime::cron::add_job(&config, "from", "* * * * *", "echo hi").unwrap();
 
         Box::pin(handle_agents(
             AgentsCommands::Rename {
@@ -996,7 +993,7 @@ mod tests {
         assert!(!config.agents.contains_key("from"));
         assert!(old_ws.join("USER.md").exists());
         assert_eq!(
-            zeroclaw_runtime::cron::list_jobs_by_agent(&config, "to")
+            reiclaw_runtime::cron::list_jobs_by_agent(&config, "to")
                 .unwrap()
                 .len(),
             1,
@@ -1022,11 +1019,11 @@ mod tests {
         assert_eq!(std::fs::read(&config_path).unwrap(), committed_bytes);
 
         let store_dir = config.companion_memory.resolved_store_dir(&config.data_dir);
-        zeroclaw_memory::companion::invalidate_alias_identity(&store_dir, "to").unwrap();
+        reiclaw_memory::companion::invalidate_alias_identity(&store_dir, "to").unwrap();
         let current =
-            zeroclaw_memory::companion::resolve_or_mint_agent_identity(&store_dir, "to").unwrap();
+            reiclaw_memory::companion::resolve_or_mint_agent_identity(&store_dir, "to").unwrap();
         assert_ne!(
-            zeroclaw_memory::companion::peek_agent_identity(&store_dir, "from"),
+            reiclaw_memory::companion::peek_agent_identity(&store_dir, "from"),
             Some(current.clone())
         );
         std::fs::remove_file(blocker).unwrap();
@@ -1051,7 +1048,7 @@ mod tests {
         );
         assert_eq!(std::fs::read(&config_path).unwrap(), committed_bytes);
         assert_eq!(
-            zeroclaw_memory::companion::peek_agent_identity(&store_dir, "to"),
+            reiclaw_memory::companion::peek_agent_identity(&store_dir, "to"),
             Some(current)
         );
         // Once all residue is gone, an unrelated/duplicate request is refused.
@@ -1078,10 +1075,10 @@ mod tests {
         let new_ws = config.agent_workspace_dir("to");
         std::fs::create_dir_all(&old_ws).unwrap();
         std::fs::write(old_ws.join("USER.md"), "source workspace").unwrap();
-        zeroclaw_runtime::cron::add_job(&config, "from", "* * * * *", "echo hi").unwrap();
+        reiclaw_runtime::cron::add_job(&config, "from", "* * * * *", "echo hi").unwrap();
         let store_dir = config.companion_memory.resolved_store_dir(&config.data_dir);
         let identity =
-            zeroclaw_memory::companion::resolve_or_mint_agent_identity(&store_dir, "from").unwrap();
+            reiclaw_memory::companion::resolve_or_mint_agent_identity(&store_dir, "from").unwrap();
 
         assert!(
             Box::pin(handle_agents(
@@ -1099,18 +1096,18 @@ mod tests {
         assert!(old_ws.join("USER.md").exists());
         assert!(!new_ws.exists());
         assert_eq!(
-            zeroclaw_runtime::cron::list_jobs_by_agent(&config, "from")
+            reiclaw_runtime::cron::list_jobs_by_agent(&config, "from")
                 .unwrap()
                 .len(),
             1
         );
         assert!(
-            zeroclaw_runtime::cron::list_jobs_by_agent(&config, "to")
+            reiclaw_runtime::cron::list_jobs_by_agent(&config, "to")
                 .unwrap()
                 .is_empty()
         );
         assert_eq!(
-            zeroclaw_memory::companion::peek_agent_identity(&store_dir, "from"),
+            reiclaw_memory::companion::peek_agent_identity(&store_dir, "from"),
             Some(identity)
         );
     }
@@ -1158,7 +1155,7 @@ mod tests {
                     )
                     .unwrap();
             }
-            assert!(zeroclaw_memory::hygiene::is_due(&config.data_dir).unwrap());
+            assert!(reiclaw_memory::hygiene::is_due(&config.data_dir).unwrap());
 
             assert!(
                 Box::pin(handle_agents(

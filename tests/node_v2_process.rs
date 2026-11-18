@@ -8,6 +8,12 @@ use axum::{
     routing::get,
 };
 use futures_util::{SinkExt, StreamExt};
+use reiclaw_api::{node::WS_NODES_V2, tool::Tool};
+use reiclaw_gateway::{
+    device_identity::DeviceIdentityStore,
+    nodes::{NodeRegistry, upgrade_node_socket},
+};
+use reiclaw_runtime::security::pairing::PairingGuard;
 use serde_json::{Value, json};
 use std::{net::SocketAddr, process::Stdio, sync::Arc, time::Duration};
 use tokio::{
@@ -16,12 +22,6 @@ use tokio::{
     sync::mpsc,
 };
 use tokio_tungstenite::tungstenite::{Message, client::IntoClientRequest};
-use zeroclaw_api::{node::WS_NODES_V2, tool::Tool};
-use zeroclaw_gateway::{
-    device_identity::DeviceIdentityStore,
-    nodes::{NodeRegistry, upgrade_node_socket},
-};
-use zeroclaw_runtime::security::pairing::PairingGuard;
 
 #[tokio::test]
 #[ignore = "spawned as a separate host process by the parent proof"]
@@ -89,9 +89,9 @@ impl Fixture {
         let dir = tempfile::tempdir().unwrap();
         let store = DeviceIdentityStore::open(dir.path(), 16).unwrap();
         let registry = Arc::new(NodeRegistry::new(16).with_identities(store));
-        zeroclaw_api::node_tools::install(dir.path(), registry.clone());
+        reiclaw_api::node_tools::install(dir.path(), registry.clone());
         let token = uuid::Uuid::new_v4().to_string();
-        let config = zeroclaw_config::schema::NodesConfig {
+        let config = reiclaw_config::schema::NodesConfig {
             enabled: true,
             auth_token: Some(token.clone()),
             ..Default::default()
@@ -116,7 +116,7 @@ impl Fixture {
                 }
             }),
         );
-        let server = ::zeroclaw_spawn::spawn!(async move {
+        let server = ::reiclaw_spawn::spawn!(async move {
             axum::serve(gateway, router).await.unwrap();
         });
         // Fault-injection proxy duplicates real Invoke frames and injects stale
@@ -160,7 +160,7 @@ impl Fixture {
                 let _ = upstream.close(None).await;
             }) }
         }));
-        let proxy_task = ::zeroclaw_spawn::spawn!(async move {
+        let proxy_task = ::reiclaw_spawn::spawn!(async move {
             axum::serve(proxy, router).await.unwrap();
         });
         Self {
@@ -188,7 +188,7 @@ impl Fixture {
         let input = child.stdin.take().unwrap();
         let stdout = child.stdout.take().unwrap();
         let (tx, events) = mpsc::channel(128);
-        ::zeroclaw_spawn::spawn!(async move {
+        ::reiclaw_spawn::spawn!(async move {
             let mut lines = BufReader::new(stdout).lines();
             while let Ok(Some(line)) = lines.next_line().await {
                 if let Ok(event) = serde_json::from_str::<Value>(&line)
@@ -218,20 +218,20 @@ impl Fixture {
         host
     }
     async fn tool(&self, host: &Host, cap: &str) -> Box<dyn Tool> {
-        use zeroclaw_runtime::tools::{
+        use reiclaw_runtime::tools::{
             AllToolsResult,
             scoped::{ScopedAssembly, ScopedToolRegistry},
         };
         let name = format!("node:{}:{cap}", host.device);
-        let config = zeroclaw_config::schema::Config {
+        let config = reiclaw_config::schema::Config {
             data_dir: self.dir.path().to_path_buf(),
-            nodes: zeroclaw_config::schema::NodesConfig {
+            nodes: reiclaw_config::schema::NodesConfig {
                 enabled: true,
                 ..Default::default()
             },
             ..Default::default()
         };
-        let security = Arc::new(zeroclaw_policy::SecurityPolicy {
+        let security = Arc::new(reiclaw_policy::SecurityPolicy {
             allowed_tools: Some(vec![name.clone()]),
             ..Default::default()
         });
@@ -248,7 +248,7 @@ impl Fixture {
             security: &security,
             built,
             skills: &[],
-            runtime: Arc::new(zeroclaw_runtime::platform::NativeRuntime::new()),
+            runtime: Arc::new(reiclaw_runtime::platform::NativeRuntime::new()),
             caller_allowed: None,
             connect_mcp: false,
             exclude_memory: false,
@@ -265,10 +265,10 @@ impl Fixture {
             .expect("admitted real scoped tool")
     }
     fn negative(&self, host: &Host) {
-        assert!(zeroclaw_api::node_tools::tools(self.dir.path(), None).is_empty());
+        assert!(reiclaw_api::node_tools::tools(self.dir.path(), None).is_empty());
         for cap in ["face", "drive", "system.run", "camera.snap", "*"] {
             let name = format!("node:{}:{cap}", host.device);
-            assert!(zeroclaw_api::node_tools::tools(self.dir.path(), Some(&[name])).is_empty());
+            assert!(reiclaw_api::node_tools::tools(self.dir.path(), Some(&[name])).is_empty());
         }
     }
 }
@@ -323,7 +323,7 @@ async fn seven_real_process_scenarios() {
     host.event("holding").await;
     let tool = echo.clone();
     let old =
-        ::zeroclaw_spawn::spawn!(async move { tool.execute(json!({"text":"old"})).await.unwrap() });
+        ::reiclaw_spawn::spawn!(async move { tool.execute(json!({"text":"old"})).await.unwrap() });
     host.event("executed").await;
     host.command("reconnect").await;
     host.event("ready").await;
@@ -347,7 +347,7 @@ async fn seven_real_process_scenarios() {
     host.event("holding").await;
     let tool = echo.clone();
     let pending =
-        ::zeroclaw_spawn::spawn!(
+        ::reiclaw_spawn::spawn!(
             async move { tool.execute(json!({"text":"reduce"})).await.unwrap() }
         );
     host.event("executed").await;
@@ -389,7 +389,7 @@ async fn seven_real_process_scenarios() {
     host.command("hold").await;
     host.event("holding").await;
     let tool = info.clone();
-    let pending = ::zeroclaw_spawn::spawn!(async move { tool.execute(json!({})).await.unwrap() });
+    let pending = ::reiclaw_spawn::spawn!(async move { tool.execute(json!({})).await.unwrap() });
     host.event("executed").await;
     fixture.registry.revoke_device(&host.device).unwrap();
     assert_eq!(
@@ -441,7 +441,7 @@ async fn seven_real_process_scenarios() {
     host.event("holding").await;
 
     let info = fixture.tool(&host, "system.info").await;
-    let pending = ::zeroclaw_spawn::spawn!(async move { info.execute(json!({})).await.unwrap() });
+    let pending = ::reiclaw_spawn::spawn!(async move { info.execute(json!({})).await.unwrap() });
     host.event("executed").await;
     fixture.registry.shutdown();
     assert_eq!(

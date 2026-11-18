@@ -1,6 +1,6 @@
 //! TG7: ModelProvider Schema Conformance Tests
 
-use zeroclaw::providers::traits::{ChatMessage, ChatResponse, ToolCall};
+use reiclaw::providers::traits::{ChatMessage, ChatResponse, ToolCall};
 
 // ─────────────────────────────────────────────────────────────────────────────
 // ChatMessage serialization

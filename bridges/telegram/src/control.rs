@@ -10,10 +10,10 @@
 use std::collections::{HashSet, VecDeque};
 use std::time::Duration;
 
+use reiclaw_gateway_client::{Backoff, BridgeClient, Deliver, Rejected};
+use reiclaw_log::{Action, Event, EventOutcome, record};
 use serde_json::json;
 use tokio::time::{sleep, timeout};
-use zeroclaw_gateway_client::{Backoff, BridgeClient, Deliver, Rejected};
-use zeroclaw_log::{Action, Event, EventOutcome, record};
 
 use crate::render::split_message;
 use crate::telegram::{Api, MESSAGE_LIMIT, Refused};

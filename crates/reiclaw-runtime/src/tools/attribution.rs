@@ -1,0 +1,49 @@
+use reiclaw_api::attribution::{Attributable, Role, ToolKind};
+use reiclaw_api::tool_attribution;
+
+use crate::subagent_v1::ReasoningSubagentTool;
+use crate::tools::ArcToolRef;
+use crate::tools::cron_add::CronAddTool;
+use crate::tools::cron_list::CronListTool;
+use crate::tools::cron_remove::CronRemoveTool;
+use crate::tools::cron_run::CronRunTool;
+use crate::tools::cron_runs::CronRunsTool;
+use crate::tools::cron_update::CronUpdateTool;
+use crate::tools::file_read::FileReadTool;
+use crate::tools::notify::NotifyTool;
+use crate::tools::read_skill::ReadSkillTool;
+use crate::tools::schedule::ScheduleTool;
+use crate::tools::send_message_to_peer::SendMessageToPeerTool;
+use crate::tools::shell::ShellTool;
+use crate::tools::skill_http::SkillHttpTool;
+use crate::tools::skill_manage::{SkillManageTool, SkillViewTool, SkillsListTool};
+use crate::tools::skill_tool::{SkillBuiltinTool, SkillShellTool};
+
+tool_attribution!(CronAddTool, ToolKind::Plugin);
+tool_attribution!(CronListTool, ToolKind::Plugin);
+tool_attribution!(CronRemoveTool, ToolKind::Plugin);
+tool_attribution!(CronRunTool, ToolKind::Plugin);
+tool_attribution!(CronRunsTool, ToolKind::Plugin);
+tool_attribution!(CronUpdateTool, ToolKind::Plugin);
+tool_attribution!(FileReadTool, ToolKind::Plugin);
+tool_attribution!(NotifyTool, ToolKind::Plugin);
+tool_attribution!(ReadSkillTool, ToolKind::Plugin);
+tool_attribution!(ScheduleTool, ToolKind::Plugin);
+tool_attribution!(SendMessageToPeerTool, ToolKind::Plugin);
+tool_attribution!(ShellTool, ToolKind::Shell);
+tool_attribution!(SkillHttpTool, ToolKind::Plugin);
+tool_attribution!(SkillsListTool, ToolKind::Plugin);
+tool_attribution!(SkillViewTool, ToolKind::Plugin);
+tool_attribution!(SkillManageTool, ToolKind::Plugin);
+tool_attribution!(SkillBuiltinTool, ToolKind::Plugin);
+tool_attribution!(SkillShellTool, ToolKind::Plugin);
+tool_attribution!(ReasoningSubagentTool, ToolKind::SpawnSubagent);
+
+impl Attributable for ArcToolRef {
+    fn role(&self) -> Role {
+        self.0.role()
+    }
+    fn alias(&self) -> &str {
+        self.0.alias()
+    }
+}

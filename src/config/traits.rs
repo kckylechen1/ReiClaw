@@ -1,1 +1,1 @@
-pub use zeroclaw_config::traits::*;
+pub use reiclaw_config::traits::*;

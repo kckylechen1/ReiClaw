@@ -150,8 +150,8 @@ fn expand_directives(
             "{{#model-provider-catalog-table" => render_model_provider_catalog_table(),
             "{{#model-provider-fields" => render_model_provider_fields(),
             "{{#channel-streaming-matrix" => {
-                let schema = schemars::schema_for!(zeroclaw_config::schema::Config);
-                zeroclaw_schema_markdown::channel_streaming_matrix(&schema.to_value())
+                let schema = schemars::schema_for!(reiclaw_config::schema::Config);
+                reiclaw_schema_markdown::channel_streaming_matrix(&schema.to_value())
             }
             "{{#env-var-bridge" => render_env_var_bridge(env_vars)?,
             "{{#env-var-name " => render_env_var_name(arg)?,
@@ -200,14 +200,14 @@ Open [`/config/{route}`](http://127.0.0.1:42617/config/{route}) in the web dashb
 
 fn render_config_fields(arg: &str) -> anyhow::Result<String> {
     let path = arg.trim();
-    let schema = schemars::schema_for!(zeroclaw_config::schema::Config);
-    zeroclaw_schema_markdown::field_table_for_path(&schema.to_value(), path, false, None)
+    let schema = schemars::schema_for!(reiclaw_config::schema::Config);
+    reiclaw_schema_markdown::field_table_for_path(&schema.to_value(), path, false, None)
         .map_err(anyhow::Error::msg)
 }
 
 fn config_section_label(path: &str) -> anyhow::Result<String> {
-    use zeroclaw_config::schema::Config;
-    if let Some(section) = zeroclaw_config::sections::Section::from_key(path) {
+    use reiclaw_config::schema::Config;
+    if let Some(section) = reiclaw_config::sections::Section::from_key(path) {
         return Ok(section.label());
     }
     let prefix = format!("{path}.");
@@ -219,7 +219,7 @@ fn config_section_label(path: &str) -> anyhow::Result<String> {
     if !is_schema_section {
         anyhow::bail!("config-where section '{path}' is not a known config section");
     }
-    Ok(zeroclaw_config::sections::humanize_section_key(path))
+    Ok(reiclaw_config::sections::humanize_section_key(path))
 }
 
 /// Render a secret-field setter widget. Secrets are stored encrypted; they must
@@ -557,7 +557,7 @@ fn load_params() -> anyhow::Result<Vec<PeerParams>> {
 }
 
 fn validate_keys(params: &[PeerParams]) -> anyhow::Result<()> {
-    let inventory = zeroclaw_config::schema::ChannelsConfig::default();
+    let inventory = reiclaw_config::schema::ChannelsConfig::default();
     let known: Vec<&'static str> = inventory.channels().iter().map(|c| c.kind).collect();
     for p in params {
         if !known.contains(&p.key.as_str()) {
@@ -618,13 +618,13 @@ fn render_env_var_name(path: &str) -> anyhow::Result<String> {
 }
 
 fn render_model_provider_catalog_table() -> String {
-    use zeroclaw_providers::ModelProviderCategory as C;
+    use reiclaw_providers::ModelProviderCategory as C;
     let category_title = |c: C| match c {
         C::Primary => "Primary",
         C::OpenAiCompatible => "OpenAI-compatible",
         C::CloudEndpoint => "Cloud AI endpoints",
     };
-    let providers = zeroclaw_providers::list_model_providers();
+    let providers = reiclaw_providers::list_model_providers();
     let mut out = String::new();
     for category in C::all() {
         let rows: Vec<_> = providers
@@ -637,7 +637,7 @@ fn render_model_provider_catalog_table() -> String {
         out.push_str(&format!("\n### {}\n\n", category_title(*category)));
         out.push_str("| Slot | Default endpoint | Local |\n|---|---|---|\n");
         for p in rows {
-            let url = zeroclaw_providers::default_model_provider_url(p.name)
+            let url = reiclaw_providers::default_model_provider_url(p.name)
                 .map(|u| format!("`{u}`"))
                 .unwrap_or_else(|| "`—`".to_string());
             let local = if p.local { "✓" } else { "" };
@@ -648,23 +648,23 @@ fn render_model_provider_catalog_table() -> String {
 }
 
 fn render_model_provider_fields() -> String {
+    use reiclaw_providers::ModelProviderCategory as C;
     use std::fmt::Write as _;
-    use zeroclaw_providers::ModelProviderCategory as C;
     let category_title = |c: C| match c {
         C::Primary => "Primary",
         C::OpenAiCompatible => "OpenAI-compatible",
         C::CloudEndpoint => "Cloud AI endpoints",
     };
-    let providers = zeroclaw_providers::list_model_providers();
-    let schema = schemars::schema_for!(zeroclaw_config::schema::Config);
+    let providers = reiclaw_providers::list_model_providers();
+    let schema = schemars::schema_for!(reiclaw_config::schema::Config);
     let schema = schema.to_value();
     let provider_defaults =
-        serde_json::to_value(zeroclaw_config::schema::ModelProviderConfig::default()).ok();
+        serde_json::to_value(reiclaw_config::schema::ModelProviderConfig::default()).ok();
 
     let base: std::collections::BTreeSet<String> = providers
         .iter()
         .map(|p| {
-            zeroclaw_schema_markdown::section_field_names(
+            reiclaw_schema_markdown::section_field_names(
                 &schema,
                 &format!("providers.models.{}", p.name),
             )
@@ -678,7 +678,7 @@ fn render_model_provider_fields() -> String {
     // empty set keeps the full base, and the base fields are identical across
     // slots so the choice of slot does not matter.
     if let Some(first) = providers.first() {
-        let base_table = zeroclaw_schema_markdown::field_table_for_path(
+        let base_table = reiclaw_schema_markdown::field_table_for_path(
             &schema,
             &format!("providers.models.{}", first.name),
             false,
@@ -686,13 +686,13 @@ fn render_model_provider_fields() -> String {
         )
         .unwrap_or_default();
         // Trim base_table to only the shared fields by excluding everything else.
-        let extras_of_first = zeroclaw_schema_markdown::section_field_names(
+        let extras_of_first = reiclaw_schema_markdown::section_field_names(
             &schema,
             &format!("providers.models.{}", first.name),
         );
         let non_base: std::collections::BTreeSet<String> =
             extras_of_first.difference(&base).cloned().collect();
-        let base_only = zeroclaw_schema_markdown::field_table_for_path_excluding(
+        let base_only = reiclaw_schema_markdown::field_table_for_path_excluding(
             &schema,
             &format!("providers.models.{}", first.name),
             false,
@@ -719,12 +719,12 @@ fn render_model_provider_fields() -> String {
         out.push_str(&format!("\n### {}\n\n", category_title(*category)));
         out.push_str("<div class=\"provider-fields\">\n");
         for p in rows {
-            let endpoint = zeroclaw_providers::default_model_provider_url(p.name)
+            let endpoint = reiclaw_providers::default_model_provider_url(p.name)
                 .map(|u| format!("<code>{u}</code>"))
                 .unwrap_or_else(|| "no fixed default".to_string());
             let local = if p.local { " · local" } else { "" };
             let path = format!("providers.models.{}", p.name);
-            let extras = zeroclaw_schema_markdown::field_table_for_path_excluding(
+            let extras = reiclaw_schema_markdown::field_table_for_path_excluding(
                 &schema,
                 &path,
                 false,
@@ -835,7 +835,7 @@ fn validate_env_var_paths(vars: &[EnvVarParams]) -> anyhow::Result<()> {
 }
 
 fn validate_env_var_path(path: &str) -> anyhow::Result<()> {
-    use zeroclaw_config::schema::Config;
+    use reiclaw_config::schema::Config;
     let config = Config::default();
     let is_leaf = config.prop_paths().into_iter().any(|field| field == path);
     if is_leaf {

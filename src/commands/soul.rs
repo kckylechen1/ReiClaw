@@ -1,7 +1,7 @@
 //! `zeroclaw soul` — Soul diagnostics.
 
 use anyhow::Result;
-use zeroclaw_runtime::agent::soul_check::{
+use reiclaw_runtime::agent::soul_check::{
     ModelTarget, SCENARIOS, SoulCheckReport, planned_model_calls, run_soul_check,
 };
 

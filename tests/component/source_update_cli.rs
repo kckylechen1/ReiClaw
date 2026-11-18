@@ -48,7 +48,7 @@ async fn source_only_update_rejects_legacy_modes_before_network_or_binary_mutati
         let stderr = String::from_utf8_lossy(&output.stderr);
         assert!(!output.status.success(), "{args:?} unexpectedly succeeded");
         assert!(
-            stderr.contains("https://github.com/kckylechen1/zeroclaw")
+            stderr.contains("https://github.com/kckylechen1/ReiClaw")
                 && stderr.contains("./install.sh --source"),
             "{args:?} must provide fork source instructions: {stderr}"
         );

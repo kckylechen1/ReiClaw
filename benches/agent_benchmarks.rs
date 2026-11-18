@@ -4,14 +4,14 @@ use criterion::{Criterion, criterion_group, criterion_main};
 use std::hint::black_box;
 use std::sync::{Arc, Mutex};
 
-use zeroclaw::agent::agent::Agent;
-use zeroclaw::agent::dispatcher::{NativeToolDispatcher, ToolDispatcher, XmlToolDispatcher};
-use zeroclaw::config::MemoryConfig;
-use zeroclaw::memory;
-use zeroclaw::memory::{Memory, MemoryCategory};
-use zeroclaw::observability::{NoopObserver, Observer};
-use zeroclaw::providers::{ChatRequest, ChatResponse, ModelProvider, ToolCall};
-use zeroclaw::tools::{Tool, ToolOutput, ToolResult};
+use reiclaw::agent::agent::Agent;
+use reiclaw::agent::dispatcher::{NativeToolDispatcher, ToolDispatcher, XmlToolDispatcher};
+use reiclaw::config::MemoryConfig;
+use reiclaw::memory;
+use reiclaw::memory::{Memory, MemoryCategory};
+use reiclaw::observability::{NoopObserver, Observer};
+use reiclaw::providers::{ChatRequest, ChatResponse, ModelProvider, ToolCall};
+use reiclaw::tools::{Tool, ToolOutput, ToolResult};
 
 use anyhow::Result;
 use async_trait::async_trait;
@@ -61,13 +61,11 @@ impl BenchModelProvider {
     }
 }
 
-impl ::zeroclaw_api::attribution::Attributable for BenchModelProvider {
-    fn role(&self) -> ::zeroclaw_api::attribution::Role {
-        ::zeroclaw_api::attribution::Role::Provider(
-            ::zeroclaw_api::attribution::ProviderKind::Model(
-                ::zeroclaw_api::attribution::ModelProviderKind::Custom,
-            ),
-        )
+impl ::reiclaw_api::attribution::Attributable for BenchModelProvider {
+    fn role(&self) -> ::reiclaw_api::attribution::Role {
+        ::reiclaw_api::attribution::Role::Provider(::reiclaw_api::attribution::ProviderKind::Model(
+            ::reiclaw_api::attribution::ModelProviderKind::Custom,
+        ))
     }
     fn alias(&self) -> &str {
         "BenchModelProvider"
@@ -107,7 +105,7 @@ impl ModelProvider for BenchModelProvider {
 
 struct NoopTool;
 
-zeroclaw_api::mock_tool_attribution!(NoopTool);
+reiclaw_api::mock_tool_attribution!(NoopTool);
 
 #[async_trait]
 impl Tool for NoopTool {

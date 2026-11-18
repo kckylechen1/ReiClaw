@@ -2,7 +2,7 @@
 
 use crate::support::helpers::{build_agent_with_memory, text_response, tool_response};
 use crate::support::{CountingTool, EchoTool, MockModelProvider, RecordingTool};
-use zeroclaw::providers::ToolCall;
+use reiclaw::providers::ToolCall;
 
 // ═════════════════════════════════════════════════════════════════════════════
 // Full-stack system tests

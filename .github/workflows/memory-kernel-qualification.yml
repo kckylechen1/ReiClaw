@@ -7,7 +7,7 @@ on:
       - scripts/ci/qualify_memory_kernel.py
       - scripts/ci/test_ci_memory_kernel.py
       - scripts/ci/memory-kernel-candidate.txt
-      - crates/zeroclaw-memory/tests/portable_kernel_upgrade.rs
+      - crates/reiclaw-memory/tests/portable_kernel_upgrade.rs
       - .github/workflows/memory-kernel-qualification.yml
 
 permissions:

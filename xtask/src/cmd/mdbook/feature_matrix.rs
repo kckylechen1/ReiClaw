@@ -8,9 +8,9 @@ use std::collections::BTreeMap;
 use std::fmt::Write as _;
 use std::path::Path;
 
+use reiclaw_api::tool::DEFAULT_TOOL_NAMES;
+use reiclaw_config::schema::ChannelsConfig;
 use serde::Deserialize;
-use zeroclaw_api::tool::DEFAULT_TOOL_NAMES;
-use zeroclaw_config::schema::ChannelsConfig;
 
 const SNIPPET_DIR: &str = "docs/book/src/_snippets";
 const PARITY_FILE: &str = "docs/book/feature-matrix-parity.toml";
@@ -139,7 +139,7 @@ fn channels_rows(parity: &Parity) -> Result<Vec<Row>> {
 fn providers_rows(parity: &Parity) -> Result<Vec<Row>> {
     let mut rows = Vec::new();
     let mut walked = std::collections::BTreeSet::new();
-    for slot in zeroclaw_providers::canonical_model_provider_slots() {
+    for slot in reiclaw_providers::canonical_model_provider_slots() {
         walked.insert(slot.to_string());
         let (openclaw, hermes) = external_cells(parity.providers.get(slot));
         rows.push(Row {

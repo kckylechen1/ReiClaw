@@ -1,58 +1,58 @@
 {
   "legs": {
     "runtime": [
-      "zeroclaw-runtime"
+      "reiclaw-runtime"
     ],
     "channels": [
-      "zeroclaw-gateway"
+      "reiclaw-gateway"
     ],
     "app": [
-      "zeroclawlabs",
-      "zeroclaw-config"
+      "reiclaw",
+      "reiclaw-config"
     ],
     "eval": [
-      "zeroclaw-eval"
+      "reiclaw-eval"
     ],
     "tail": [
       "fill-translations",
       "xtask",
-      "zeroclaw-api",
+      "reiclaw-api",
       "zeroclaw-bridge-acp",
       "zeroclaw-bridge-telegram",
-      "zeroclaw-cost",
-      "zeroclaw-gateway-client",
-      "zeroclaw-http",
-      "zeroclaw-infra",
-      "zeroclaw-log",
-      "zeroclaw-macros",
-      "zeroclaw-memory",
-      "zeroclaw-platform",
-      "zeroclaw-policy",
-      "zeroclaw-provider-dispatch",
-      "zeroclaw-providers",
-      "zeroclaw-schema-markdown",
-      "zeroclaw-spawn",
-      "zeroclaw-tool-call-parser",
-      "zeroclaw-tools"
+      "reiclaw-cost",
+      "reiclaw-gateway-client",
+      "reiclaw-http",
+      "reiclaw-infra",
+      "reiclaw-log",
+      "reiclaw-macros",
+      "reiclaw-memory",
+      "reiclaw-platform",
+      "reiclaw-policy",
+      "reiclaw-provider-dispatch",
+      "reiclaw-providers",
+      "reiclaw-schema-markdown",
+      "reiclaw-spawn",
+      "reiclaw-tool-call-parser",
+      "reiclaw-tools"
     ]
   },
   "features": {
     "runtime": [
-      "zeroclaw-runtime/heavy-tests",
-      "zeroclaw-runtime/memory-tachi"
+      "reiclaw-runtime/heavy-tests",
+      "reiclaw-runtime/memory-tachi"
     ],
     "channels": [
-      "zeroclaw-gateway/nodes",
-      "zeroclaw-gateway/memory-tachi"
+      "reiclaw-gateway/nodes",
+      "reiclaw-gateway/memory-tachi"
     ],
     "app": [
-      "zeroclawlabs/nodes"
+      "reiclaw/nodes"
     ],
     "eval": [
-      "zeroclaw-memory/tachi"
+      "reiclaw-memory/tachi"
     ],
     "tail": [
-      "zeroclaw-memory/tachi"
+      "reiclaw-memory/tachi"
     ]
   },
   "extra_runs": {
@@ -60,7 +60,7 @@
       {
         "name": "landlock",
         "features": [
-          "zeroclaw-runtime/sandbox-landlock"
+          "reiclaw-runtime/sandbox-landlock"
         ],
         "filter": "landlock"
       }
@@ -69,7 +69,7 @@
       {
         "name": "voice-surface",
         "features": [
-          "zeroclaw-gateway/voice-surface"
+          "reiclaw-gateway/voice-surface"
         ],
         "filter": "ws::tests::"
       }

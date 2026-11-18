@@ -7,8 +7,8 @@
 use std::io::Write;
 
 use anyhow::Result;
+use reiclaw_gateway_client::{Client, ConnectOptions, Decision, Frame, Rejected};
 use tokio::io::{AsyncBufReadExt, BufReader};
-use zeroclaw_gateway_client::{Client, ConnectOptions, Decision, Frame, Rejected};
 
 use crate::commands::self_test::{resolve_gateway_bearer_token, resolve_probe_host};
 use crate::config::Config;
@@ -84,10 +84,10 @@ pub async fn run(
     let mut client = match Client::connect_with_surface(&options, "cli").await {
         Ok(client) => client,
         Err(e) => {
-            ::zeroclaw_log::record!(
+            ::reiclaw_log::record!(
                 WARN,
-                ::zeroclaw_log::Event::new(module_path!(), ::zeroclaw_log::Action::Fail)
-                    .with_outcome(::zeroclaw_log::EventOutcome::Failure)
+                ::reiclaw_log::Event::new(module_path!(), ::reiclaw_log::Action::Fail)
+                    .with_outcome(::reiclaw_log::EventOutcome::Failure)
                     .with_attrs(::serde_json::json!({
                         "gateway": &gateway,
                         "error": format!("{e:#}"),
@@ -358,7 +358,7 @@ mod tests {
         use tokio_tungstenite::tungstenite::Message;
         let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
         let addr = listener.local_addr().unwrap();
-        let server = zeroclaw_spawn::spawn!(async move {
+        let server = reiclaw_spawn::spawn!(async move {
             let (stream, _) = listener.accept().await.unwrap();
             let mut ws = tokio_tungstenite::accept_hdr_async(stream, |_req: &tokio_tungstenite::tungstenite::handshake::server::Request, mut response: tokio_tungstenite::tungstenite::handshake::server::Response| {
                 response.headers_mut().insert("sec-websocket-protocol", "zeroclaw.v1".parse().unwrap());

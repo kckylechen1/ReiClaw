@@ -1,18 +1,18 @@
 # Fork Notes
 
-This page keeps the fork-specific facts that used to live in `AGENTS.md`. The short rules are in [`AGENTS.md`](https://github.com/kckylechen1/zeroclaw/blob/master/AGENTS.md); product direction is in [ADR-013](../architecture/decisions/ADR-013-channels-as-gateway-clients.md) and [ADR-017](../architecture/decisions/ADR-017-personal-agent-body-edges-and-delegation.md).
+This page keeps the fork-specific facts that used to live in `AGENTS.md`. The short rules are in [`AGENTS.md`](https://github.com/kckylechen1/ReiClaw/blob/master/AGENTS.md); product direction is in [ADR-013](../architecture/decisions/ADR-013-channels-as-gateway-clients.md) and [ADR-017](../architecture/decisions/ADR-017-personal-agent-body-edges-and-delegation.md).
 
 ## Where new types go
 
-`zeroclaw-config` is on `agent-runtime`'s mandatory dependency path. Moving
+`reiclaw-config` is on `agent-runtime`'s mandatory dependency path. Moving
 code between files in this crate does not remove downstream dependencies or
-macro expansion. The extraction tracked in [#689](https://github.com/kckylechen1/zeroclaw/issues/689)
+macro expansion. The extraction tracked in [#689](https://github.com/kckylechen1/ReiClaw/issues/689)
 starts from `schema.rs` at 18,210 lines on `d95302025684`; its goals are explicit
 ownership and smaller review/conflict surfaces, not an unmeasured build speedup.
 
-1. **Shared wire and domain types go in `zeroclaw-api`.** A type two crates both name belongs there.
-2. **Logic stays where it runs.** `zeroclaw-api` holds the shape; the owning crate holds the behavior. A consumer that only reads a result must not link the runtime that produces it.
-3. **New config sections get their own module** under `zeroclaw-config/src/` (see `persona.rs`), not another block in `schema.rs`.
+1. **Shared wire and domain types go in `reiclaw-api`.** A type two crates both name belongs there.
+2. **Logic stays where it runs.** `reiclaw-api` holds the shape; the owning crate holds the behavior. A consumer that only reads a result must not link the runtime that produces it.
+3. **New config sections get their own module** under `reiclaw-config/src/` (see `persona.rs`), not another block in `schema.rs`.
 4. **Delete retired consumers first; extract retained behavior in bounded slices.**
    Keep declarations, serialization attributes and defaults together. State,
    validation, saving, loading and permission policy need named behavior owners;
@@ -22,7 +22,7 @@ ownership and smaller review/conflict surfaces, not an unmeasured build speedup.
 5. **Preserve contracts during mechanical extraction.** Keep existing public
    schema paths, deep-copy snapshot semantics, explicit log components and
    serialization/default behavior. Schema unit tests stay in
-   `zeroclaw-config/src/schema/tests.rs`; only necessary imports and source-scan
+   `reiclaw-config/src/schema/tests.rs`; only necessary imports and source-scan
    inputs change, without weakening assertions or coverage. Use one dependent PR
    per slice and retain the parent boundary for restacking.
 6. **Separate extraction from declaration splitting.** The approved sequence is
@@ -36,7 +36,7 @@ ownership and smaller review/conflict surfaces, not an unmeasured build speedup.
 
 ### Current-only configuration (#382 / #647)
 
-The owner retired V1/V2 configuration support. `zeroclaw-config::current`
+The owner retired V1/V2 configuration support. `reiclaw-config::current`
 accepts explicit V3 input; missing, invalid, older and future versions fail
 before migration, salvage defaults or persistence can reinterpret them. The
 V1/V2 lenses, conversion chain, filesystem upgrade, versioned generator,
@@ -75,7 +75,7 @@ registry or claiming a measured build/runtime speedup.
 
 Compared with upstream `zeroclaw-labs/zeroclaw` at
 `cda933e6b9937deacbcc0d4d2cd7f1ae5bb4500e`, this fork keeps capability definitions
-in `zeroclaw-api`, with Node hosts advertising only the names they implement.
+in `reiclaw-api`, with Node hosts advertising only the names they implement.
 Upstream's v1 device-supplied schemas and `approved=true` shortcut are skipped;
 they do not preserve this fork's authenticated v2 admission boundary.
 The catalog introduced by #630 S1 contains only `system.info` and `test.echo`.
@@ -129,10 +129,10 @@ See [runtime internals](../agents/internals.md#repeated-tool-failure-recovery).
 | Cron `allowed_tools = []` means deny-all | asserts the opposite in a test | deliberate |
 | `ModelProvider::set_credential` with real 429 rotation | logs "cannot apply … Retrying with original key" | deliberate |
 | WeChat state persistence is atomic and non-blocking | blocking, non-atomic write | deliberate |
-| Portable memory kernel behind `memory-tachi` (`zeroclaw-memory/tachi`), default backend `tachi` | absent (defaults to SQLite) | deliberate; `tachi` is default in `zeroclawlabs`, while `--no-default-features`, `--features slim-control`, and default `zeroclaw-memory` stay AGPL-free |
+| Portable memory kernel behind `memory-tachi` (`reiclaw-memory/tachi`), default backend `tachi` | absent (defaults to SQLite) | deliberate; `tachi` is default in `reiclaw`, while `--no-default-features`, `--features slim-control`, and default `reiclaw-memory` stay AGPL-free |
 | `vault:<NAME>` secret references resolved from Tachi Vault and preserved on disk | `op://` only at `87461d1ac5` | deliberate; Tachi Vault owns credentials |
 | HyperMemory custom CRUD backend | absent | retired; never re-add |
-| Builtin `calculator` / `weather` tools (`crates/zeroclaw-tools/src/{calculator,weather_tool}.rs`) | present | retired; implementations deleted, names reserved in `RETIRED_OPERATOR_TOOL_NAMES`. Weather, if ever needed again, is an HTTP skill / MCP wrapper, not a builtin |
+| Builtin `calculator` / `weather` tools (`crates/reiclaw-tools/src/{calculator,weather_tool}.rs`) | present | retired; implementations deleted, names reserved in `RETIRED_OPERATOR_TOOL_NAMES`. Weather, if ever needed again, is an HTTP skill / MCP wrapper, not a builtin |
 | `knowledge` graph tool + `knowledge.db` + `[knowledge]` / `[knowledge_bundles]` config | present | retired; relationship memory belongs to the Tachi memory kernel (`memory-tachi`), not a second local graph. Leftover sections warn via `RETIRED_CONFIG_SURFACES` tombstones |
 | GitHub Copilot provider family (`copilot.rs`, `CopilotModelProviderConfig`) | present | retired (#673 pattern); `copilot` / `github-copilot` sit in `RETIRED_MODEL_PROVIDERS`, so old configs fail closed with an explicit migration error instead of silently dropping the OAuth token |
 | Browser tools (`browser.rs`+`browser/tests.rs`, `text_browser.rs`, `browser_open.rs`, `[browser]`+`[text_browser]` config) | present | retired; web interaction stays on `web_fetch`/`web_search_tool`/`http_request`, heavy automation goes to external harnesses via Tachi. `[browser]`/`[text_browser]` warn via `RETIRED_CONFIG_SURFACES` tombstones; names in `RETIRED_OPERATOR_TOOL_NAMES`; screenshot tool retained |
@@ -314,7 +314,7 @@ Telegram source identifiers, replace the session ledger, or add another Agent.
 
 Upstream comparison: `zeroclaw-labs/zeroclaw` at
 `5d4b18d335780af8bf15979b2f45e541f91c5eb9`,
-`crates/zeroclaw-gateway/src/ws.rs`; fork baseline `eaf007c95`.
+`crates/reiclaw-gateway/src/ws.rs`; fork baseline `eaf007c95`.
 The upstream socket lifecycle and cancel-token helpers are not equivalent to
 this fork's shared Conversation and durable request receipts. Retain the local
 owners and extend their transport boundary; do not port a second runtime.
@@ -339,7 +339,7 @@ or the agent's long-term memory.
 
 Upstream `zeroclaw-labs/zeroclaw` at
 `641b766030805edfa999bb5aa6ff19a9ffd4339b`,
-`crates/zeroclaw-gateway/src/ws.rs`, constructs an Agent per socket and has no
+`crates/reiclaw-gateway/src/ws.rs`, constructs an Agent per socket and has no
 ConversationHub. The fork already owns shared conversations and replay receipts;
 the gap is deletion of their retained live history. This is a bounded local fix,
 with no upstream code port, new durable store, protocol or configuration key.
@@ -381,21 +381,21 @@ Relative to immutable upstream decisions
 this fork converges default conversation memory on the embedded Tachi
 (`portable-kernel`) store:
 
-- `zeroclawlabs` enables `memory-tachi` by default and defaults
+- `reiclaw` enables `memory-tachi` by default and defaults
   `[memory].backend` and `[agents.<alias>.memory].backend` to `tachi` (`Tachi`).
-  `zeroclaw-memory` keeps default features off, and both
+  `reiclaw-memory` keeps default features off, and both
   `--no-default-features` and `--features slim-control` remain 100% AGPL-free.
 - `SqliteMemory`, `LucidMemory`, `MEMORY_SNAPSHOT.md` export/hydration, SQLite
   v3 memory migration, and `[storage.sqlite]` / `[storage.lucid]` configuration
   sections are retired.
-- Parse-only config tombstones stay in `zeroclaw-config` (`sqlite`, `lucid`,
+- Parse-only config tombstones stay in `reiclaw-config` (`sqlite`, `lucid`,
   `postgres`, `qdrant`, `[storage.*]`, `memory.snapshot_enabled`,
   `memory.snapshot_on_hygiene`, `memory.auto_hydrate`), emitting structured
   warnings and failing memory construction explicitly rather than silently
   falling back. The offline `brain.db` conversion that once accompanied this
   guidance was retired on 2026-11-18 after the owner's stores were converted;
   existing `brain.db` data is neither read nor converted.
-- Non-memory SQLite stores remain untouched (`zeroclaw-infra` sessions, ACP
+- Non-memory SQLite stores remain untouched (`reiclaw-infra` sessions, ACP
   sessions, approvals, Soul, User Model, audit, cron, devices, and knowledge
   graph).
 - Upstream `zeroclaw-labs/zeroclaw` retains `SqliteMemory` and `LucidMemory`

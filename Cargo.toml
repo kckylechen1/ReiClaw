@@ -1,39 +1,39 @@
 [workspace]
 # The root package is an implicit member; an explicit "." defeats path exclusions.
-members = ["crates/zeroclaw-api", "crates/zeroclaw-infra", "crates/zeroclaw-config", "crates/zeroclaw-schema-markdown", "crates/zeroclaw-cost", "crates/zeroclaw-http", "crates/zeroclaw-platform", "crates/zeroclaw-policy", "crates/zeroclaw-log", "crates/zeroclaw-spawn", "crates/zeroclaw-providers", "crates/zeroclaw-provider-dispatch", "crates/zeroclaw-memory", "crates/zeroclaw-tools", "crates/zeroclaw-runtime", "crates/zeroclaw-eval", "crates/zeroclaw-gateway", "crates/zeroclaw-gateway-client", "bridges/acp", "bridges/telegram", "crates/zeroclaw-tool-call-parser", "crates/zeroclaw-macros", "tools/fill-translations", "xtask"]
+members = ["crates/reiclaw-api", "crates/reiclaw-infra", "crates/reiclaw-config", "crates/reiclaw-schema-markdown", "crates/reiclaw-cost", "crates/reiclaw-http", "crates/reiclaw-platform", "crates/reiclaw-policy", "crates/reiclaw-log", "crates/reiclaw-spawn", "crates/reiclaw-providers", "crates/reiclaw-provider-dispatch", "crates/reiclaw-memory", "crates/reiclaw-tools", "crates/reiclaw-runtime", "crates/reiclaw-eval", "crates/reiclaw-gateway", "crates/reiclaw-gateway-client", "bridges/acp", "bridges/telegram", "crates/reiclaw-tool-call-parser", "crates/reiclaw-macros", "tools/fill-translations", "xtask"]
 resolver = "2"
 
 [workspace.package]
 version = "0.8.3"
 edition = "2024"
 license = "MIT OR Apache-2.0"
-repository = "https://github.com/zeroclaw-labs/zeroclaw"
+repository = "https://github.com/kckylechen1/ReiClaw"
 rust-version = "1.96.1"
 
 [workspace.dependencies]
 jiff = { version = "0.2.46", features = ["serde", "tzdb-bundle-always"] }
-zeroclaw-schema-markdown = { path = "crates/zeroclaw-schema-markdown", version = "0.8.3" }
-zeroclaw-cost = { path = "crates/zeroclaw-cost", version = "0.8.3" }
-zeroclaw-platform = { path = "crates/zeroclaw-platform", version = "0.8.3" }
-zeroclaw-http = { path = "crates/zeroclaw-http", version = "0.8.3" }
-zeroclaw-api = { path = "crates/zeroclaw-api", version = "0.8.3" }
-zeroclaw-infra = { path = "crates/zeroclaw-infra", version = "0.8.3" }
-zeroclaw-config = { path = "crates/zeroclaw-config", version = "0.8.3", default-features = false }
-zeroclaw-log = { path = "crates/zeroclaw-log", version = "0.8.3" }
-zeroclaw-spawn = { path = "crates/zeroclaw-spawn", version = "0.8.3" }
-zeroclaw-providers = { path = "crates/zeroclaw-providers", version = "0.8.3" }
-zeroclaw-provider-dispatch = { path = "crates/zeroclaw-provider-dispatch", version = "0.8.3" }
-zeroclaw-memory = { path = "crates/zeroclaw-memory", version = "0.8.3" }
-zeroclaw-tools = { path = "crates/zeroclaw-tools", version = "0.8.3", default-features = false }
-zeroclaw-runtime = { path = "crates/zeroclaw-runtime", version = "0.8.3", default-features = false }
-zeroclaw-eval = { path = "crates/zeroclaw-eval", version = "0.8.3" }
-zeroclaw-gateway = { path = "crates/zeroclaw-gateway", version = "0.8.3", default-features = false }
-zeroclaw-gateway-client = { path = "crates/zeroclaw-gateway-client", version = "0.8.3" }
-zeroclaw-tool-call-parser = { path = "crates/zeroclaw-tool-call-parser", version = "0.8.3" }
-zeroclaw-macros = { path = "crates/zeroclaw-macros", version = "0.8.3" }
+reiclaw-schema-markdown = { path = "crates/reiclaw-schema-markdown", version = "0.8.3" }
+reiclaw-cost = { path = "crates/reiclaw-cost", version = "0.8.3" }
+reiclaw-platform = { path = "crates/reiclaw-platform", version = "0.8.3" }
+reiclaw-http = { path = "crates/reiclaw-http", version = "0.8.3" }
+reiclaw-api = { path = "crates/reiclaw-api", version = "0.8.3" }
+reiclaw-infra = { path = "crates/reiclaw-infra", version = "0.8.3" }
+reiclaw-config = { path = "crates/reiclaw-config", version = "0.8.3", default-features = false }
+reiclaw-log = { path = "crates/reiclaw-log", version = "0.8.3" }
+reiclaw-spawn = { path = "crates/reiclaw-spawn", version = "0.8.3" }
+reiclaw-providers = { path = "crates/reiclaw-providers", version = "0.8.3" }
+reiclaw-provider-dispatch = { path = "crates/reiclaw-provider-dispatch", version = "0.8.3" }
+reiclaw-memory = { path = "crates/reiclaw-memory", version = "0.8.3" }
+reiclaw-tools = { path = "crates/reiclaw-tools", version = "0.8.3", default-features = false }
+reiclaw-runtime = { path = "crates/reiclaw-runtime", version = "0.8.3", default-features = false }
+reiclaw-eval = { path = "crates/reiclaw-eval", version = "0.8.3" }
+reiclaw-gateway = { path = "crates/reiclaw-gateway", version = "0.8.3", default-features = false }
+reiclaw-gateway-client = { path = "crates/reiclaw-gateway-client", version = "0.8.3" }
+reiclaw-tool-call-parser = { path = "crates/reiclaw-tool-call-parser", version = "0.8.3" }
+reiclaw-macros = { path = "crates/reiclaw-macros", version = "0.8.3" }
 directories = "6.0"
 sys-locale = "0.3"
-zeroclaw-policy = { path = "crates/zeroclaw-policy", version = "0.8.3" }
+reiclaw-policy = { path = "crates/reiclaw-policy", version = "0.8.3" }
 
 [patch.crates-io]
 # Upstream PR #558's unmerged candidate: rand update plus released protocol fixes.
@@ -41,10 +41,10 @@ zeroclaw-policy = { path = "crates/zeroclaw-policy", version = "0.8.3" }
 tungstenite = { version = "=0.29.0", git = "https://github.com/snapview/tungstenite-rs", rev = "b40760374c31d43253989c4b30132eeeb5f74e71" }
 
 [package]
-name = "zeroclawlabs"
+name = "reiclaw"
 # Workspace crates are publish = false during microkernel transition.
 publish = false
-default-run = "zeroclaw"
+default-run = "rei"
 version.workspace = true
 edition.workspace = true
 authors = ["theonlyhennygod"]
@@ -74,27 +74,27 @@ name = "rei"
 path = "src/main.rs"
 
 [lib]
-name = "zeroclaw"
+name = "reiclaw"
 path = "src/lib.rs"
 
 [dependencies]
-zeroclaw-schema-markdown = { workspace = true, optional = true }
-zeroclaw-policy.workspace = true
-zeroclaw-http.workspace = true
+reiclaw-schema-markdown = { workspace = true, optional = true }
+reiclaw-policy.workspace = true
+reiclaw-http.workspace = true
 # Internal workspace crates — versions and paths declared once in [workspace.dependencies]
-zeroclaw-api.workspace = true
-zeroclaw-spawn.workspace = true
-zeroclaw-infra.workspace = true
-zeroclaw-config = { workspace = true, features = ["clap"] }
-zeroclaw-log.workspace = true
-zeroclaw-providers.workspace = true
-zeroclaw-memory.workspace = true
-zeroclaw-tools = { workspace = true, optional = true }
-zeroclaw-runtime = { workspace = true, optional = true }
-zeroclaw-gateway = { workspace = true, optional = true }
-zeroclaw-gateway-client = { workspace = true, optional = true }
-zeroclaw-tool-call-parser.workspace = true
-zeroclaw-macros.workspace = true
+reiclaw-api.workspace = true
+reiclaw-spawn.workspace = true
+reiclaw-infra.workspace = true
+reiclaw-config = { workspace = true, features = ["clap"] }
+reiclaw-log.workspace = true
+reiclaw-providers.workspace = true
+reiclaw-memory.workspace = true
+reiclaw-tools = { workspace = true, optional = true }
+reiclaw-runtime = { workspace = true, optional = true }
+reiclaw-gateway = { workspace = true, optional = true }
+reiclaw-gateway-client = { workspace = true, optional = true }
+reiclaw-tool-call-parser.workspace = true
+reiclaw-macros.workspace = true
 # CLI - minimal and fast
 clap = { version = "4.5", features = ["derive"] }
 clap_complete = "4.5"
@@ -154,7 +154,7 @@ tower = { version = "0.5", default-features = false, features = ["util"], option
 # single cross-crate reference), so
 # it lives here in the canonical registry. install.sh and `cargo cmd convert`
 # both read this; neither shadows it with its own list.
-[package.metadata.zeroclaw]
+[package.metadata.reiclaw]
 non_row_features = [
     "default",
     "default-channels",
@@ -168,7 +168,7 @@ non_row_features = [
 ]
 # Compatibility exclusions for standard distribution artifacts. Release
 # workflows pass only their target triple; feature policy stays here.
-[package.metadata.zeroclaw.dist_target_exclusions]
+[package.metadata.reiclaw.dist_target_exclusions]
 arm-unknown-linux-gnueabihf = ["observability-prometheus"]
 armv7-unknown-linux-gnueabihf = ["observability-prometheus"]
 
@@ -197,8 +197,8 @@ slim-control = [
 # Channels are opt-in via the lean `default-channels` bundle, `channels-full`,
 # or individual `channel-*` features.
 agent-runtime = [
-    "dep:zeroclaw-runtime", "dep:zeroclaw-tools",
-    "dep:zeroclaw-gateway-client",
+    "dep:reiclaw-runtime", "dep:reiclaw-tools",
+    "dep:reiclaw-gateway-client",
     "dep:rusqlite",
     "dep:tokio-tungstenite",
     "dep:rustls",
@@ -217,10 +217,10 @@ channels-full = ["default-channels"]
 
 # Major subsystems — each forwards to exactly ONE crate
 gateway = [
-    "dep:zeroclaw-gateway",
+    "dep:reiclaw-gateway",
     "dep:axum", "dep:tower",
 ]
-schema-export = ["dep:zeroclaw-schema-markdown", "zeroclaw-config/schema-export", "zeroclaw-gateway?/schema-export"]
+schema-export = ["dep:reiclaw-schema-markdown", "reiclaw-config/schema-export", "reiclaw-gateway?/schema-export"]
 
 # Channel feature flags retained for CLI/installer preset compatibility.
 channel-telegram = []
@@ -228,26 +228,26 @@ channel-webhook = []
 channel-acp-server = []
 
 # Node discovery surface (gateway `/ws/nodes` registry + LAN mDNS peer hints).
-# Default-off, mirroring `zeroclaw-gateway`'s own `nodes` feature. The root
+# Default-off, mirroring `reiclaw-gateway`'s own `nodes` feature. The root
 # package needs this forward so targets that construct `gateway::AppState`
 # (e.g. the `component` test) can cfg-gate the node-only fields.
-nodes = ["zeroclaw-gateway?/nodes"]
-memory-tachi = ["zeroclaw-memory/tachi", "zeroclaw-runtime?/memory-tachi", "zeroclaw-gateway?/memory-tachi"]
+nodes = ["reiclaw-gateway?/nodes"]
+memory-tachi = ["reiclaw-memory/tachi", "reiclaw-runtime?/memory-tachi", "reiclaw-gateway?/memory-tachi"]
 
 # Backends and platform flags — each forwards to ONE crate
 observability-prometheus = [
-    "zeroclaw-runtime/observability-prometheus",
-    "zeroclaw-gateway/observability-prometheus",
+    "reiclaw-runtime/observability-prometheus",
+    "reiclaw-gateway/observability-prometheus",
 ]
-sandbox-landlock = ["zeroclaw-runtime/sandbox-landlock"]
-sandbox-bubblewrap = ["zeroclaw-runtime/sandbox-bubblewrap"]
-embedded-web = ["zeroclaw-gateway/embedded-web"]
+sandbox-landlock = ["reiclaw-runtime/sandbox-landlock"]
+sandbox-bubblewrap = ["reiclaw-runtime/sandbox-bubblewrap"]
+embedded-web = ["reiclaw-gateway/embedded-web"]
 
 # Backward-compatible aliases
 landlock = ["sandbox-landlock"]
 metrics = ["observability-prometheus"]
 
-voice-surface = ["gateway", "zeroclaw-gateway/voice-surface"]
+voice-surface = ["gateway", "reiclaw-gateway/voice-surface"]
 
 # CI meta-feature
 ci-all = [
@@ -258,7 +258,7 @@ ci-all = [
     "memory-tachi",
     "observability-prometheus",
     "sandbox-landlock", "sandbox-bubblewrap",
-    "zeroclaw-runtime/heavy-tests",
+    "reiclaw-runtime/heavy-tests",
 ]
 
 # Keep local debug artifacts small. Repository Cargo config disables incremental
@@ -305,7 +305,7 @@ strip = true
 panic = "abort"
 
 [dev-dependencies]
-zeroclaw-eval.workspace = true
+reiclaw-eval.workspace = true
 # Used only by root integration-test fixtures and assertions.
 parking_lot = "0.12"
 regex = "1.10"

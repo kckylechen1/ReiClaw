@@ -274,7 +274,7 @@ use gateway_helpers::{log_gateway_start, resolve_gateway_addr};
 pub(crate) use gateway_helpers::{t, ta};
 
 // Re-export so binary modules can use crate::<CommandEnum> while keeping a single source of truth.
-pub use zeroclaw::{
+pub use reiclaw::{
     AgentsCommands, BridgeCommands, ChannelCommands, ChannelsCommands, CronCommands,
     GatewayCommands, IntegrationCommands, MigrateCommands, ProvidersCommands, ServiceCommands,
     SkillBundleCommands, SkillCommands,
@@ -442,7 +442,7 @@ enum Commands {
     Onboard {
         /// Configure a specific section only. Omit to run the full flow.
         #[command(subcommand)]
-        section: Option<zeroclaw_config::sections::Section>,
+        section: Option<reiclaw_config::sections::Section>,
 
         /// Skip interactive prompts; read from --api-key/--model-provider/--model/--memory.
         #[arg(long, hide = true)]
@@ -579,7 +579,7 @@ Examples:
   zeroclaw gateway get-paircode       # show pairing code")]
     Gateway {
         #[command(subcommand)]
-        gateway_command: Option<zeroclaw::GatewayCommands>,
+        gateway_command: Option<reiclaw::GatewayCommands>,
     },
 
     /// Start ACP (Agent Control Protocol) server over stdio
@@ -859,7 +859,7 @@ Property path tab completion is included automatically in `zeroclaw completions 
     #[command(long_about = "\
 This fork has no verified binary update channel.
 
-Update a checkout of https://github.com/kckylechen1/zeroclaw and run \
+Update a checkout of https://github.com/kckylechen1/ReiClaw and run \
 ./install.sh --source with your existing preset/features.
 
 Legacy --check, --force, --version and --json options remain parseable, \
@@ -1044,7 +1044,7 @@ fn resolve_homebrew_onboard_config_dir(
         return None;
     }
 
-    zeroclaw_runtime::service::homebrew_var_dir_from_exe(exe)
+    reiclaw_runtime::service::homebrew_var_dir_from_exe(exe)
 }
 
 #[cfg(feature = "agent-runtime")]
@@ -1462,7 +1462,7 @@ fn validated_locale(locale: &str) -> Result<String> {
     if !ok_shape {
         bail!("invalid locale code '{locale}'");
     }
-    let known = zeroclaw_runtime::i18n::available_locales();
+    let known = reiclaw_runtime::i18n::available_locales();
     if !known.iter().any(|o| o.code == locale) {
         let codes: Vec<&str> = known.iter().map(|o| o.code.as_str()).collect();
         bail!(
@@ -1478,7 +1478,7 @@ fn fetch_locales(locale: &str, catalog: Option<&str>) -> Result<()> {
     let locale = validated_locale(locale)?;
 
     let selected: Vec<&(&str, &str)> = match catalog {
-        None => zeroclaw_config::schema::FTL_CATALOGS.iter().collect(),
+        None => reiclaw_config::schema::FTL_CATALOGS.iter().collect(),
         Some(list) => {
             let names: Vec<&str> = list
                 .split(',')
@@ -1487,13 +1487,13 @@ fn fetch_locales(locale: &str, catalog: Option<&str>) -> Result<()> {
                 .collect();
             let mut out = Vec::new();
             for name in &names {
-                match zeroclaw_config::schema::FTL_CATALOGS
+                match reiclaw_config::schema::FTL_CATALOGS
                     .iter()
                     .find(|(n, _)| n == name)
                 {
                     Some(entry) => out.push(entry),
                     None => {
-                        let valid = zeroclaw_config::schema::FTL_CATALOGS
+                        let valid = reiclaw_config::schema::FTL_CATALOGS
                             .iter()
                             .map(|(n, _)| *n)
                             .collect::<Vec<_>>()
@@ -1506,7 +1506,7 @@ fn fetch_locales(locale: &str, catalog: Option<&str>) -> Result<()> {
         }
     };
 
-    let dest = zeroclaw_config::schema::ftl_locale_dir(&locale)?;
+    let dest = reiclaw_config::schema::ftl_locale_dir(&locale)?;
     std::fs::create_dir_all(&dest).with_context(|| format!("creating {}", dest.display()))?;
     // Confinement check: the resolved dest must live under the data-dir FTL root.
     let ftl_root = dest
@@ -1522,14 +1522,13 @@ fn fetch_locales(locale: &str, catalog: Option<&str>) -> Result<()> {
     let mut restored = 0u32;
 
     for (name, out_name) in selected {
-        let content =
-            zeroclaw_runtime::i18n::builtin_catalog(&locale, name).with_context(|| {
-                ta(
-                    "cli-locales-missing-builtin",
-                    &[("name", name), ("locale", &locale)],
-                    "catalogue is not included in this build",
-                )
-            })?;
+        let content = reiclaw_runtime::i18n::builtin_catalog(&locale, name).with_context(|| {
+            ta(
+                "cli-locales-missing-builtin",
+                &[("name", name), ("locale", &locale)],
+                "catalogue is not included in this build",
+            )
+        })?;
         let out_path = dest.join(out_name);
         std::fs::write(&out_path, content)
             .with_context(|| format!("writing {}", out_path.display()))?;
@@ -1689,7 +1688,7 @@ async fn async_main(command: clap::Command) -> Result<()> {
             #[cfg(feature = "schema-export")]
             {
                 let schema = schemars::schema_for!(config::Config);
-                print!("{}", zeroclaw_schema_markdown::generate(&schema.to_value()));
+                print!("{}", reiclaw_schema_markdown::generate(&schema.to_value()));
                 return Ok(());
             }
             #[cfg(not(feature = "schema-export"))]
@@ -1715,7 +1714,7 @@ async fn async_main(command: clap::Command) -> Result<()> {
     let default_filter =
         format!("{default_floor},matrix_sdk=warn,matrix_sdk_base=warn,matrix_sdk_crypto=warn");
 
-    zeroclaw_log::install_global_subscriber(
+    reiclaw_log::install_global_subscriber(
         recording_filter.as_deref(),
         &default_filter,
         cli.verbose,
@@ -1875,13 +1874,13 @@ async fn async_main(command: clap::Command) -> Result<()> {
                         .models
                         .ensure(type_key, alias_key)
                         .ok_or_else(|| {
-                            ::zeroclaw_log::record!(
+                            ::reiclaw_log::record!(
                                 WARN,
-                                ::zeroclaw_log::Event::new(
+                                ::reiclaw_log::Event::new(
                                     module_path!(),
-                                    ::zeroclaw_log::Action::Reject
+                                    ::reiclaw_log::Action::Reject
                                 )
-                                .with_outcome(::zeroclaw_log::EventOutcome::Failure)
+                                .with_outcome(::reiclaw_log::EventOutcome::Failure)
                                 .with_attrs(::serde_json::json!({"family": type_key})),
                                 "ask CLI refused: --model-provider names an unknown family"
                             );
@@ -1909,7 +1908,7 @@ async fn async_main(command: clap::Command) -> Result<()> {
                     .resolved_model_provider_for_agent(&agent_alias)
                     .map(|(ty, _alias, entry)| (ty, Some(entry)))
                     .unwrap_or(("openai", None));
-                let model_provider = zeroclaw::providers::create_model_provider(
+                let model_provider = reiclaw::providers::create_model_provider(
                     provider_name,
                     resolved_entry.and_then(|e| e.api_key.as_deref()),
                 )?;
@@ -1919,7 +1918,7 @@ async fn async_main(command: clap::Command) -> Result<()> {
                 match message {
                     Some(msg) => {
                         let response =
-                            zeroclaw_providers::ProviderDispatch::from_ref(&*model_provider)
+                            reiclaw_providers::ProviderDispatch::from_ref(&*model_provider)
                                 .simple_chat(&msg, model_name, Some(final_temperature))
                                 .await?;
                         println!("{response}");
@@ -1948,7 +1947,7 @@ async fn async_main(command: clap::Command) -> Result<()> {
                                 }
                             };
                             let response =
-                                zeroclaw_providers::ProviderDispatch::from_ref(&*model_provider)
+                                reiclaw_providers::ProviderDispatch::from_ref(&*model_provider)
                                     .simple_chat(line.trim(), model_name, Some(final_temperature))
                                     .await?;
                             println!("{response}");
@@ -1970,7 +1969,7 @@ async fn async_main(command: clap::Command) -> Result<()> {
 
     #[cfg(feature = "agent-runtime")]
     {
-        zeroclaw_runtime::cron::scheduler::register_delivery_fn(Box::new(
+        reiclaw_runtime::cron::scheduler::register_delivery_fn(Box::new(
             |config, channel, target, thread_id, output| {
                 Box::pin(async move {
                     channels::deliver_announcement(&config, &channel, &target, thread_id, &output)
@@ -2028,10 +2027,10 @@ async fn async_main(command: clap::Command) -> Result<()> {
                 );
                 if !unsupported.is_empty() {
                     let flags = unsupported.join(", ");
-                    ::zeroclaw_log::record!(
+                    ::reiclaw_log::record!(
                         WARN,
-                        ::zeroclaw_log::Event::new(module_path!(), ::zeroclaw_log::Action::Reject)
-                            .with_outcome(::zeroclaw_log::EventOutcome::Failure)
+                        ::reiclaw_log::Event::new(module_path!(), ::reiclaw_log::Action::Reject)
+                            .with_outcome(::reiclaw_log::EventOutcome::Failure)
                             .with_attrs(::serde_json::json!({"flags": flags})),
                         "interactive agent refused: flags only apply with --message"
                     );
@@ -2071,8 +2070,8 @@ async fn async_main(command: clap::Command) -> Result<()> {
                 true,
                 None,
                 None,
-                zeroclaw_api::ingress::TurnOrigin::Interactive,
-                zeroclaw_runtime::agent::loop_::AgentRunOverrides::default(),
+                reiclaw_api::ingress::TurnOrigin::Interactive,
+                reiclaw_runtime::agent::loop_::AgentRunOverrides::default(),
             ))
             .await
             .map(|_| ())
@@ -2091,7 +2090,7 @@ async fn async_main(command: clap::Command) -> Result<()> {
 
         Commands::Gateway { gateway_command } => {
             match gateway_command {
-                Some(zeroclaw::GatewayCommands::Restart {
+                Some(reiclaw::GatewayCommands::Restart {
                     port,
                     host,
                     allow_degraded_security,
@@ -2099,9 +2098,9 @@ async fn async_main(command: clap::Command) -> Result<()> {
                     let _nag = gate_security_posture(&config, allow_degraded_security)?;
                     let (port, host) = resolve_gateway_addr(&config, port, host);
                     let addr = format!("{host}:{port}");
-                    ::zeroclaw_log::record!(
+                    ::reiclaw_log::record!(
                         INFO,
-                        ::zeroclaw_log::Event::new(module_path!(), ::zeroclaw_log::Action::Note)
+                        ::reiclaw_log::Event::new(module_path!(), ::reiclaw_log::Action::Note)
                             .with_attrs(::serde_json::json!({"addr": addr})),
                         "🔄 Restarting ZeroClaw Gateway on"
                     );
@@ -2110,11 +2109,11 @@ async fn async_main(command: clap::Command) -> Result<()> {
                     match shutdown_gateway(&host, port, config.gateway.path_prefix.as_deref()).await
                     {
                         Ok(()) => {
-                            ::zeroclaw_log::record!(
+                            ::reiclaw_log::record!(
                                 INFO,
-                                ::zeroclaw_log::Event::new(
+                                ::reiclaw_log::Event::new(
                                     module_path!(),
-                                    ::zeroclaw_log::Action::Note
+                                    ::reiclaw_log::Action::Note
                                 )
                                 .with_attrs(::serde_json::json!({"addr": addr})),
                                 "✓ Existing gateway on shut down gracefully"
@@ -2126,13 +2125,13 @@ async fn async_main(command: clap::Command) -> Result<()> {
                                 match tokio::net::TcpStream::connect(&addr).await {
                                     Err(_) => break, // port is free
                                     Ok(_) if tokio::time::Instant::now() >= deadline => {
-                                        ::zeroclaw_log::record!(
+                                        ::reiclaw_log::record!(
                                             WARN,
-                                            ::zeroclaw_log::Event::new(
+                                            ::reiclaw_log::Event::new(
                                                 module_path!(),
-                                                ::zeroclaw_log::Action::Note
+                                                ::reiclaw_log::Action::Note
                                             )
-                                            .with_outcome(::zeroclaw_log::EventOutcome::Unknown)
+                                            .with_outcome(::reiclaw_log::EventOutcome::Unknown)
                                             .with_attrs(::serde_json::json!({"port": port})),
                                             "Timed out waiting for port to be released"
                                         );
@@ -2146,11 +2145,11 @@ async fn async_main(command: clap::Command) -> Result<()> {
                             }
                         }
                         Err(e) => {
-                            ::zeroclaw_log::record!(
+                            ::reiclaw_log::record!(
                                 INFO,
-                                ::zeroclaw_log::Event::new(
+                                ::reiclaw_log::Event::new(
                                     module_path!(),
-                                    ::zeroclaw_log::Action::Note
+                                    ::reiclaw_log::Action::Note
                                 )
                                 .with_attrs(::serde_json::json!({"error": format!("{}", e)})),
                                 "   No existing gateway to shut down"
@@ -2161,7 +2160,7 @@ async fn async_main(command: clap::Command) -> Result<()> {
                     log_gateway_start(&host, port);
                     Box::pin(run_gateway_if_enabled(&host, port, config, None)).await
                 }
-                Some(zeroclaw::GatewayCommands::GetPaircode {
+                Some(reiclaw::GatewayCommands::GetPaircode {
                     new,
                     rotate,
                     rotate_device,
@@ -2257,11 +2256,11 @@ async fn async_main(command: clap::Command) -> Result<()> {
                     }
                     Ok(())
                 }
-                Some(zeroclaw::GatewayCommands::Bridge { bridge_command }) => {
+                Some(reiclaw::GatewayCommands::Bridge { bridge_command }) => {
                     gateway_helpers::bridges::handle_bridge_command(&mut config, bridge_command)
                         .await
                 }
-                Some(zeroclaw::GatewayCommands::Start {
+                Some(reiclaw::GatewayCommands::Start {
                     port,
                     host,
                     allow_degraded_security,
@@ -2307,10 +2306,10 @@ async fn async_main(command: clap::Command) -> Result<()> {
                     } else {
                         "Consider installing to /usr/local/bin for system-wide service."
                     };
-                    ::zeroclaw_log::record!(
+                    ::reiclaw_log::record!(
                         WARN,
-                        ::zeroclaw_log::Event::new(module_path!(), ::zeroclaw_log::Action::Note)
-                            .with_outcome(::zeroclaw_log::EventOutcome::Unknown),
+                        ::reiclaw_log::Event::new(module_path!(), ::reiclaw_log::Action::Note)
+                            .with_outcome(::reiclaw_log::EventOutcome::Unknown),
                         &format!(
                             "Daemon running from user home directory: {}. {install_hint}",
                             exe.display()
@@ -2321,16 +2320,16 @@ async fn async_main(command: clap::Command) -> Result<()> {
             let port = port.unwrap_or(config.gateway.port);
             let host = host.unwrap_or_else(|| config.gateway.host.clone());
             if port == 0 {
-                ::zeroclaw_log::record!(
+                ::reiclaw_log::record!(
                     INFO,
-                    ::zeroclaw_log::Event::new(module_path!(), ::zeroclaw_log::Action::Note)
+                    ::reiclaw_log::Event::new(module_path!(), ::reiclaw_log::Action::Note)
                         .with_attrs(::serde_json::json!({"host": host})),
                     "🧠 Starting ZeroClaw Daemon on (random port)"
                 );
             } else {
-                ::zeroclaw_log::record!(
+                ::reiclaw_log::record!(
                     INFO,
-                    ::zeroclaw_log::Event::new(module_path!(), ::zeroclaw_log::Action::Note)
+                    ::reiclaw_log::Event::new(module_path!(), ::reiclaw_log::Action::Note)
                         .with_attrs(::serde_json::json!({"host": host, "port": port})),
                     "🧠 Starting ZeroClaw Daemon on"
                 );
@@ -2338,7 +2337,7 @@ async fn async_main(command: clap::Command) -> Result<()> {
 
             #[cfg(target_os = "linux")]
             {
-                use zeroclaw_config::schema::SandboxBackend;
+                use reiclaw_config::schema::SandboxBackend;
                 // Any enabled agent whose risk_profile uses the docker
                 // sandbox triggers the warning — we just need to know
                 // *some* agent is using it.
@@ -2349,14 +2348,14 @@ async fn async_main(command: clap::Command) -> Result<()> {
                     .filter_map(|(alias, _)| config.risk_profile_for_agent(alias))
                     .any(|p| matches!(p.sandbox_config().backend, SandboxBackend::Docker));
                 let runtime_docker_mem = config.runtime.kind
-                    == zeroclaw_config::schema::RuntimeKind::Docker
+                    == reiclaw_config::schema::RuntimeKind::Docker
                     && config
                         .runtime
                         .docker
                         .memory_limit_mb
                         .is_some_and(|mb| mb > 0);
                 if (sandbox_docker || runtime_docker_mem)
-                    && !zeroclaw_runtime::security::linux_memcg_available()
+                    && !reiclaw_runtime::security::linux_memcg_available()
                 {
                     let which = match (sandbox_docker, runtime_docker_mem) {
                         (true, true) => {
@@ -2365,10 +2364,10 @@ async fn async_main(command: clap::Command) -> Result<()> {
                         (true, false) => "security.sandbox.backend = \"docker\"",
                         _ => "runtime.kind = \"docker\"",
                     };
-                    ::zeroclaw_log::record!(
+                    ::reiclaw_log::record!(
                         WARN,
-                        ::zeroclaw_log::Event::new(module_path!(), ::zeroclaw_log::Action::Note)
-                            .with_outcome(::zeroclaw_log::EventOutcome::Unknown)
+                        ::reiclaw_log::Event::new(module_path!(), ::reiclaw_log::Action::Note)
+                            .with_outcome(::reiclaw_log::EventOutcome::Unknown)
                             .with_attrs(::serde_json::json!({"which": which})),
                         "Docker memory limits are configured but the Linux kernel has no memcg support. Affected config: . Consequence: --memory limits are silently ignored; agents can OOM the host. Fix: add 'cgroup_memory=1 cgroup_enable=memory' to /boot/firmware/cmdline.txt (Raspberry Pi) or enable CONFIG_MEMCG in your kernel, then reboot."
                     );
@@ -2381,7 +2380,7 @@ async fn async_main(command: clap::Command) -> Result<()> {
             // Capture the launch command now, before any in-app upgrade can
             // swap the binary on disk (after which `current_exe()` resolves to a
             // "(deleted)" path on Linux). Used by the post-loop self-respawn.
-            zeroclaw_runtime::restart::record_launch();
+            reiclaw_runtime::restart::record_launch();
 
             // Non-destructive disposition for the retired legacy SOP run store:
             // a real install may still carry `<data_dir>/sop/runs.db` (runs,
@@ -2393,10 +2392,10 @@ async fn async_main(command: clap::Command) -> Result<()> {
             // to a retained execution or permission surface is available.
             let legacy_sop_run_store = config.data_dir.join("sop").join("runs.db");
             if legacy_sop_run_store.exists() {
-                ::zeroclaw_log::record!(
+                ::reiclaw_log::record!(
                     WARN,
-                    ::zeroclaw_log::Event::new(module_path!(), ::zeroclaw_log::Action::Note)
-                        .with_outcome(::zeroclaw_log::EventOutcome::Unknown)
+                    ::reiclaw_log::Event::new(module_path!(), ::reiclaw_log::Action::Note)
+                        .with_outcome(::reiclaw_log::EventOutcome::Unknown)
                         .with_attrs(::serde_json::json!({
                             "path": legacy_sop_run_store.display().to_string()
                         })),
@@ -2414,7 +2413,7 @@ async fn async_main(command: clap::Command) -> Result<()> {
             // previous Arc (after daemon::run returned and subsystem clones
             // died) and opens again. Gateway and channels receive clones of
             // the same handle — they must not call the factory themselves.
-            let mut companion_store: Option<Arc<zeroclaw_memory::CompanionStore>> = None;
+            let mut companion_store: Option<Arc<reiclaw_memory::CompanionStore>> = None;
             // Nag task for the degraded-security warning, scoped to the
             // current config. Re-evaluated each reload iteration so a repaired
             // config stops the warning and a freshly-degraded one starts it.
@@ -2422,15 +2421,15 @@ async fn async_main(command: clap::Command) -> Result<()> {
                 gate_security_posture(&current_config, allow_degraded_security)?;
             loop {
                 companion_store =
-                    zeroclaw_memory::reload_companion_store(companion_store, &current_config)?;
+                    reiclaw_memory::reload_companion_store(companion_store, &current_config)?;
                 let (companion_for_gateway, _companion_for_channels) =
-                    zeroclaw_memory::clone_for_subsystems(&companion_store);
+                    reiclaw_memory::clone_for_subsystems(&companion_store);
                 let companion_outbox_observer =
                     spawn_companion_outbox_observer(companion_store.clone());
                 if let Some(store) = companion_store.as_ref() {
-                    ::zeroclaw_log::record!(
+                    ::reiclaw_log::record!(
                         INFO,
-                        ::zeroclaw_log::Event::new(module_path!(), ::zeroclaw_log::Action::Note)
+                        ::reiclaw_log::Event::new(module_path!(), ::reiclaw_log::Action::Note)
                             .with_attrs(::serde_json::json!({
                                 "path": store.path().display().to_string(),
                             })),
@@ -2444,7 +2443,7 @@ async fn async_main(command: clap::Command) -> Result<()> {
                     move |host, port, config, tx, reload_controls| {
                         let companion_store = companion_for_gateway.clone();
                         Box::pin(async move {
-                            Box::pin(zeroclaw_gateway::run_gateway(
+                            Box::pin(reiclaw_gateway::run_gateway(
                                 &host,
                                 port,
                                 config,
@@ -2471,12 +2470,9 @@ async fn async_main(command: clap::Command) -> Result<()> {
                 match exit {
                     daemon::DaemonExit::Shutdown => break,
                     daemon::DaemonExit::Reload => {
-                        ::zeroclaw_log::record!(
+                        ::reiclaw_log::record!(
                             INFO,
-                            ::zeroclaw_log::Event::new(
-                                module_path!(),
-                                ::zeroclaw_log::Action::Note
-                            ),
+                            ::reiclaw_log::Event::new(module_path!(), ::reiclaw_log::Action::Note),
                             "🔄 Daemon reload — re-reading config from disk"
                         );
                         current_config = Box::pin(Config::load_or_init()).await?;
@@ -2513,7 +2509,7 @@ async fn async_main(command: clap::Command) -> Result<()> {
             // gateway listener is released), so launch the upgraded binary as a
             // detached child before we exit. No-op unless an in-app upgrade
             // requested a self-respawn.
-            zeroclaw_runtime::restart::respawn_if_requested();
+            reiclaw_runtime::restart::respawn_if_requested();
             Ok(())
         }
 
@@ -2576,7 +2572,7 @@ async fn async_main(command: clap::Command) -> Result<()> {
         Commands::Providers {
             providers_command: None,
         } => {
-            let model_providers = zeroclaw_providers::list_model_providers();
+            let model_providers = reiclaw_providers::list_model_providers();
             let configured_types: std::collections::HashSet<&str> = config
                 .providers
                 .models
@@ -2589,7 +2585,7 @@ async fn async_main(command: clap::Command) -> Result<()> {
             );
             println!("  ID (use in config)  DESCRIPTION"); // i18n-exempt: literal command/identifier example
             println!("  ─────────────────── ───────────");
-            for category in zeroclaw_providers::ModelProviderCategory::all() {
+            for category in reiclaw_providers::ModelProviderCategory::all() {
                 let in_category: Vec<_> = model_providers
                     .iter()
                     .filter(|p| p.category == *category)
@@ -3031,10 +3027,10 @@ fn warn_verifiable_intent_withheld(config: &Config) {
     if !config.verifiable_intent.enabled {
         return;
     }
-    ::zeroclaw_log::record!(
+    ::reiclaw_log::record!(
         WARN,
-        ::zeroclaw_log::Event::new(module_path!(), ::zeroclaw_log::Action::Note)
-            .with_outcome(::zeroclaw_log::EventOutcome::Unknown),
+        ::reiclaw_log::Event::new(module_path!(), ::reiclaw_log::Action::Note)
+            .with_outcome(::reiclaw_log::EventOutcome::Unknown),
         "verifiable_intent: vi_verify is not registered as a model-callable tool because no credential chain verifier exists yet (see #9328)"
     );
 }
@@ -3048,33 +3044,33 @@ fn warn_verifiable_intent_withheld(config: &Config) {
 #[cfg(feature = "agent-runtime")]
 fn warn_withheld_operator_tools(config: &Config) {
     if config.backup.enabled {
-        ::zeroclaw_log::record!(
+        ::reiclaw_log::record!(
             WARN,
-            ::zeroclaw_log::Event::new(module_path!(), ::zeroclaw_log::Action::Note)
-                .with_outcome(::zeroclaw_log::EventOutcome::Unknown),
+            ::reiclaw_log::Event::new(module_path!(), ::reiclaw_log::Action::Note)
+                .with_outcome(::reiclaw_log::EventOutcome::Unknown),
             "backup: the backup model tool is retired; backup create/list/verify/restore are operator-only via the gateway operator API (POST/GET /api/agents/<alias>/backup). The [backup] section still configures that surface"
         );
     }
     if config.data_retention.enabled {
-        ::zeroclaw_log::record!(
+        ::reiclaw_log::record!(
             WARN,
-            ::zeroclaw_log::Event::new(module_path!(), ::zeroclaw_log::Action::Note)
-                .with_outcome(::zeroclaw_log::EventOutcome::Unknown),
+            ::reiclaw_log::Event::new(module_path!(), ::reiclaw_log::Action::Note)
+                .with_outcome(::reiclaw_log::EventOutcome::Unknown),
             "data_retention: the data_management model tool is retired; retention status/stats/purge are operator-only via the gateway operator API (/api/agents/<alias>/data-retention). The [data_retention] section still configures that surface"
         );
     }
     if config.security_ops.enabled {
-        ::zeroclaw_log::record!(
+        ::reiclaw_log::record!(
             WARN,
-            ::zeroclaw_log::Event::new(module_path!(), ::zeroclaw_log::Action::Note)
-                .with_outcome(::zeroclaw_log::EventOutcome::Unknown),
+            ::reiclaw_log::Event::new(module_path!(), ::reiclaw_log::Action::Note)
+                .with_outcome(::reiclaw_log::EventOutcome::Unknown),
             "security_ops: the security_ops model tool is retired and has no replacement surface; the diagnostics module is unreachable while enabled stays true. Unset security_ops.enabled to silence this notice"
         );
     }
 }
 
 fn gate_security_posture(
-    config: &zeroclaw::config::Config,
+    config: &reiclaw::config::Config,
     allow_degraded: bool,
 ) -> anyhow::Result<Option<tokio::task::JoinHandle<()>>> {
     if config.degraded_security.is_empty() {
@@ -3094,14 +3090,14 @@ fn gate_security_posture(
         );
     }
     let config_path = config.config_path.display().to_string();
-    let handle = ::zeroclaw_spawn::spawn!(async move {
+    let handle = ::reiclaw_spawn::spawn!(async move {
         let mut ticker = tokio::time::interval(std::time::Duration::from_secs(30));
         loop {
             ticker.tick().await;
-            ::zeroclaw_log::record!(
+            ::reiclaw_log::record!(
                 WARN,
-                ::zeroclaw_log::Event::new(module_path!(), ::zeroclaw_log::Action::Note)
-                    .with_outcome(::zeroclaw_log::EventOutcome::Unknown)
+                ::reiclaw_log::Event::new(module_path!(), ::reiclaw_log::Action::Note)
+                    .with_outcome(::reiclaw_log::EventOutcome::Unknown)
                     .with_attrs(::serde_json::json!({ "degraded_security": sections })),
                 &format!(
                     "Running with DEGRADED security: sections ({sections}) were reset to \
@@ -3116,13 +3112,13 @@ fn gate_security_posture(
 }
 
 fn companion_outbox_health_for_cli(
-    config: &zeroclaw_config::schema::Config,
-) -> zeroclaw_api::companion::CompanionOutboxHealth {
-    zeroclaw_memory::probe_companion_outbox_health(config)
+    config: &reiclaw_config::schema::Config,
+) -> reiclaw_api::companion::CompanionOutboxHealth {
+    reiclaw_memory::probe_companion_outbox_health(config)
 }
 
-fn print_companion_outbox_line(config: &zeroclaw_config::schema::Config) {
-    use zeroclaw_api::companion::CompanionOutboxStatus;
+fn print_companion_outbox_line(config: &reiclaw_config::schema::Config) {
+    use reiclaw_api::companion::CompanionOutboxStatus;
 
     let health = companion_outbox_health_for_cli(config);
     match health.status {
@@ -3165,12 +3161,12 @@ fn print_companion_outbox_line(config: &zeroclaw_config::schema::Config) {
 }
 
 fn spawn_companion_outbox_observer(
-    store: Option<std::sync::Arc<zeroclaw_memory::CompanionStore>>,
+    store: Option<std::sync::Arc<reiclaw_memory::CompanionStore>>,
 ) -> Option<tokio::task::JoinHandle<()>> {
     let store = store?;
-    Some(::zeroclaw_spawn::spawn!(async move {
+    Some(::reiclaw_spawn::spawn!(async move {
         let mut ticker = tokio::time::interval(std::time::Duration::from_secs(
-            zeroclaw_memory::OUTBOX_OBSERVE_INTERVAL_SECS,
+            reiclaw_memory::OUTBOX_OBSERVE_INTERVAL_SECS,
         ));
         ticker.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Skip);
         loop {
@@ -3184,7 +3180,7 @@ fn spawn_companion_outbox_observer(
 async fn run_gateway_if_enabled(
     host: &str,
     port: u16,
-    config: zeroclaw::config::Config,
+    config: reiclaw::config::Config,
     tx: Option<tokio::sync::broadcast::Sender<serde_json::Value>>,
 ) -> anyhow::Result<()> {
     let default_host = config.gateway.host.clone();
@@ -3192,12 +3188,12 @@ async fn run_gateway_if_enabled(
     // Capture the launch command before the gateway starts so in-app upgrade
     // can self-respawn after the listener is released. Must mirror the same
     // call in the Daemon branch.
-    zeroclaw_runtime::restart::record_launch();
+    reiclaw_runtime::restart::record_launch();
     // Standalone gateway (no daemon supervisor): pass None for reload_tx so
     // /admin/reload returns 503 with a clear "no supervisor; restart
     // manually" message.
     // Companion store is constructed once here — run_gateway never opens it.
-    let companion_store = zeroclaw_memory::create_companion_store(&config)?;
+    let companion_store = reiclaw_memory::create_companion_store(&config)?;
     let result = Box::pin(gateway::run_gateway(
         host,
         port,
@@ -3210,7 +3206,7 @@ async fn run_gateway_if_enabled(
     // Self-respawn after the listener is released, if an in-app upgrade
     // requested it. No-op when no respawn was requested or on supervised
     // restart modes.
-    zeroclaw_runtime::restart::respawn_if_requested();
+    reiclaw_runtime::restart::respawn_if_requested();
     match result {
         Err(err) if is_addr_in_use_error(&err) => {
             let restart_port = available_gateway_restart_hint_port(host, port);
@@ -3228,7 +3224,7 @@ async fn run_gateway_if_enabled(
 async fn run_gateway_if_enabled(
     _host: &str,
     _port: u16,
-    _config: zeroclaw::config::Config,
+    _config: reiclaw::config::Config,
     _tx: Option<tokio::sync::broadcast::Sender<serde_json::Value>>,
 ) -> anyhow::Result<()> {
     anyhow::bail!("Gateway feature is not enabled. Rebuild with --features gateway")
@@ -3318,7 +3314,7 @@ fn available_gateway_restart_hint_port(host: &str, port: u16) -> Option<u16> {
         let Some(candidate) = port.checked_add(offset) else {
             break;
         };
-        if std::net::TcpListener::bind(zeroclaw_infra::effective_gateway_bind_socket_addr(
+        if std::net::TcpListener::bind(reiclaw_infra::effective_gateway_bind_socket_addr(
             host, candidate,
         ))
         .is_ok()

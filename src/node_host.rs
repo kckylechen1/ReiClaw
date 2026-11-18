@@ -1,6 +1,10 @@
 //! Foreground loopback-only v2 host. Private key stays in this process.
 use anyhow::{Context, Result, bail};
 use futures_util::{SinkExt, StreamExt};
+use reiclaw_api::node::{GatewayToNode, NodeToGateway, WS_NODES_V2};
+use reiclaw_api::node_capability;
+use reiclaw_gateway::device_identity::{DeviceKeyPair, auth_message};
+use reiclaw_gateway::nodes::invocation::args_digest;
 use serde::Deserialize;
 use serde_json::{Value, json};
 use std::collections::HashMap;
@@ -8,10 +12,6 @@ use std::io::{BufRead, Read};
 use std::net::SocketAddr;
 use std::time::Duration;
 use tokio_tungstenite::tungstenite::{Message, client::IntoClientRequest};
-use zeroclaw_api::node::{GatewayToNode, NodeToGateway, WS_NODES_V2};
-use zeroclaw_api::node_capability;
-use zeroclaw_gateway::device_identity::{DeviceKeyPair, auth_message};
-use zeroclaw_gateway::nodes::invocation::args_digest;
 
 // Local implementations are a separate fact from kernel eligibility and grants.
 const IMPLEMENTED_CAPABILITIES: &[&str] = &["system.info", "test.echo"];
@@ -70,10 +70,10 @@ pub async fn run() -> Result<()> {
     };
     tokio::pin!(terminate);
     let key = DeviceKeyPair::generate().map_err(|e| {
-        ::zeroclaw_log::record!(
+        ::reiclaw_log::record!(
             ERROR,
-            ::zeroclaw_log::Event::new(module_path!(), ::zeroclaw_log::Action::Fail)
-                .with_outcome(::zeroclaw_log::EventOutcome::Failure),
+            ::reiclaw_log::Event::new(module_path!(), ::reiclaw_log::Action::Fail)
+                .with_outcome(::reiclaw_log::EventOutcome::Failure),
             "node host key generation failed"
         );
         anyhow::Error::msg(e.to_string())
@@ -218,7 +218,7 @@ pub async fn run() -> Result<()> {
                             let refusal = if !authenticated || connection_id != connection { Some("stale_connection") }
                                 else if cap_revision != revision || !caps.contains(&cap) { Some("capability_changed") }
                                 else if grant_proof.is_some() || !node_capability::invocable(&cap).is_some_and(|spec| spec.validate_args(&args)) || args_digest(&args) != digest { Some("unsupported_or_invalid") }
-                                else if !zeroclaw_api::time::parse_rfc3339(&deadline).is_ok_and(|d| d > jiff::Timestamp::now()) { Some("deadline_expired") }
+                                else if !reiclaw_api::time::parse_rfc3339(&deadline).is_ok_and(|d| d > jiff::Timestamp::now()) { Some("deadline_expired") }
                                 else { None };
                             let result = if let Some(reason) = refusal {
                                 NodeToGateway::Result { call_id: call_id.clone(), connection_id: connection.clone(), success: false, output: String::new(), error: Some(reason.into()) }

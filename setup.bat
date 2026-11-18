@@ -9,7 +9,7 @@ setlocal enabledelayedexpansion
 
 set "VERSION=0.8.3"
 set "TARGET=x86_64-pc-windows-msvc"
-set "REPO=https://github.com/kckylechen1/zeroclaw"
+set "REPO=https://github.com/kckylechen1/ReiClaw"
 
 :: Colors via ANSI (Windows 10+ Terminal)
 set "GREEN=[32m"
@@ -89,7 +89,7 @@ if errorlevel 1 (
 :: Read Git output as data: exact one-line membership must not depend on the
 :: byte-level LF/CRLF behavior of Git's stdout and FINDSTR /X. PowerShell's
 :: default string membership is case-insensitive, matching the former /I policy.
-powershell -NoProfile -NonInteractive -Command "$origin = @(git remote get-url origin 2>$null); if ($LASTEXITCODE -ne 0 -or $origin.Count -ne 1) { exit 1 }; $allowed = @('%REPO%', '%REPO%.git', 'git@github.com:kckylechen1/zeroclaw', 'git@github.com:kckylechen1/zeroclaw.git', 'ssh://git@github.com/kckylechen1/zeroclaw', 'ssh://git@github.com/kckylechen1/zeroclaw.git'); if ($allowed -notcontains $origin[0]) { exit 1 }; exit 0" >nul 2>nul
+powershell -NoProfile -NonInteractive -Command "$origin = @(git remote get-url origin 2>$null); if ($LASTEXITCODE -ne 0 -or $origin.Count -ne 1) { exit 1 }; $allowed = @('%REPO%', '%REPO%.git', 'git@github.com:kckylechen1/ReiClaw', 'git@github.com:kckylechen1/ReiClaw.git', 'ssh://git@github.com/kckylechen1/ReiClaw', 'ssh://git@github.com/kckylechen1/ReiClaw.git', 'https://github.com/kckylechen1/zeroclaw', 'https://github.com/kckylechen1/zeroclaw.git', 'git@github.com:kckylechen1/zeroclaw', 'git@github.com:kckylechen1/zeroclaw.git', 'ssh://git@github.com/kckylechen1/zeroclaw', 'ssh://git@github.com/kckylechen1/zeroclaw.git'); if ($allowed -notcontains $origin[0]) { exit 1 }; exit 0" >nul 2>nul
 if errorlevel 1 (
     echo   %RED%ERROR: Source origin is not this fork or could not be verified.%RESET%
     echo   Clone %REPO%.git into a new directory and run setup.bat --source there.

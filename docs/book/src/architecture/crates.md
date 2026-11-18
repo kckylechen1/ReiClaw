@@ -4,7 +4,7 @@ The workspace is split into layers. Edge crates talk to the outside world; core 
 
 ## Layer: Core
 
-### `zeroclaw-runtime`
+### `reiclaw-runtime`
 
 The agent loop, security-policy enforcement, SOP definition loading (the former SOP engine was removed with the run side), cron scheduler, and SubAgent lifecycle. Depends on every other core and edge crate.
 
@@ -19,7 +19,7 @@ Notable submodules:
 - `quickstart/`: onboarding apply path, preset catalogue and selection policy
 - `service/`: systemd / launchctl / Windows Service integration
 
-### `zeroclaw-config`
+### `reiclaw-config`
 
 TOML schema and its validation. Handles:
 
@@ -32,7 +32,7 @@ TOML schema and its validation. Handles:
 
 All user-facing config keys are documented in [Reference → Config](../reference/config.md), which is generated from this crate.
 
-### `zeroclaw-api`
+### `reiclaw-api`
 
 The kernel ABI. Defines the core public traits, including:
 
@@ -55,13 +55,13 @@ locale handling; it has no dependency on runtime, providers, memory, tools or
 the gateway server. The [owner ACP bridge contract](../gateway/api.md#bounded-owner-bridges-and-acp)
 defines its authentication, permission and cancellation boundaries.
 
-### `zeroclaw-providers`
+### `reiclaw-providers`
 
 All LLM client implementations plus the routing and retry wrappers. See [Model Providers → Overview](../providers/overview.md) for the list.
 
 Structure:
 
-- `traits.rs`: re-exports from `zeroclaw-api` plus provider-internal helpers
+- `traits.rs`: re-exports from `reiclaw-api` plus provider-internal helpers
 - `anthropic.rs`, `openai.rs`, …: one file per native provider
 - `compatible.rs`: a single OpenAI-compatible implementation reused by the OpenAI-compatible providers (Ollama, Groq, `custom`, etc.)
 - `router.rs`: hint-based per-call model route selection
@@ -72,11 +72,11 @@ Structure:
 
 30+ messaging integrations. See [Channels → Overview](../channels/overview.md) for the catalogue.
 
-All channels implement the `Channel` trait from `zeroclaw-api`. Each is feature-gated, a minimal build includes only the channels you compile in.
+All channels implement the `Channel` trait from `reiclaw-api`. Each is feature-gated, a minimal build includes only the channels you compile in.
 
 The `orchestrator/` submodule handles message streaming, draft updates, multi-message splits, and the ACP server.
 
-### `zeroclaw-gateway`
+### `reiclaw-gateway`
 
 HTTP/WebSocket gateway. Exposes the runtime over:
 
@@ -87,7 +87,7 @@ HTTP/WebSocket gateway. Exposes the runtime over:
 
 Pairing is required by default; `[gateway.allow_public_bind = true]` enables binding to `0.0.0.0`.
 
-### `zeroclaw-tools`
+### `reiclaw-tools`
 
 Callable tools the agent invokes. Not to be confused with CLI `zeroclaw` subcommands.
 
@@ -97,17 +97,17 @@ Each tool is registered via factory and described to the model via Fluent-locali
 
 ## Layer: Support
 
-### `zeroclaw-provider-dispatch`
+### `reiclaw-provider-dispatch`
 
-Attributed model calls through `zeroclaw-api::ModelProvider`. Owns the existing
+Attributed model calls through `reiclaw-api::ModelProvider`. Owns the existing
 `ProviderDispatch` and borrowed `ProviderDispatchRef` wrappers, including
 stream attribution. It depends on the shared API and logging crates, without
 linking concrete provider implementations. Memory consolidation, enrichment and
-reflection use this boundary directly; `zeroclaw-providers` keeps re-exports
+reflection use this boundary directly; `reiclaw-providers` keeps re-exports
 for its existing callers. Provider factories, credentials and routing policy
 remain with their existing owners.
 
-### `zeroclaw-schema-markdown`
+### `reiclaw-schema-markdown`
 
 Stateless Markdown and HTML field rendering from a supplied JSON Schema value.
 The CLI's optional `schema-export` feature and the mdBook preprocessor use it;
@@ -115,24 +115,24 @@ the config, API and runtime crates do not depend on the renderer. Its normal
 dependency is `serde_json`; real-config integration tests use config and
 schemars as development dependencies. The schema remains config-owned.
 
-### `zeroclaw-cost`
+### `reiclaw-cost`
 
 The existing cost ledger, cache-aware token pricing and budget checks.
 `CostTracker` owns `data/state/costs.jsonl` and its process-local aggregates;
-reload updates its `CostConfig` from `zeroclaw-config`. Shared record, summary
-and budget-result shapes live in `zeroclaw-api::cost`, which has no dependency
+reload updates its `CostConfig` from `reiclaw-config`. Shared record, summary
+and budget-result shapes live in `reiclaw-api::cost`, which has no dependency
 on the ledger crate. Runtime, gateway and CLI paths retain their existing
 accounting behavior; this crate does not schedule external harness work.
 
-### `zeroclaw-memory`
+### `reiclaw-memory`
 
-Conversation memory and retrieval. Embedded Tachi (`portable-kernel`, enabled by default in `zeroclawlabs` via `memory-tachi` and `zeroclaw-memory/tachi`) is the default durable backend; workspace `Markdown` and `none` are the alternatives (`SQLite`, `Lucid`, `PostgreSQL`, and `Qdrant` were retired). `zeroclaw-memory` defaults keep `tachi` off so `--no-default-features` and `slim-control` builds remain AGPL-free. Optional:
+Conversation memory and retrieval. Embedded Tachi (`portable-kernel`, enabled by default in `reiclaw` via `memory-tachi` and `reiclaw-memory/tachi`) is the default durable backend; workspace `Markdown` and `none` are the alternatives (`SQLite`, `Lucid`, `PostgreSQL`, and `Qdrant` were retired). `reiclaw-memory` defaults keep `tachi` off so `--no-default-features` and `slim-control` builds remain AGPL-free. Optional:
 
 - Embedding backends (OpenAI, Ollama, local)
 - Vector retrieval over stored conversations
 - Memory consolidation (summaries, fact extraction)
 
-### `zeroclaw-tool-call-parser`
+### `reiclaw-tool-call-parser`
 
 Model-side tool-call syntax parsing. Handles variations between providers:
 
@@ -141,7 +141,7 @@ Model-side tool-call syntax parsing. Handles variations between providers:
 - Qwen/Ollama's function-call formats
 - Native tool-call streaming deltas
 
-### `zeroclaw-log`
+### `reiclaw-log`
 
 The single emission surface for every log event in the workspace. Owns
 the on-disk JSONL schema (`LogEvent`), the alias-bound attribution
@@ -152,7 +152,7 @@ paginated cursor reader behind `/api/logs`, and the bridge to the
 typed `Observer` for Prometheus consumers. See
 [`architecture/logging.md`](./logging.md).
 
-### `zeroclaw-spawn`
+### `reiclaw-spawn`
 
 The sanctioned wrapper around `tokio::spawn`. Provides the `spawn!`
 macro, which instruments every background task with the caller's
@@ -160,47 +160,47 @@ current attribution span so a `record!` emitted inside the spawned
 future inherits the parent's `agent_alias` / `channel` / `session_key`.
 Call sites use `spawn!` instead of `tokio::spawn` directly.
 
-### `zeroclaw-http`
+### `reiclaw-http`
 
 Shared outbound HTTP client construction, proxy application and connection
 caching for providers, channels, memory and tools. The canonical proxy fields
-and validation remain in `zeroclaw-config`; the binary applies the loaded config
+and validation remain in `reiclaw-config`; the binary applies the loaded config
 at startup and reload. This keeps HTTP/TLS dependencies out of configuration-only
 consumers without coupling network clients to the SQLite infrastructure crate.
 No provider, channel or tool policy is owned by this crate.
 
-### `zeroclaw-platform`
+### `reiclaw-platform`
 
 Native and Docker command adapters for the body's local tools. Owns the runtime
 factory, configured-shell validation, Docker workspace mount checks and Windows
-command construction. `zeroclaw-config` retains `[runtime]` and its defaults;
-`zeroclaw-api::runtime_traits` owns the shared adapter contract and typed mount
-errors. `zeroclaw-runtime::platform` re-exports the adapters for existing runtime,
+command construction. `reiclaw-config` retains `[runtime]` and its defaults;
+`reiclaw-api::runtime_traits` owns the shared adapter contract and typed mount
+errors. `reiclaw-runtime::platform` re-exports the adapters for existing runtime,
 gateway and channel callers. Providers use the Windows command helper directly.
 
 This crate does not own agent sessions, task state or delegated execution.
 External harnesses continue through Tachi under ADR-017.
 
-### `zeroclaw-policy`
+### `reiclaw-policy`
 
 Runtime authorization policy for the body's local tools and delegation
 admission. Owns command and path checks, protected state boundaries, action
 trackers and parent-policy narrowing. Risk/runtime profile settings and the
-canonical command/path defaults remain in `zeroclaw-config`; shared operation
-and risk classifications live in `zeroclaw-api::policy`.
-`zeroclaw-runtime::security::policy` forwards this implementation for existing
+canonical command/path defaults remain in `reiclaw-config`; shared operation
+and risk classifications live in `reiclaw-api::policy`.
+`reiclaw-runtime::security::policy` forwards this implementation for existing
 runtime callers. External harness sessions and durable execution truth remain
 Tachi-owned under ADR-017.
 
-### `zeroclaw-infra`
+### `reiclaw-infra`
 
 Process-level support: debouncers, watchdogs, the SQLite session
-backend. Not a tracing/metrics layer, that's `zeroclaw-log`. See
+backend. Not a tracing/metrics layer, that's `reiclaw-log`. See
 [Runtime state and persistence](./runtime-state-and-persistence.md) for the
 state ownership and durability boundaries across config, sessions, memory,
 logs, costs, cron, and gateway metadata.
 
-### `zeroclaw-macros`
+### `reiclaw-macros`
 
 Derive macros for config schema, tool registration, and channel registration. Saves boilerplate across the workspace.
 
@@ -239,8 +239,8 @@ required. The production delegation entry point and watcher remain separate
 integration work. Building this profile does not prove that a particular harness,
 such as DSH, is configured or has passed an end-to-end run.
 
-Shared HTTP clients and proxy runtime state belong to `zeroclaw-http`;
+Shared HTTP clients and proxy runtime state belong to `reiclaw-http`;
 WebSocket-specific proxy transport belongs to `zeroclaw-channels`, and SQLite
-memory schema migrations belong to `zeroclaw-memory`. The config crate retains
+memory schema migrations belong to `reiclaw-memory`. The config crate retains
 proxy settings, validation, and persistence without an HTTP client or TLS
 dependency. Each runtime subsystem retains the dependencies it uses.

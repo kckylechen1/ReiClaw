@@ -1,9 +1,9 @@
 use anyhow::{Context, Result, bail};
+use reiclaw_api::config_metadata::CredentialSurfaceClass;
+use reiclaw_config::schema::{RiskProfileConfig, SandboxBackend, SandboxConfig};
+use reiclaw_policy::SecurityPolicy;
 use serde::Serialize;
 use std::collections::BTreeMap;
-use zeroclaw_api::config_metadata::CredentialSurfaceClass;
-use zeroclaw_config::schema::{RiskProfileConfig, SandboxBackend, SandboxConfig};
-use zeroclaw_policy::SecurityPolicy;
 
 use crate::config::Config;
 
@@ -72,7 +72,7 @@ pub struct GatewayStatus {
 pub fn build_report(config: &Config, agent_alias: &str) -> Result<SecurityStatusReport> {
     let resolved = resolve_agent_context(config, agent_alias)?;
     let sandbox_config = sandbox_config_from_policy(&resolved.policy);
-    let sandbox = zeroclaw_runtime::security::sandbox_posture(
+    let sandbox = reiclaw_runtime::security::sandbox_posture(
         &sandbox_config,
         config.runtime.kind.as_wire(),
         Some(&resolved.policy.workspace_dir),
@@ -406,7 +406,7 @@ fn parse_sandbox_backend(name: &str) -> SandboxBackend {
 }
 
 fn credential_classification_counts(
-    fields: &[zeroclaw_config::config::PropFieldSpec],
+    fields: &[reiclaw_config::config::PropFieldSpec],
 ) -> BTreeMap<String, usize> {
     let mut counts = BTreeMap::new();
     for field in fields {
@@ -443,11 +443,11 @@ fn credential_class_name(class: CredentialSurfaceClass) -> &'static str {
     }
 }
 
-fn autonomy_level_name(level: zeroclaw_config::autonomy::AutonomyLevel) -> &'static str {
+fn autonomy_level_name(level: reiclaw_config::autonomy::AutonomyLevel) -> &'static str {
     match level {
-        zeroclaw_config::autonomy::AutonomyLevel::ReadOnly => "read-only",
-        zeroclaw_config::autonomy::AutonomyLevel::Supervised => "supervised",
-        zeroclaw_config::autonomy::AutonomyLevel::Full => "full",
+        reiclaw_config::autonomy::AutonomyLevel::ReadOnly => "read-only",
+        reiclaw_config::autonomy::AutonomyLevel::Supervised => "supervised",
+        reiclaw_config::autonomy::AutonomyLevel::Full => "full",
     }
 }
 
@@ -462,7 +462,7 @@ mod tests {
             .insert(profile_alias.to_string(), profile);
         config.agents.insert(
             agent.to_string(),
-            zeroclaw_config::schema::AliasedAgentConfig {
+            reiclaw_config::schema::AliasedAgentConfig {
                 risk_profile: profile_alias.into(),
                 ..Default::default()
             },
@@ -499,7 +499,7 @@ mod tests {
     #[test]
     fn full_autonomy_reports_effective_workspace_override() {
         let profile = RiskProfileConfig {
-            level: zeroclaw_config::autonomy::AutonomyLevel::Full,
+            level: reiclaw_config::autonomy::AutonomyLevel::Full,
             workspace_only: true,
             ..RiskProfileConfig::default()
         };
@@ -519,19 +519,19 @@ mod tests {
 
     #[test]
     fn workspace_access_reports_effective_root_tiers() {
-        use zeroclaw_config::multi_agent::{AccessMode, AgentAlias};
+        use reiclaw_config::multi_agent::{AccessMode, AgentAlias};
 
         let mut config = config_with_agent("ops", "ops-risk", RiskProfileConfig::default());
         config.agents.insert(
             "docs".to_string(),
-            zeroclaw_config::schema::AliasedAgentConfig {
+            reiclaw_config::schema::AliasedAgentConfig {
                 risk_profile: "ops-risk".into(),
                 ..Default::default()
             },
         );
         config.agents.insert(
             "writer".to_string(),
-            zeroclaw_config::schema::AliasedAgentConfig {
+            reiclaw_config::schema::AliasedAgentConfig {
                 risk_profile: "ops-risk".into(),
                 ..Default::default()
             },

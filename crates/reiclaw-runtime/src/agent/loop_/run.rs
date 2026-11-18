@@ -1,0 +1,788 @@
+//! Interactive CLI `run` entry point for the agent loop.
+//!
+//! Extracted from `loop_/mod.rs` so the channel/gateway `process_message`
+//! path and the interactive CLI assembly can evolve independently.
+
+use crate::approval::ApprovalManager;
+use crate::observability::{self, Observer, ObserverEvent};
+use crate::platform;
+use crate::security::SecurityPolicy;
+use crate::tools;
+use crate::tools::scoped;
+use anyhow::{Context, Result};
+use reiclaw_api::ingress::{IngressContext, TurnOrigin};
+use reiclaw_config::schema::Config;
+use reiclaw_memory::{self, Memory, MemoryCategory};
+use reiclaw_providers::{self, ChatMessage, ModelProvider};
+use std::collections::HashSet;
+use std::path::PathBuf;
+use std::sync::Arc;
+
+use super::{
+    AUTOSAVE_MIN_MESSAGE_CHARS, AgentRunOverrides, LoopKnobs, ResolvedAgentExecution, ResolvedIo,
+    ResolvedModelAccess, ResolvedRuntimeKnobs, TOOL_LOOP_COST_TRACKING_CONTEXT, ToolLoop,
+    agent_provider_composite, api_key_and_uri_for_provider, autosave_memory_key,
+    build_system_prompt_for_turn, compute_excluded_mcp_tools, resolved_agent_for_turn,
+    retain_registered_tool_descriptions, run_tool_call_loop, scope_session_key,
+    synthetic_session_key_for_run,
+};
+
+#[allow(clippy::too_many_lines, clippy::too_many_arguments)]
+pub async fn run(
+    config: Config,
+    agent_alias: &str,
+    message: Option<String>,
+    provider_override: Option<String>,
+    model_override: Option<String>,
+    temperature: Option<f64>,
+    interactive: bool,
+    session_state_file: Option<PathBuf>,
+    allowed_tools: Option<Vec<String>>,
+    origin: TurnOrigin,
+    overrides: AgentRunOverrides,
+) -> Result<String> {
+    use ::reiclaw_log::Instrument;
+    let agent = resolved_agent_for_turn(&config, agent_alias)?;
+    crate::agent::thinking::validate_thinking_config(&agent.resolved.thinking);
+    let risk_profile = config
+        .risk_profile_for_agent(agent_alias)
+        .with_context(|| {
+            format!(
+                "agents.{agent_alias}.risk_profile does not name a configured risk_profiles entry"
+            )
+        })?
+        .clone();
+    // Rendered once and reused across every prompt build in this turn, same
+    // as `risk_profile` above — the persona resolution is stable for the
+    // whole call, only the tool/skill surface changes per rebuild.
+    let persona = crate::agent::persona_projection::persona_projection(&config, agent_alias);
+    let persona_section = persona.section.clone();
+    let memory_composite = {
+        use reiclaw_config::multi_agent::MemoryBackendKind;
+        match agent.memory.backend {
+            MemoryBackendKind::Markdown => format!("markdown.{agent_alias}"),
+            MemoryBackendKind::None => "none".to_string(),
+            _ => {
+                let raw = config.memory.backend.trim();
+                if raw.is_empty() || raw.eq_ignore_ascii_case("none") {
+                    "none".to_string()
+                } else {
+                    let (kind, alias) = raw.split_once('.').unwrap_or((raw, "default"));
+                    format!("{kind}.{alias}")
+                }
+            }
+        }
+    };
+    // ── Session key for this turn ─────────────────────────────────────
+    // Every `run()`-based path (CLI, cron, heartbeat, SOP step, a detached
+    // child run) reaches here with no session key in scope, because only the
+    // four conversational entry points scope one (gateway-WS, the channel
+    // orchestrator, ACP, RPC). Without a key this turn cannot claim the
+    // children it dispatched — the announce chain has a parent id to file
+    // children under, but no name to look them up by. So `run()` supplies one
+    // when, and only when, nobody else did: a nested run inside a scoped turn
+    // must keep seeing its caller's key, or the child's own dispatches would be
+    // filed under a name the parent never asks about.
+    //
+    // See `synthetic_session_key_for_run` for why the fallback is per-alias
+    // rather than per-run, and what that trades away.
+    //
+    // This flag also decides whether this turn *claims* (below): only the run
+    let __zc_synthetic_session_key = synthetic_session_key_for_run(agent_alias);
+    // Root-lineage fallback owned by the async block below without moving
+    // `__zc_synthetic_session_key` (still needed after the block).
+    let __zc_lineage_root_fallback = __zc_synthetic_session_key.clone();
+    let __zc_alias = agent_alias.to_string();
+    let __zc_attribution_span =
+        ::reiclaw_log::attribution_span!(&crate::agent::AgentAttribution(__zc_alias.as_str()));
+    let __zc_scope_span = ::reiclaw_log::info_span!(
+        target: "zeroclaw_log_internal_scope",
+        "zeroclaw_scope",
+        risk_profile = %agent.risk_profile,
+        runtime_profile = %agent.runtime_profile,
+        memory_namespace = %memory_composite,
+    );
+    let __zc_body = async move {
+        let agent_alias: &str = __zc_alias.as_str();
+        // ── Effective per-agent runtime tunables ──────────────────────
+        // Profile values (when set) override the agent's inline fields.
+        // See `Config::resolved_agent_config` for precedence rules.
+        let eff_compact_context = agent.resolved.compact_context;
+        let eff_max_system_prompt_chars = agent.resolved.max_system_prompt_chars;
+        let eff_prompt_injection_mode = agent.resolved.prompt_injection_mode;
+        let base_observer = observability::create_observer(&config.observability);
+        let observer: Arc<dyn Observer> = Arc::from(base_observer);
+        let turn_id = uuid::Uuid::new_v4().to_string();
+        let channel_name = if interactive { "cli" } else { "daemon" };
+        let _flush_guard = interactive.then(|| observability::FlushGuard::new(observer.clone()));
+        if interactive
+            && matches!(
+                config.observability.backend,
+                reiclaw_config::schema::ObservabilityBackend::Prometheus
+            )
+        {
+            ::reiclaw_log::record!(
+                WARN,
+                ::reiclaw_log::Event::new(module_path!(), ::reiclaw_log::Action::Note)
+                    .with_outcome(::reiclaw_log::EventOutcome::Unknown),
+                "Observability backend is Prometheus (pull/scrape model): a one-shot CLI process \
+                 exits before any scraper can pull, so its telemetry will not be collected. \
+                 Prometheus is intended for long-running (daemon) deployments."
+            );
+        }
+        let runtime: Arc<dyn platform::RuntimeAdapter> =
+            Arc::from(platform::create_runtime(&config.runtime)?);
+        let task_identity = overrides.task_identity.or_else(|| {
+            runtime
+                .has_filesystem_access()
+                .then(|| crate::tools::task_context::TaskIdentity::capture(&config, agent_alias))
+        });
+        let suppress_memory_inject = overrides.suppress_memory_inject;
+        let memory_free = overrides.memory_free;
+        // Unified spawn lineage (SA-9/SA-11): the run's effective lineage
+        // is the spawning context's lineage, or a fresh root minted from
+        // this run's session key when nobody passed one (top-level turn,
+        // cron job — a typed root transition, never a silent reset).
+        // This value is what the registry below is built with, so a
+        // registry rebuild inside a child inherits the child's lineage
+        // and depth can never reset across a rebuild.
+        let effective_lineage = overrides.lineage.clone().unwrap_or_else(|| {
+            reiclaw_api::subagent_v1::LineageRef::new_root(
+                reiclaw_api::subagent_v1::ParentRunRef::from_opaque(
+                    crate::agent::loop_::current_session_key()
+                        .unwrap_or_else(|| __zc_lineage_root_fallback.clone()),
+                ),
+            )
+        });
+        let security = match overrides.security {
+            Some(sec) => sec,
+            None => Arc::new(SecurityPolicy::for_agent(&config, agent_alias)?),
+        };
+
+        let agent_provider_resolved = config
+            .resolved_model_provider_for_agent(agent_alias)
+            .map(|(ty, alias, cfg)| (ty, alias.to_string(), cfg.clone()));
+        let agent_model_provider = agent_provider_resolved.as_ref().map(|(_, _, cfg)| cfg);
+
+        let mem: Arc<dyn Memory> = if memory_free {
+            Arc::new(reiclaw_memory::NoneMemory::new("none"))
+        } else {
+            match overrides.memory {
+                Some(m) => m,
+                None => {
+                    reiclaw_memory::create_memory_for_agent(
+                        &config,
+                        agent_alias,
+                        agent_model_provider.and_then(|e| e.api_key.as_deref()),
+                    )
+                    .await?
+                }
+            }
+        };
+        ::reiclaw_log::record!(
+            INFO,
+            ::reiclaw_log::Event::new(module_path!(), ::reiclaw_log::Action::Load)
+                .with_category(::reiclaw_log::EventCategory::Memory)
+                .with_attrs(::serde_json::json!({"backend": mem.name()})),
+            "Memory initialized"
+        );
+
+        // ── Tools (including memory tools) ────────────
+        let all_tools_result = tools::all_tools_with_runtime(
+            Arc::new(config.clone()),
+            &security,
+            &risk_profile,
+            agent_alias,
+            runtime.clone(),
+            mem.clone(),
+            &config.http_request,
+            &config.web_fetch,
+            &config.data_dir,
+            &config.agents,
+            agent_model_provider.and_then(|e| e.api_key.as_deref()),
+            &config,
+            None,
+            None,
+            Some(effective_lineage.clone()),
+            task_identity,
+        );
+        let skills = crate::skills::load_skills_for_agent_from_config(&config, agent_alias);
+        // Route the per-agent tool registry through the one gated seam
+        // (built-in filter -> MCP scope+gate -> skills), identical to the
+        // behavior this path hand-rolled. `caller_allowed` carries the run()
+        // per-run allowlist.
+        let assembled = scoped::ScopedToolRegistry::assemble(scoped::ScopedAssembly {
+            config: &config,
+            agent_alias,
+            security: &security,
+            built: all_tools_result,
+            skills: &skills,
+            runtime: runtime.clone(),
+            caller_allowed: allowed_tools.as_deref(),
+            connect_mcp: true,
+            // A memory-free run drops the persistent memory tools so the model
+            // cannot read or write memory even though the registry is otherwise
+            // built identically.
+            exclude_memory: memory_free,
+            list_deferred_mcp_specs: false,
+            emit_assembly_logs: true,
+            // Honor the daemon worker's pre-built shared registry so stdio
+            // MCP children live for the daemon's lifetime, not per
+            // `agent::run` call. CLI/one-shot callers leave
+            // `mcp_registry` at its default (`None`) and the seam
+            // falls back to the per-call `connect_all`.
+            mcp_registry: overrides.mcp_registry.as_ref().map(Arc::clone),
+        })
+        .await;
+        // run injects one combined MCP prompt block: deferred tool-search listing +
+        // pinned resources, composed by the harness.
+        let deferred_section = assembled.combined_mcp_prompt_section();
+        let scoped::ScopedAssembled {
+            registry,
+            task_owner,
+            activated_handle,
+            mcp_tool_names,
+            ..
+        } = assembled;
+        let tools_registry = registry.into_inner();
+
+        // ── Resolve model_provider ─────────────────────────────────────────
+        let agent_provider_ref = agent_provider_composite(&config, agent_alias);
+        let provider_name = provider_override
+            .as_deref()
+            .or(agent_provider_ref.as_deref())
+            .ok_or_else(|| {
+                ::reiclaw_log::record!(
+                    ERROR,
+                    ::reiclaw_log::Event::new(module_path!(), ::reiclaw_log::Action::Fail)
+                        .with_category(::reiclaw_log::EventCategory::Agent)
+                        .with_outcome(::reiclaw_log::EventOutcome::Failure)
+                        .with_attrs(::serde_json::json!({"agent_alias": agent_alias})),
+                    "agent loop refused: agent.model_provider unresolved and no --provider override"
+                );
+                anyhow::Error::msg(format!(
+                    "agents.{agent_alias}.model_provider does not resolve and no provider override \
+                     was passed on the CLI. Either set `[agents.{agent_alias}] model_provider` or \
+                     pass --provider."
+                ))
+            })?
+            .to_string();
+
+        let model_name = match model_override
+            .as_deref()
+            .or(agent_model_provider.and_then(|e| e.model.as_deref()))
+        {
+            Some(m) => m.to_string(),
+            None => anyhow::bail!(
+                "no model configured for agent {agent_alias}: \
+             [providers.models.{provider_name}.<alias>].model is unset and --model was not passed"
+            ),
+        };
+
+        {
+            let span = reiclaw_log::Span::current();
+            let mp_composite = match agent_provider_resolved.as_ref() {
+                Some((ty, alias, _)) => format!("{ty}.{alias}"),
+                None => provider_name.clone(),
+            };
+            span.record("model_provider", mp_composite.as_str());
+            span.record("model", model_name.as_str());
+        }
+
+        let agent_runtime_options = match agent_provider_resolved.as_ref() {
+            Some((ty, alias, _)) => {
+                reiclaw_providers::provider_runtime_options_for_alias(&config, ty, alias)
+            }
+            None => reiclaw_providers::provider_runtime_options_for_agent(&config, agent_alias),
+        };
+        // Resolve every alias-owned option, including vision, through the shared
+        // provider-ref resolver. This keeps a --provider override isolated from
+        // the agent alias without a second capability-specific lookup.
+        let provider_runtime_options = reiclaw_providers::options_for_provider_ref(
+            &config,
+            &provider_name,
+            &agent_runtime_options,
+        );
+
+        // Resolve api_key and uri from the actual provider being constructed.
+        // For dotted aliases (e.g. "openai.shartgpt"), look up the alias-specific
+        // config so a -p override does not leak the agent's current provider key
+        // (e.g. an anthropic key) to a different provider family that doesn't expect it.
+        let (initial_api_key, initial_uri) =
+            api_key_and_uri_for_provider(&config, &provider_name, agent_model_provider);
+        let model_provider: Box<dyn ModelProvider> =
+            reiclaw_providers::create_routed_model_provider_with_options(
+                &config,
+                &provider_name,
+                initial_api_key.as_deref(),
+                initial_uri.as_deref(),
+                &config.reliability,
+                &config.model_routes,
+                &model_name,
+                &provider_runtime_options,
+            )?;
+
+        let mut turn_guard = crate::observability::AgentTurnGuard::start(
+            observer.as_ref(),
+            provider_name.to_string(),
+            model_name.to_string(),
+            Some(channel_name.to_string()),
+            Some(agent_alias.to_string()),
+            Some(turn_id.clone()),
+        );
+
+        // ── Initialize locale-aware tool descriptions ──────────────────
+        let _i18n_locale = config
+            .locale
+            .as_deref()
+            .filter(|s| !s.is_empty())
+            .map(ToString::to_string)
+            .unwrap_or_else(crate::i18n::detect_locale);
+
+        let mut tool_descs: Vec<(&str, &str)> = vec![
+            (
+                "shell",
+                "Execute terminal commands. Use when: running local checks, build/test commands, diagnostics. Don't use when: a safer dedicated tool exists, or command is destructive without approval.",
+            ),
+            (
+                "file_read",
+                "Read file contents. Use when: inspecting project files, configs, logs. Don't use when: a targeted search is enough.",
+            ),
+            (
+                "file_write",
+                "Write file contents. Use when: applying focused edits, scaffolding files, updating docs/code. Don't use when: side effects are unclear or file ownership is uncertain.",
+            ),
+            (
+                "memory_store",
+                "Save to memory. Use when: preserving durable preferences, decisions, key context. Don't use when: information is transient/noisy/sensitive without need.",
+            ),
+            (
+                "memory_recall",
+                "Search memory. Use when: retrieving prior decisions, user preferences, historical context. Don't use when: answer is already in current context.",
+            ),
+            (
+                "memory_forget",
+                "Delete a memory entry. Use when: memory is incorrect/stale or explicitly requested for removal. Don't use when: impact is uncertain.",
+            ),
+        ];
+        if matches!(
+            eff_prompt_injection_mode,
+            reiclaw_config::schema::SkillsPromptInjectionMode::Compact
+        ) {
+            tool_descs.push((
+            "read_skill",
+            "Load the full source for an available skill by name. Use when: compact mode only shows a summary and you need the complete skill instructions.",
+        ));
+        }
+        tool_descs.push((
+        "cron_add",
+        "Create a cron job. Supports schedule kinds: cron, at, every; and job types: shell or agent.",
+    ));
+        tool_descs.push((
+            "cron_list",
+            "List all cron jobs with schedule, status, and metadata.",
+        ));
+        tool_descs.push(("cron_remove", "Remove a cron job by job_id."));
+        tool_descs.push((
+        "cron_update",
+        "Patch a cron job (schedule, enabled, command/prompt, model, delivery, session_target).",
+    ));
+        tool_descs.push((
+            "cron_run",
+            "Force-run a cron job immediately and record a run history entry.",
+        ));
+        tool_descs.push(("cron_runs", "Show recent run history for a cron job."));
+        tool_descs.push((
+        "screenshot",
+        "Capture a screenshot of the current screen. Returns file path and base64-encoded PNG. Use when: visual verification, UI inspection, debugging displays.",
+    ));
+        tool_descs.push((
+        "image_info",
+        "Read image file metadata (format, dimensions, size) and optionally base64-encode it. Use when: inspecting images, preparing visual data for analysis.",
+    ));
+        tool_descs.push((
+        "schedule",
+        "Manage scheduled tasks (create/list/get/cancel/pause/resume). Supports recurring cron and one-shot delays.",
+    ));
+        retain_registered_tool_descriptions(&mut tool_descs, &tools_registry);
+        let bootstrap_max_chars = if eff_compact_context {
+            Some(crate::agent::system_prompt::COMPACT_BOOTSTRAP_MAX_CHARS)
+        } else {
+            None
+        };
+        let agent_workspace = config.agent_workspace_dir(agent_alias);
+        // ── Approval manager (supervised mode) ───────────────────────
+        let approval_manager = if interactive {
+            Some(ApprovalManager::from_risk_profile(&risk_profile).with_store_at(&config.data_dir))
+        } else {
+            None
+        };
+        let memory_session_id = session_state_file.as_deref().and_then(|path| {
+            let raw = path.to_string_lossy().trim().to_string();
+            if raw.is_empty() {
+                None
+            } else {
+                // Match the sanitized form persisted by memory backend migrations.
+                Some(reiclaw_api::session_keys::sanitize_session_key(&format!(
+                    "cli:{raw}"
+                )))
+            }
+        });
+
+        // ── Cost tracking context (scoped for CLI / cron / web agents) ──
+        let cost_tracking_context =
+            crate::agent::cost::tool_loop_cost_tracking_context_for_agent(&config, agent_alias);
+
+        // ── Execute ──────────────────────────────────────────────────
+        let final_output;
+
+        if let Some(msg) = message {
+            let effective_msg = msg.clone();
+            let thinking_level = agent.resolved.thinking.default_level;
+            let thinking_params = crate::agent::thinking::apply_thinking_level_with_config(
+                thinking_level,
+                &agent.resolved.thinking,
+            );
+            let effective_temperature: Option<f64> = temperature.map(|t| {
+                crate::agent::thinking::clamp_temperature(
+                    t + thinking_params.temperature_adjustment,
+                )
+            });
+
+            // Compute per-turn excluded MCP tools from tool_filter_groups before
+            // building the turn prompt so tool availability matches the specs
+            // sent to the provider.
+            let excluded_tools = compute_excluded_mcp_tools(
+                &tools_registry,
+                &agent.resolved.tool_filter_groups,
+                &effective_msg,
+                &mcp_tool_names,
+            );
+            let system_prompt = build_system_prompt_for_turn(
+                &agent_workspace,
+                &model_name,
+                &tool_descs,
+                &deferred_section,
+                &skills,
+                Some(&agent.identity),
+                bootstrap_max_chars,
+                &risk_profile,
+                model_provider.as_ref(),
+                &tools_registry,
+                &excluded_tools,
+                activated_handle.as_ref(),
+                agent.resolved.strict_tool_parsing,
+                eff_prompt_injection_mode,
+                eff_compact_context,
+                eff_max_system_prompt_chars,
+                true,
+                config.channels.show_tool_calls,
+                persona_section.as_deref(),
+                persona.legacy_files,
+                thinking_params.system_prompt_prefix.as_deref(),
+            )?;
+
+            let excluded_tool_names: HashSet<&str> =
+                excluded_tools.iter().map(String::as_str).collect();
+            let runtime_capability_names = tools_registry
+                .iter()
+                .map(|tool| tool.name())
+                .filter(|name| !excluded_tool_names.contains(*name))
+                .collect::<Vec<_>>();
+            if let Some(suggestion) = crate::skills::render_missing_skill_install_suggestion(
+                &effective_msg,
+                &skills,
+                &runtime_capability_names,
+                &config.data_dir,
+                &config.skills.extra_registries,
+                config.skills.install_suggestions.enabled,
+            ) {
+                final_output = suggestion;
+                if interactive {
+                    println!("{final_output}");
+                }
+                observer.record_event(&ObserverEvent::TurnComplete);
+                return Ok(final_output);
+            }
+
+            // Auto-save user message to memory (skip short/trivial messages)
+            if config.memory.auto_save
+                && effective_msg.chars().count() >= AUTOSAVE_MIN_MESSAGE_CHARS
+                && !reiclaw_memory::should_skip_autosave_content(&effective_msg)
+            {
+                let user_key = autosave_memory_key("user_msg");
+                let store_start = std::time::Instant::now();
+                let store_result = mem
+                    .store(
+                        &user_key,
+                        &effective_msg,
+                        MemoryCategory::Conversation,
+                        memory_session_id.as_deref(),
+                    )
+                    .await;
+                observer.record_event(&ObserverEvent::MemoryStore {
+                    category: MemoryCategory::Conversation.to_string(),
+                    backend: mem.name().to_string(),
+                    duration: store_start.elapsed(),
+                    success: store_result.is_ok(),
+                    channel: Some(channel_name.to_string()),
+                    agent_alias: Some(agent_alias.to_string()),
+                    turn_id: Some(turn_id.clone()),
+                });
+            }
+
+            // Memory context is injected once in the engine, keyed on the
+            // ingress origin (agent::memory_inject).
+            let now = jiff::Zoned::now().strftime("%Y-%m-%d %H:%M:%S %:z");
+            let enriched = format!("[{now}] {effective_msg}");
+            let mut history = vec![
+                ChatMessage::system(&system_prompt),
+                ChatMessage::user(&enriched),
+            ];
+
+            // Compute per-turn excluded MCP tools from tool_filter_groups.
+            let excluded_tools = compute_excluded_mcp_tools(
+                &tools_registry,
+                &agent.resolved.tool_filter_groups,
+                &effective_msg,
+                &mcp_tool_names,
+            );
+
+            if let Some(sys_msg) = history.first_mut()
+                && sys_msg.role == "system"
+            {
+                sys_msg.content = build_system_prompt_for_turn(
+                    &agent_workspace,
+                    &model_name,
+                    &tool_descs,
+                    &deferred_section,
+                    &skills,
+                    Some(&agent.identity),
+                    bootstrap_max_chars,
+                    &risk_profile,
+                    model_provider.as_ref(),
+                    &tools_registry,
+                    &excluded_tools,
+                    activated_handle.as_ref(),
+                    agent.resolved.strict_tool_parsing,
+                    eff_prompt_injection_mode,
+                    eff_compact_context,
+                    eff_max_system_prompt_chars,
+                    true,
+                    config.channels.show_tool_calls,
+                    persona_section.as_deref(),
+                    persona.legacy_files,
+                    thinking_params.system_prompt_prefix.as_deref(),
+                )?;
+            }
+            let response = reiclaw_api::NATIVE_THINKING_OVERRIDE
+                .scope(
+                    thinking_params.native_thinking,
+                    TOOL_LOOP_COST_TRACKING_CONTEXT.scope(
+                        cost_tracking_context.clone(),
+                        run_tool_call_loop(ToolLoop {
+                            exec: ResolvedAgentExecution::resolve(
+                                ResolvedModelAccess {
+                                    model_provider: model_provider.as_ref(),
+                                    provider_name: &provider_name,
+                                    model: &model_name,
+                                    temperature: effective_temperature,
+                                },
+                                ResolvedIo {
+                                    tools_registry: &tools_registry,
+                                    observer: observer.as_ref(),
+                                    silent: false,
+                                    approval: approval_manager.as_ref(),
+                                    multimodal_config: &config.multimodal,
+                                    config: Some(&config),
+                                    hooks: None,
+                                    activated_tools: activated_handle.as_ref(),
+                                    receipt_generator: None,
+                                },
+                                ResolvedRuntimeKnobs {
+                                    max_tool_iterations: agent.resolved.max_tool_iterations,
+                                    excluded_tools: &excluded_tools,
+                                    dedup_exempt_tools: &agent.resolved.tool_call_dedup_exempt,
+                                    pacing: &config.pacing,
+                                    strict_tool_parsing: agent.resolved.strict_tool_parsing,
+                                    parallel_tools: agent.resolved.parallel_tools,
+                                    max_tool_result_chars: agent.resolved.max_tool_result_chars,
+                                    keep_tool_context_turns: agent.resolved.keep_tool_context_turns,
+                                    context_token_budget: agent
+                                        .resolved
+                                        .effective_context_budget(),
+                                    knobs: &LoopKnobs::default(),
+                                },
+                            ).with_task_owner(task_owner.as_ref()),
+                            history: &mut history,
+                            channel_name,
+                            channel_reply_target: None,
+                            cancellation_token: None,
+                            on_delta: None,
+                            shared_budget: None,
+                            channel: None,
+                            collected_receipts: None,
+                            event_tx: None,
+                            steering: None,
+                            new_messages_out: None,
+                            image_cache: None,
+                            // Origin is threaded from the entry point;
+                            // source/transport/trust stay phase-1
+                            // placeholders until per-transport stamping.
+                            memory: Some(crate::agent::memory_inject::TurnMemory {
+                                handle: mem.as_ref(),
+                                query: effective_msg.clone(),
+                                sessions: vec![memory_session_id.clone()],
+                                suppress: suppress_memory_inject,
+                                cfg: crate::agent::memory_inject::MemoryInjectConfig::from_memory_config(
+                                    &config.memory,
+                                    crate::agent::memory_inject::DEFAULT_RECALL_LIMIT,
+                                ),
+                            }),
+                            ingress: IngressContext::from_origin(origin),
+                            agent_alias: Some(agent_alias),
+                            parent_agent_alias: None,
+                            turn_id: &turn_id,
+                        }),
+                    ),
+                )
+                .await?;
+
+            // After successful multi-step execution, attempt autonomous skill creation.
+            if config.skills.skill_creation.enabled {
+                let tool_calls = crate::skills::creator::extract_tool_calls_from_history(&history);
+                if tool_calls.len() >= 2 {
+                    let creator = crate::skills::creator::SkillCreator::new(
+                        config.data_dir.clone(),
+                        config.skills.skill_creation.clone(),
+                    );
+                    // Opt-in reflection synthesizes a `SKILL.md` from a bounded
+                    // slice of the execution; it falls back to `SKILL.toml`
+                    // internally when the provider call or its output is
+                    // unusable. Default path stays the deterministic generator.
+                    let creation_result = if config.skills.skill_creation.reflection_enabled {
+                        TOOL_LOOP_COST_TRACKING_CONTEXT
+                            .scope(
+                                cost_tracking_context.clone(),
+                                creator.create_from_execution_reflected(
+                                    &msg,
+                                    &tool_calls,
+                                    &response,
+                                    None,
+                                    &provider_name,
+                                    model_provider.as_ref(),
+                                    &model_name,
+                                ),
+                            )
+                            .await
+                    } else {
+                        creator.create_from_execution(&msg, &tool_calls, None).await
+                    };
+                    match creation_result {
+                        Ok(Some(slug)) => {
+                            ::reiclaw_log::record!(
+                                INFO,
+                                ::reiclaw_log::Event::new(
+                                    module_path!(),
+                                    ::reiclaw_log::Action::Register
+                                )
+                                .with_category(::reiclaw_log::EventCategory::Agent)
+                                .with_attrs(::serde_json::json!({"slug": slug})),
+                                "Auto-created skill from execution"
+                            );
+                        }
+                        Ok(None) => {
+                            ::reiclaw_log::record!(
+                                DEBUG,
+                                ::reiclaw_log::Event::new(
+                                    module_path!(),
+                                    ::reiclaw_log::Action::Skip
+                                )
+                                .with_category(::reiclaw_log::EventCategory::Agent),
+                                "Skill creation skipped (duplicate or disabled)"
+                            );
+                        }
+                        Err(e) => ::reiclaw_log::record!(
+                            WARN,
+                            ::reiclaw_log::Event::new(module_path!(), ::reiclaw_log::Action::Fail)
+                                .with_category(::reiclaw_log::EventCategory::Agent)
+                                .with_outcome(::reiclaw_log::EventOutcome::Failure)
+                                .with_attrs(::serde_json::json!({"error": format!("{}", e)})),
+                            "Skill creation failed"
+                        ),
+                    }
+                }
+            }
+            // Emit the user-visible response before any background work so the
+            // skill-review fork can never delay the user's answer.
+            final_output = response;
+            if interactive {
+                println!("{final_output}");
+            }
+            observer.record_event(&ObserverEvent::TurnComplete);
+
+            if config.skills.skill_improvement.enabled {
+                let review_workspace = config.agent_workspace_dir(agent_alias);
+                let review_config = config.skills.skill_improvement.clone();
+                let failed_slugs: Vec<String> =
+                    crate::skills::improver::extract_skill_executions_from_history(&history)
+                        .into_iter()
+                        .filter_map(|(slug, ok)| if ok { None } else { Some(slug) })
+                        .collect();
+                TOOL_LOOP_COST_TRACKING_CONTEXT
+                    .scope(
+                        cost_tracking_context.clone(),
+                        crate::skills::review::maybe_run_skill_review(
+                            Some(&config),
+                            review_workspace,
+                            review_config,
+                            config.skills.allow_scripts,
+                            history.clone(),
+                            failed_slugs,
+                            model_provider.as_ref(),
+                            &provider_name,
+                            &model_name,
+                            observer.as_ref(),
+                            &config.multimodal,
+                            &config.pacing,
+                            agent.resolved.max_tool_result_chars,
+                            agent.resolved.max_context_tokens,
+                            None, // cancellation_token — no parent token in single-shot run
+                            Some(agent_alias),
+                        ),
+                    )
+                    .await;
+            }
+        } else {
+            // Interactive chat is a gateway client now (`zeroclaw chat`); a
+            // local run always has a message.
+            anyhow::bail!(
+                "agent::run needs a message; for interactive chat use `zeroclaw chat`, which attaches to the gateway"
+            );
+        }
+
+        let tokens_used = cost_tracking_context.as_ref().and_then(|ctx| {
+            let usage = ctx.snapshot_turn_usage();
+            (usage.input_tokens > 0 || usage.output_tokens > 0).then_some(
+                reiclaw_api::observability_traits::TurnTokenUsage {
+                    input_tokens: usage.input_tokens,
+                    output_tokens: usage.output_tokens,
+                },
+            )
+        });
+        turn_guard.set_model_route(provider_name.clone(), model_name.clone());
+        turn_guard.set_usage(tokens_used, None);
+        turn_guard.finish();
+
+        Ok(final_output)
+    };
+    let __zc_instrumented = __zc_body
+        .instrument(__zc_scope_span)
+        .instrument(__zc_attribution_span);
+    if crate::agent::loop_::current_session_key().is_some() {
+        // A caller already named this conversation; leave it alone.
+        __zc_instrumented.await
+    } else {
+        scope_session_key(Some(__zc_synthetic_session_key), __zc_instrumented).await
+    }
+}

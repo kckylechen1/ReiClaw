@@ -1,8 +1,8 @@
 //! HTTP upload transport only. No payload ledger or runtime dependencies.
 use crate::telegram::{Api, File};
 use anyhow::{Context, Result, bail};
+use reiclaw_gateway_client::ConnectOptions;
 use serde_json::Value;
-use zeroclaw_gateway_client::ConnectOptions;
 
 pub async fn upload(api: &Api, options: &ConnectOptions, file: &File) -> Result<String> {
     let token = options

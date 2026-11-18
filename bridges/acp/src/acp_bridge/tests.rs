@@ -148,7 +148,7 @@ fn permission_provenance_never_turns_absence_into_human_choice() {
 async fn dispatcher_rejects_busy_before_actor_dequeue_and_old_cancel_cannot_cross_terminal() {
     let (tx, mut rx) = mpsc::channel(8);
     let admission = Arc::new(Admission::default());
-    let task = zeroclaw_spawn::spawn!(std::future::pending::<()>());
+    let task = reiclaw_spawn::spawn!(std::future::pending::<()>());
     let session = Session {
         tx,
         task,
@@ -227,7 +227,7 @@ async fn production_connect_refuses_missing_or_denied_cancel_grant() {
     for grant in [Value::Null, Value::Bool(false)] {
         let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
         let address = listener.local_addr().unwrap();
-        let server = zeroclaw_spawn::spawn!(async move {
+        let server = reiclaw_spawn::spawn!(async move {
             let (stream, _) = listener.accept().await.unwrap();
             let mut ws = tokio_tungstenite::accept_hdr_async(stream, ChatProtocol)
                 .await

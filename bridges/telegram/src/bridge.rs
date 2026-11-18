@@ -6,14 +6,14 @@ use std::collections::{HashMap, HashSet, VecDeque};
 use std::time::Duration;
 
 use anyhow::{Context, Result, bail};
-use serde_json::json;
-use tokio::sync::{mpsc, watch};
-use tokio::time::{Instant, sleep, sleep_until, timeout};
-use zeroclaw_gateway_client::{
+use reiclaw_gateway_client::{
     Backoff, CancelAck, Client, ConnectOptions, ControlReady, Decision, Frame, Rejected,
     SourceInput, SourceRecord, TurnState,
 };
-use zeroclaw_log::{Action, Event, EventOutcome, record};
+use reiclaw_log::{Action, Event, EventOutcome, record};
+use serde_json::json;
+use tokio::sync::{mpsc, watch};
+use tokio::time::{Instant, sleep, sleep_until, timeout};
 
 use crate::render::{
     ApprovalKeys, EDIT_INTERVAL, decode_callback, edit_due, encode_callback, split_message,
@@ -101,7 +101,7 @@ pub async fn run(config: BridgeConfig) -> Result<()> {
     let (cursor, poll_cursor) = watch::channel(PollState::default());
     let poll_api = api.clone();
     let poll_wait = config.poll_wait;
-    let poller = zeroclaw_spawn::spawn!(poll_updates(poll_api, poll_wait, tx, poll_cursor));
+    let poller = reiclaw_spawn::spawn!(poll_updates(poll_api, poll_wait, tx, poll_cursor));
     // Proactive messages use the same bridge token on the control socket.
     // Source intake separately negotiates its scoped durable authority.
     let control = match config.gateway.token.clone() {
@@ -109,7 +109,7 @@ pub async fn run(config: BridgeConfig) -> Result<()> {
             let control_api = api.clone();
             let gateway = config.gateway.gateway.clone();
             let owner_id = config.owner_id;
-            Some(zeroclaw_spawn::spawn!(crate::control::run(
+            Some(reiclaw_spawn::spawn!(crate::control::run(
                 control_api,
                 gateway,
                 token,
@@ -610,7 +610,7 @@ impl Bridge {
                 let options = self.options.clone();
                 let id = self.request_id(source.update_id);
                 self.upload_source = Some(source.clone());
-                self.upload = Some(zeroclaw_spawn::spawn!(async move {
+                self.upload = Some(reiclaw_spawn::spawn!(async move {
                     let handle = crate::attachments::upload(&api, &options, &file).await?;
                     Ok(PendingMessage {
                         id,
