@@ -58,15 +58,18 @@ tag push.
 3. The code path includes:
    - `fmt`: `cargo fmt --all -- --check` (the Rust matrix waits on it; docs validation runs independently).
    - `lint`: `cargo clippy --workspace --all-targets --locked --features
-     ci-all -- -D warnings`, plus the provider dispatch gate. This is the
-     only all-features compile in the gate (benches included).
+     ci-all -- -D warnings`, plus the provider dispatch gate and the Fluent
+     catalog syntax gate (`cargo fluent check`). This is the only
+     all-features compile in the gate (benches included).
    - `build`: matrix across `x86_64-unknown-linux-gnu`,
      `aarch64-apple-darwin`, `x86_64-pc-windows-msvc`.
    - `check`: no default features.
-   - `test`: `cargo nextest run --locked` per leg of
-     `dev/ci/test-partition.json` (runtime, channels, app, tail); the runtime
-     leg adds a filtered `sandbox-landlock` run, and the app leg runs the
-     architecture guards.
+   - `test`: `cargo nextest run --locked` per phase of
+     `dev/ci/test-partition.json`, one parallel job each: the main run of
+     every leg (runtime, channels, app, eval, tail) plus each filtered extra
+     run (`runtime / landlock`, `channels / voice-surface`). The matrix comes
+     from `scripts/dev/leg.sh --matrix`; the app leg runs the architecture
+     guards.
    - `security`: `cargo deny check`, lockfile integrity, `cargo audit`.
    - `installer-drift`: `cargo generate installers --check` (PRs: only when
      manifests, `xtask/`, or generated install surfaces change).

@@ -23,10 +23,10 @@ An unavailable, invalid, empty, or unresolvable comparison retains full runtime 
 | Selected work | Coverage |
 |---|---|
 | Every run | Scope-policy checks, workflow validation, `Docs Style`, and `CI Required Gate` |
-| Full runtime lane | Rust formatting; workspace Clippy with `ci-all` and `-D warnings`; provider-dispatch guard; Linux build and macOS/Windows checks; no-default, minimal-companion, slim-control and i686 checks; four nextest partitions; dependency security; Web regressions/build; applicable repository, Nix, installer and targeted Windows checks |
+| Full runtime lane | Rust formatting; workspace Clippy with `ci-all` and `-D warnings`; provider-dispatch guard; Fluent catalog syntax; Linux build and macOS/Windows checks; no-default, minimal-companion, slim-control and i686 checks; parallel nextest jobs, one per partition phase; dependency security; Web regressions/build; applicable repository, Nix, installer and targeted Windows checks |
 | Docs Build | Real references, rustdoc, preprocessors, translation checks and all locales through `cargo mdbook build`, without publishing |
 
-The four test partitions and their feature-specific runs come from `dev/ci/test-partition.json`. Formatting precedes the runtime fan-out; documentation checks depend on scope classification and run independently of Rust formatting.
+The test partitions and their feature-specific runs come from `dev/ci/test-partition.json`; each leg's main run and each extra run is its own parallel job (`scripts/dev/leg.sh --matrix`). Formatting precedes the runtime fan-out; documentation checks depend on scope classification and run independently of Rust formatting.
 
 Master pushes use the same classifier. A prose merge therefore skips the runtime matrix again instead of rebuilding it to warm caches. Full runtime pushes retain their selected build and cache-writing jobs; the repository-structure and Nix jobs remain PR/merge-group checks. Quality Gate and Code Analysis key push concurrency by commit so a later prose push cannot cancel or replace an earlier code push's work. Updated PR heads still cancel obsolete runs for that PR.
 
