@@ -397,7 +397,7 @@ pub fn check_tool_loop_budget() -> Option<BudgetCheck> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use zeroclaw_config::schema::{Config, DeepseekModelProviderConfig, ModelProviderConfig};
+    use zeroclaw_config::schema::{Config, GroqModelProviderConfig, ModelProviderConfig};
 
     fn fresh_seen() -> Mutex<HashSet<(String, String)>> {
         Mutex::new(HashSet::new())
@@ -485,23 +485,23 @@ mod tests {
     #[test]
     fn provider_pricing_resolves_composite_and_bare_type_keys() {
         let mut model_rates: HashMap<String, f64> = HashMap::new();
-        model_rates.insert("glm-5.1.input".to_string(), 1.4);
-        model_rates.insert("glm-5.1.output".to_string(), 4.4);
+        model_rates.insert("model-a.input".to_string(), 1.4);
+        model_rates.insert("model-a.output".to_string(), 4.4);
 
         // CLI / agent-loop builder keys by the composite `<type>.<alias>`.
         let mut composite_keyed: ModelProviderPricing = HashMap::new();
-        composite_keyed.insert("glm.default".to_string(), model_rates.clone());
+        composite_keyed.insert("groq.default".to_string(), model_rates.clone());
         assert!(
-            provider_pricing(&composite_keyed, "glm.default").is_some(),
+            provider_pricing(&composite_keyed, "groq.default").is_some(),
             "composite-keyed map must resolve via the verbatim composite lookup"
         );
 
         // Channel orchestrator builder keys by the bare provider `<type>`, yet
         // the lookup still arrives as the composite alias — must fall back.
         let mut type_keyed: ModelProviderPricing = HashMap::new();
-        type_keyed.insert("glm".to_string(), model_rates.clone());
+        type_keyed.insert("groq".to_string(), model_rates.clone());
         assert!(
-            provider_pricing(&type_keyed, "glm.default").is_some(),
+            provider_pricing(&type_keyed, "groq.default").is_some(),
             "type-keyed map must resolve the composite alias via the bare-type fallback"
         );
 
@@ -554,18 +554,18 @@ mod tests {
     #[test]
     fn build_model_provider_pricing_prefers_rate_sheet_over_legacy_alias_pricing() {
         let mut config = Config::default();
-        config.providers.models.deepseek.insert(
+        config.providers.models.groq.insert(
             "default".to_string(),
-            DeepseekModelProviderConfig {
+            GroqModelProviderConfig {
                 base: ModelProviderConfig {
-                    model: Some("deepseek-v4-flash".into()),
-                    pricing: HashMap::from([("deepseek-v4-flash.output".into(), 0.77)]),
+                    model: Some("model-flash".into()),
+                    pricing: HashMap::from([("model-flash.output".into(), 0.77)]),
                     ..Default::default()
                 },
             },
         );
-        config.cost.rates.providers.models.deepseek.insert(
-            "deepseek-v4-flash".to_string(),
+        config.cost.rates.providers.models.groq.insert(
+            "model-flash".to_string(),
             zeroclaw_config::schema::ModelCostRates {
                 input_per_mtok: Some(0.14),
                 output_per_mtok: Some(0.28),
@@ -574,16 +574,11 @@ mod tests {
         );
 
         let alias_map = build_model_provider_pricing(&config);
-        let deepseek = alias_map
-            .get("deepseek.default")
-            .expect("deepseek alias pricing");
-        assert_eq!(deepseek.get("deepseek-v4-flash.input").copied(), Some(0.14));
+        let groq = alias_map.get("groq.default").expect("groq alias pricing");
+        assert_eq!(groq.get("model-flash.input").copied(), Some(0.14));
+        assert_eq!(groq.get("model-flash.cached_input").copied(), Some(0.0028));
         assert_eq!(
-            deepseek.get("deepseek-v4-flash.cached_input").copied(),
-            Some(0.0028)
-        );
-        assert_eq!(
-            deepseek.get("deepseek-v4-flash.output").copied(),
+            groq.get("model-flash.output").copied(),
             Some(0.28),
             "cost.rates must remain the canonical pricing source"
         );
@@ -592,64 +587,61 @@ mod tests {
     #[test]
     fn build_model_provider_pricing_keeps_alias_legacy_pricing_isolated() {
         let mut config = Config::default();
-        config.providers.models.deepseek.insert(
+        config.providers.models.groq.insert(
             "work".to_string(),
-            DeepseekModelProviderConfig {
+            GroqModelProviderConfig {
                 base: ModelProviderConfig {
-                    pricing: HashMap::from([("deepseek-v4-flash.output".into(), 0.77)]),
+                    pricing: HashMap::from([("model-flash.output".into(), 0.77)]),
                     ..Default::default()
                 },
             },
         );
-        config.providers.models.deepseek.insert(
+        config.providers.models.groq.insert(
             "personal".to_string(),
-            DeepseekModelProviderConfig {
+            GroqModelProviderConfig {
                 base: ModelProviderConfig {
-                    pricing: HashMap::from([("deepseek-v4-flash.output".into(), 0.91)]),
+                    pricing: HashMap::from([("model-flash.output".into(), 0.91)]),
                     ..Default::default()
                 },
             },
         );
 
         let alias_map = build_model_provider_pricing(&config);
-        let work = alias_map.get("deepseek.work").expect("work alias pricing");
+        let work = alias_map.get("groq.work").expect("work alias pricing");
         let personal = alias_map
-            .get("deepseek.personal")
+            .get("groq.personal")
             .expect("personal alias pricing");
 
-        assert_eq!(work.get("deepseek-v4-flash.output").copied(), Some(0.77));
-        assert_eq!(
-            personal.get("deepseek-v4-flash.output").copied(),
-            Some(0.91)
-        );
+        assert_eq!(work.get("model-flash.output").copied(), Some(0.77));
+        assert_eq!(personal.get("model-flash.output").copied(), Some(0.91));
     }
 
     #[test]
     fn build_type_level_model_provider_pricing_merges_aliases_and_rate_sheet() {
         let mut config = Config::default();
-        config.providers.models.deepseek.insert(
+        config.providers.models.groq.insert(
             "work".to_string(),
-            DeepseekModelProviderConfig {
+            GroqModelProviderConfig {
                 base: ModelProviderConfig {
                     pricing: HashMap::from([
-                        ("deepseek-v4-flash.input".into(), 0.33),
-                        ("deepseek-v4-flash.output".into(), 0.77),
+                        ("model-flash.input".into(), 0.33),
+                        ("model-flash.output".into(), 0.77),
                     ]),
                     ..Default::default()
                 },
             },
         );
-        config.providers.models.deepseek.insert(
+        config.providers.models.groq.insert(
             "personal".to_string(),
-            DeepseekModelProviderConfig {
+            GroqModelProviderConfig {
                 base: ModelProviderConfig {
-                    pricing: HashMap::from([("deepseek-v4-flash.output".into(), 0.91)]),
+                    pricing: HashMap::from([("model-flash.output".into(), 0.91)]),
                     ..Default::default()
                 },
             },
         );
-        config.cost.rates.providers.models.deepseek.insert(
-            "deepseek-v4-flash".to_string(),
+        config.cost.rates.providers.models.groq.insert(
+            "model-flash".to_string(),
             zeroclaw_config::schema::ModelCostRates {
                 input_per_mtok: Some(0.14),
                 output_per_mtok: Some(0.28),
@@ -658,35 +650,29 @@ mod tests {
         );
 
         let by_type = build_type_level_model_provider_pricing(&config);
-        let deepseek = by_type.get("deepseek").expect("deepseek type pricing");
-        assert_eq!(deepseek.get("deepseek-v4-flash.input").copied(), Some(0.14));
-        assert_eq!(
-            deepseek.get("deepseek-v4-flash.output").copied(),
-            Some(0.28)
-        );
-        assert_eq!(
-            deepseek.get("deepseek-v4-flash.cached_input").copied(),
-            Some(0.0028)
-        );
+        let groq = by_type.get("groq").expect("groq type pricing");
+        assert_eq!(groq.get("model-flash.input").copied(), Some(0.14));
+        assert_eq!(groq.get("model-flash.output").copied(), Some(0.28));
+        assert_eq!(groq.get("model-flash.cached_input").copied(), Some(0.0028));
     }
 
     #[test]
     fn build_type_level_model_provider_pricing_keeps_legacy_last_alias_wins_behavior() {
         let mut config = Config::default();
-        config.providers.models.deepseek.insert(
+        config.providers.models.groq.insert(
             "work".to_string(),
-            DeepseekModelProviderConfig {
+            GroqModelProviderConfig {
                 base: ModelProviderConfig {
-                    pricing: HashMap::from([("deepseek-v4-flash.output".into(), 0.77)]),
+                    pricing: HashMap::from([("model-flash.output".into(), 0.77)]),
                     ..Default::default()
                 },
             },
         );
-        config.providers.models.deepseek.insert(
+        config.providers.models.groq.insert(
             "personal".to_string(),
-            DeepseekModelProviderConfig {
+            GroqModelProviderConfig {
                 base: ModelProviderConfig {
-                    pricing: HashMap::from([("deepseek-v4-flash.output".into(), 0.91)]),
+                    pricing: HashMap::from([("model-flash.output".into(), 0.91)]),
                     ..Default::default()
                 },
             },
@@ -706,9 +692,9 @@ mod tests {
         }
 
         let by_type = build_type_level_model_provider_pricing(&config);
-        let deepseek = by_type.get("deepseek").expect("deepseek type pricing");
-        let expected_deepseek = expected.get("deepseek").expect("expected deepseek pricing");
-        assert_eq!(deepseek, expected_deepseek);
+        let groq = by_type.get("groq").expect("groq type pricing");
+        let expected_groq = expected.get("groq").expect("expected groq pricing");
+        assert_eq!(groq, expected_groq);
     }
 
     #[test]
@@ -724,8 +710,8 @@ mod tests {
         let ctx = ToolLoopCostTrackingContext::new(
             Arc::clone(&tracker),
             Arc::new(HashMap::from([(
-                "deepseek".to_string(),
-                pricing_with_cache("deepseek-chat", 0.27, 0.027, 1.10),
+                "groq".to_string(),
+                pricing_with_cache("model-chat", 0.27, 0.027, 1.10),
             )])),
         );
         let usage = zeroclaw_providers::traits::TokenUsage {
@@ -737,7 +723,7 @@ mod tests {
         let runtime = tokio::runtime::Runtime::new().unwrap();
         let (total_tokens, cost_usd) = runtime
             .block_on(TOOL_LOOP_COST_TRACKING_CONTEXT.scope(Some(ctx), async {
-                record_tool_loop_cost_usage("deepseek", "deepseek-chat", &usage)
+                record_tool_loop_cost_usage("groq", "model-chat", &usage)
             }))
             .expect("cost usage");
 
@@ -770,8 +756,8 @@ mod tests {
         let ctx = ToolLoopCostTrackingContext::new(
             Arc::clone(&tracker),
             Arc::new(HashMap::from([(
-                "deepseek".to_string(),
-                pricing_with_cache("deepseek-chat", 0.27, 0.027, 1.10),
+                "groq".to_string(),
+                pricing_with_cache("model-chat", 0.27, 0.027, 1.10),
             )])),
         );
         let turn_usage = Arc::new(Mutex::new(TurnUsage::default()));
@@ -786,7 +772,7 @@ mod tests {
             .block_on(TOOL_LOOP_TURN_USAGE.scope(
                 Some(Arc::clone(&turn_usage)),
                 TOOL_LOOP_COST_TRACKING_CONTEXT.scope(Some(ctx), async {
-                    record_tool_loop_cost_usage("deepseek", "deepseek-chat", &usage)
+                    record_tool_loop_cost_usage("groq", "model-chat", &usage)
                 }),
             ))
             .expect("cost usage");

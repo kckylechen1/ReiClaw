@@ -622,9 +622,6 @@ fn render_model_provider_catalog_table() -> String {
     let category_title = |c: C| match c {
         C::Primary => "Primary",
         C::OpenAiCompatible => "OpenAI-compatible",
-        C::FastInference => "Fast inference",
-        C::ModelHosting => "Model hosting platforms",
-        C::ChineseAi => "Chinese AI",
         C::CloudEndpoint => "Cloud AI endpoints",
     };
     let providers = zeroclaw_providers::list_model_providers();
@@ -656,9 +653,6 @@ fn render_model_provider_fields() -> String {
     let category_title = |c: C| match c {
         C::Primary => "Primary",
         C::OpenAiCompatible => "OpenAI-compatible",
-        C::FastInference => "Fast inference",
-        C::ModelHosting => "Model hosting platforms",
-        C::ChineseAi => "Chinese AI",
         C::CloudEndpoint => "Cloud AI endpoints",
     };
     let providers = zeroclaw_providers::list_model_providers();

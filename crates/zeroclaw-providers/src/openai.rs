@@ -1555,11 +1555,11 @@ mod tests {
 
     #[test]
     fn responses_url_appends_responses_to_custom_base() {
-        let p = OpenAiResponsesModelProvider::builder("opencode")
-            .api_url("https://opencode.ai/zen/v1")
+        let p = OpenAiResponsesModelProvider::builder("custom")
+            .api_url("https://gateway.example.test/v1")
             .credential(None)
             .build();
-        assert_eq!(p.responses_url, "https://opencode.ai/zen/v1/responses");
+        assert_eq!(p.responses_url, "https://gateway.example.test/v1/responses");
     }
 
     #[test]

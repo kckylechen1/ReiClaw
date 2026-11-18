@@ -1189,9 +1189,9 @@ enum EstopSubcommands {
 
 #[derive(Subcommand, Debug)]
 enum AuthCommands {
-    /// Login with OAuth (OpenAI Codex, Gemini, or xAI)
+    /// Login with OAuth (OpenAI Codex or Gemini)
     Login {
-        /// ModelProvider (`openai-codex`, `gemini`, or `xai`)
+        /// ModelProvider (`openai-codex` or `gemini`)
         #[arg(long)]
         model_provider: String,
         /// Profile name (default: default)
@@ -1201,13 +1201,13 @@ enum AuthCommands {
         #[arg(long)]
         device_code: bool,
         /// Import an existing auth.json file instead of starting a new login flow.
-        /// Supports `openai-codex` (`~/.codex/auth.json`) and `xai` (`~/.grok/auth.json`).
+        /// Supports `openai-codex` (`~/.codex/auth.json`).
         #[arg(long, value_name = "PATH", conflicts_with = "device_code")]
         import: Option<PathBuf>,
     },
     /// Complete OAuth by pasting redirect URL or auth code
     PasteRedirect {
-        /// ModelProvider (`openai-codex`, `gemini`, or `xai`)
+        /// ModelProvider (`openai-codex` or `gemini`)
         #[arg(long)]
         model_provider: String,
         /// Profile name (default: default)
@@ -1243,7 +1243,7 @@ enum AuthCommands {
     },
     /// Refresh OAuth access token using refresh token
     Refresh {
-        /// ModelProvider (`openai-codex`, `gemini`, or `xai`)
+        /// ModelProvider (`openai-codex` or `gemini`)
         #[arg(long)]
         model_provider: String,
         /// Profile name or profile id

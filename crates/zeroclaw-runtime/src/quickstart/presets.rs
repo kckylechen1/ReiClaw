@@ -292,9 +292,7 @@ fn unbounded_runtime() -> RuntimeProfileConfig {
 #[must_use]
 pub fn recommended_runtime_profile(name: &str) -> Option<&'static str> {
     match name {
-        "lmstudio" | "llamacpp" | "sglang" | "vllm" | "osaurus" => {
-            Some(LOCAL_SMALL_RUNTIME_PRESET_NAME)
-        }
+        "lmstudio" | "llamacpp" | "osaurus" => Some(LOCAL_SMALL_RUNTIME_PRESET_NAME),
         _ => None,
     }
 }
@@ -510,7 +508,7 @@ mod tests {
             Some(LOCAL_SMALL_RUNTIME_PRESET_NAME),
         );
         assert_eq!(recommendation("ollama"), None);
-        assert_eq!(recommendation("atomic_chat"), None);
+        assert_eq!(recommendation("groq"), None);
         assert_eq!(recommendation("anthropic"), None);
     }
 

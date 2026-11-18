@@ -954,16 +954,16 @@ schema_version = 3
 api_key = "private-anthropic-key"
 [providers.models.openai.azure]
 model = "gpt-4o"
-[providers.models.glm.telnyx]
+[providers.models.groq.telnyx]
 api_key = "private-openrouter-key"
 [providers.models.gemini.gemini_cli]
 auth_mode = "o_auth"
 oauth_project = "retained-project"
 oauth_client_id = "private-client-id"
 oauth_client_secret = "private-client-secret"
-[providers.models.xai.kilocli]
-model = "grok"
-[providers.models.kilo.kilo_cli]
+[providers.models.llamacpp.kilocli]
+model = "retained-model"
+[providers.models.lmstudio.kilo_cli]
 model = "anthropic/claude-sonnet-4-6"
 [providers.models.custom.compatible]
 uri = "https://api.example.invalid/v1"
@@ -1044,11 +1044,11 @@ uri = "https://api.example.invalid/v1"
 
     #[test]
     fn retired_provider_families_block_all_current_selectors_without_credential_leaks() {
-        use crate::providers::{ModelProviders, RETIRED_MODEL_PROVIDER_NAMES};
-        for family in RETIRED_MODEL_PROVIDER_NAMES {
+        use crate::providers::{ModelProviders, retired_model_provider_names};
+        for family in retired_model_provider_names() {
             for body in [
                 format!(
-                    "[providers.models.{family}.private_alias]\napi_key = 'private-test-key'\n"
+                    "[providers.models.\"{family}\".private_alias]\napi_key = 'private-test-key'\n"
                 ),
                 format!("[agents.owner]\nmodel_provider = '{family}.private_alias'\n"),
                 format!("[agents.owner]\nclassifier_provider = '{family}.private_alias'\n"),
@@ -1065,14 +1065,14 @@ uri = "https://api.example.invalid/v1"
                     assert!(!message.contains("private_alias"));
                 }
             }
-            let raw = format!("[{family}.private_alias]\napi_key = 'private-test-key'\n");
+            let raw = format!("[\"{family}\".private_alias]\napi_key = 'private-test-key'\n");
             let error = toml::from_str::<ModelProviders>(&raw)
                 .unwrap_err()
                 .to_string();
             assert!(error.contains("is retired"));
             assert!(!error.contains("private-test-key"));
             let json =
-                serde_json::json!({(*family): {"private_alias": {"api_key": "private-test-key"}}});
+                serde_json::json!({family: {"private_alias": {"api_key": "private-test-key"}}});
             assert!(
                 serde_json::from_value::<ModelProviders>(json)
                     .unwrap_err()

@@ -782,89 +782,13 @@ fn custom_auth_style() {
     assert!(matches!(p.auth_header, AuthStyle::Custom(_)));
 }
 
-#[test]
-fn zhipu_jwt_produces_valid_three_part_token() {
-    let result = zhipu_jwt_bearer("testid.testsecret").unwrap();
-    assert!(result.starts_with("Bearer "));
-    let jwt = result.strip_prefix("Bearer ").unwrap();
-    let parts: Vec<&str> = jwt.split('.').collect();
-    assert_eq!(parts.len(), 3, "JWT must have 3 dot-separated parts: {jwt}");
-}
-
-#[test]
-fn zhipu_jwt_header_is_correct() {
-    use base64::engine::{Engine, general_purpose::URL_SAFE_NO_PAD};
-    let result = zhipu_jwt_bearer("myid.mysecret").unwrap();
-    let jwt = result.strip_prefix("Bearer ").unwrap();
-    let header_b64 = jwt.split('.').next().unwrap();
-    let header_bytes = URL_SAFE_NO_PAD.decode(header_b64).unwrap();
-    let header: serde_json::Value = serde_json::from_slice(&header_bytes).unwrap();
-    assert_eq!(header["alg"], "HS256");
-    assert_eq!(header["typ"], "JWT");
-    assert_eq!(header["sign_type"], "SIGN");
-}
-
-#[test]
-fn zhipu_jwt_payload_contains_api_key_and_timestamps() {
-    use base64::engine::{Engine, general_purpose::URL_SAFE_NO_PAD};
-    let result = zhipu_jwt_bearer("myapiid.mysecretkey").unwrap();
-    let jwt = result.strip_prefix("Bearer ").unwrap();
-    let payload_b64 = jwt.split('.').nth(1).unwrap();
-    let payload_bytes = URL_SAFE_NO_PAD.decode(payload_b64).unwrap();
-    let payload: serde_json::Value = serde_json::from_slice(&payload_bytes).unwrap();
-    assert_eq!(payload["api_key"], "myapiid");
-    assert!(payload["exp"].is_number());
-    assert!(payload["timestamp"].is_number());
-    // exp should be ~210s after timestamp
-    let ts = payload["timestamp"].as_u64().unwrap();
-    let exp = payload["exp"].as_u64().unwrap();
-    assert_eq!(exp - ts, 210_000);
-}
-
-#[test]
-fn zhipu_jwt_signature_is_verifiable() {
-    let secret = "testsecret123";
-    let credential = format!("testid.{secret}");
-    let result = zhipu_jwt_bearer(&credential).unwrap();
-    let jwt = result.strip_prefix("Bearer ").unwrap();
-    let parts: Vec<&str> = jwt.split('.').collect();
-    let signing_input = format!("{}.{}", parts[0], parts[1]);
-
-    // Verify HMAC-SHA256 signature
-    let key = ring::hmac::Key::new(ring::hmac::HMAC_SHA256, secret.as_bytes());
-    use base64::engine::{Engine, general_purpose::URL_SAFE_NO_PAD};
-    let sig_bytes = URL_SAFE_NO_PAD.decode(parts[2]).unwrap();
-    ring::hmac::verify(&key, signing_input.as_bytes(), &sig_bytes).expect("signature must verify");
-}
-
-#[test]
-fn zhipu_jwt_rejects_invalid_key_format() {
-    assert!(zhipu_jwt_bearer("no-dot-here").is_err());
-    assert!(zhipu_jwt_bearer("").is_err());
-}
-
-#[test]
-fn zhipu_jwt_auth_style_applies_correctly() {
-    let p = OpenAiCompatibleModelProvider::builder("test")
-        .display_name("Z.AI")
-        .base_url("https://api.z.ai/api/coding/paas/v4")
-        .credential(Some("testid.testsecret"))
-        .auth_style(AuthStyle::ZhipuJwt)
-        .build();
-    assert!(matches!(p.auth_header, AuthStyle::ZhipuJwt));
-}
-
 #[tokio::test]
 async fn all_compatible_providers_attempt_request_without_key() {
     let model_providers = vec![
-        make_model_provider("Venice", "http://127.0.0.1:1", None),
-        make_model_provider("Moonshot", "http://127.0.0.1:1", None),
-        make_model_provider("GLM", "http://127.0.0.1:1", None),
         make_model_provider("MiniMax", "http://127.0.0.1:1", None),
         make_model_provider("Groq", "http://127.0.0.1:1", None),
-        make_model_provider("Mistral", "http://127.0.0.1:1", None),
-        make_model_provider("xAI", "http://127.0.0.1:1", None),
-        make_model_provider("Astrai", "http://127.0.0.1:1", None),
+        make_model_provider("Ollama", "http://127.0.0.1:1", None),
+        make_model_provider("Custom", "http://127.0.0.1:1", None),
     ];
 
     for p in model_providers {

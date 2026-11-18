@@ -1199,8 +1199,8 @@ mod tests {
     fn typed_provider_catalog_keys_create_snake_config_sections() {
         let mut cfg = zeroclaw_config::schema::Config::default();
         let cases = [
-            ("providers.models", "atomic_chat"),
-            ("providers.models", "github_models"),
+            ("providers.models", "lmstudio"),
+            ("providers.models", "llamacpp"),
             ("providers.transcription", "local_whisper"),
         ];
 
@@ -1211,12 +1211,12 @@ mod tests {
         }
 
         assert!(
-            cfg.providers.models.atomic_chat.contains_key("default"),
-            "created Atomic Chat alias should land in the atomic_chat provider map",
+            cfg.providers.models.lmstudio.contains_key("default"),
+            "created LM Studio alias should land in the lmstudio provider map",
         );
         assert!(
-            cfg.providers.models.github_models.contains_key("default"),
-            "created GitHub Models alias should land in the github_models provider map",
+            cfg.providers.models.llamacpp.contains_key("default"),
+            "created llama.cpp alias should land in the llamacpp provider map",
         );
         assert!(
             cfg.providers

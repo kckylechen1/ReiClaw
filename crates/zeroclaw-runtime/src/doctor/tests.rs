@@ -8,9 +8,9 @@ fn collapse_model_probes_groups_identical_and_breaks_divergent() {
         ("ollama.a".to_string(), K(8)),
         ("ollama.b".to_string(), K(8)),
         ("ollama.c".to_string(), K(8)),
-        ("opencode.x".to_string(), K(18)),
-        ("opencode.y".to_string(), K(18)),
-        ("kilo.solo".to_string(), K(335)),
+        ("groq.x".to_string(), K(18)),
+        ("groq.y".to_string(), K(18)),
+        ("lmstudio.solo".to_string(), K(335)),
         ("openai.a".to_string(), K(10)),
         ("openai.b".to_string(), K(12)),
         (
@@ -25,10 +25,10 @@ fn collapse_model_probes_groups_identical_and_breaks_divergent() {
     assert_eq!(
         msgs,
         vec![
-            "ollama: 8 models",      // 3 identical aliases → collapsed to type
-            "opencode: 18 models",   // 2 identical → collapsed
-            "kilo.solo: 335 models", // single alias → kept per-alias
-            "openai.a: 10 models",   // divergent counts → broken out
+            "ollama: 8 models",          // 3 identical aliases → collapsed to type
+            "groq: 18 models",           // 2 identical → collapsed
+            "lmstudio.solo: 335 models", // single alias → kept per-alias
+            "openai.a: 10 models",       // divergent counts → broken out
             "openai.b: 12 models",
             "custom.unlisted: not supported", // single alias → kept
         ]
@@ -632,16 +632,16 @@ fn config_validation_warns_invalid_embedding_route_provider() {
 
 #[test]
 fn config_validation_surfaces_dangling_fallback_ref() {
-    use zeroclaw_config::schema::{ModelProviderConfig, NvidiaModelProviderConfig};
+    use zeroclaw_config::schema::{GroqModelProviderConfig, ModelProviderConfig};
 
     let mut config = Config::default();
-    config.providers.models.nvidia.insert(
-        "nvidia".to_string(),
-        NvidiaModelProviderConfig {
+    config.providers.models.groq.insert(
+        "primary".to_string(),
+        GroqModelProviderConfig {
             base: ModelProviderConfig {
-                model: Some("stepfun-ai/step-3.5-flash".into()),
+                model: Some("primary-model".into()),
                 fallback: vec![zeroclaw_config::providers::ModelProviderRef::new(
-                    "deepseek-ai/deepseek-v4-flash",
+                    "missing-fallback-model",
                 )],
                 ..Default::default()
             },
@@ -655,7 +655,7 @@ fn config_validation_surfaces_dangling_fallback_ref() {
             .contains("does not resolve to a configured providers.models entry")
             && item
                 .message
-                .contains("providers.models.nvidia.nvidia.fallback[0]")
+                .contains("providers.models.groq.primary.fallback[0]")
     });
     assert!(
         fallback_item.is_some(),

@@ -1,12 +1,6 @@
 //! Per-family catalog source table.
 
-use std::time::Duration;
-
 use anyhow::Result;
-use serde::Deserialize;
-
-const NEARAI_CATALOG_URL: &str = "https://cloud-api.near.ai/v1/model/list";
-const FETCH_TIMEOUT_SECS: u64 = 10;
 
 /// `(models.dev key, openrouter.ai vendor prefix)` for a family name.
 /// Either or both can be `None` for families with no public catalog
@@ -21,135 +15,23 @@ pub fn catalog_source_for(family: &str) -> Option<(Option<&'static str>, Option<
         "gemini" => (Some("google"), Some("google")),
         "minimax" => (Some("minimax"), Some("minimax")),
         "lmstudio" => (Some("lmstudio"), None),
-        "kilo" => (Some("kilo"), None),
         "ovh" => (Some("ovhcloud"), None),
-        // Compat families — mirrors the consts in CompatFamilySpec impls.
-        "moonshot" => (Some("moonshotai"), Some("moonshotai")),
         "qwen" => (Some("alibaba"), Some("qwen")),
-        "glm" => (Some("zhipuai"), None),
-        "zai" => (Some("zai"), Some("z-ai")),
-        "doubao" => (None, Some("bytedance")),
-        "hunyuan" => (None, Some("tencent")),
-        "qianfan" => (None, Some("baidu")),
         "groq" => (Some("groq"), None),
-        "mistral" => (Some("mistral"), Some("mistralai")),
-        "deepseek" => (Some("deepseek"), Some("deepseek")),
-        "together" => (Some("togetherai"), None),
-        "fireworks" => (Some("fireworks-ai"), None),
-        "cohere" => (Some("cohere"), Some("cohere")),
-        "perplexity" => (Some("perplexity"), Some("perplexity")),
-        "xai" => (Some("xai"), Some("x-ai")),
-        "cerebras" => (Some("cerebras"), None),
-        "deepinfra" => (Some("deepinfra"), None),
-        "huggingface" => (Some("huggingface"), None),
-        "ai21" => (None, Some("ai21")),
-        "reka" => (None, Some("rekaai")),
-        "baseten" => (Some("baseten"), None),
-        "nebius" => (Some("nebius"), None),
-        "friendli" => (Some("friendli"), None),
-        "stepfun" => (Some("stepfun"), Some("stepfun")),
-        "aihubmix" => (Some("aihubmix"), None),
-        "siliconflow" => (Some("siliconflow"), None),
-        "venice" => (Some("venice"), None),
-        // NEAR AI Cloud publishes its own no-auth catalog at /v1/model/list.
-        // `list_models_for_family` handles that path before using this tuple.
-        "nearai" => (None, None),
-        "novita" => (Some("novita-ai"), None),
-        "nvidia" => (Some("nvidia"), Some("nvidia")),
-        "vercel" => (Some("vercel"), None),
-        "cloudflare" => (Some("cloudflare-ai-gateway"), None),
-        "synthetic" => (Some("synthetic"), None),
-        "opencode" => (Some("opencode"), None),
-        "atomic_chat" => (Some("atomic-chat"), None),
         // Families with no public catalog: local-only servers (no public
         // /models index without a running server) or credential-required
         // APIs with no published catalog. Operator pastes a credential and
         // the provider's `/models` endpoint serves the list directly.
-        "sambanova" | "hyperbolic" | "anyscale" | "nscale" | "lepton" | "yi" | "baichuan"
-        | "avian" | "deepmyst" | "astrai" | "sglang" | "vllm" | "osaurus" | "litellm"
-        | "llamacpp" | "ollama" | "manifest" | "morph" | "github_models" | "upstage"
-        | "featherless" | "arcee" | "lambda_ai" | "inception" | "custom" => (None, None),
+        "osaurus" | "llamacpp" | "ollama" | "custom" => (None, None),
         _ => return None,
     };
     Some(pair)
-}
-
-#[derive(Debug, Deserialize)]
-struct NearaiCatalog {
-    #[serde(default)]
-    models: Vec<NearaiModel>,
-}
-
-#[derive(Debug, Deserialize)]
-struct NearaiModel {
-    #[serde(rename = "modelId")]
-    model_id: String,
-    #[serde(default)]
-    metadata: NearaiModelMetadata,
-}
-
-#[derive(Debug, Default, Deserialize)]
-struct NearaiModelMetadata {
-    #[serde(default)]
-    architecture: NearaiArchitecture,
-}
-
-#[derive(Debug, Default, Deserialize)]
-struct NearaiArchitecture {
-    #[serde(default, rename = "outputModalities")]
-    output_modalities: Vec<String>,
-}
-
-fn is_nearai_chat_model(model: &NearaiModel) -> bool {
-    // Brittle: relies on NEAR keeping the "privacy-filter" substring in
-    // audit-class model IDs. Revisit if NEAR exposes an architectural
-    // classifier (e.g. a `model_class` or `endpoint_type` field) in the
-    // catalog metadata.
-    if model.model_id.contains("privacy-filter") {
-        return false;
-    }
-
-    let arch = &model.metadata.architecture;
-    arch.output_modalities
-        .iter()
-        .any(|modality| modality == "text")
-}
-
-pub(crate) fn parse_nearai_catalog(bytes: &[u8]) -> Result<Vec<String>> {
-    let catalog: NearaiCatalog = serde_json::from_slice(bytes)?;
-    let mut ids: Vec<String> = catalog
-        .models
-        .iter()
-        .filter(|model| is_nearai_chat_model(model))
-        .map(|model| model.model_id.trim().to_string())
-        .filter(|id| !id.is_empty())
-        .collect();
-    ids.sort();
-    ids.dedup();
-    Ok(ids)
-}
-
-async fn list_nearai_models() -> Result<Vec<String>> {
-    let client = reqwest::Client::builder()
-        .timeout(Duration::from_secs(FETCH_TIMEOUT_SECS))
-        .build()?;
-    let response = client
-        .get(NEARAI_CATALOG_URL)
-        .send()
-        .await?
-        .error_for_status()?;
-    let bytes = response.bytes().await?;
-    parse_nearai_catalog(&bytes)
 }
 
 /// Probe the catalog for `family` without constructing a live provider.
 /// Returns the union of every known public catalog source. Errors if
 /// `family` is unknown or has no public catalog source set.
 pub async fn list_models_for_family(family: &str) -> Result<Vec<String>> {
-    if family == "nearai" {
-        return list_nearai_models().await;
-    }
-
     let Some((md_key, or_prefix)) = catalog_source_for(family) else {
         anyhow::bail!("unknown provider family {family:?}");
     };
@@ -270,9 +152,9 @@ mod tests {
 
     #[test]
     fn known_family_with_dual_sources_returns_both() {
-        let (md, or) = catalog_source_for("xai").expect("xai is canonical");
-        assert_eq!(md, Some("xai"));
-        assert_eq!(or, Some("x-ai"));
+        let (md, or) = catalog_source_for("openai").expect("openai is canonical");
+        assert_eq!(md, Some("openai"));
+        assert_eq!(or, Some("openai"));
     }
 
     #[test]
@@ -283,70 +165,10 @@ mod tests {
     }
 
     #[test]
-    fn nearai_family_uses_provider_catalog_source() {
-        let (md, or) = catalog_source_for("nearai").expect("nearai is canonical");
-        assert_eq!(md, None);
-        assert_eq!(or, None);
-    }
-
-    #[test]
-    fn parse_nearai_catalog_filters_to_chat_model_ids() {
-        let raw = r#"{
-            "models": [
-                {
-                    "modelId": "zai-org/GLM-5.1-FP8",
-                    "metadata": {
-                        "architecture": {
-                            "inputModalities": ["text"],
-                            "outputModalities": ["text"]
-                        }
-                    }
-                },
-                {
-                    "modelId": "openai/privacy-filter",
-                    "metadata": {
-                        "architecture": {
-                            "inputModalities": ["text"],
-                            "outputModalities": ["text"]
-                        }
-                    }
-                },
-                {
-                    "modelId": "Qwen/Qwen3-Embedding-0.6B",
-                    "metadata": {
-                        "architecture": {
-                            "inputModalities": ["text"],
-                            "outputModalities": ["embedding"]
-                        }
-                    }
-                },
-                {
-                    "modelId": "incomplete",
-                    "metadata": {
-                        "architecture": {
-                            "inputModalities": [],
-                            "outputModalities": []
-                        }
-                    }
-                }
-            ]
-        }"#;
-        let ids = parse_nearai_catalog(raw.as_bytes()).unwrap();
-        assert_eq!(ids, vec!["zai-org/GLM-5.1-FP8"]);
-    }
-
-    #[test]
     fn bespoke_family_with_only_models_dev() {
         let (md, or) = catalog_source_for("lmstudio").expect("lmstudio is canonical");
         assert_eq!(md, Some("lmstudio"));
         assert_eq!(or, None);
-    }
-
-    #[test]
-    fn bespoke_family_with_only_openrouter() {
-        let (md, or) = catalog_source_for("ai21").expect("ai21 is canonical");
-        assert_eq!(md, None);
-        assert_eq!(or, Some("ai21"));
     }
 
     #[test]
@@ -371,7 +193,7 @@ mod tests {
         let sorted = sort_model_catalog_for_chat(
             "openrouter",
             vec![
-                "ai21/jamba-mini".into(),
+                "vendor/plain-model".into(),
                 "openai/gpt-4.1".into(),
                 "some/image-model".into(),
                 "anthropic/claude-sonnet-4".into(),

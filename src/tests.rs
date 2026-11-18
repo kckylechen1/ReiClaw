@@ -1031,14 +1031,10 @@ fn agent_uses_provider_temperature_when_unset() {
 #[cfg(feature = "agent-runtime")]
 fn config_set_materializes_missing_typed_provider_alias() {
     let mut config = Config::default();
-    let path = "providers.models.deepseek.default.model";
+    let path = "providers.models.groq.default.model";
 
     assert!(
-        config
-            .providers
-            .models
-            .find("deepseek", "default")
-            .is_none(),
+        config.providers.models.find("groq", "default").is_none(),
         "fresh config should not already contain the requested provider alias"
     );
 
@@ -1047,21 +1043,21 @@ fn config_set_materializes_missing_typed_provider_alias() {
 
     assert!(created, "missing provider alias should be created");
     config
-        .set_prop_persistent(path, "deepseek-chat")
+        .set_prop_persistent(path, "groq-test-model")
         .expect("materialized path should be writable");
     assert_eq!(
         config
             .providers
             .models
-            .find("deepseek", "default")
+            .find("groq", "default")
             .and_then(|provider| provider.model.as_deref()),
-        Some("deepseek-chat")
+        Some("groq-test-model")
     );
 
     let known_paths: Vec<String> = config.prop_paths();
     let api_key_path = zeroclaw_config::helpers::resolve_field_path(
         &known_paths,
-        "providers.models.deepseek.default.api-key",
+        "providers.models.groq.default.api-key",
     );
     config
         .set_prop_persistent(&api_key_path, "sk-test-placeholder")
@@ -1070,7 +1066,7 @@ fn config_set_materializes_missing_typed_provider_alias() {
         config
             .providers
             .models
-            .find("deepseek", "default")
+            .find("groq", "default")
             .and_then(|provider| provider.api_key.as_deref()),
         Some("sk-test-placeholder")
     );

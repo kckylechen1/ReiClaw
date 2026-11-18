@@ -17,7 +17,7 @@ For bounded multi-step reasoning inside a single conversation, the `reasoning_su
 
 ## Hint-based model routes
 
-A narrower mechanism: `[[model_routes]]` lets an agent override the configured `model_provider` for prompts marked with a hint string. Useful when one agent should occasionally reach for a different model without spinning up a second agent. Each route entry carries a `hint` (the string a prompt must declare to fire it), a `model_provider` (the dotted `<type>.<alias>` profile to switch to, e.g. `deepseek.reasoner`), and a `model` (the provider-local model id, e.g. `deepseek-reasoner`). Configure routes through the gateway or `zeroclaw config set`; see the [Config reference](../reference/config.md#model_routes) for the field schema.
+A narrower mechanism: `[[model_routes]]` lets an agent override the configured `model_provider` for prompts marked with a hint string. Useful when one agent should occasionally reach for a different model without spinning up a second agent. Each route entry carries a `hint` (the string a prompt must declare to fire it), a `model_provider` (the dotted `<type>.<alias>` profile to switch to, e.g. `anthropic.reasoner`), and a `model` (the provider-local model id, e.g. `claude-opus-4-7`). Configure routes through the gateway or `zeroclaw config set`; see the [Config reference](../reference/config.md#model_routes) for the field schema.
 
 Routes fire for matching explicit hints or hints selected by the configured
 classifier. The default request path uses the agent's primary `model_provider`.

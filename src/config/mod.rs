@@ -37,25 +37,10 @@ pub use schema::ModelProviderConfig;
 // so tests + downstream binary callers can construct typed family entries
 // without reaching into `zeroclaw_config::schema` directly.
 pub use schema::{
-    Ai21ModelProviderConfig, AihubmixModelProviderConfig, AnthropicModelProviderConfig,
-    AnyscaleModelProviderConfig, AstraiModelProviderConfig, AvianModelProviderConfig,
-    BaichuanModelProviderConfig, BasetenModelProviderConfig, CerebrasModelProviderConfig,
-    CloudflareModelProviderConfig, CohereModelProviderConfig, CustomModelProviderConfig,
-    DeepinfraModelProviderConfig, DeepmystModelProviderConfig, DeepseekModelProviderConfig,
-    DoubaoModelProviderConfig, FireworksModelProviderConfig, FriendliModelProviderConfig,
-    GeminiModelProviderConfig, GlmModelProviderConfig, GroqModelProviderConfig,
-    HuggingfaceModelProviderConfig, HunyuanModelProviderConfig, HyperbolicModelProviderConfig,
-    LeptonModelProviderConfig, LitellmModelProviderConfig, LlamacppModelProviderConfig,
-    LmstudioModelProviderConfig, MinimaxModelProviderConfig, MistralModelProviderConfig,
-    MoonshotModelProviderConfig, NebiusModelProviderConfig, NovitaModelProviderConfig,
-    NscaleModelProviderConfig, NvidiaModelProviderConfig, OllamaModelProviderConfig,
-    OpenAIModelProviderConfig, OpencodeModelProviderConfig, OsaurusModelProviderConfig,
-    OvhModelProviderConfig, PerplexityModelProviderConfig, QianfanModelProviderConfig,
-    QwenModelProviderConfig, RekaModelProviderConfig, SambanovaModelProviderConfig,
-    SglangModelProviderConfig, SiliconflowModelProviderConfig, StepfunModelProviderConfig,
-    SyntheticModelProviderConfig, TogetherModelProviderConfig, VeniceModelProviderConfig,
-    VercelModelProviderConfig, VllmModelProviderConfig, XaiModelProviderConfig,
-    YiModelProviderConfig, ZaiModelProviderConfig,
+    AnthropicModelProviderConfig, CustomModelProviderConfig, GeminiModelProviderConfig,
+    GroqModelProviderConfig, LlamacppModelProviderConfig, LmstudioModelProviderConfig,
+    MinimaxModelProviderConfig, OllamaModelProviderConfig, OpenAIModelProviderConfig,
+    OsaurusModelProviderConfig, OvhModelProviderConfig, QwenModelProviderConfig,
 };
 pub use traits::HasPropKind;
 pub use traits::PropFieldInfo;

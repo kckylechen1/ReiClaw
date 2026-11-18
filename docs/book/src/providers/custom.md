@@ -3,14 +3,14 @@
 Three ways to add a provider ZeroClaw doesn't ship with:
 
 1. **Use the `custom` slot.** For any OpenAI-compatible endpoint not covered by an existing canonical slot.
-2. **Use the first-class local-server slots** (`lmstudio`, `llamacpp`, `sglang`, `vllm`, `osaurus`, `litellm`). Thin wrappers with sensible defaults.
+2. **Use the first-class local-server slots** (`lmstudio`, `llamacpp`, `osaurus`). Thin wrappers with sensible defaults.
 3. **Implement the `ModelProvider` trait** in Rust. For anything that's not OpenAI-compatible.
 
 ## OpenAI-compatible endpoint: use the `custom` slot
 
 If the service speaks OpenAI chat-completions, this is a config-only change. The `custom` slot requires `uri` (the family's endpoint enum has no default); reference it from an agent's `model_provider`.
 
-This is the same `OpenAiCompatibleModelProvider` runtime impl used by `groq`, `mistral`, `xai`, and every other vendor with its own canonical slot in the [catalog](./catalog.md). The difference is which family slot you use: `custom` is the catch-all for endpoints not represented by a vendor slot.
+This is the same `OpenAiCompatibleModelProvider` runtime impl used by `groq` and every other vendor with its own canonical slot in the [catalog](./catalog.md). The difference is which family slot you use: `custom` is the catch-all for endpoints not represented by a vendor slot.
 
 ## First-class local-inference servers
 
@@ -37,33 +37,9 @@ full set, derived from the schema:
 
 Other model families use different template variable names, check your model's chat template and set the appropriate key under `chat_template_kwargs`.
 
-### SGLang: slot `sglang`
+### LM Studio and Osaurus
 
-<div class="os-tabs-src">
-
-#### sh
-
-```sh
-python -m sglang.launch_server --model meta-llama/Llama-3.1-8B-Instruct --port 30000
-```
-
-</div>
-
-### vLLM: slot `vllm`
-
-<div class="os-tabs-src">
-
-#### sh
-
-```sh
-vllm serve meta-llama/Llama-3.1-8B-Instruct
-```
-
-</div>
-
-### LM Studio, Osaurus, LiteLLM
-
-Slots `lmstudio`, `osaurus`, `litellm` follow the same pattern, see the [catalog](./catalog.md).
+Slots `lmstudio` and `osaurus` follow the same pattern, see the [catalog](./catalog.md). A vLLM, SGLang, or LiteLLM server is reached through the `custom` slot with its URL in `uri`.
 
 ## Wire protocol: `wire_api = "responses"`
 
@@ -74,13 +50,7 @@ When set to `"responses"`, the provider is built as an `OpenAiResponsesModelProv
 - A **persisted** `providers.models.openai.<alias>` entry that omits `wire_api` deserializes as unset and stays on chat-completions.
 - A **bare** `model_provider = "openai"` reference (or a dotted ref to a nonexistent alias) has no config entry to read; it is built from the family fallback and stays on chat-completions. The responses default applies only when a slot is actually written to config.
 
-`wire_api` is honored by the bring-your-own-endpoint families where the wire is operator-configurable: `openai`, `llamacpp`, and `custom` (plus the generic openai-compatible path). Branded vendor slots (`groq`, `mistral`, `deepseek`, …) have a fixed wire protocol and ignore the field, with one exception: `opencode` honors `wire_api = "responses"` because OpenCode Zen serves both wires. With no `uri` override, the OpenCode responses route targets `https://opencode.ai/zen/v1/responses`:
-
-```toml
-[providers.models.opencode.default]
-model    = "big-pickle"
-wire_api = "responses"
-```
+`wire_api` is honored by the bring-your-own-endpoint families where the wire is operator-configurable: `openai`, `llamacpp`, and `custom` (plus the generic openai-compatible path). Branded vendor slots (`groq`, `anthropic`, …) have a fixed wire protocol and ignore the field.
 
 The setting governs both the primary agent path and delegate targets, so a delegate whose target alias declares `wire_api = "responses"` reaches the endpoint over the responses wire.
 

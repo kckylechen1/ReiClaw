@@ -31,7 +31,7 @@ Family-specific entries add their own typed fields on top of these shared fields
 For most families, the URL is resolved in this order:
 
 1. **Operator override**: `uri` field on the alias entry, if set.
-2. **Family endpoint**: the family's `*Endpoint` enum supplies the URL (e.g. `OpenAIEndpoint::Default` -> `https://api.openai.com/v1`). Multi-region families have an `endpoint` field on the alias entry that picks the variant (e.g. `endpoint = "cn"` for Moonshot).
+2. **Family endpoint**: the family's `*Endpoint` enum supplies the URL (e.g. `OpenAIEndpoint::Default` -> `https://api.openai.com/v1`). Multi-region families have an `endpoint` field on the alias entry that picks the variant (e.g. `endpoint = "cn"` for Qwen).
 3. **Templated families**: Azure takes typed inputs (`resource`, `deployment`, `api_version`) and substitutes them into the family's URI template. Missing fields fail loud at runtime.
 
 ## Family slots
@@ -127,7 +127,7 @@ warning; remove them. They are not automatically mapped to other settings.
 Configure context size on the Ollama server, and set supported shared alias
 fields such as `max_tokens` and `temperature` explicitly when needed.
 
-### Multi-region (Moonshot / Qwen / GLM / MiniMax / ...)
+### Multi-region (Qwen / MiniMax)
 
 One type per family; pick the region via the typed `endpoint` field on the alias entry.
 

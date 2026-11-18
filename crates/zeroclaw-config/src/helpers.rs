@@ -1117,10 +1117,10 @@ mod tests {
 
     #[test]
     fn resolve_field_path_canonicalizes_kebab_final_field_segments() {
-        let known = vec!["providers.models.deepseek.default.api_key".to_string()];
+        let known = vec!["providers.models.groq.default.api_key".to_string()];
         assert_eq!(
-            resolve_field_path(&known, "providers.models.deepseek.default.api-key"),
-            "providers.models.deepseek.default.api_key",
+            resolve_field_path(&known, "providers.models.groq.default.api-key"),
+            "providers.models.groq.default.api_key",
         );
     }
 

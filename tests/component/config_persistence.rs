@@ -20,13 +20,13 @@ fn config_default_validates_without_provider_profiles() {
 
 #[test]
 fn config_toml_roundtrip_preserves_provider() {
-    use zeroclaw::config::{DeepseekModelProviderConfig, ModelProviderConfig};
+    use zeroclaw::config::{GroqModelProviderConfig, ModelProviderConfig};
     let mut config = Config::default();
-    config.providers.models.deepseek.insert(
+    config.providers.models.groq.insert(
         "default".to_string(),
-        DeepseekModelProviderConfig {
+        GroqModelProviderConfig {
             base: ModelProviderConfig {
-                model: Some("deepseek-chat".into()),
+                model: Some("groq-test-model".into()),
                 temperature: Some(0.5),
                 ..Default::default()
             },
@@ -38,26 +38,22 @@ fn config_toml_roundtrip_preserves_provider() {
         .expect("TOML should round-trip through current parsing");
 
     assert!(
-        parsed
-            .providers
-            .models
-            .find("deepseek", "default")
-            .is_some(),
-        "deepseek.default entry should survive round-trip"
+        parsed.providers.models.find("groq", "default").is_some(),
+        "groq.default entry should survive round-trip"
     );
     assert_eq!(
         parsed
             .providers
             .models
-            .find("deepseek", "default")
+            .find("groq", "default")
             .and_then(|e| e.model.as_deref()),
-        Some("deepseek-chat")
+        Some("groq-test-model")
     );
     assert!(
         (parsed
             .providers
             .models
-            .find("deepseek", "default")
+            .find("groq", "default")
             .and_then(|e| e.temperature)
             .unwrap_or(0.7)
             - 0.5)

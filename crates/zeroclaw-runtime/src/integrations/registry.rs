@@ -111,17 +111,6 @@ mod tests {
     use zeroclaw_config::schema::{StreamMode, TelegramConfig};
 
     #[test]
-    fn registry_has_entries() {
-        let config = Config::default();
-        let entries = all_integrations(&config);
-        assert!(
-            entries.len() >= 30,
-            "Expected 30+ integrations, got {}",
-            entries.len()
-        );
-    }
-
-    #[test]
     fn all_categories_represented() {
         let config = Config::default();
         let entries = all_integrations(&config);

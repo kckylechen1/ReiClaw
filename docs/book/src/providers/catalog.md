@@ -26,18 +26,6 @@ OpenAI Codex subscription auth lives on the `openai` slot. Set `wire_api = "resp
 
 Google's Gemini API. Supports vision and pre-executed grounded search (see [Streaming](./streaming.md) for `PreExecutedToolCall` events).
 
-### Kilo AI Gateway: slot `kilo`
-
-```toml
-[providers.models.kilo.home]
-model   = "anthropic/claude-sonnet-4-6"
-api_key = "..."
-# endpoint = "gateway"  # default → https://api.kilo.ai/api/gateway
-```
-
-Cloud API via Kilo AI Gateway. Bearer-token auth with multiple model tiers (free, balanced, pro).
-The `/models` endpoint is public (`PUBLIC_MODEL_LISTING`), so model listing works without a credential. Because it is queried live, it is the source that carries pricing into the cost-rates editor. The shared models.dev catalog (`kilo` key) is only a fallback for when the live endpoint is unreachable, and it does not include pricing.
-
 ---
 
 ## OpenAI-compatible: Ollama
@@ -59,73 +47,15 @@ Slots with no fixed default need `uri` set on the alias entry (`custom` and mult
 
 For a worked example per family, see [Configuration](./configuration.md). If your vendor isn't listed, use the `custom` slot ([Custom providers](./custom.md)).
 
-### Worked examples: Morph, GitHub Models, Upstage, Featherless, Arcee, Lambda AI, Inception
-
-Each of these is a standard OpenAI-compatible slot: set `model` and `api_key`, leave
-`uri` off (the typed endpoint supplies it). None of them ship a public model index,
-so the model picker stays empty until you paste a credential. Once a key is set,
-ZeroClaw lists models from the provider's live `/models` endpoint. The model IDs
-below are illustrative; confirm the current catalog in the vendor dashboard.
-
-**Morph**: slot `morph`. Fast apply-edits models (`morph-v3-large`, `morph-v3-fast`, or
-`auto`). Key from the [Morph dashboard](https://morphllm.com).
-
-**GitHub Models**: slot `github_models` (alias `github-models`). OpenAI / Meta /
-Microsoft models behind a single GitHub Personal Access Token. Create a PAT with the
-**`models`** permission (fine-grained); a Copilot token is *not* the same credential.
-Model IDs are publisher-prefixed (e.g. `openai/gpt-4o`).
-
-**Upstage**: slot `upstage`. Solar Pro / Solar Mini (e.g. `solar-pro2`). Key from the
-[Upstage console](https://console.upstage.ai/api-keys).
-
-**Featherless**: slot `featherless`. Serverless open-weight models, addressed by their
-Hugging Face repo IDs (e.g. `meta-llama/Meta-Llama-3.1-8B-Instruct`). Key from
-[featherless.ai](https://featherless.ai).
-
-**Arcee**: slot `arcee`. Native models include `conductor`, `maestro`,
-`virtuoso-large`, `coder-large`, and `blitz`. Key from the
-[Arcee platform](https://www.arcee.ai). Arcee's Platform API uses the non-standard
-`/api/v1` base path; the typed endpoint already accounts for this, so still leave
-`uri` off.
-
-**Lambda AI**: slot `lambda_ai` (alias `lambda-ai`). Lambda's hosted inference (e.g.
-`hermes3-405b`). Key from the [Lambda Cloud](https://cloud.lambda.ai) API-keys page.
-
-**Inception**: slot `inception`. The Mercury diffusion-LLM family (`mercury-coder` and
-the newer `mercury-2`). Key from the
-[Inception platform](https://platform.inceptionlabs.ai).
-
-> Credentials come only from config (`api_key`) or the `--credential` override at run
-> time, these slots do **not** read a per-provider `*_API_KEY` environment variable.
-
-NEAR AI Cloud example:
-
-```toml
-[providers.models.nearai.tee]
-model   = "..."       # pick a modelId from https://cloud-api.near.ai/v1/model/list
-api_key = "..."
-```
-
-The `nearai` slot uses `https://cloud-api.near.ai/v1` by default and sends
-`Authorization: Bearer <api_key>`. To bridge an existing `NEARAI_API_KEY`
-shell variable into ZeroClaw's schema-mirror env surface, set
-`ZEROCLAW_providers__models__nearai__tee__api_key="$NEARAI_API_KEY"`.
-
 ---
 
 ## Multi-region families
 
-Several Chinese vendors expose distinct regional endpoints with different default models. Use one canonical slot and pick the region with the typed `endpoint` field on the alias entry.
-
-### Moonshot: slot `moonshot`
-
-Variants: `cn`, `intl`, `code`.
+Some vendors expose distinct regional endpoints with different default models. Use one canonical slot and pick the region with the typed `endpoint` field on the alias entry.
 
 ### Qwen / DashScope: slot `qwen`
 
 OAuth-backed Qwen accounts use the same slot with `auth_mode = "oauth"`.
-
-### GLM: slot `glm`
 
 ### MiniMax: slot `minimax`
 
@@ -136,14 +66,6 @@ api_key  = "..."
 endpoint = "intl"                            # variants: cn, intl
 ```
 
-### Z.AI: slot `zai`
-
-For Z.AI's Anthropic-compatible API, use `[providers.models.anthropic.zai]` with `uri = "https://api.z.ai/api/anthropic"` instead.
-
-### Doubao / Volcengine: slot `doubao`
-
-The remaining Chinese-region slots (`yi`, `hunyuan`, `qianfan`, `baichuan`) appear in the all-slots table above; select the region with the typed `endpoint` field on the alias entry.
-
 ---
 
 ## Routing layers
@@ -151,6 +73,89 @@ The remaining Chinese-region slots (`yi`, `hunyuan`, `qianfan`, `baichuan`) appe
 OpenRouter is reached through a `custom` (OpenAI-compatible) slot pointed at `https://openrouter.ai/api/v1`, not a dedicated family. The runtime still sees one endpoint; OpenRouter handles vendor fan-out behind that endpoint.
 
 For per-task routing, run multiple agents and let channels pick which agent handles which traffic, see [Routing](./routing.md). For a narrower in-config hint mechanism, use `[[model_routes]]`.
+
+---
+
+## Retired preset families
+
+These families were thin URL presets over the shared OpenAI-compatible client and no
+longer have a slot. Point a `custom` slot at the endpoint instead, with `uri` set to the
+former default below:
+
+```toml
+[providers.models.custom.home]
+uri     = "https://api.mistral.ai/v1"
+model   = "..."
+api_key = "..."
+```
+
+A config that still declares `[providers.models.<retired>.<alias>]`, references
+`<retired>.<alias>` from an agent, route, or fallback, or sets a
+`ZEROCLAW_providers__models__<retired>__...` override fails to load with an error that
+names the replacement. Keys and endpoints are never migrated automatically. `sglang`,
+`vllm`, and `litellm` were local-server presets: use `custom` (or `llamacpp`) with your
+server's own URL.
+
+| Retired family (and aliases) | `uri` for the `custom` slot |
+|---|---|
+| `vercel`, `vercel-ai` | `https://ai-gateway.vercel.sh/v1` |
+| `cloudflare`, `cloudflare-ai` | `https://gateway.ai.cloudflare.com/v1` |
+| `synthetic` | `https://api.synthetic.new/openai/v1` |
+| `opencode`, `opencode-zen`, `opencode-go` | `https://opencode.ai/zen/v1` |
+| `doubao`, `volcengine`, `ark`, `doubao-cn` | `https://ark.cn-beijing.volces.com/api/v3` |
+| `mistral` | `https://api.mistral.ai/v1` |
+| `deepseek` | `https://api.deepseek.com` |
+| `together`, `together-ai` | `https://api.together.xyz` |
+| `fireworks`, `fireworks-ai` | `https://api.fireworks.ai/inference/v1` |
+| `novita` | `https://api.novita.ai/openai` |
+| `perplexity` | `https://api.perplexity.ai` |
+| `cohere` | `https://api.cohere.com/compatibility` |
+| `sglang` | `http://localhost:30000/v1` |
+| `vllm` | `http://localhost:8000/v1` |
+| `astrai` | `https://as-trai.com/v1` |
+| `siliconflow`, `silicon-flow` | `https://api.siliconflow.com/v1` |
+| `aihubmix` | `https://aihubmix.com/v1` |
+| `litellm`, `lite-llm` | `http://localhost:4000/v1` |
+| `cerebras` | `https://api.cerebras.ai/v1` |
+| `sambanova` | `https://api.sambanova.ai/v1` |
+| `hyperbolic` | `https://api.hyperbolic.xyz/v1` |
+| `deepinfra`, `deep-infra` | `https://api.deepinfra.com/v1/openai` |
+| `huggingface`, `hf` | `https://router.huggingface.co/v1` |
+| `ai21`, `ai21-labs` | `https://api.ai21.com/studio/v1` |
+| `reka` | `https://api.reka.ai/v1` |
+| `baseten` | `https://inference.baseten.co/v1` |
+| `nscale` | `https://inference.api.nscale.com/v1` |
+| `anyscale` | `https://api.endpoints.anyscale.com/v1` |
+| `nebius` | `https://api.tokenfactory.nebius.com/v1` |
+| `friendli`, `friendliai` | `https://api.friendli.ai/serverless/v1` |
+| `lepton`, `lepton-ai` | `https://llama3-1-405b.lepton.run/api/v1` |
+| `manifest` | `https://app.manifest.build/v1` |
+| `morph` | `https://api.morphllm.com/v1` |
+| `github_models`, `github-models` | `https://models.github.ai/inference` |
+| `upstage` | `https://api.upstage.ai/v1` |
+| `featherless` | `https://api.featherless.ai/v1` |
+| `arcee` | `https://api.arcee.ai/api/v1` |
+| `lambda_ai`, `lambda-ai` | `https://api.lambda.ai/v1` |
+| `inception` | `https://api.inceptionlabs.ai/v1` |
+| `stepfun`, `step`, `stepfun-intl`, `step-intl` | `https://api.stepfun.ai/v1`<br>`https://api.stepfun.com/v1` |
+| `baichuan` | `https://api.baichuan-ai.com/v1` |
+| `yi`, `01ai`, `lingyiwanwu` | `https://api.lingyiwanwu.com/v1` |
+| `hunyuan`, `tencent` | `https://api.hunyuan.cloud.tencent.com/v1` |
+| `avian` | `https://api.avian.io/v1` |
+| `deepmyst`, `deep-myst` | `https://api.deepmyst.com/v1` |
+| `moonshot`, `kimi`, `kimi-cn`, `kimi-intl`, `kimi-global`, `kimi-code`, `kimi_coding`, `kimi_for_coding`, `moonshot-cn`, `moonshot-intl`, `moonshot-global` | `https://api.moonshot.ai/v1`<br>`https://api.moonshot.cn/v1`<br>`https://api.kimi.com/coding/v1` |
+| `venice` | `https://api.venice.ai` |
+| `nearai` | `https://cloud-api.near.ai/v1` |
+| `atomic_chat`, `atomic-chat` | `http://127.0.0.1:1337/v1` |
+| `zai`, `z.ai`, `zai-global`, `z.ai-global`, `zai-cn`, `z.ai-cn` | `https://api.z.ai/api/coding/paas/v4`<br>`https://open.bigmodel.cn/api/coding/paas/v4` |
+| `glm`, `zhipu`, `glm-global`, `zhipu-global`, `glm-cn`, `zhipu-cn`, `bigmodel` | `https://api.z.ai/api/paas/v4`<br>`https://open.bigmodel.cn/api/paas/v4` |
+| `nvidia`, `nvidia-nim`, `build.nvidia.com` | `https://integrate.api.nvidia.com/v1` |
+| `qianfan`, `baidu` | `https://qianfan.baidubce.com/v2` |
+| `kilo` | `https://api.kilo.ai/api/gateway` |
+| `xai`, `grok` | `https://api.x.ai/v1` |
+
+Two former behaviors have no `custom` equivalent: xAI sign-in through `zeroclaw auth`
+(use an `api_key` instead), and the `zai` / `glm` Zhipu JWT credential scheme.
 
 ---
 

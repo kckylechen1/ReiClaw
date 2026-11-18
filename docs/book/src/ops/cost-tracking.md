@@ -107,9 +107,9 @@ Behavior:
 - **Gateway is the primary source.** The provider's existing `/models` endpoint
   (the same one onboarding uses to list models) is parsed for per-model pricing.
   Gateways that publish prices there report them as per-token decimal strings
-  (OpenRouter's and Kilo's `pricing{prompt,completion,...}`), which are scaled
+  (OpenRouter's `pricing{prompt,completion,...}`), which are scaled
   to USD per 1M tokens. A gateway whose `/models` listing carries no pricing at
-  all (such as opencode zen, which lists model ids only) is covered by the
+  all (a gateway that lists model ids only) is covered by the
   models.dev fallback below. No second copy of the endpoint URL or credentials:
   they are read from the provider's existing config.
 - **models.dev fallback.** A model the gateway doesn't price (or a provider

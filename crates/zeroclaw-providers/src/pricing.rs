@@ -202,7 +202,7 @@ pub fn spawn_refresher(config: Arc<RwLock<Config>>) {
 /// the snapshot is keyed by, the gateway's model id to match, and the
 /// models.dev provider key to fall back to when the gateway carries no price.
 struct WantedModel {
-    /// Composite alias (`<type>.<alias>`, e.g. `kilo.primary`). The snapshot
+    /// Composite alias (`<type>.<alias>`, e.g. `groq.primary`). The snapshot
     /// is keyed by this, preserving the alias boundary so a non-opted-in alias
     /// cannot inherit prices from an opted-in same-family alias via the
     /// bare-family fallback.
@@ -519,7 +519,7 @@ mod tests {
         let mut snap = PriceSnapshot::new();
         // Keyed by provider family `<type>`, NOT the `<type>.<alias>` composite:
         // this is the bare name the cost path resolves to (see `provider_pricing`).
-        snap.entry("opencode".to_string()).or_default().insert(
+        snap.entry("custom".to_string()).or_default().insert(
             "minimax-m2.5".to_string(),
             ModelRates {
                 input_per_mtok: Some(0.3),
@@ -528,13 +528,13 @@ mod tests {
             },
         );
         // The cost path passes the bare family: direct hit.
-        let hit = lookup(&snap, "opencode", "minimax-m2.5").expect("family hit");
+        let hit = lookup(&snap, "custom", "minimax-m2.5").expect("family hit");
         assert_eq!(hit.input_per_mtok, Some(0.3));
         // A `<type>.<alias>` ref falls back to the bare family (provider_pricing parity).
-        assert!(lookup(&snap, "opencode.zen", "minimax-m2.5").is_some());
+        assert!(lookup(&snap, "custom.zen", "minimax-m2.5").is_some());
         // A recorded `vendor/slug` id degrades to the stored slug.
-        assert!(lookup(&snap, "opencode", "minimax/minimax-m2.5").is_some());
-        assert!(lookup(&snap, "opencode", "other-model").is_none());
+        assert!(lookup(&snap, "custom", "minimax/minimax-m2.5").is_some());
+        assert!(lookup(&snap, "custom", "other-model").is_none());
         assert!(lookup(&snap, "other", "minimax-m2.5").is_none());
     }
 
@@ -624,11 +624,11 @@ mod tests {
     #[test]
     fn assemble_gateway_wins_then_models_dev_fills_gaps() {
         let wanted = vec![
-            want("kilo.a", "minimax/m2.7", Some("kilo")), // priced by gateway
-            want("kilo.b", "only-on-mdev", Some("kilo")), // gateway blank → models.dev
-            want("kilo.c", "vendor/slug", Some("kilo")),  // suffix match on gateway
-            want("kilo.d", "nowhere", Some("kilo")),      // neither source
-            want("kilo.f", "partial", Some("kilo")),      // gateway in+out, mdev cache
+            want("groq.a", "minimax/m2.7", Some("groq")), // priced by gateway
+            want("groq.b", "only-on-mdev", Some("groq")), // gateway blank → models.dev
+            want("groq.c", "vendor/slug", Some("groq")),  // suffix match on gateway
+            want("groq.d", "nowhere", Some("groq")),      // neither source
+            want("groq.f", "partial", Some("groq")),      // gateway in+out, mdev cache
             want("x.e", "no-key", None),                  // no fallback key
         ];
         let mut gateway = HashMap::new();
@@ -648,29 +648,29 @@ mod tests {
             "partial".to_string(),
             full_rate(Some(9.9), Some(9.9), Some(0.5)),
         );
-        let models_dev = HashMap::from([("kilo".to_string(), md)]);
+        let models_dev = HashMap::from([("groq".to_string(), md)]);
 
-        // All 5 kilo aliases and the 1 x alias are in the wanted list (all opted
-        // in), so bare-family entries are added for "kilo" (5==5) but not "x"
+        // All 5 groq aliases and the 1 x alias are in the wanted list (all opted
+        // in), so bare-family entries are added for "groq" (5==5) but not "x"
         // (x.e priced nothing, so "x" never gets a non-empty family map).
-        let total = HashMap::from([("kilo".to_string(), 5usize), ("x".to_string(), 1usize)]);
+        let total = HashMap::from([("groq".to_string(), 5usize), ("x".to_string(), 1usize)]);
         let snap = assemble_snapshot(&gateway_results, &models_dev, &total);
 
-        // All aliases opted in → bare "kilo" entry exists (backward compat path).
-        assert_eq!(snap["kilo"]["minimax/m2.7"].input_per_mtok, Some(0.3));
-        assert_eq!(snap["kilo"]["only-on-mdev"].input_per_mtok, Some(0.5));
-        assert_eq!(snap["kilo"]["vendor/slug"].input_per_mtok, Some(0.7));
+        // All aliases opted in → bare "groq" entry exists (backward compat path).
+        assert_eq!(snap["groq"]["minimax/m2.7"].input_per_mtok, Some(0.3));
+        assert_eq!(snap["groq"]["only-on-mdev"].input_per_mtok, Some(0.5));
+        assert_eq!(snap["groq"]["vendor/slug"].input_per_mtok, Some(0.7));
         // Per-dimension merge: gateway wins input+output, models.dev backfills
         // ONLY the cache_read dimension the gateway left unset.
-        let partial = &snap["kilo"]["partial"];
+        let partial = &snap["groq"]["partial"];
         assert_eq!(partial.input_per_mtok, Some(2.0)); // gateway
         assert_eq!(partial.output_per_mtok, Some(4.0)); // gateway
         assert_eq!(partial.cached_input_per_mtok, Some(0.5)); // models.dev backfill
         // Neither source: absent from the family map (left at $0).
-        assert!(!snap["kilo"].contains_key("nowhere"));
+        assert!(!snap["groq"].contains_key("nowhere"));
         // Composite alias keys are also present.
-        assert_eq!(snap["kilo.a"]["minimax/m2.7"].input_per_mtok, Some(0.3));
-        assert_eq!(snap["kilo.b"]["only-on-mdev"].input_per_mtok, Some(0.5));
+        assert_eq!(snap["groq.a"]["minimax/m2.7"].input_per_mtok, Some(0.3));
+        assert_eq!(snap["groq.b"]["only-on-mdev"].input_per_mtok, Some(0.5));
         // The no-key case priced nothing; its composite key and bare "x" are absent.
         assert!(!snap.contains_key("x.e"));
         assert!(!snap.contains_key("x"));
@@ -693,36 +693,36 @@ mod tests {
     // composite lookup nor by the bare-family split_once fallback.
     #[test]
     fn alias_boundary_non_opted_in_alias_gets_no_live_pricing() {
-        // kilo.primary opted in; kilo.secondary did NOT.
-        // Total kilo aliases: 2. Only 1 opted in -> no bare "kilo" entry.
-        let wanted = vec![want("kilo.primary", "minimax-m2.7", Some("kilo"))];
+        // groq.primary opted in; groq.secondary did NOT.
+        // Total groq aliases: 2. Only 1 opted in -> no bare "groq" entry.
+        let wanted = vec![want("groq.primary", "minimax-m2.7", Some("groq"))];
         let mut gateway = HashMap::new();
         gateway.insert("minimax-m2.7".to_string(), rate(0.3));
         let gateway_results = vec![(wanted.as_slice(), gateway)];
         let models_dev = HashMap::new();
-        let total = HashMap::from([("kilo".to_string(), 2usize)]);
+        let total = HashMap::from([("groq".to_string(), 2usize)]);
 
         let snap = assemble_snapshot(&gateway_results, &models_dev, &total);
 
-        // kilo.primary (opted in) has composite rates.
+        // groq.primary (opted in) has composite rates.
         assert_eq!(
-            snap["kilo.primary"]["minimax-m2.7"].input_per_mtok,
+            snap["groq.primary"]["minimax-m2.7"].input_per_mtok,
             Some(0.3)
         );
-        // No bare "kilo" entry: mixed opt-in state means the bare-family lookup
-        // must not surface kilo.primary's rates to kilo.secondary.
+        // No bare "groq" entry: mixed opt-in state means the bare-family lookup
+        // must not surface groq.primary's rates to groq.secondary.
         assert!(
-            !snap.contains_key("kilo"),
+            !snap.contains_key("groq"),
             "bare-family key must not exist when not all aliases opted in"
         );
-        // A kilo.secondary composite lookup finds nothing (it never opted in).
+        // A groq.secondary composite lookup finds nothing (it never opted in).
         assert!(
-            lookup(&snap, "kilo.secondary", "minimax-m2.7").is_none(),
+            lookup(&snap, "groq.secondary", "minimax-m2.7").is_none(),
             "non-opted-in alias must not inherit prices via composite lookup"
         );
-        // A bare-family lookup for "kilo" also finds nothing.
+        // A bare-family lookup for "groq" also finds nothing.
         assert!(
-            lookup(&snap, "kilo", "minimax-m2.7").is_none(),
+            lookup(&snap, "groq", "minimax-m2.7").is_none(),
             "bare-family lookup must not return prices when only some aliases opted in"
         );
     }
@@ -733,8 +733,8 @@ mod tests {
     #[test]
     fn alias_boundary_two_opted_in_aliases_have_own_source_rates() {
         let wanted = [
-            want("kilo.primary", "minimax-m2.7", Some("kilo")),
-            want("kilo.secondary", "minimax-m2.7", Some("kilo")),
+            want("groq.primary", "minimax-m2.7", Some("groq")),
+            want("groq.secondary", "minimax-m2.7", Some("groq")),
         ];
         // Two gateway groups: primary sees $0.30/MTok, secondary sees $0.90/MTok.
         let mut gateway_a = HashMap::new();
@@ -746,37 +746,37 @@ mod tests {
         let secondary_slice = std::slice::from_ref(&wanted[1]);
         let gateway_results = vec![(primary_slice, gateway_a), (secondary_slice, gateway_b)];
         let models_dev = HashMap::new();
-        // Both aliases opted in (2 == 2 total) -> bare "kilo" entry is added too.
-        let total = HashMap::from([("kilo".to_string(), 2usize)]);
+        // Both aliases opted in (2 == 2 total) -> bare "groq" entry is added too.
+        let total = HashMap::from([("groq".to_string(), 2usize)]);
 
         let snap = assemble_snapshot(&gateway_results, &models_dev, &total);
 
         // Each alias retains its own gateway's rates in the composite slot.
         assert_eq!(
-            snap["kilo.primary"]["minimax-m2.7"].input_per_mtok,
+            snap["groq.primary"]["minimax-m2.7"].input_per_mtok,
             Some(0.3),
-            "kilo.primary must use its own gateway rate"
+            "groq.primary must use its own gateway rate"
         );
         assert_eq!(
-            snap["kilo.secondary"]["minimax-m2.7"].input_per_mtok,
+            snap["groq.secondary"]["minimax-m2.7"].input_per_mtok,
             Some(0.9),
-            "kilo.secondary must use its own gateway rate"
+            "groq.secondary must use its own gateway rate"
         );
         // Composite lookup preserves per-alias isolation.
         assert_eq!(
-            lookup(&snap, "kilo.primary", "minimax-m2.7").and_then(|r| r.input_per_mtok),
+            lookup(&snap, "groq.primary", "minimax-m2.7").and_then(|r| r.input_per_mtok),
             Some(0.3)
         );
         assert_eq!(
-            lookup(&snap, "kilo.secondary", "minimax-m2.7").and_then(|r| r.input_per_mtok),
+            lookup(&snap, "groq.secondary", "minimax-m2.7").and_then(|r| r.input_per_mtok),
             Some(0.9)
         );
-        // The bare "kilo" entry exists (all aliases opted in) and carries merged
+        // The bare "groq" entry exists (all aliases opted in) and carries merged
         // rates (first-wins per dimension); bare-family cost-path queries resolve.
         assert!(
-            snap.contains_key("kilo"),
+            snap.contains_key("groq"),
             "bare-family entry must exist when all aliases opted in"
         );
-        assert!(lookup(&snap, "kilo", "minimax-m2.7").is_some());
+        assert!(lookup(&snap, "groq", "minimax-m2.7").is_some());
     }
 }

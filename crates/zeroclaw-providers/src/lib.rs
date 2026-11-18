@@ -41,17 +41,12 @@ const MINIMAX_INTL_BASE_URL: &str = "https://api.minimax.io/v1";
 /// Operators with a custom OAuth app override via
 /// `[providers.models.minimax.<alias>] oauth_client_id = "..."`.
 const MINIMAX_OAUTH_DEFAULT_CLIENT_ID: &str = "78257093-7e40-4613-99e0-527b14b39113";
-const GLM_GLOBAL_BASE_URL: &str = "https://api.z.ai/api/paas/v4";
-const MOONSHOT_INTL_BASE_URL: &str = "https://api.moonshot.ai/v1";
 const QWEN_CN_BASE_URL: &str = "https://dashscope.aliyuncs.com/compatible-mode/v1";
 const QWEN_OAUTH_BASE_FALLBACK_URL: &str = QWEN_CN_BASE_URL;
 const QWEN_OAUTH_TOKEN_ENDPOINT: &str = "https://chat.qwen.ai/api/v1/oauth2/token";
 const QWEN_OAUTH_PLACEHOLDER: &str = "qwen-oauth";
 const QWEN_OAUTH_DEFAULT_CLIENT_ID: &str = "f0304373b74a44d2b584a3fb70ca9e56";
 const QWEN_OAUTH_CREDENTIAL_FILE: &str = ".qwen/oauth_creds.json";
-const ZAI_GLOBAL_BASE_URL: &str = "https://api.z.ai/api/coding/paas/v4";
-const QIANFAN_BASE_URL: &str = "https://qianfan.baidubce.com/v2";
-const VERCEL_AI_GATEWAY_BASE_URL: &str = "https://ai-gateway.vercel.sh/v1";
 
 pub fn is_minimax_intl_alias(name: &str) -> bool {
     matches!(
@@ -75,33 +70,6 @@ pub fn is_minimax_cn_alias(name: &str) -> bool {
 pub fn is_minimax_alias(name: &str) -> bool {
     is_minimax_intl_alias(name) || is_minimax_cn_alias(name)
 }
-pub fn is_glm_global_alias(name: &str) -> bool {
-    matches!(name, "glm" | "zhipu" | "glm-global" | "zhipu-global")
-}
-
-pub fn is_glm_cn_alias(name: &str) -> bool {
-    matches!(name, "glm-cn" | "zhipu-cn" | "bigmodel")
-}
-
-pub fn is_glm_alias(name: &str) -> bool {
-    is_glm_global_alias(name) || is_glm_cn_alias(name)
-}
-
-pub fn is_moonshot_intl_alias(name: &str) -> bool {
-    matches!(
-        name,
-        "moonshot-intl" | "moonshot-global" | "kimi-intl" | "kimi-global"
-    )
-}
-
-pub fn is_moonshot_cn_alias(name: &str) -> bool {
-    matches!(name, "moonshot" | "kimi" | "moonshot-cn" | "kimi-cn")
-}
-
-pub fn is_moonshot_alias(name: &str) -> bool {
-    is_moonshot_intl_alias(name) || is_moonshot_cn_alias(name)
-}
-
 pub fn is_qwen_cn_alias(name: &str) -> bool {
     matches!(name, "qwen" | "dashscope" | "qwen-cn" | "dashscope-cn")
 }
@@ -130,34 +98,6 @@ pub fn is_qwen_alias(name: &str) -> bool {
         || is_qwen_intl_alias(name)
         || is_qwen_us_alias(name)
         || is_qwen_oauth_alias(name)
-}
-
-pub fn is_zai_global_alias(name: &str) -> bool {
-    matches!(name, "zai" | "z.ai" | "zai-global" | "z.ai-global")
-}
-
-pub fn is_zai_cn_alias(name: &str) -> bool {
-    matches!(name, "zai-cn" | "z.ai-cn")
-}
-
-pub fn is_zai_alias(name: &str) -> bool {
-    is_zai_global_alias(name) || is_zai_cn_alias(name)
-}
-
-pub fn is_qianfan_alias(name: &str) -> bool {
-    matches!(name, "qianfan" | "baidu")
-}
-
-fn qianfan_base_url(api_url: Option<&str>) -> String {
-    api_url
-        .map(str::trim)
-        .filter(|value| !value.is_empty())
-        .map(ToString::to_string)
-        .unwrap_or_else(|| QIANFAN_BASE_URL.to_string())
-}
-
-pub fn is_doubao_alias(name: &str) -> bool {
-    matches!(name, "doubao" | "volcengine" | "ark" | "doubao-cn")
 }
 
 #[derive(Clone, Deserialize, Default)]
@@ -918,11 +858,13 @@ const KEY_PREFIX_MODEL_PROVIDERS: &[(&str, &str)] = &[
     ("sk-ant-", "anthropic"),
     ("sk-", "openai"),
     ("gsk_", "groq"),
+    // Credential-safety tombstones: retiring an adapter must not allow its
+    // vendor's key to be sent to a recognized retained provider. These names
+    // are all in `RETIRED_MODEL_PROVIDERS`, so a mismatch fails with the
+    // retirement error instead of forwarding the key.
     ("pplx-", "perplexity"),
     ("xai-", "xai"),
     ("nvapi-", "nvidia"),
-    // Credential-safety tombstone: retiring the adapter must not allow an
-    // old Telnyx key to be sent to a recognized retained provider.
     ("KEY-", "telnyx"),
 ];
 
@@ -1016,34 +958,10 @@ pub fn create_model_provider_for_alias_with_url(
 pub fn canonicalize_v2_model_provider_name(name: &str) -> &str {
     match name {
         // Vendor-canonical synonyms.
-        "grok" => "xai",
         "google" | "google-gemini" => "gemini",
-        "together-ai" => "together",
-        "fireworks-ai" => "fireworks",
-        "vercel-ai" => "vercel",
-        "cloudflare-ai" => "cloudflare",
-        "nvidia-nim" | "build.nvidia.com" => "nvidia",
         "lm-studio" => "lmstudio",
-        "lite-llm" => "litellm",
-        "hf" => "huggingface",
-        "01ai" | "lingyiwanwu" => "yi",
-        "tencent" => "hunyuan",
-        "baidu" => "qianfan",
         "ovhcloud" => "ovh",
-        "opencode-zen" => "opencode",
         "llama.cpp" => "llamacpp",
-        "deep-myst" => "deepmyst",
-        "silicon-flow" => "siliconflow",
-        "deep-infra" => "deepinfra",
-        "ai21-labs" => "ai21",
-        "friendliai" => "friendli",
-        "lepton-ai" => "lepton",
-        "lambda-ai" => "lambda_ai",
-        "github-models" => "github_models",
-        "step" => "stepfun",
-        // Moonshot / Kimi (regional + code variants fold to one family).
-        "kimi" | "kimi-cn" | "kimi-intl" | "kimi-global" | "kimi-code" | "kimi_coding"
-        | "kimi_for_coding" | "moonshot-cn" | "moonshot-intl" | "moonshot-global" => "moonshot",
         // Qwen / DashScope / Bailian.
         "qwen-cn"
         | "qwen-intl"
@@ -1060,10 +978,6 @@ pub fn canonicalize_v2_model_provider_name(name: &str) -> &str {
         | "bailian"
         | "aliyun-bailian"
         | "aliyun" => "qwen",
-        // GLM / Zhipu.
-        "zhipu" | "glm-global" | "zhipu-global" | "glm-cn" | "zhipu-cn" | "bigmodel" => "glm",
-        // Z.AI.
-        "z.ai" | "zai-global" | "z.ai-global" | "zai-cn" | "z.ai-cn" => "zai",
         // Minimax (cn/intl + oauth).
         "minimax-intl"
         | "minimax-io"
@@ -1076,14 +990,8 @@ pub fn canonicalize_v2_model_provider_name(name: &str) -> &str {
         | "minimax-oauth"
         | "minimax-oauth-global"
         | "minimax-oauth-cn" => "minimax",
-        // Doubao / Volcengine.
-        "volcengine" | "ark" | "doubao-cn" => "doubao",
-        // Stepfun-intl folds with a different uri at the schema layer.
-        "stepfun-intl" | "step-intl" => "stepfun",
         // Anthropic special folds.
         "claude-code" | "anthropic-custom" => "anthropic",
-        // OpenCode regional fold (alias differs at the schema layer).
-        "opencode-go" => "opencode",
         // Already canonical, or a name the factory's match arms can reject
         // with a useful error.
         _ => name,
@@ -1099,16 +1007,6 @@ fn split_v2_colon_url(name: &str) -> (&str, Option<&str>) {
         }
     }
     (name, None)
-}
-
-pub(crate) fn moonshot_code_base_url() -> &'static str {
-    <zeroclaw_config::schema::MoonshotEndpoint as zeroclaw_config::schema::ModelEndpoint>::uri(
-        &zeroclaw_config::schema::MoonshotEndpoint::Code,
-    )
-}
-
-fn is_legacy_kimi_code_alias(name: &str) -> bool {
-    matches!(name, "kimi-code" | "kimi_coding" | "kimi_for_coding")
 }
 
 /// Apply the config `vision` capability override to a freshly-constructed
@@ -1156,7 +1054,6 @@ fn create_model_provider_inner(
         }
     }
     let (split_name, split_url) = split_v2_colon_url(raw_name);
-    let legacy_kimi_code = is_legacy_kimi_code_alias(split_name);
     let api_url = api_url.or(split_url);
     let name = canonicalize_v2_model_provider_name(split_name);
     let provider_kind = options
@@ -1218,20 +1115,6 @@ fn create_model_provider_inner(
                     .map(str::trim)
                     .filter(|v| !v.is_empty())
             });
-
-    if legacy_kimi_code {
-        let base_url = match resolved_url {
-            Some(url) => url,
-            None => moonshot_code_base_url(),
-        };
-        return Ok(apply_vision_override(
-            factory::apply_compat_options(
-                factory::build_kimi_code_compat(alias, key, base_url),
-                options,
-            ),
-            options.vision,
-        ));
-    }
 
     factory::dispatch_family_factory(config, provider_kind, alias, key, resolved_url, options)
         .map(|provider| apply_vision_override(provider, options.vision))
@@ -1720,12 +1603,6 @@ pub enum ModelProviderCategory {
     Primary,
     /// OpenAI-compatible HTTP endpoints, each with its own canonical slot.
     OpenAiCompatible,
-    /// Low-latency inference endpoints.
-    FastInference,
-    /// Model-hosting / aggregation platforms.
-    ModelHosting,
-    /// Chinese AI model providers.
-    ChineseAi,
     /// Cloud-vendor AI endpoints.
     CloudEndpoint,
 }
@@ -1739,9 +1616,6 @@ impl ModelProviderCategory {
         match self {
             Self::Primary => "Primary",
             Self::OpenAiCompatible => "OpenAiCompatible",
-            Self::FastInference => "FastInference",
-            Self::ModelHosting => "ModelHosting",
-            Self::ChineseAi => "ChineseAi",
             Self::CloudEndpoint => "CloudEndpoint",
         }
     }
@@ -1750,14 +1624,7 @@ impl ModelProviderCategory {
     /// instead of hardcoding it.
     #[must_use]
     pub fn all() -> &'static [ModelProviderCategory] {
-        &[
-            Self::Primary,
-            Self::OpenAiCompatible,
-            Self::FastInference,
-            Self::ModelHosting,
-            Self::ChineseAi,
-            Self::CloudEndpoint,
-        ]
+        &[Self::Primary, Self::OpenAiCompatible, Self::CloudEndpoint]
     }
 }
 
@@ -1766,24 +1633,6 @@ impl ModelProviderCategory {
 /// multi-region, CLI shims).
 #[must_use]
 pub fn default_model_provider_url(name: &str) -> Option<&'static str> {
-    use factory::CompatFamilySpec;
-    use zeroclaw_config::schema::{
-        Ai21ModelProviderConfig, AihubmixModelProviderConfig, AnyscaleModelProviderConfig,
-        ArceeModelProviderConfig, AstraiModelProviderConfig, BaichuanModelProviderConfig,
-        BasetenModelProviderConfig, CerebrasModelProviderConfig, CloudflareModelProviderConfig,
-        CohereModelProviderConfig, DeepinfraModelProviderConfig, DeepseekModelProviderConfig,
-        DoubaoModelProviderConfig, FeatherlessModelProviderConfig, FireworksModelProviderConfig,
-        FriendliModelProviderConfig, GithubModelsModelProviderConfig,
-        HuggingfaceModelProviderConfig, HyperbolicModelProviderConfig,
-        InceptionModelProviderConfig, LambdaAiModelProviderConfig, LeptonModelProviderConfig,
-        LitellmModelProviderConfig, MistralModelProviderConfig, MorphModelProviderConfig,
-        NearaiModelProviderConfig, NebiusModelProviderConfig, NovitaModelProviderConfig,
-        NscaleModelProviderConfig, OpencodeModelProviderConfig, PerplexityModelProviderConfig,
-        RekaModelProviderConfig, SambanovaModelProviderConfig, SglangModelProviderConfig,
-        SiliconflowModelProviderConfig, SyntheticModelProviderConfig, TogetherModelProviderConfig,
-        UpstageModelProviderConfig, VercelModelProviderConfig, VllmModelProviderConfig,
-        YiModelProviderConfig,
-    };
     use zeroclaw_config::schema::{ModelEndpoint, OllamaEndpoint};
 
     match name {
@@ -1791,47 +1640,6 @@ pub fn default_model_provider_url(name: &str) -> Option<&'static str> {
         "openai" => Some(openai::BASE_URL),
         "ollama" => Some(OllamaEndpoint::default().uri()),
         "gemini" => Some(gemini::BASE_URL),
-        "vercel" => Some(<VercelModelProviderConfig as CompatFamilySpec>::DEFAULT_URL),
-        "cloudflare" => Some(<CloudflareModelProviderConfig as CompatFamilySpec>::DEFAULT_URL),
-        "synthetic" => Some(<SyntheticModelProviderConfig as CompatFamilySpec>::DEFAULT_URL),
-        "opencode" => Some(<OpencodeModelProviderConfig as CompatFamilySpec>::DEFAULT_URL),
-        "doubao" => Some(<DoubaoModelProviderConfig as CompatFamilySpec>::DEFAULT_URL),
-        "mistral" => Some(<MistralModelProviderConfig as CompatFamilySpec>::DEFAULT_URL),
-        "deepseek" => Some(<DeepseekModelProviderConfig as CompatFamilySpec>::DEFAULT_URL),
-        "together" => Some(<TogetherModelProviderConfig as CompatFamilySpec>::DEFAULT_URL),
-        "fireworks" => Some(<FireworksModelProviderConfig as CompatFamilySpec>::DEFAULT_URL),
-        "novita" => Some(<NovitaModelProviderConfig as CompatFamilySpec>::DEFAULT_URL),
-        "perplexity" => Some(<PerplexityModelProviderConfig as CompatFamilySpec>::DEFAULT_URL),
-        "cohere" => Some(<CohereModelProviderConfig as CompatFamilySpec>::DEFAULT_URL),
-        "sglang" => Some(<SglangModelProviderConfig as CompatFamilySpec>::DEFAULT_URL),
-        "vllm" => Some(<VllmModelProviderConfig as CompatFamilySpec>::DEFAULT_URL),
-        "astrai" => Some(<AstraiModelProviderConfig as CompatFamilySpec>::DEFAULT_URL),
-        "siliconflow" => Some(<SiliconflowModelProviderConfig as CompatFamilySpec>::DEFAULT_URL),
-        "aihubmix" => Some(<AihubmixModelProviderConfig as CompatFamilySpec>::DEFAULT_URL),
-        "litellm" => Some(<LitellmModelProviderConfig as CompatFamilySpec>::DEFAULT_URL),
-        "cerebras" => Some(<CerebrasModelProviderConfig as CompatFamilySpec>::DEFAULT_URL),
-        "sambanova" => Some(<SambanovaModelProviderConfig as CompatFamilySpec>::DEFAULT_URL),
-        "hyperbolic" => Some(<HyperbolicModelProviderConfig as CompatFamilySpec>::DEFAULT_URL),
-        "deepinfra" => Some(<DeepinfraModelProviderConfig as CompatFamilySpec>::DEFAULT_URL),
-        "huggingface" => Some(<HuggingfaceModelProviderConfig as CompatFamilySpec>::DEFAULT_URL),
-        "ai21" => Some(<Ai21ModelProviderConfig as CompatFamilySpec>::DEFAULT_URL),
-        "reka" => Some(<RekaModelProviderConfig as CompatFamilySpec>::DEFAULT_URL),
-        "baseten" => Some(<BasetenModelProviderConfig as CompatFamilySpec>::DEFAULT_URL),
-        "nscale" => Some(<NscaleModelProviderConfig as CompatFamilySpec>::DEFAULT_URL),
-        "anyscale" => Some(<AnyscaleModelProviderConfig as CompatFamilySpec>::DEFAULT_URL),
-        "nebius" => Some(<NebiusModelProviderConfig as CompatFamilySpec>::DEFAULT_URL),
-        "friendli" => Some(<FriendliModelProviderConfig as CompatFamilySpec>::DEFAULT_URL),
-        "lepton" => Some(<LeptonModelProviderConfig as CompatFamilySpec>::DEFAULT_URL),
-        "morph" => Some(<MorphModelProviderConfig as CompatFamilySpec>::DEFAULT_URL),
-        "github_models" => Some(<GithubModelsModelProviderConfig as CompatFamilySpec>::DEFAULT_URL),
-        "upstage" => Some(<UpstageModelProviderConfig as CompatFamilySpec>::DEFAULT_URL),
-        "featherless" => Some(<FeatherlessModelProviderConfig as CompatFamilySpec>::DEFAULT_URL),
-        "arcee" => Some(<ArceeModelProviderConfig as CompatFamilySpec>::DEFAULT_URL),
-        "lambda_ai" => Some(<LambdaAiModelProviderConfig as CompatFamilySpec>::DEFAULT_URL),
-        "inception" => Some(<InceptionModelProviderConfig as CompatFamilySpec>::DEFAULT_URL),
-        "nearai" => Some(<NearaiModelProviderConfig as CompatFamilySpec>::DEFAULT_URL),
-        "baichuan" => Some(<BaichuanModelProviderConfig as CompatFamilySpec>::DEFAULT_URL),
-        "yi" => Some(<YiModelProviderConfig as CompatFamilySpec>::DEFAULT_URL),
         _ => None,
     }
 }
@@ -1883,94 +1691,19 @@ pub fn list_model_providers() -> Vec<ModelProviderInfo> {
         &mut out,
         ModelProviderCategory::OpenAiCompatible,
         &[
-            ("venice", "Venice", false),
-            ("nearai", "NEAR AI Cloud", false),
-            ("vercel", "Vercel AI Gateway", false),
-            ("cloudflare", "Cloudflare AI", false),
-            ("moonshot", "Moonshot", false),
-            ("synthetic", "Synthetic", false),
-            ("opencode", "OpenCode", false),
-            ("zai", "Z.AI", false),
-            ("glm", "GLM (Zhipu)", false),
             ("minimax", "MiniMax", false),
-            ("qianfan", "Qianfan (Baidu)", false),
-            ("doubao", "Doubao (Volcengine)", false),
             ("qwen", "Qwen (DashScope / Qwen Code OAuth)", false),
             ("groq", "Groq", false),
-            ("mistral", "Mistral", false),
-            ("xai", "xAI (Grok)", false),
-            ("deepseek", "DeepSeek", false),
-            ("together", "Together AI", false),
-            ("fireworks", "Fireworks AI", false),
-            ("novita", "Novita AI", false),
-            ("perplexity", "Perplexity", false),
-            ("cohere", "Cohere", false),
-            ("kilo", "Kilo", false),
             ("lmstudio", "LM Studio", true),
             ("llamacpp", "llama.cpp server", true),
-            ("sglang", "SGLang", true),
-            ("vllm", "vLLM", true),
             ("osaurus", "Osaurus", true),
-            ("nvidia", "NVIDIA NIM", false),
-            ("siliconflow", "SiliconFlow", false),
-            ("aihubmix", "AiHubMix", false),
-            ("litellm", "LiteLLM", false),
-            ("atomic_chat", "Atomic Chat", true),
-            ("astrai", "Astrai", false),
-            ("deepmyst", "DeepMyst", false),
-            ("manifest", "Manifest", false),
-            ("morph", "Morph (Fast Apply)", false),
-            ("github_models", "GitHub Models", false),
-            ("upstage", "Upstage Solar", false),
-            ("featherless", "Featherless AI", false),
-            ("arcee", "Arcee AI", false),
-            ("lambda_ai", "Lambda AI", false),
-            ("inception", "Inception Labs (Mercury)", false),
             ("custom", "Custom (OpenAI-compatible)", false),
         ],
     );
     push_family(
         &mut out,
-        ModelProviderCategory::FastInference,
-        &[
-            ("cerebras", "Cerebras", false),
-            ("sambanova", "SambaNova", false),
-            ("hyperbolic", "Hyperbolic", false),
-        ],
-    );
-    push_family(
-        &mut out,
-        ModelProviderCategory::ModelHosting,
-        &[
-            ("deepinfra", "DeepInfra", false),
-            ("huggingface", "Hugging Face", false),
-            ("ai21", "AI21 Labs", false),
-            ("reka", "Reka", false),
-            ("baseten", "Baseten", false),
-            ("nscale", "Nscale", false),
-            ("anyscale", "Anyscale", false),
-            ("nebius", "Nebius Token Factory", false),
-            ("friendli", "Friendli AI", false),
-            ("lepton", "Lepton AI", false),
-        ],
-    );
-    push_family(
-        &mut out,
-        ModelProviderCategory::ChineseAi,
-        &[
-            ("stepfun", "Stepfun", false),
-            ("baichuan", "Baichuan", false),
-            ("yi", "01.AI (Yi)", false),
-            ("hunyuan", "Tencent Hunyuan", false),
-        ],
-    );
-    push_family(
-        &mut out,
         ModelProviderCategory::CloudEndpoint,
-        &[
-            ("ovh", "OVHcloud AI Endpoints", false),
-            ("avian", "Avian", false),
-        ],
+        &[("ovh", "OVHcloud AI Endpoints", false)],
     );
     debug_assert_eq!(
         out.iter()
@@ -2053,24 +1786,23 @@ pub async fn fetch_context_window(
     config: &zeroclaw_config::schema::ModelProviderConfig,
 ) -> Option<usize> {
     match provider_type {
-        "together" | "groq" | "fireworks" | "deepinfra" | "hyperbolic" | "anyscale" | "novita"
-        | "nebius" => fetch_openai_compatible_context_window(provider_type, config).await,
+        "groq" => {
+            fetch_openai_compatible_context_window("https://api.groq.com/openai/v1", config).await
+        }
         _ => None, // anthropic, openai, ollama, etc. don't expose it
     }
 }
 
 async fn fetch_openai_compatible_context_window(
-    provider_type: &str,
+    default_uri: &'static str,
     config: &zeroclaw_config::schema::ModelProviderConfig,
 ) -> Option<usize> {
     let client = reqwest::Client::new();
-    let default_uri = crate::factory::get_default_url(provider_type);
     let base_url = config
         .uri
         .as_deref()
         .filter(|s| !s.is_empty() && *s != "<unset>")
-        .or(default_uri)
-        .unwrap_or("");
+        .unwrap_or(default_uri);
     let url = format!("{}/models", base_url.trim_end_matches('/'));
     let mut req = client.get(&url);
     if let Some(key) = config.api_key.as_deref() {

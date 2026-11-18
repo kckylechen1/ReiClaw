@@ -456,6 +456,46 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn walker_refuses_retired_compat_family_env_override_naming_the_custom_replacement() {
+        let _guard = super::env_test_lock().await;
+        for (name, family, base_url) in [
+            (
+                "ZEROCLAW_providers__models__deepseek__private_alias__api_key",
+                "deepseek",
+                "https://api.deepseek.com",
+            ),
+            (
+                "ZEROCLAW_providers__models__github_models__private_alias__api_key",
+                "github_models",
+                "https://models.github.ai/inference",
+            ),
+            (
+                "ZEROCLAW_providers__models__xai__private_alias__api_key",
+                "xai",
+                "https://api.x.ai/v1",
+            ),
+            (
+                "ZEROCLAW_providers__models__moonshot__private_alias__api_key",
+                "moonshot",
+                "https://api.moonshot.ai/v1",
+            ),
+        ] {
+            let _value = EnvVarGuard::set(name, "private-test-value");
+            let mut config = Config::default();
+            let error = apply_env_overrides(&mut config).unwrap_err().to_string();
+            assert!(
+                error.contains(&format!("Model provider `{family}` is retired")),
+                "{name}: {error}"
+            );
+            assert!(error.contains("providers.models.custom.<alias>"), "{error}");
+            assert!(error.contains(&format!("uri = \"{base_url}\"")), "{error}");
+            assert!(!error.contains("private-test-value"));
+            assert!(!error.contains("private_alias"));
+            assert!(config.providers.models.iter_entries().next().is_none());
+        }
+    }
+
+    #[tokio::test]
     async fn walker_resolves_typed_family_alias_default() {
         let _guard = super::env_test_lock().await;
         let _v = EnvVarGuard::set(
