@@ -9,6 +9,7 @@ pub mod ask_user;
 pub mod backup_tool;
 pub mod content_search;
 pub mod data_management;
+pub mod episode_read;
 pub mod escalate;
 pub mod file_download;
 pub mod file_edit;
@@ -44,6 +45,7 @@ pub mod note_owner_correction;
 pub mod pipeline;
 pub mod propose_soul_change;
 pub mod screenshot;
+pub mod session_search;
 pub mod sessions;
 pub mod tachi_admission;
 pub mod tachi_delegation;
@@ -60,6 +62,7 @@ pub const MEMORY_TOOL_NAMES: &[&str] = &[
     "memory_forget",
     "memory_export",
     "memory_purge",
+    "episode_read",
 ];
 
 #[cfg(test)]
@@ -90,6 +93,7 @@ mod memory_tool_names_guard {
                 memory.clone(),
                 security.clone(),
             )),
+            Box::new(episode_read::EpisodeReadTool::new(memory.clone(), "none")),
         ];
         let actual: BTreeSet<&str> = tools.iter().map(|t| t.name()).collect();
         let listed: BTreeSet<&str> = MEMORY_TOOL_NAMES.iter().copied().collect();

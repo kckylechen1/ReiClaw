@@ -159,3 +159,15 @@ tool-content-search-capture-limit = [Search stopped at the capture limit; result
 tool-content-search-resource-limit = [Search stopped at a resource limit; results may be incomplete]
 tool-content-search-no-scanned-matches = No matches found in scanned content.
 tool-content-search-cancelled = Search cancelled.
+
+# Foreground context drill-down tools (session_search, episode_read).
+tool-session-search = Search this agent's own persisted session transcripts by keyword. Returns matching snippets with message_id, timestamp, and chronology warnings when newer turns exist so you verify final outcomes instead of intermediate attempts.
+tool-session-search-param-query = Keywords to search for in your own persisted session transcripts.
+tool-session-search-param-session-key = Optional session key owned by this agent to narrow the search.
+tool-session-search-param-limit = Max hits to return (default: 10, max: 50).
+tool-episode-read = Read non-superseded sleep memory episodes for this agent within an optional RFC 3339 time window or session, optionally including recent daily digests. Superseded episodes are excluded; inspect newer turns before treating early attempts as settled outcomes.
+tool-episode-read-param-since = Optional RFC 3339 lower bound on episode ended_at.
+tool-episode-read-param-until = Optional RFC 3339 upper bound on episode ended_at.
+tool-episode-read-param-session-id = Optional session key filter.
+tool-episode-read-param-limit = Max episodes to return (default: 5, max: 25).
+tool-episode-read-param-include-daily-digests = Set true to also include recent daily digest summaries.
