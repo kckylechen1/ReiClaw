@@ -37,7 +37,11 @@ fn catalog_message<'a>(catalog: &'a str, key: &str) -> &'a str {
 }
 
 fn write_locale_config(dir: &Path, locale: &str) {
-    std::fs::write(dir.join("config.toml"), format!("locale = \"{locale}\"\n")).unwrap();
+    std::fs::write(
+        dir.join("config.toml"),
+        format!("schema_version = 3\nlocale = \"{locale}\"\n"),
+    )
+    .unwrap();
 }
 
 fn help_stdout<I, S>(args: I) -> String

@@ -269,7 +269,7 @@ impl HttpRequestTool {
                 config_path.display()
             ))
         })?;
-        let config: zeroclaw_config::schema::Config = toml::from_str(&contents).map_err(|e| {
+        let config = zeroclaw_config::current::parse_current(&contents).map_err(|e| {
             anyhow::Error::msg(format!(
                 "Failed to parse config file {} for auth_secret '{secret_name}': {e}",
                 config_path.display()
@@ -826,7 +826,7 @@ mod tests {
             let address = listener.local_addr().unwrap();
             let tmp = TempDir::new().unwrap();
             let config_path = tmp.path().join("config.toml");
-            std::fs::write(&config_path, format!("[http_request.secrets]\napi_token = \"Bearer scoped-fixture\"\n[http_request.auth_secret_policies.api_token]\n{policy}\n")).unwrap();
+            std::fs::write(&config_path, format!("schema_version = 3\n[http_request.secrets]\napi_token = \"Bearer scoped-fixture\"\n[http_request.auth_secret_policies.api_token]\n{policy}\n")).unwrap();
             let tool = HttpRequestTool::new_with_config(
                 Arc::new(SecurityPolicy {
                     autonomy: AutonomyLevel::Supervised,
@@ -971,7 +971,7 @@ mod tests {
             false,
         )
         .unwrap();
-        std::fs::write(&path, "[http_request.secrets]\napi_token = \"Bearer scoped-fixture\"\n[http_request.auth_secret_policies.api_token]\nallowed_hosts = [\"API.EXAMPLE.COM\"]\n").unwrap();
+        std::fs::write(&path, "schema_version = 3\n[http_request.secrets]\napi_token = \"Bearer scoped-fixture\"\n[http_request.auth_secret_policies.api_token]\nallowed_hosts = [\"API.EXAMPLE.COM\"]\n").unwrap();
         assert_eq!(
             tool.resolve_auth_secret("api_token", "api.example.com")
                 .unwrap(),
@@ -985,7 +985,7 @@ mod tests {
         ] {
             assert!(tool.resolve_auth_secret("api_token", host).is_err());
         }
-        std::fs::write(&path, "[http_request.secrets]\napi_token = \"Bearer replaced-fixture\"\n[http_request.auth_secret_policies.api_token]\nallowed_hosts = []\n").unwrap();
+        std::fs::write(&path, "schema_version = 3\n[http_request.secrets]\napi_token = \"Bearer replaced-fixture\"\n[http_request.auth_secret_policies.api_token]\nallowed_hosts = []\n").unwrap();
         assert!(
             tool.resolve_auth_secret("api_token", "api.example.com")
                 .is_err()
@@ -1025,6 +1025,8 @@ mod tests {
         std::fs::write(
             &config_path,
             r#"
+schema_version = 3
+
 [http_request.secrets]
 api_token = "Bearer from-secret"
 "#,
@@ -1052,6 +1054,8 @@ api_token = "Bearer from-secret"
         std::fs::write(
             &config_path,
             r#"
+schema_version = 3
+
 [http_request.secrets]
 api_token = "Bearer from-disk"
 "#,
@@ -1088,6 +1092,8 @@ api_token = "Bearer from-disk"
         std::fs::write(
             &config_path,
             r#"
+schema_version = 3
+
 [http_request.secrets]
 api_token = "${ZEROCLAW_TEST_HTTP_REQUEST_SECRET}"
 "#,
@@ -1118,6 +1124,8 @@ api_token = "${ZEROCLAW_TEST_HTTP_REQUEST_SECRET}"
         std::fs::write(
             &config_path,
             r#"
+schema_version = 3
+
 [http_request.secrets]
 api_token = "${ZEROCLAW_TEST_HTTP_REQUEST_MISSING_SECRET}"
 "#,
@@ -1159,6 +1167,8 @@ api_token = "${ZEROCLAW_TEST_HTTP_REQUEST_MISSING_SECRET}"
             &config_path,
             format!(
                 r#"
+schema_version = 3
+
 [http_request.secrets]
 api_token = "{encrypted}"
 "#
@@ -1206,6 +1216,8 @@ api_token = "{encrypted}"
             &config_path,
             format!(
                 r#"
+schema_version = 3
+
 [http_request.secrets]
 api_token = "{encrypted}"
 "#
@@ -1267,6 +1279,8 @@ api_token = "{encrypted}"
         std::fs::write(
             &config_path,
             r#"
+schema_version = 3
+
 [http_request.secrets]
 api_token = "Bearer from-secret"
 "#,

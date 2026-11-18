@@ -1,8 +1,4 @@
-// Historical schema typed lenses for migration. Each module is frozen after
-// its corresponding version ships; only their `migrate(self) -> ...` methods
-// are referenced at runtime by `crate::migration`.
-pub mod v1;
-pub mod v2;
+//! Current configuration declarations and typed accessors.
 
 use crate::load::default_path_under_config_dir;
 pub use crate::load::{
@@ -133,7 +129,10 @@ pub struct Config {
     #[serde(skip)]
     pub loaded_from: Option<PathBuf>,
     /// Config file schema version.
-    #[serde(default = "default_schema_version")]
+    #[serde(
+        default = "default_schema_version",
+        deserialize_with = "deserialize_current_schema_version"
+    )]
     pub schema_version: u32,
 
     /// All configured provider profiles, grouped by category under a
@@ -524,7 +523,7 @@ pub struct Config {
     #[serde(
         default,
         skip_serializing,
-        deserialize_with = "crate::migration::deserialize_retired_sop_config"
+        deserialize_with = "crate::current::deserialize_retired_sop_config"
     )]
     #[cfg_attr(feature = "schema-export", schemars(skip))]
     pub sop: HashMap<String, ()>,
@@ -4048,10 +4047,26 @@ pub const TEMPERATURE_RANGE: std::ops::RangeInclusive<f64> = 0.0..=2.0;
 /// returns `None`, rather than echoing this value as the model's real capacity.
 pub const UNCONFIGURED_CONTEXT_WINDOW_FALLBACK: usize = 32_000;
 
-/// Defaults to 0 so configs without an explicit `schema_version` are recognized
-/// as pre-versioning and get migrated.
+/// Partial field probes use current defaults. Whole-file entry points check
+/// that the raw input explicitly declared the supported version before serde.
 fn default_schema_version() -> u32 {
-    0
+    crate::current::CURRENT_SCHEMA_VERSION
+}
+
+/// Property/JSON edits must not create a live version that persistence would
+/// silently restamp. The same guard also applies to typed direct deserialization.
+fn deserialize_current_schema_version<'de, D>(deserializer: D) -> Result<u32, D::Error>
+where
+    D: serde::Deserializer<'de>,
+{
+    let version = u32::deserialize(deserializer)?;
+    if version != crate::current::CURRENT_SCHEMA_VERSION {
+        return Err(serde::de::Error::custom(format!(
+            "schema_version {version} is unsupported; only schema_version {} is accepted",
+            crate::current::CURRENT_SCHEMA_VERSION
+        )));
+    }
+    Ok(version)
 }
 
 /// Per-channel reply-pacing accessor. Implemented by every `*Config`
@@ -8362,8 +8377,7 @@ impl Default for WebhookAuditConfig {
 // All policy fields live on per-agent `[risk_profiles.<alias>]` entries
 // (see `RiskProfileConfig` below). `Config::active_risk_profile(agent_alias)`
 // resolves the active profile for any callsite (agent-driven or non-agent
-// contexts). Configs from older schema versions are folded into
-// `risk_profiles.default` by the migration in `schema/v2.rs`.
+// contexts). A missing alias is not synthesized during loading.
 
 pub fn default_auto_approve() -> Vec<String> {
     vec![
@@ -9686,7 +9700,7 @@ pub struct ChannelsConfig {
     #[nested]
     pub email: HashMap<String, crate::scattered_types::EmailConfig>,
     /// MQTT SOP listener instances — RETIRED. The section now
-    /// fails config parse with the migration message instead of silently
+    /// fails config parse with the retirement message instead of silently
     /// no-op'ing. Field removed with the run-side config sweep.
     #[serde(
         default,
@@ -9696,7 +9710,7 @@ pub struct ChannelsConfig {
     #[cfg_attr(feature = "schema-export", schemars(skip))]
     pub mqtt: HashMap<String, ()>,
     /// Filesystem SOP listener instances — RETIRED. The section
-    /// now fails config parse with the migration message instead of silently
+    /// now fails config parse with the retirement message instead of silently
     /// no-op'ing. Field removed with the run-side config sweep.
     #[serde(
         default,
@@ -10965,7 +10979,7 @@ impl Default for Config {
             degraded_sections: Vec::new(),
             retired_surface_warnings: Vec::new(),
             loaded_from: None,
-            schema_version: crate::migration::CURRENT_SCHEMA_VERSION,
+            schema_version: crate::current::CURRENT_SCHEMA_VERSION,
             providers: crate::providers::Providers::default(),
             model_routes: Vec::new(),
             embedding_routes: Vec::new(),

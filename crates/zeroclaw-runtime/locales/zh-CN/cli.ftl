@@ -39,7 +39,8 @@ cli-config-list-about = 列出所有配置属性及其当前值
 cli-config-get-about = 获取配置属性值
 cli-config-set-about = 设置配置属性（密钥字段会自动提示进行掩码输入）
 cli-config-init-about = 使用默认值初始化未配置的部分（enabled=false）
-cli-config-migrate-about = 将磁盘上的 config.toml 迁移到当前架构版本（保留注释）
+cli-config-validate-about = 校验当前 config.toml，不修改文件
+cli-config-generate-about = 生成当前支持的配置示例
 cli-service-install-about = 安装守护进程服务单元以实现自动启动和重启
 cli-service-start-about = 启动守护进程服务
 cli-service-stop-about = 停止守护进程服务
@@ -575,9 +576,9 @@ cli-desktop-not-installed = 未安装 ZeroClaw 配套应用。
 cli-desktop-blurb1 = 该配套应用是一个轻量级菜单栏应用，
 cli-desktop-blurb2 = 它连接到与 CLI 相同的网关。
 cli-config-all-configured = 所有部分均已配置。
-cli-config-schema-current = 配置已为当前架构版本。
+cli-config-valid = 配置有效。
 cli-config-applied-ops = 已应用 {$count} 个操作：
-cli-config-section-degraded = 警告：{$path} 中的配置部分 `{$section}` 格式不正确，本次运行已重置为默认值。该部分中的值不会生效。请运行 `zeroclaw config migrate` 查看解析错误，然后修复文件。
+cli-config-section-degraded = 警告：{$path} 中的配置部分 `{$section}` 格式不正确，本次运行已重置为默认值。该部分中的值不会生效。请运行 `zeroclaw config validate` 查看解析错误，然后修复文件。
 cli-estop-resume-done = 急停恢复已完成。
 cli-estop-engaged = 急停已启用。
 cli-estop-status = 急停状态：
@@ -593,7 +594,6 @@ cli-config-secret-set = {$path} 已设置（加密密钥——不显示值）
 cli-config-secret-unset = {$path} 未设置（加密密钥）
 cli-config-updated = {$path} 已更新。
 cli-config-review-hint = 运行 `zeroclaw config list` 进行查看，然后设置必填字段。
-cli-config-backed-up = 已备份至 {$path}
 cli-estop-domains-none = {"  "}domain_blocks:  （无）
 cli-estop-domains = {"  "}domain_blocks:  {$v}
 cli-estop-tools-none = {"  "}tool_freeze:    （无）
@@ -782,8 +782,8 @@ cli-doctor-context-window-zero = {$provider_ref}：context_window 为 0（无效
 cli-doctor-context-window-unset = {$provider_ref}：未设置 context_window — 选择此配置时将使用 {$fallback} 个令牌的回退值；该值可能远低于模型的实际上限；请在此配置中设置 context_window
 
 # ── Degraded config sections (doctor diagnose, #8835) ──
-cli-doctor-degraded-security = 安全关键配置节 `{$path}` 无效，已重置为默认值以便守护进程启动；当前运行的安全态势可能弱于预期。运行 `zeroclaw config migrate` 查看解析错误，然后修复该文件。
-cli-doctor-degraded-section = 配置节 `{$path}` 格式错误，已重置为默认值；该节中的值当前不生效。运行 `zeroclaw config migrate` 查看解析错误，然后修复该文件。
+cli-doctor-degraded-security = 安全关键配置节 `{$path}` 无效，已重置为默认值以便守护进程启动；当前运行的安全态势可能弱于预期。运行 `zeroclaw config validate` 查看解析错误，然后修复该文件。
+cli-doctor-degraded-section = 配置节 `{$path}` 格式错误，已重置为默认值；该节中的值当前不生效。运行 `zeroclaw config validate` 查看解析错误，然后修复该文件。
 
 channel-runtime-task-pref-invalid = 任务偏好无效。用法：/task-pref <value|goal|preference|habit|constraint> <semantic-key> <statement...>
 channel-runtime-task-pref-set = 已记录仅本会话生效的任务偏好：{$kind}：{$statement}

@@ -171,17 +171,32 @@ pub const RETIRED_MODEL_PROVIDER_NAMES: &[&str] = &[
     "openrouter",
 ];
 
+/// A pre-write configuration refusal. Callers must not restore an earlier
+/// snapshot after this error: the guard has not changed the on-disk file.
+#[derive(Debug)]
+pub struct RetiredModelProviderError(&'static str);
+
+impl std::fmt::Display for RetiredModelProviderError {
+    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(
+            formatter,
+            "Model provider `{}` is retired. Remove its configuration and explicitly \
+             configure a supported provider; credentials and endpoints are not migrated. \
+             The `gemini` API provider (including Gemini CLI OAuth credentials) and `kilo` \
+             API gateway remain supported.",
+            self.0
+        )
+    }
+}
+
+impl std::error::Error for RetiredModelProviderError {}
+
 pub fn reject_retired_model_provider(name: &str) -> anyhow::Result<()> {
     // References may include an alias or a legacy endpoint suffix. Never echo
     // either: endpoints and alias values can contain private information.
     let family = name.split(['.', ':']).next().unwrap_or(name);
     if let Some(retired) = RETIRED_MODEL_PROVIDER_NAMES.iter().find(|&&n| n == family) {
-        anyhow::bail!(
-            "Model provider `{retired}` is retired. Remove its configuration and explicitly \
-             configure a supported provider; credentials and endpoints are not migrated. \
-             The `gemini` API provider (including Gemini CLI OAuth credentials) and `kilo` \
-             API gateway remain supported."
-        );
+        return Err(RetiredModelProviderError(retired).into());
     }
     Ok(())
 }

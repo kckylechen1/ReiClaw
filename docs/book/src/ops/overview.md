@@ -149,7 +149,7 @@ The service does not auto-update. Subscribe to the release feed (GitHub releases
 4. `zeroclaw service restart`
 5. Verify the `/health` endpoint reports `status: "ok"` with no component in `error`
 
-If the new version requires config migrations, the startup log emits a warning and the binary usually auto-migrates. Check `zeroclaw config list` to spot-check values after upgrade, and `zeroclaw config migrate` to apply any pending schema migrations manually.
+This fork accepts only config files with explicit `schema_version = 3`. Older, future and unversioned files are rejected without conversion or rewriting. Run `zeroclaw config validate` to check the current file and `zeroclaw config list` to inspect effective values. `zeroclaw config generate` emits a native current-schema example; it does not accept a version argument.
 
 ## See also
 

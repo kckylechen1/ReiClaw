@@ -207,7 +207,7 @@ Bedrock (`bedrock`, `aws-bedrock`), Azure OpenAI (`azure`, `azure_openai`,
 and Kilo CLI (`kilocli`, `kilo-cli`) are retired. Their adapters, typed slots,
 and CLI binary-path settings are removed. Existing family tables and provider
 selectors fail with an explicit `is retired` configuration error, including
-V1/V2 migration and legacy spellings. They are never silently dropped or
+retired spellings within current-schema input. They are never silently dropped or
 redirected to another provider. Environment overrides for these deleted paths
 also fail with the retirement error.
 

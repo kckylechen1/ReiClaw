@@ -764,9 +764,11 @@ pub async fn handle_channels(cmd: ChannelsCommands, config: &mut Config) -> Resu
             // no filter we walk the canonical channel-type list.
             let types: Vec<String> = match channel_type {
                 Some(t) => vec![t],
-                None => zeroclaw_config::schema::v2::V3_CHANNEL_TYPES
-                    .iter()
-                    .map(|s| (*s).to_string())
+                None => config
+                    .channels
+                    .channels()
+                    .into_iter()
+                    .map(|channel| channel.kind.to_string())
                     .collect(),
             };
             let mut types = types;

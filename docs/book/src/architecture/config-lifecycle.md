@@ -36,9 +36,10 @@ Config load has a few distinct phases:
 1. Resolve the install root from bootstrap env vars. This happens before any
    `Config` exists, so bootstrap names keep their uppercase form and do not use
    the schema-mirror grammar.
-2. Read `config.toml`, run schema migration in memory, decrypt configured
-   secrets, and record any malformed security-critical sections as degraded
-   security.
+2. Read `config.toml` and require an explicit `schema_version = 3` before
+   changing the install layout. Older, future, missing or invalid versions
+   fail without converting the file. Decrypt configured secrets and record
+   malformed current security-critical sections as degraded security.
 3. Apply schema-mirror overrides to the in-memory config. In env vars,
    `__` maps to `.`, so `ZEROCLAW_providers__models__openai__api_key`
    targets `providers.models.openai.api_key`.
@@ -46,6 +47,16 @@ Config load has a few distinct phases:
 
 On a fresh install, defaults are saved before env overrides are applied. This
 keeps env-injected secrets and local CI values out of the new file.
+
+`zeroclaw config validate` checks the current file without writing it.
+`zeroclaw config generate` emits a native V3 example; `--encrypt` encrypts its
+secret fields using the resolved install's secret store. Generation has no
+version selector. There is no `config migrate` command or `/api/config/migrate`
+endpoint. Existing-file full and incremental saves also refuse unsupported
+versions, including when a file is replaced after startup. Current sections,
+comments, unknown TOML keys, environment provenance and secret references keep
+their existing save behavior. Current retirement warnings and fail-closed
+credential, approval and privacy guards remain in force.
 
 ## Proxy runtime ownership
 
@@ -167,7 +178,7 @@ consumer census; a module's size alone is not permission to remove it.
 | Quickstart preset selection | Risk/runtime catalogues, factories and provider recommendations moved to the existing Quickstart runtime owner. Config keeps submission DTOs and canonical profile types/defaults. |
 | Shared config metadata | Moved to `zeroclaw-api::config_metadata`; config keeps derive generation and compatibility re-exports. Config-specific traits, coercion, validation and writes remain config-owned. |
 | `sections`, `comment_writer`, `card`, `typed_value` and onboarding DTOs | Config editing, onboarding and persistence still consume these surfaces. #379 owns editor retirement; keep canonical types and write paths until their retained callers have replacements. |
-| Legacy SOP configuration | #697 removes the unused declarations after the engine, definition/authoring surface and `procedure_v1` retired. Explicit `sop` input rejects at parse, load, migration and save boundaries; former approval/guard values never become current authority. Keep L1 reasoning and the Tachi bridge. |
+| Legacy SOP configuration | #697 removes the unused declarations after the engine, definition/authoring surface and `procedure_v1` retired. Explicit `sop` input rejects at parse, load and save boundaries; former approval/guard values never become current authority. Keep L1 reasoning and the Tachi bridge. |
 
 ## Env overrides are not saved
 

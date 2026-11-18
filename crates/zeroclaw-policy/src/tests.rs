@@ -311,7 +311,7 @@ fn risk_profile_allowed_tools_empty_toml_denies_all_tools() {
     use zeroclaw_config::schema::Config;
 
     let toml = r#"
-schema_version = 2
+schema_version = 3
 
 [risk_profiles.deny_all]
 allowed_tools = []
@@ -344,7 +344,7 @@ fn risk_profile_allowed_tools_absent_toml_is_unrestricted() {
     use zeroclaw_config::schema::Config;
 
     let toml = r#"
-schema_version = 2
+schema_version = 3
 
 [risk_profiles.unrestricted]
 
@@ -375,7 +375,7 @@ fn risk_profile_allowed_tools_nonempty_toml_preserves_list() {
     use zeroclaw_config::schema::Config;
 
     let toml = r#"
-schema_version = 2
+schema_version = 3
 
 [risk_profiles.shell_only]
 allowed_tools = ["shell"]

@@ -14,14 +14,14 @@ fn persisted_token_hashes_cross_config_and_runtime_owners() {
 
     let mut config: Config = toml::from_str(
         r#"
-schema_version = 2
+schema_version = 3
 
 [gateway]
 require_pairing = true
 paired_tokens = ["268099d88852e81cfbc7b1861b4e5a035686f7364609e8351f3b0d891da2e116"]
 "#,
     )
-    .expect("historical prehashed configuration");
+    .expect("current configuration with historical token hashes");
     let bridge_token = generate_bridge_token();
     config.gateway.bridges.insert(
         "fixture_bridge".to_string(),

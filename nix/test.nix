@@ -192,6 +192,12 @@ in
         ).strip().strip('"')
         assert other_model == "claude-haiku-4-6", f"expected claude-haiku-4-6, got {other_model}"
 
+    with subtest("rendered config declares the current schema generation"):
+        version = machine.succeed(
+            "yq -p toml -o json '.schema_version' /var/lib/zeroclaw-other/config.toml"
+        ).strip()
+        assert version == "3", f"expected schema_version 3, got {version!r}"
+
     with subtest("hardening defaults applied (ProtectSystem=strict)"):
         out = machine.succeed(
             "systemctl show -p ProtectSystem zeroclaw-test.service"

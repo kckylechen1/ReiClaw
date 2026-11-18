@@ -646,8 +646,7 @@ fn value_at_exists(mut current: &toml::value::Table, segments: &[&str]) -> bool 
 /// `deny_unknown_fields`, so serde silently drops an unknown nested
 /// section and configs carrying a retired section keep parsing; this makes
 /// the retirement visible instead of a silent no-op. Called by the
-/// config-file LOAD paths (`Config::load_or_init`, the channels standalone
-/// loader, and the gateway migrate handler); incidental single-key file
+/// config-file LOAD paths; incidental single-key file
 /// readers (e.g. the web-search Brave-key reload) never participated in
 /// any config warning machinery and are out of this boundary.
 ///
@@ -659,7 +658,7 @@ fn value_at_exists(mut current: &toml::value::Table, segments: &[&str]) -> bool 
 /// Ordering caveat, stated honestly: in `Config::load_or_init`, detection
 /// runs before the `composition` hard-error gate, so a config with both
 /// problems still warns before the load fails; on the channels loader,
-/// strict migration runs first, so a file that fails strict migration
+/// strict parsing runs first, so a file that fails strict parsing
 /// (e.g. invalid `composition`) errors before detection. A failed load
 /// has its own error to fix; after the fix, the tombstone surfaces.
 /// Successful loads additionally replay the structured warning through

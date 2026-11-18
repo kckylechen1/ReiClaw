@@ -99,7 +99,7 @@ instance creates it and the others set `createUser = false`.
 | `group` | `str` | `"zeroclaw-<name>"` | System group. |
 | `createUser` | `bool` | `true` | Set `false` to bring your own user. |
 | `dataDir` | `path` | `"/var/lib/zeroclaw-<name>"` | State directory. Created via `systemd-tmpfiles` so any absolute path works (`/var/lib/...`, `/srv/...`, etc.). |
-| `settings` | `submodule { freeformType = (pkgs.formats.toml { }).type; }` | `{}` | Rendered to `${dataDir}/config.toml`. |
+| `settings` | `submodule { freeformType = (pkgs.formats.toml { }).type; }` | `{}` | Rendered to `${dataDir}/config.toml`. The module adds `schema_version = 3` unless `settings` sets it; ZeroClaw refuses unversioned config. |
 | `environmentFile` | `nullOr path` | `null` | systemd `EnvironmentFile=`. Substituted into `settings` strings at start. |
 | `extraConfig` | `lines` | `""` | Raw TOML appended after rendered `settings` (escape hatch). |
 | `bindReadOnlyPaths` | `attrsOf path` | `{}` | `target → source` map → `BindReadOnlyPaths=`. |

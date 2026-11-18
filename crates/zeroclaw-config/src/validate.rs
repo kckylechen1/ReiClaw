@@ -732,12 +732,7 @@ impl Config {
     ///
     /// Only `[runtime_profiles.<alias>.context_compression]` is checked —
     /// `AliasedAgentConfig` (`[agents.<alias>]`) has no `context_compression`
-    /// field of its own, and the legacy pre-V3 `[agent.context_compression]`
-    /// top-level table (folded into `[runtime_profiles.default]` by the V2→V3
-    /// migration, see `schema/v2.rs`) has already collapsed into this same
-    /// surface by the time `Config` exists, so a single pass over
-    /// `runtime_profiles` covers both the historical and current authored
-    /// forms without double-warning.
+    /// field of its own. Current input is checked once per runtime profile.
     fn collect_context_compression_ignored_warnings(
         &self,
         warnings: &mut Vec<crate::validation_warnings::ValidationWarning>,
@@ -1773,9 +1768,8 @@ impl Config {
                 .map(str::trim)
                 .is_some_and(|value| !value.is_empty());
 
-            // Entries created by migration from top-level fields use the
-            // model_provider type+alias as the map key and may not have
-            // explicit `uri` (the model_provider factory resolves the
+            // Typed provider entries may omit an explicit `uri` (the
+            // model_provider factory resolves the
             // family's default endpoint via `ModelEndpoint`). An entry
             // with no identifying information at all is almost always an
             // in-progress quickstart state — the user picked the model

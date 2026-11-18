@@ -14,9 +14,8 @@ use tokio::io::AsyncWriteExt;
 
 /// Top-level keys that must always appear in the saved config even
 /// when their value equals the default. `schema_version` is the
-/// migration detector's anchor — dropping it from a freshly-saved
-/// config would make the next load mis-detect the file as V1 (no
-/// version key = V1).
+/// current-only input boundary — dropping it would make the next load
+/// reject the file as unversioned.
 const SAVE_PRESERVE_KEYS: &[&str] = &["schema_version"];
 
 /// Insert a blank line before every `[section]` header that doesn't
@@ -200,9 +199,8 @@ impl Config {
         // prop write under a nonexistent `agents.default` must not materialize the
         // reserved runtime fallback (the operator would get an agent the rename
         // guard then traps). This is the set-prop analogue of the create guard in
-        // `create_map_key_checked`. The migration that legitimately synthesizes
-        // `agents.default` calls `create_map_key` directly, not this path, and an
-        // already-present `default` is left untouched by the existence check above.
+        // `create_map_key_checked`. An already-present `default` remains
+        // untouched by the existence check above.
         if section == "agents" && crate::alias_refs::is_reserved_agent_alias(alias) {
             // Make the refusal observable: callers that check the return surface a
             // reserved-name error, and this WARN with a stable `error_key` lets an
@@ -505,10 +503,9 @@ impl Config {
         // Encrypt secrets before serialization
         let mut config_to_save = self.clone();
         // Stamp the current schema version on every write. The in-memory
-        // config is always at `CURRENT_SCHEMA_VERSION` (load-time migration
-        // brings it forward), but pin it explicitly so a full save can never
-        // emit a body-newer-than-label file. See `save_dirty` and.
-        config_to_save.schema_version = crate::migration::CURRENT_SCHEMA_VERSION;
+        // config has current typed fields; existing disk generations are
+        // checked below before any write can replace their contents.
+        config_to_save.schema_version = crate::current::CURRENT_SCHEMA_VERSION;
         let config_path = self.resolve_config_path_for_save().await?;
         // Fail closed: a metadata error must not read as "file absent" and
         // slip an unproven save past the guard.
@@ -559,7 +556,7 @@ impl Config {
             .as_deref()
             .and_then(|s| toml::from_str::<toml::Table>(s).ok());
         if let Some(table) = on_disk_table.as_ref() {
-            crate::migration::reject_retired_sop_config(table)?;
+            crate::current::require_current_schema(&toml::Value::Table(table.clone()))?;
         }
         let store = crate::secrets::SecretStore::new(zeroclaw_dir, self.secrets.encrypt);
         let whole_entries = self.effective_whole_entry_dirty_entries(on_disk_table.as_ref());
@@ -671,7 +668,7 @@ impl Config {
                 let mut doc: toml_edit::DocumentMut = existing
                     .parse()
                     .context("Failed to parse existing config for comment preservation")?;
-                crate::migration::sync_table(doc.as_table_mut(), &new_table);
+                crate::toml_document::sync_table(doc.as_table_mut(), &new_table);
                 // sync_table preserves existing decor verbatim, so newly
                 // inserted sections lack the blank-line gap before their
                 // header until the post-processor runs.
@@ -1393,7 +1390,7 @@ impl Config {
             .context("Failed to parse existing config for incremental save")?;
         let on_disk_table: Option<toml::Table> = toml::from_str::<toml::Table>(&existing).ok();
         if let Some(table) = on_disk_table.as_ref() {
-            crate::migration::reject_retired_sop_config(table)?;
+            crate::current::require_current_schema(&toml::Value::Table(table.clone()))?;
         }
         let whole_entries = self.effective_whole_entry_dirty_entries(on_disk_table.as_ref());
         let dirty_prop_paths = self.collect_dirty_prop_paths(&whole_entries);
@@ -1473,7 +1470,7 @@ impl Config {
         // position at the top of the file) or appends it when absent.
         doc.as_table_mut().insert(
             "schema_version",
-            toml_edit::value(i64::from(crate::migration::CURRENT_SCHEMA_VERSION)),
+            toml_edit::value(i64::from(crate::current::CURRENT_SCHEMA_VERSION)),
         );
 
         let toml_str = ensure_blank_line_before_sections(&doc.to_string());
@@ -1998,7 +1995,7 @@ fn reconcile_natural_key_whole_entry(
                 return;
             };
             if let toml::Value::Table(t) = value {
-                crate::migration::sync_table(entry_table, &t);
+                crate::toml_document::sync_table(entry_table, &t);
             }
         }
         None => {
@@ -2721,7 +2718,7 @@ fn set_path_in_doc(root: &mut toml_edit::Table, segs: &[&str], value: &toml::Val
             None => return,
         };
     }
-    let new_item = crate::migration::toml_value_to_edit_item(value);
+    let new_item = crate::toml_document::toml_value_to_edit_item(value);
     cursor.insert(last, new_item);
 }
 

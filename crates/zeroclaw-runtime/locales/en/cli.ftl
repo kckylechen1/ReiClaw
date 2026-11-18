@@ -43,7 +43,8 @@ cli-config-list-about = List all config properties with current values
 cli-config-get-about = Get a config property value
 cli-config-set-about = Set a config property (secret fields auto-prompt for masked input)
 cli-config-init-about = Initialize unconfigured sections with defaults (enabled=false)
-cli-config-migrate-about = Migrate config.toml to the current schema version on disk (preserves comments)
+cli-config-validate-about = Validate the current config.toml without modifying it
+cli-config-generate-about = Generate an example of the supported current configuration
 
 cli-service-install-about = Install daemon service unit for auto-start and restart
 cli-service-start-about = Start daemon service
@@ -682,9 +683,9 @@ cli-desktop-not-installed = ZeroClaw companion app is not installed.
 cli-desktop-blurb1 = The companion app is a lightweight menu bar app that
 cli-desktop-blurb2 = connects to the same gateway as the CLI.
 cli-config-all-configured = All sections already configured.
-cli-config-schema-current = Config already at current schema version.
+cli-config-valid = Config is valid.
 cli-config-applied-ops = Applied {$count} operation(s):
-cli-config-section-degraded = warning: config section `{$section}` in {$path} is malformed and was reset to defaults for this run. Values in that section are NOT in effect. Run `zeroclaw config migrate` to see the parse error, then repair the file.
+cli-config-section-degraded = warning: config section `{$section}` in {$path} is malformed and was reset to defaults for this run. Values in that section are NOT in effect. Run `zeroclaw config validate` to see the parse error, then repair the file.
 cli-estop-resume-done = Estop resume completed.
 cli-estop-engaged = Estop engaged.
 cli-estop-status = Estop status:
@@ -702,7 +703,6 @@ cli-config-secret-set = {$path} is set (encrypted secret — value not displayed
 cli-config-secret-unset = {$path} is not set (encrypted secret)
 cli-config-updated = {$path} updated.
 cli-config-review-hint = Run `zeroclaw config list` to review, then set required fields.
-cli-config-backed-up = Backed up to {$path}
 cli-estop-domains-none = {"  "}domain_blocks:  (none)
 cli-estop-domains = {"  "}domain_blocks:  {$v}
 cli-estop-tools-none = {"  "}tool_freeze:    (none)
@@ -936,8 +936,8 @@ cli-doctor-ctxwin-none = No updates needed.
 cli-doctor-ctxwin-write-failed = {$provider_ref}: failed to write context_window: {$error}
 
 # ── Degraded config sections (doctor diagnose, #8835) ──
-cli-doctor-degraded-security = SECURITY-CRITICAL config section `{$path}` is invalid and was reset to its default so the daemon can boot; the running posture may be WEAKER than intended. Run `zeroclaw config migrate` to see the parse error, then repair the file.
-cli-doctor-degraded-section = config section `{$path}` is malformed and was reset to defaults; values in that section are NOT in effect. Run `zeroclaw config migrate` to see the parse error, then repair the file.
+cli-doctor-degraded-security = SECURITY-CRITICAL config section `{$path}` is invalid and was reset to its default so the daemon can boot; the running posture may be WEAKER than intended. Run `zeroclaw config validate` to see the parse error, then repair the file.
+cli-doctor-degraded-section = config section `{$path}` is malformed and was reset to defaults; values in that section are NOT in effect. Run `zeroclaw config validate` to see the parse error, then repair the file.
 
 # ── Personality file truncation (doctor diagnose, #310) ──
 cli-doctor-personality-file-truncated = {$alias}/{$filename}: personality cap {$cap} vs {$total} chars ({$discarded} would be discarded)

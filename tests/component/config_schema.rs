@@ -1,12 +1,12 @@
 //! Config Schema Boundary Tests
-//! Validates: config defaults, backward compatibility, invalid input rejection,
+//! Validates: config defaults, current-schema boundaries, invalid input rejection,
 //! and gateway/security/agent config boundary conditions.
 
-use zeroclaw::config::migration;
+use zeroclaw::config::current;
 use zeroclaw::config::{Config, GatewayConfig, RiskProfileConfig, SecurityConfig};
 
-fn migrate(toml_str: &str) -> Config {
-    migration::migrate_to_current(toml_str).expect("migration succeeds")
+fn parse(toml_str: &str) -> Config {
+    current::parse_current(toml_str).expect("current configuration parses")
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -15,36 +15,33 @@ fn migrate(toml_str: &str) -> Config {
 
 #[test]
 fn config_valid_keys_not_flagged_as_unknown() {
-    // api_key: Option<T> defaulting to None — TOML omits it.
-    // model_provider: serde alias for default_model_provider.
-    let unknown = Config::unknown_keys("api_key = \"sk-test\"\nmodel_provider = \"ollama\"\n");
+    let unknown = Config::unknown_keys("schema_version = 3\nlocale = \"en\"\n");
     assert!(
         unknown.is_empty(),
-        "api_key and model_provider should not be flagged as unknown, got: {unknown:?}",
+        "current keys must be recognized: {unknown:?}"
     );
 }
 
 #[test]
 fn config_unknown_keys_parse_without_error() {
-    let config = migrate(
+    let config = parse(
         r#"
-default_temperature = 0.7
-default_model_provider = "openai"
+schema_version = 3
 totally_unknown_key = "should be ignored"
 another_fake = 42
+[providers.models.openai.default]
+temperature = 0.7
 "#,
     );
-    assert!(
-        (config
-            .providers
-            .models
-            .find("openai", "default")
-            .and_then(|e| e.temperature)
-            .unwrap_or(0.7)
-            - 0.7)
-            .abs()
-            < f64::EPSILON
-    );
+    let provider = config
+        .providers
+        .models
+        .find("openai", "default")
+        .expect("unknown root keys must not discard a current provider entry");
+    let temperature = provider
+        .temperature
+        .expect("the explicit provider temperature must remain configured");
+    assert!((temperature - 0.7).abs() < f64::EPSILON);
 }
 
 #[test]
@@ -63,16 +60,22 @@ fn config_invalid_gateway_port_fails() {
 #[test]
 fn config_wrong_type_for_temperature_fails() {
     let toml_str = r#"
-default_temperature = "hot"
+schema_version = 3
+[providers.models.openai.default]
+temperature = "hot"
 "#;
-    // V1's `default_temperature` is folded into model_providers.<x>.default
-    // by `migrate_to_current`. A non-f64 value should fail at the migration
-    // boundary because the synthesized model_provider entry can't deserialize
-    // a string into Option<f64>.
-    let result = migration::migrate_to_current(toml_str);
+    let error = current::parse_current(toml_str).unwrap_err();
+    let message = format!("{error:#}");
+    // serde(flatten) reports the provider entry rather than its inner leaf.
+    // Require the actual type failure and its owning entry, so a different
+    // admission error cannot satisfy this invalid-temperature regression.
     assert!(
-        result.is_err(),
-        "string for f64 temperature should fail migration"
+        message.contains("invalid type: string \"hot\", expected f64"),
+        "expected the temperature type error, got: {message}"
+    );
+    assert!(
+        message.contains("providers.models.openai.default"),
+        "expected the configured provider's path, got: {message}"
     );
 }
 
@@ -103,7 +106,7 @@ fn gateway_config_defaults_are_secure() {
 #[test]
 fn gateway_config_missing_section_uses_defaults() {
     let toml_str = r#"
-default_temperature = 0.5
+schema_version = 3
 "#;
     let parsed: Config = toml::from_str(toml_str).expect("missing gateway section should parse");
     assert_eq!(parsed.gateway.port, 42617);
@@ -115,7 +118,7 @@ default_temperature = 0.5
 #[test]
 fn gateway_config_partial_section_fills_defaults() {
     let toml_str = r#"
-default_temperature = 0.7
+schema_version = 3
 
 [gateway]
 port = 9090
@@ -261,60 +264,48 @@ allowed_paths = ["/tmp/data"]
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
-// Backward compatibility
+// Current-only configuration
 // ─────────────────────────────────────────────────────────────────────────────
 
 #[test]
-fn config_minimal_toml_with_temperature_uses_defaults() {
-    let config = migrate("default_temperature = 0.7\ndefault_provider = \"openai\"\n");
-    // Migration synthesizes [agents.default] from the V2 shape.
-    config
-        .agent("default")
-        .expect("migration synthesized agents.default");
+fn config_minimal_current_input_uses_current_defaults_without_synthetic_agent() {
+    let config = parse("schema_version = 3\n");
+    assert!(config.agents.is_empty());
+    assert!(config.providers.models.is_empty());
     assert_eq!(config.gateway.port, 42617);
+    assert!(config.gateway.require_pairing);
+    assert_eq!(
+        toml::to_string(&config).unwrap(),
+        toml::to_string(&Config::default()).unwrap()
+    );
 }
 
 #[test]
-fn config_only_temperature_parses() {
-    let config = migrate("default_temperature = 1.2\ndefault_provider = \"openai\"\n");
-    assert!(
-        (config
-            .providers
-            .models
-            .find("openai", "default")
-            .and_then(|e| e.temperature)
-            .unwrap_or(0.7)
-            - 1.2)
-            .abs()
-            < f64::EPSILON
+fn config_provider_temperature_parses() {
+    let config =
+        parse("schema_version = 3\n[providers.models.openai.default]\ntemperature = 1.2\n");
+    assert_eq!(
+        config.providers.models.openai["default"].base.temperature,
+        Some(1.2)
     );
-    let agent = config
-        .agent("default")
-        .expect("migration synthesized agents.default");
-    assert!(agent.enabled);
+    assert!(config.agents.is_empty());
 }
 
 #[test]
 fn config_extra_unknown_keys_ignored() {
-    let config = migrate(
+    let config = parse(
         r#"
-default_temperature = 0.5
-default_provider = "openai"
+schema_version = 3
 future_feature = true
 [some_future_section]
 value = 123
+[providers.models.openai.default]
+temperature = 0.5
 "#,
     );
-    assert!(
-        (config
-            .providers
-            .models
-            .find("openai", "default")
-            .and_then(|e| e.temperature)
-            .unwrap_or(0.7)
-            - 0.5)
-            .abs()
-            < f64::EPSILON
+    assert_eq!(
+        config.providers.models.openai["default"].base.temperature,
+        Some(0.5)
     );
 }
 
@@ -325,7 +316,7 @@ value = 123
 #[test]
 fn config_multiple_channels_coexist() {
     let toml_str = r#"
-default_temperature = 0.7
+schema_version = 3
 
 [channels.telegram.default]
 bot_token = "test_token"
@@ -342,7 +333,7 @@ bot_token = "test_token"
 
 #[test]
 fn config_memory_defaults_when_section_absent() {
-    let toml_str = "default_temperature = 0.7\n";
+    let toml_str = "schema_version = 3\n";
     let parsed: Config = toml::from_str(toml_str).expect("minimal TOML should parse");
     let mem = &parsed.memory;
     assert!(!mem.backend.is_empty());
@@ -357,7 +348,7 @@ fn config_memory_defaults_when_section_absent() {
 #[test]
 fn config_channels_without_cli_field() {
     let toml_str = r#"
-default_temperature = 0.7
+schema_version = 3
 
 [channels.telegram.default]
 bot_token = "telegram-test-token"
@@ -408,20 +399,6 @@ allowed_numbers = ["*"]
 }
 
 #[test]
-fn config_empty_parses_with_all_defaults() {
-    let config = migrate("");
-    assert!(config.channels.cli);
-    assert!(
-        (config
-            .providers
-            .models
-            .iter_entries()
-            .next()
-            .map(|(_, _, e)| e)
-            .and_then(|e| e.temperature)
-            .unwrap_or(0.7)
-            - 0.7)
-            .abs()
-            < f64::EPSILON
-    );
+fn config_unversioned_input_is_rejected() {
+    assert!(current::parse_current("").is_err());
 }

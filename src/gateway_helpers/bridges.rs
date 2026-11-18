@@ -66,7 +66,7 @@ async fn add(
             "unknown bridge"
         ));
     }
-    crate::config::migration::ensure_disk_at_current_version(&config.config_path)?;
+    crate::config::current::ensure_disk_at_current_version(&config.config_path)?;
 
     let token = generate_bridge_token();
     let mut bridge = existing.unwrap_or_default();
@@ -112,7 +112,7 @@ async fn remove(config: &mut Config, name: &str) -> Result<()> {
             "unknown bridge"
         ));
     }
-    crate::config::migration::ensure_disk_at_current_version(&config.config_path)?;
+    crate::config::current::ensure_disk_at_current_version(&config.config_path)?;
     config.mark_dirty(&format!("gateway.bridges.{name}"));
     Box::pin(config.save_dirty()).await?;
     println!(

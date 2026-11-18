@@ -1,0 +1,475 @@
+locale = "en"
+schema_version = 3
+
+[agents.complex_agent]
+channels = [
+    "discord.default",
+    "telegram.default",
+]
+model_provider = "anthropic.agent_complex_agent"
+risk_profile = "agent_complex_agent"
+runtime_profile = "agent_complex_agent"
+skill_bundles = ["agent_complex_agent"]
+
+[agents.complex_agent.identity]
+format = "openclaw"
+
+[agents.simple_agent]
+model_provider = "openai.agent_simple_agent"
+risk_profile = "default"
+runtime_profile = "default"
+
+[agents.simple_agent.identity]
+format = "openclaw"
+
+[backup]
+compress = true
+destination_dir = "state/backups"
+enabled = true
+encrypt = false
+include_dirs = [
+    "config",
+    "memory",
+    "audit",
+    "knowledge",
+]
+max_keep = 10
+
+[channels]
+ack_reactions = true
+cli = true
+debounce_ms = 0
+max_concurrent_per_channel = 4
+message_timeout_secs = 300
+session_backend = "sqlite"
+session_persistence = true
+session_ttl_hours = 0
+show_tool_calls = false
+
+[channels.discord.default]
+archive = true
+bot_token = "discord-v1-bot-token"
+channel_ids = ["555566667777"]
+draft_update_interval_ms = 1000
+enabled = true
+guild_ids = ["111122223333"]
+listen_to_bots = false
+mention_only = true
+multi_message_delay_ms = 500
+respond_to_dms = true
+stall_timeout_secs = 0
+store_dms = true
+stream_mode = "off"
+
+[channels.email.default]
+enabled = false
+from_address = "zeroclaw@example.com"
+imap_host = "imap.example.com"
+password = "email-password"
+smtp_host = "smtp.example.com"
+username = "zeroclaw@example.com"
+
+[channels.telegram.default]
+ack_reactions = false
+bot_token = "telegram-v1-bot-token"
+draft_update_interval_ms = 1000
+enabled = true
+interrupt_on_new_message = false
+mention_only = false
+stream_mode = "partial"
+
+[channels.webhook.default]
+enabled = true
+listen_path = "/webhook"
+port = 8080
+send_method = "POST"
+send_url = "https://hooks.example.com/inbound"
+
+[cost]
+allow_override = false
+daily_limit_usd = 10.0
+enabled = true
+monthly_limit_usd = 100.0
+warn_at_percent = 80
+
+[cost.enforcement]
+mode = "warn"
+reserve_percent = 10
+
+[cron.heartbeat_ping]
+command = "curl -fsS https://uptime.example.com/ping"
+enabled = true
+job_type = "shell"
+
+[cron.heartbeat_ping.schedule]
+every_ms = 60000
+kind = "every"
+
+[cron.morning_briefing]
+enabled = true
+job_type = "agent"
+model = "gpt-4o-mini"
+name = "Morning briefing"
+prompt = "Summarize overnight events."
+session_target = "isolated"
+
+[cron.morning_briefing.schedule]
+expr = "0 7 * * *"
+kind = "cron"
+tz = "UTC"
+
+[data_retention]
+categories = []
+dry_run = false
+enabled = false
+retention_days = 90
+
+[[embedding_routes]]
+dimensions = 1536
+hint = "default"
+model = "text-embedding-3-small"
+model_provider = "openai.default"
+
+[gateway]
+allow_public_bind = false
+host = "127.0.0.1"
+idempotency_max_keys = 10000
+idempotency_ttl_secs = 300
+pair_rate_limit_per_minute = 10
+paired_tokens = []
+port = 42617
+rate_limit_max_keys = 10000
+require_pairing = true
+session_persistence = true
+session_ttl_hours = 0
+trust_forwarded_headers = false
+webhook_rate_limit_per_minute = 60
+
+[heartbeat]
+agent = "complex_agent"
+enabled = true
+interval_minutes = 30
+two_phase = true
+
+[hooks]
+enabled = true
+
+[hooks.builtin]
+command_logger = false
+
+[hooks.builtin.webhook_audit]
+enabled = false
+include_args = false
+max_args_bytes = 4096
+tool_patterns = []
+url = ""
+
+[http_request]
+allow_private_hosts = false
+allowed_domains = ["*"]
+allowed_private_hosts = []
+enabled = true
+max_response_size = 1000000
+timeout_secs = 30
+
+[image_gen]
+enabled = false
+
+[link_enricher]
+enabled = false
+max_links = 3
+timeout_secs = 10
+
+[mcp]
+
+[media_pipeline]
+describe_images = true
+enabled = false
+summarize_video = true
+transcribe_audio = true
+
+[memory]
+archive_after_days = 7
+audit_enabled = false
+audit_retention_days = 30
+auto_save = true
+chunk_max_tokens = 512
+conflict_threshold = 0.85
+conversation_retention_days = 30
+default_namespace = "default"
+embedding_cache_size = 10000
+embedding_dimensions = 1536
+embedding_model = "text-embedding-3-small"
+embedding_provider = "none"
+fts_early_return_score = 0.85
+hygiene_enabled = true
+keyword_weight = 0.3
+min_relevance_score = 0.4
+purge_after_days = 30
+rerank_enabled = false
+rerank_threshold = 5
+response_cache_enabled = false
+response_cache_hot_entries = 256
+response_cache_max_entries = 5000
+response_cache_ttl_minutes = 60
+retrieval_stages = [
+    "cache",
+    "fts",
+    "vector",
+]
+search_mode = "hybrid"
+vector_weight = 0.7
+
+[memory.policy]
+max_entries_per_category = 0
+max_entries_per_namespace = 0
+read_only_namespaces = []
+
+[[model_routes]]
+hint = "fast"
+model = "gpt-4o-mini"
+model_provider = "openai.default"
+
+[[model_routes]]
+hint = "deep"
+model = "claude-sonnet-4-6"
+model_provider = "anthropic.default"
+
+[multimodal]
+allow_remote_fetch = false
+max_image_size_mb = 5
+max_images = 4
+
+[node_transport]
+allowed_peers = []
+connection_pool_size = 4
+enabled = true
+max_request_age_secs = 300
+mutual_tls = false
+require_https = true
+shared_secret = ""
+
+[nodes]
+
+[observability]
+runtime_trace_max_entries = 200
+runtime_trace_mode = "rolling"
+runtime_trace_path = "state/runtime-trace.jsonl"
+
+[pacing]
+loop_detection_enabled = true
+loop_detection_max_repeats = 3
+loop_detection_window_size = 20
+loop_ignore_tools = []
+
+[peer_groups.discord_default]
+agents = ["complex_agent"]
+channel = "discord"
+external_peers = ["222233334444"]
+
+[peer_groups.telegram_default]
+agents = ["complex_agent"]
+channel = "telegram"
+external_peers = [
+    "@v1_admin",
+    "12345678",
+]
+
+[pipeline]
+allowed_tools = []
+enabled = false
+max_steps = 20
+
+[providers.models.anthropic.agent_complex_agent]
+api_key = "sk-ant-complex"
+model = "claude-sonnet-4-5"
+temperature = 0.3
+timeout_secs = 180
+
+[providers.models.anthropic.custom]
+max_tokens = 8192
+name = "anthropic-custom"
+uri = "https://api.z.ai/api/anthropic"
+
+[providers.models.anthropic.default]
+name = "anthropic"
+uri = "https://api.anthropic.com"
+
+[providers.models.ollama.default]
+merge_system_into_user = true
+name = "ollama"
+uri = "http://127.0.0.1:11434"
+
+[providers.models.openai.agent_simple_agent]
+model = "gpt-4o-mini"
+
+[providers.models.openai.default]
+api_key = "sk-v1-test-global"
+max_tokens = 4096
+model = "gpt-4o-mini"
+name = "openai"
+temperature = 0.5
+timeout_secs = 90
+uri = "https://api.openai.com/v1/chat/completions"
+wire_api = "chat_completions"
+
+[providers.models.openai.default.extra_headers]
+HTTP-Referer = "https://zeroclaw.test"
+X-Title = "zeroclaw-v1-fixture"
+
+[proxy]
+
+[query_classification]
+enabled = false
+rules = []
+
+[reliability]
+api_keys = []
+channel_initial_backoff_secs = 2
+channel_max_backoff_secs = 60
+provider_backoff_ms = 500
+provider_retries = 2
+scheduler_poll_secs = 15
+scheduler_retries = 2
+
+[risk_profiles.agent_complex_agent]
+allowed_tools = [
+    "shell",
+    "memory",
+]
+
+[risk_profiles.default]
+allowed_commands = [
+    "ls",
+    "git",
+    "cat",
+]
+allowed_roots = ["~/workspace"]
+always_ask = []
+auto_approve = ["weather"]
+block_high_risk_commands = true
+excluded_tools = ["browser"]
+forbidden_paths = [
+    "/etc",
+    "/root",
+]
+level = "supervised"
+require_approval_for_medium_risk = true
+shell_env_passthrough = [
+    "PATH",
+    "HOME",
+]
+workspace_only = true
+
+[runtime]
+kind = "native"
+reasoning_effort = "medium"
+reasoning_enabled = false
+
+[runtime.docker]
+allowed_workspace_roots = []
+cpu_limit = 1.0
+image = "alpine:3.20"
+memory_limit_mb = 512
+mount_workspace = true
+network = "none"
+read_only_rootfs = true
+
+[runtime_profiles.agent_complex_agent]
+agentic = true
+max_tool_iterations = 25
+
+[runtime_profiles.default]
+compact_context = false
+keep_tool_context_turns = 2
+max_actions_per_hour = 100
+max_context_tokens = 32000
+max_cost_per_day_cents = 1000
+max_history_messages = 50
+max_system_prompt_chars = 0
+max_tool_iterations = 10
+max_tool_result_chars = 50000
+parallel_tools = true
+shell_timeout_secs = 60
+tool_call_dedup_exempt = []
+tool_dispatcher = "auto"
+
+[scheduler]
+catch_up_on_startup = true
+enabled = true
+max_concurrent = 4
+max_run_history = 50
+max_tasks = 64
+
+[secrets]
+encrypt = true
+
+[security]
+
+[security_ops]
+auto_triage = false
+enabled = false
+max_auto_severity = "low"
+playbooks_dir = "~/.zeroclaw/playbooks"
+report_output_dir = "~/.zeroclaw/security-reports"
+require_approval_for_actions = true
+
+[shell_tool]
+timeout_secs = 60
+
+[skill_bundles.agent_complex_agent]
+
+[skills]
+allow_scripts = false
+open_skills_enabled = false
+prompt_injection_mode = "full"
+
+[skills.skill_creation]
+enabled = false
+max_skills = 500
+similarity_threshold = 0.85
+
+[skills.skill_improvement]
+cooldown_secs = 3600
+enabled = true
+
+[storage]
+
+[transcription]
+
+[trust]
+
+[tts]
+
+[tunnel]
+tunnel_provider = "none"
+
+[verifiable_intent]
+
+[web_fetch]
+allowed_domains = ["*"]
+allowed_private_hosts = []
+blocked_domains = []
+enabled = true
+max_response_size = 500000
+timeout_secs = 30
+
+[web_fetch.firecrawl]
+api_key_env = "FIRECRAWL_API_KEY"
+api_url = "https://api.firecrawl.dev/v1"
+enabled = false
+mode = "scrape"
+
+[web_search]
+enabled = true
+max_results = 5
+search_provider = "duckduckgo"
+timeout_secs = 15
+
+[workspace]
+cross_workspace_search = false
+enabled = false
+isolate_audit = true
+isolate_memory = true
+isolate_secrets = true
+workspaces_dir = "~/.zeroclaw/workspaces"

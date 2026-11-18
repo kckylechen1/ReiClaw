@@ -123,7 +123,7 @@ impl WebSearchTool {
             ))
         })?;
 
-        let config: zeroclaw_config::schema::Config = toml::from_str(&contents).map_err(|e| {
+        let config = zeroclaw_config::current::parse_current(&contents).map_err(|e| {
             ::zeroclaw_log::record!(
                 ERROR,
                 ::zeroclaw_log::Event::new(module_path!(), ::zeroclaw_log::Action::Fail)
@@ -324,7 +324,7 @@ impl WebSearchTool {
             ))
         })?;
 
-        let config: zeroclaw_config::schema::Config = toml::from_str(&contents).map_err(|e| {
+        let config = zeroclaw_config::current::parse_current(&contents).map_err(|e| {
             ::zeroclaw_log::record!(
                 ERROR,
                 ::zeroclaw_log::Event::new(module_path!(), ::zeroclaw_log::Action::Fail)
@@ -499,7 +499,7 @@ impl WebSearchTool {
             ))
         })?;
 
-        let config: zeroclaw_config::schema::Config = toml::from_str(&contents).map_err(|e| {
+        let config = zeroclaw_config::current::parse_current(&contents).map_err(|e| {
             ::zeroclaw_log::record!(
                 ERROR,
                 ::zeroclaw_log::Event::new(module_path!(), ::zeroclaw_log::Action::Fail)
@@ -637,7 +637,7 @@ impl WebSearchTool {
             ))
         })?;
 
-        let config: zeroclaw_config::schema::Config = toml::from_str(&contents).map_err(|e| {
+        let config = zeroclaw_config::current::parse_current(&contents).map_err(|e| {
             ::zeroclaw_log::record!(
                 ERROR,
                 ::zeroclaw_log::Event::new(module_path!(), ::zeroclaw_log::Action::Fail)
@@ -877,7 +877,7 @@ impl WebSearchTool {
             ))
         })?;
 
-        let config: zeroclaw_config::schema::Config = toml::from_str(&contents).map_err(|e| {
+        let config = zeroclaw_config::current::parse_current(&contents).map_err(|e| {
             ::zeroclaw_log::record!(
                 ERROR,
                 ::zeroclaw_log::Event::new(module_path!(), ::zeroclaw_log::Action::Fail)
@@ -1543,7 +1543,7 @@ mod tests {
         let config_path = tmp.path().join("config.toml");
         std::fs::write(
             &config_path,
-            "[web_search]\nbrave_api_key = \"fresh-key-from-disk\"\n",
+            "schema_version = 3\n[web_search]\nbrave_api_key = \"fresh-key-from-disk\"\n",
         )
         .unwrap();
 
@@ -1572,7 +1572,10 @@ mod tests {
         let config_path = tmp.path().join("config.toml");
         std::fs::write(
             &config_path,
-            format!("[web_search]\nbrave_api_key = \"{}\"\n", encrypted),
+            format!(
+                "schema_version = 3\n[web_search]\nbrave_api_key = \"{}\"\n",
+                encrypted
+            ),
         )
         .unwrap();
 
@@ -1596,7 +1599,7 @@ mod tests {
     async fn test_execute_searxng_without_instance_url() {
         let tmp = tempfile::TempDir::new().unwrap();
         let config_path = tmp.path().join("config.toml");
-        std::fs::write(&config_path, "[web_search]\n").unwrap();
+        std::fs::write(&config_path, "schema_version = 3\n[web_search]\n").unwrap();
 
         let tool = WebSearchTool::new_with_config(
             "searxng".to_string(),
@@ -1673,7 +1676,7 @@ mod tests {
         // before any network call is attempted.
         let tmp = tempfile::tempdir().unwrap();
         let config_path = tmp.path().join("config.toml");
-        std::fs::write(&config_path, "[web_search]\n").unwrap();
+        std::fs::write(&config_path, "schema_version = 3\n[web_search]\n").unwrap();
 
         let tool = WebSearchTool::new_with_config(
             "tavily".to_string(),
@@ -1719,7 +1722,7 @@ mod tests {
         let config_path = tmp.path().join("config.toml");
         std::fs::write(
             &config_path,
-            "[web_search]\ntavily_api_key = \"tvly-fresh-from-disk\"\n",
+            "schema_version = 3\n[web_search]\ntavily_api_key = \"tvly-fresh-from-disk\"\n",
         )
         .unwrap();
 
@@ -1748,7 +1751,10 @@ mod tests {
         let config_path = tmp.path().join("config.toml");
         std::fs::write(
             &config_path,
-            format!("[web_search]\ntavily_api_key = \"{}\"\n", encrypted),
+            format!(
+                "schema_version = 3\n[web_search]\ntavily_api_key = \"{}\"\n",
+                encrypted
+            ),
         )
         .unwrap();
 
@@ -1904,7 +1910,7 @@ mod tests {
         let config_path = tmp.path().join("config.toml");
         std::fs::write(
             &config_path,
-            "[web_search]\nsearxng_instance_url = \"https://search.local\"\n",
+            "schema_version = 3\n[web_search]\nsearxng_instance_url = \"https://search.local\"\n",
         )
         .unwrap();
 
@@ -1929,7 +1935,7 @@ mod tests {
         let config_path = tmp.path().join("config.toml");
 
         // Start with no key in config
-        std::fs::write(&config_path, "[web_search]\n").unwrap();
+        std::fs::write(&config_path, "schema_version = 3\n[web_search]\n").unwrap();
 
         let tool = WebSearchTool::new_with_config(
             "brave".to_string(),
@@ -1949,7 +1955,7 @@ mod tests {
         // Simulate runtime config update (e.g. via web_search_config set)
         std::fs::write(
             &config_path,
-            "[web_search]\nbrave_api_key = \"runtime-updated-key\"\n",
+            "schema_version = 3\n[web_search]\nbrave_api_key = \"runtime-updated-key\"\n",
         )
         .unwrap();
 
@@ -1981,7 +1987,7 @@ mod tests {
         let config_path = tmp.path().join("config.toml");
         std::fs::write(
             &config_path,
-            "[web_search]\njina_api_key = \"jina-fresh-from-disk\"\n",
+            "schema_version = 3\n[web_search]\njina_api_key = \"jina-fresh-from-disk\"\n",
         )
         .unwrap();
 
@@ -2073,7 +2079,7 @@ mod tests {
         // before any network call is attempted.
         let tmp = tempfile::tempdir().unwrap();
         let config_path = tmp.path().join("config.toml");
-        std::fs::write(&config_path, "[web_search]\n").unwrap();
+        std::fs::write(&config_path, "schema_version = 3\n[web_search]\n").unwrap();
 
         let tool = WebSearchTool::new_with_config(
             "jina".to_string(),
@@ -2118,7 +2124,7 @@ mod tests {
         // network call is attempted.
         let tmp = tempfile::tempdir().unwrap();
         let config_path = tmp.path().join("config.toml");
-        std::fs::write(&config_path, "[web_search]\n").unwrap();
+        std::fs::write(&config_path, "schema_version = 3\n[web_search]\n").unwrap();
 
         let tool = bocha_tool(config_path, false);
         let result = tool.execute(json!({"query": "test"})).await;
@@ -2137,7 +2143,7 @@ mod tests {
         let config_path = tmp.path().join("config.toml");
         std::fs::write(
             &config_path,
-            "[web_search]\nbocha_api_key = \"fresh-bocha-from-disk\"\n",
+            "schema_version = 3\n[web_search]\nbocha_api_key = \"fresh-bocha-from-disk\"\n",
         )
         .unwrap();
 
@@ -2155,7 +2161,10 @@ mod tests {
         let config_path = tmp.path().join("config.toml");
         std::fs::write(
             &config_path,
-            format!("[web_search]\nbocha_api_key = \"{}\"\n", encrypted),
+            format!(
+                "schema_version = 3\n[web_search]\nbocha_api_key = \"{}\"\n",
+                encrypted
+            ),
         )
         .unwrap();
 
@@ -2170,7 +2179,7 @@ mod tests {
         let config_path = tmp.path().join("config.toml");
         std::fs::write(
             &config_path,
-            "[web_search]\nbocha_api_key = \"initial-key\"\n",
+            "schema_version = 3\n[web_search]\nbocha_api_key = \"initial-key\"\n",
         )
         .unwrap();
 
@@ -2181,14 +2190,14 @@ mod tests {
         // up the new value.
         std::fs::write(
             &config_path,
-            "[web_search]\nbocha_api_key = \"rotated-key\"\n",
+            "schema_version = 3\n[web_search]\nbocha_api_key = \"rotated-key\"\n",
         )
         .unwrap();
         assert_eq!(tool.resolve_bocha_api_key().unwrap(), "rotated-key");
 
         // Operator removes the key — the tool must fail instead of serving
         // any previously observed value.
-        std::fs::write(&config_path, "[web_search]\n").unwrap();
+        std::fs::write(&config_path, "schema_version = 3\n[web_search]\n").unwrap();
         let result = tool.resolve_bocha_api_key();
         assert!(result.is_err());
         assert!(
@@ -2307,7 +2316,7 @@ mod tests {
         let config_path = tmp.path().join("config.toml");
         std::fs::write(
             &config_path,
-            "[web_search]\nbocha_api_key = \"bocha-test-key\"\n",
+            "schema_version = 3\n[web_search]\nbocha_api_key = \"bocha-test-key\"\n",
         )
         .unwrap();
         let tool = bocha_tool(config_path, false);
