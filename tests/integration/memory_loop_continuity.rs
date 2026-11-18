@@ -10,8 +10,8 @@ use crate::support::helpers::{build_agent_with_memory, text_response, tool_respo
 use crate::support::{CountingTool, EchoTool, MockModelProvider};
 
 fn make_persistent_memory(dir: &std::path::Path) -> Arc<dyn Memory> {
-    let backend = if reiclaw::memory::TACHI_COMPILED {
-        "tachi"
+    let backend = if reiclaw::memory::MEMORYCORE_COMPILED {
+        "memorycore"
     } else {
         "markdown"
     };

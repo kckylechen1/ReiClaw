@@ -391,7 +391,7 @@ async fn legacy_staff_echoing_modern_version_keeps_the_initialized_session() {
     assert_eq!(requests[1].1["params"]["protocolVersion"], "2026-07-28");
     assert_eq!(requests[3].0["Mcp-Session-Id"], "legacy-echo-session");
     assert_eq!(requests[3].0["x-tachi-profile"], "standard");
-    assert_eq!(requests[3].0["x-tachi-agent-identity"], "zeroclaw:home");
+    assert_eq!(requests[3].0["x-tachi-agent-identity"], "reiclaw:home");
 }
 
 #[tokio::test]
@@ -471,12 +471,12 @@ async fn modern_staff_bootstrap_uses_discover_and_negotiated_request_metadata() 
     );
     let (headers, call) = requests.last().expect("tool call");
     assert_eq!(headers["x-tachi-profile"], "standard");
-    assert_eq!(headers["x-tachi-agent-identity"], "zeroclaw:home");
+    assert_eq!(headers["x-tachi-agent-identity"], "reiclaw:home");
     assert_eq!(headers["Mcp-Name"], TACHI_STAFF_TOOL);
     assert!(!headers.contains_key("Mcp-Session-Id"));
     assert_eq!(
         call["params"]["_meta"]["io.modelcontextprotocol/clientInfo"]["name"],
-        "zeroclaw"
+        "reiclaw"
     );
     assert_eq!(call["params"]["arguments"]["profile"], "codex_55_review");
 }
@@ -540,8 +540,8 @@ async fn start_maps_harness_to_profile_and_sends_identity_headers() {
     }
 
     assert_eq!(call.headers[HEADER_PROFILE], "standard");
-    assert_eq!(call.headers[HEADER_AGENT_IDENTITY], "zeroclaw:home");
-    assert_eq!(call.headers[HEADER_CLIENT], "zeroclaw");
+    assert_eq!(call.headers[HEADER_AGENT_IDENTITY], "reiclaw:home");
+    assert_eq!(call.headers[HEADER_CLIENT], "reiclaw");
     assert_eq!(call.headers[HEADER_PROJECT], "zeroclaw");
     assert_eq!(call.headers["mcp-session-id"], "session-1");
 }
@@ -2490,7 +2490,7 @@ async fn mirror_restart_after_bind_repairs_register_before_terminal_observe() {
                 "execution_origin":MIRROR_EXECUTION_ORIGIN,
                 "lifecycle_owner":MIRROR_LIFECYCLE_OWNER,
                 "harness":MIRROR_HARNESS,
-                "frozen_contract_ref":format!("zeroclaw:staff:{native}"),
+                "frozen_contract_ref":format!("reiclaw:staff:{native}"),
                 "observation":null
             });
             store_reg
@@ -2569,7 +2569,7 @@ async fn mirror_watch_timeout_while_running_does_not_observe() {
                 "execution_origin":MIRROR_EXECUTION_ORIGIN,
                 "lifecycle_owner":MIRROR_LIFECYCLE_OWNER,
                 "harness":MIRROR_HARNESS,
-                "frozen_contract_ref":"zeroclaw:staff:d-watch"
+                "frozen_contract_ref":"reiclaw:staff:d-watch"
             })),
             (TACHI_AGENT_EVAL_TOOL, Some("observe")) => {
                 obs.fetch_add(1, Ordering::SeqCst);

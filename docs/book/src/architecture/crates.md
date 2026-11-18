@@ -126,7 +126,7 @@ accounting behavior; this crate does not schedule external harness work.
 
 ### `reiclaw-memory`
 
-Conversation memory and retrieval. Embedded Tachi (`portable-kernel`, enabled by default in `reiclaw` via `memory-tachi` and `reiclaw-memory/tachi`) is the default durable backend; workspace `Markdown` and `none` are the alternatives (`SQLite`, `Lucid`, `PostgreSQL`, and `Qdrant` were retired). `reiclaw-memory` defaults keep `tachi` off so `--no-default-features` and `slim-control` builds remain AGPL-free. Optional:
+Conversation memory and retrieval. Embedded MemoryCore (`portable-kernel`, enabled by default in `reiclaw` via `memory-core` and `reiclaw-memory/memorycore`) is the default durable backend; workspace `Markdown` and `none` are the alternatives (`SQLite`, `Lucid`, `PostgreSQL`, and `Qdrant` were retired). `reiclaw-memory` defaults keep `memorycore` off so `--no-default-features` and `slim-control` builds remain AGPL-free. Optional:
 
 - Embedding backends (OpenAI, Ollama, local)
 - Vector retrieval over stored conversations
@@ -233,7 +233,7 @@ The slim build keeps the body's conversation, context, local tools, and permissi
 checks. External harness delegation uses the Tachi MCP client included in the
 agent runtime, following [ADR-017](./decisions/ADR-017-personal-agent-body-edges-and-delegation.md).
 The profile adds no local harness launcher or execution ledger. Delegation does
-not require the separate `memory-tachi` feature, which selects a memory backend.
+not require the separate `memory-core` feature, which selects a memory backend.
 An enabled Tachi endpoint and admitted harness-to-profile mappings are still
 required. The production delegation entry point and watcher remain separate
 integration work. Building this profile does not prove that a particular harness,

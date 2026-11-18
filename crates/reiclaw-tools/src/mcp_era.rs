@@ -282,7 +282,7 @@ pub fn client_request_meta(version: &str) -> serde_json::Value {
     json!({
         META_PROTOCOL_VERSION: version,
         META_CLIENT_INFO: {
-            "name": "zeroclaw",
+            "name": "reiclaw",
             "version": env!("CARGO_PKG_VERSION")
         },
         META_CLIENT_CAPABILITIES: modern_client_capabilities()

@@ -26,8 +26,8 @@ impl KernelStoreKind {
     #[must_use]
     pub const fn role(self) -> &'static str {
         match self {
-            Self::Memory => "zeroclaw-memory",
-            Self::Companion => "zeroclaw-companion",
+            Self::Memory => "reiclaw-memory",
+            Self::Companion => "reiclaw-companion",
         }
     }
 
@@ -44,7 +44,7 @@ impl KernelStoreKind {
 mod tests {
     use super::*;
     use crate::companion::CompanionStore;
-    use crate::tachi::TachiMemory;
+    use crate::memorycore::MemoryCore;
     use portable_kernel::MemoryStore;
     use rusqlite::{Connection, OpenFlags};
     use std::collections::BTreeMap;
@@ -53,14 +53,14 @@ mod tests {
 
     fn store_path(workspace: &Path, kind: KernelStoreKind) -> PathBuf {
         match kind {
-            KernelStoreKind::Memory => workspace.join("memory/tachi.db"),
+            KernelStoreKind::Memory => workspace.join("memory/memorycore.db"),
             KernelStoreKind::Companion => workspace.join("companion/companion-memory.db"),
         }
     }
 
     fn runtime_open(workspace: &Path, kind: KernelStoreKind) -> anyhow::Result<()> {
         match kind {
-            KernelStoreKind::Memory => TachiMemory::new("tachi", workspace).map(drop),
+            KernelStoreKind::Memory => MemoryCore::new("memorycore", workspace).map(drop),
             KernelStoreKind::Companion => {
                 CompanionStore::open_runtime(&store_path(workspace, kind)).map(drop)
             }
@@ -115,7 +115,7 @@ mod tests {
     #[test]
     fn runtime_creates_distinct_owned_portable_stores() {
         let tmp = TempDir::new().unwrap();
-        let generic = TachiMemory::new("tachi", tmp.path()).unwrap();
+        let generic = MemoryCore::new("memorycore", tmp.path()).unwrap();
         assert_eq!(
             generic.store_handle().lock().store_profile(),
             StoreProfile::PortableKernel

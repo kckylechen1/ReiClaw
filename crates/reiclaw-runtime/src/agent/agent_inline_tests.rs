@@ -69,13 +69,13 @@ impl Tool for BoundarySteeringTool {
     }
 }
 
-#[cfg(not(feature = "memory-tachi"))]
+#[cfg(not(feature = "memory-core"))]
 #[derive(Default)]
 struct SteeringMemoryStub {
     entries: Mutex<HashMap<String, reiclaw_memory::MemoryEntry>>,
 }
 
-#[cfg(not(feature = "memory-tachi"))]
+#[cfg(not(feature = "memory-core"))]
 impl SteeringMemoryStub {
     fn write_entry(
         &self,
@@ -110,7 +110,7 @@ impl SteeringMemoryStub {
     }
 }
 
-#[cfg(not(feature = "memory-tachi"))]
+#[cfg(not(feature = "memory-core"))]
 #[async_trait]
 impl Memory for SteeringMemoryStub {
     fn name(&self) -> &str {
@@ -200,7 +200,7 @@ impl Memory for SteeringMemoryStub {
     }
 }
 
-#[cfg(not(feature = "memory-tachi"))]
+#[cfg(not(feature = "memory-core"))]
 impl ::reiclaw_api::attribution::Attributable for SteeringMemoryStub {
     fn role(&self) -> ::reiclaw_api::attribution::Role {
         ::reiclaw_api::attribution::Role::Memory(::reiclaw_api::attribution::MemoryKind::InMemory)
@@ -214,10 +214,10 @@ impl ::reiclaw_api::attribution::Attributable for SteeringMemoryStub {
 async fn steering_at_tool_boundary_keeps_enrichment_and_cancellation_precedence() {
     for cancel_at_boundary in [false, true] {
         let tmp = tempfile::tempdir().unwrap();
-        #[cfg(feature = "memory-tachi")]
+        #[cfg(feature = "memory-core")]
         let memory: Arc<dyn Memory> =
-            Arc::new(reiclaw_memory::TachiMemory::new("tachi", tmp.path()).unwrap());
-        #[cfg(not(feature = "memory-tachi"))]
+            Arc::new(reiclaw_memory::MemoryCore::new("memorycore", tmp.path()).unwrap());
+        #[cfg(not(feature = "memory-core"))]
         let memory: Arc<dyn Memory> = Arc::new(SteeringMemoryStub::default());
         let seen = Arc::new(Mutex::new(Vec::new()));
         let observer = Arc::new(CapturingObserver::default());

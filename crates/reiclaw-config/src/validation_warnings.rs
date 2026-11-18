@@ -466,7 +466,7 @@ fn retired_field_reason(code: &str) -> &'static str {
         "memory_backend_removed" => {
             "the postgres, qdrant, sqlite, and lucid memory backends were removed; selecting one \
              fails memory construction instead of falling back to another store. \
-             Choose tachi, markdown or none; existing brain.db data is neither read nor \
+             Choose memorycore, markdown or none; existing brain.db data is neither read nor \
              converted (the offline migration tool was retired)"
         }
         "memory_snapshot_removed" => {

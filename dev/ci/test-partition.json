@@ -39,20 +39,20 @@
   "features": {
     "runtime": [
       "reiclaw-runtime/heavy-tests",
-      "reiclaw-runtime/memory-tachi"
+      "reiclaw-runtime/memory-core"
     ],
     "channels": [
       "reiclaw-gateway/nodes",
-      "reiclaw-gateway/memory-tachi"
+      "reiclaw-gateway/memory-core"
     ],
     "app": [
       "reiclaw/nodes"
     ],
     "eval": [
-      "reiclaw-memory/tachi"
+      "reiclaw-memory/memorycore"
     ],
     "tail": [
-      "reiclaw-memory/tachi"
+      "reiclaw-memory/memorycore"
     ]
   },
   "extra_runs": {

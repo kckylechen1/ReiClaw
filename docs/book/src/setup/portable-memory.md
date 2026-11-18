@@ -1,16 +1,16 @@
 # Portable memory kernel
 
-The `memory-tachi` feature uses the shared Portable Kernel for two
-ZeroClaw-owned databases. It is enabled by default on the root `reiclaw`
+The `memory-core` feature uses the shared Portable Kernel for two
+ReiClaw-owned databases. It is enabled by default on the root `reiclaw`
 crate (and stays optional on `reiclaw-memory`, so `--no-default-features` and
 `slim-control` builds remain free of AGPL dependencies). The backend name
-`tachi`, the crate feature `reiclaw-memory/tachi`, configuration keys and
-existing database locations are unchanged.
+`memorycore`, the crate feature `reiclaw-memory/memorycore`, configuration keys and
+existing database locations are described below.
 
 | Store | Owner role | Location |
 |---|---|---|
-| Generic memory | `zeroclaw-memory` | `<data_dir>/memory/tachi.db` |
-| Companion memory | `zeroclaw-companion` | `[companion_memory].store_dir/companion-memory.db`; default `<data_dir>/companion/companion-memory.db` |
+| Generic memory | `reiclaw-memory` | `<data_dir>/memory/memorycore.db` |
+| Companion memory | `reiclaw-companion` | `[companion_memory].store_dir/companion-memory.db`; default `<data_dir>/companion/companion-memory.db` |
 
 Both require the `PortableKernel` profile. The roles are not interchangeable.
 The kernel supplies storage and typed contracts; ZeroClaw continues to own

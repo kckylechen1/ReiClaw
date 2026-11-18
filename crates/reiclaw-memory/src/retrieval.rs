@@ -657,9 +657,9 @@ impl Memory for RetrievalPipeline {
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[cfg(feature = "memorycore")]
+    use crate::memorycore::MemoryCore;
     use crate::none::NoneMemory;
-    #[cfg(feature = "tachi")]
-    use crate::tachi::TachiMemory;
     use crate::traits::MemoryCategory;
     use std::sync::atomic::{AtomicUsize, Ordering};
 
@@ -864,10 +864,10 @@ mod tests {
 
     /// Deterministic embedder so the tachi hybrid (FTS + vector) path is
     /// reproducible without a network.
-    #[cfg(feature = "tachi")]
+    #[cfg(feature = "memorycore")]
     struct DetEmbedding;
 
-    #[cfg(feature = "tachi")]
+    #[cfg(feature = "memorycore")]
     #[async_trait]
     impl crate::embeddings::EmbeddingProvider for DetEmbedding {
         fn name(&self) -> &str {
@@ -897,10 +897,10 @@ mod tests {
 
     /// A Tachi backend with several entries across sessions and namespaces,
     /// exercising the real FTS + vector hybrid merge.
-    #[cfg(feature = "tachi")]
-    async fn seeded_tachi(dir: &std::path::Path) -> Arc<TachiMemory> {
+    #[cfg(feature = "memorycore")]
+    async fn seeded_memorycore(dir: &std::path::Path) -> Arc<MemoryCore> {
         let mem =
-            TachiMemory::with_embedder("tachi", dir, Arc::new(DetEmbedding), 0.7, 0.3).unwrap();
+            MemoryCore::with_embedder("memorycore", dir, Arc::new(DetEmbedding), 0.7, 0.3).unwrap();
         mem.store(
             "deploy-target",
             "alpha cluster serves production deploys",
@@ -1140,11 +1140,11 @@ mod tests {
 
     // -- Neutrality: pipeline-at-defaults == direct backend recall --------
 
-    #[cfg(feature = "tachi")]
+    #[cfg(feature = "memorycore")]
     #[tokio::test]
     async fn defaults_identity_on_tachi_hybrid_recall() {
         let tmp = tempfile::TempDir::new().unwrap();
-        let backend = seeded_tachi(tmp.path()).await;
+        let backend = seeded_memorycore(tmp.path()).await;
 
         // (query, session, since, until) combinations covering keyword,
         // session-scoped, recent-wildcard, and time-window recalls.
@@ -1213,11 +1213,11 @@ mod tests {
         );
     }
 
-    #[cfg(feature = "tachi")]
+    #[cfg(feature = "memorycore")]
     #[tokio::test]
     async fn defaults_identity_on_namespaced_recall() {
         let tmp = tempfile::TempDir::new().unwrap();
-        let backend = seeded_tachi(tmp.path()).await;
+        let backend = seeded_memorycore(tmp.path()).await;
         let pipeline = RetrievalPipeline::new(
             backend.clone() as Arc<dyn Memory>,
             RetrievalConfig::default(),

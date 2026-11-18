@@ -1943,11 +1943,11 @@ mod tests {
     /// calibration, while this module owns the blend and relevance floor.
     /// Exercise the stock no-embedding backend through the real renderer so
     /// those two layers cannot silently drift back onto incompatible scales.
-    #[cfg(feature = "memory-tachi")]
+    #[cfg(feature = "memory-core")]
     #[tokio::test]
-    async fn noop_tachi_bm25_recall_stays_ranked_through_rerank_injection() {
+    async fn noop_memorycore_bm25_recall_stays_ranked_through_rerank_injection() {
         let tmp = tempfile::TempDir::new().unwrap();
-        let memory = reiclaw_memory::TachiMemory::new("rerank-bm25", tmp.path()).unwrap();
+        let memory = reiclaw_memory::MemoryCore::new("rerank-bm25", tmp.path()).unwrap();
         assert_eq!(
             memory.embedder_dimensions(),
             0,

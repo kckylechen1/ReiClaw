@@ -1308,7 +1308,7 @@ fn v1_child_capability_set_is_disjoint_from_a_real_parent_registry() {
     use std::collections::HashMap;
     let tmp = tempfile::TempDir::new().unwrap();
     let mut config = reiclaw_config::schema::Config::default();
-    if !reiclaw_memory::TACHI_COMPILED {
+    if !reiclaw_memory::MEMORYCORE_COMPILED {
         config.memory.backend = "markdown".into();
     }
     config.risk_profiles.insert(

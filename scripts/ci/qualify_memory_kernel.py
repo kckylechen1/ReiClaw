@@ -103,14 +103,14 @@ def qualify(repo: Path, revision: str, output: Path) -> int:
         receipt["lock_sha256"] = hashlib.sha256((work / "Cargo.lock").read_bytes()).hexdigest()
         metadata_file = output / "metadata.json"
         with metadata_file.open("wb") as stream, (output / "metadata.stderr.log").open("wb") as errors:
-            metadata_result = subprocess.run(["cargo", "metadata", "--locked", "--format-version", "1", "--features", "memory-tachi"], cwd=work, env=env, stdout=stream, stderr=errors, check=False)
-        receipt["commands"].append({"argv": ["cargo", "metadata", "--locked", "--format-version", "1", "--features", "memory-tachi"], "exit_code": metadata_result.returncode, "log": "metadata.stderr.log"})
+            metadata_result = subprocess.run(["cargo", "metadata", "--locked", "--format-version", "1", "--features", "memory-core"], cwd=work, env=env, stdout=stream, stderr=errors, check=False)
+        receipt["commands"].append({"argv": ["cargo", "metadata", "--locked", "--format-version", "1", "--features", "memory-core"], "exit_code": metadata_result.returncode, "log": "metadata.stderr.log"})
         if metadata_result.returncode:
             raise RuntimeError("candidate metadata resolution failed")
         receipt["graph"] = check_graph(json.loads(metadata_file.read_text()), revision)
         commands = [
-            ("portable-tests.log", ["cargo", "test", "--locked", "-p", "reiclaw-memory", "--features", "tachi"]),
-            ("consumer-check.log", ["cargo", "check", "--locked", "--workspace", "--all-targets", "--features", "memory-tachi"]),
+            ("portable-tests.log", ["cargo", "test", "--locked", "-p", "reiclaw-memory", "--features", "memorycore"]),
+            ("consumer-check.log", ["cargo", "check", "--locked", "--workspace", "--all-targets", "--features", "memory-core"]),
         ]
         for filename, args in commands:
             command(args, work, output / filename, receipt, env)

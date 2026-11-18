@@ -232,7 +232,7 @@ installations are detected automatically as a fallback; env override precedence:
 - [Provider configuration](docs/book/src/providers/configuration.md): the universal `[providers.models.<type>.<alias>]` schema
 - [Security overview](docs/book/src/security/overview.md): autonomy, sandboxing, tool receipts
 - [Delegation and SubAgents](docs/book/src/agents/delegation.md): `[tachi]` and `[tachi.harnesses]`
-- [Portable memory kernel](docs/book/src/setup/portable-memory.md): `memory-tachi` stores, admission and retired legacy stores
+- [Portable memory kernel](docs/book/src/setup/portable-memory.md): `memory-core` stores, admission and retired legacy stores
 
 A V3 config has at minimum four section headers (`<type>.<alias>` shaped): a provider entry, an agent that references it, and a risk profile the agent gates against. See [Provider Configuration → Minimal working example](docs/book/src/providers/configuration.md#minimal-working-example).
 
@@ -324,7 +324,7 @@ fork-specific.
 Dual-licensed: [MIT](LICENSE-MIT) OR [Apache 2.0](LICENSE-APACHE). You may choose either. Contributors automatically grant rights under both; see [CLA](docs/book/src/contributing/cla.md). The **ZeroClaw** name and logo are trademarks of ZeroClaw Labs.
 
 Tachi is AGPL-3.0-only. Calling it over MCP as a separate process leaves this
-project's license unchanged. The optional `memory-tachi` feature links the shared portable kernel
+project's license unchanged. The optional `memory-core` feature links the shared portable kernel
 directly; a binary built with it and distributed to others is covered by the
 AGPL (see ADR-017 §6).
 

@@ -142,7 +142,7 @@ Implementation status (2026-10-30): the consumerless `execution_subagent` and `s
 ZeroClaw is MIT OR Apache-2.0. Tachi, memcore, and vault-kit are AGPL-3.0-only.
 
 - Calling Tachi over MCP as a separate process leaves ZeroClaw's license unchanged. This is one more reason delegation goes over MCP.
-- The optional `memory-tachi` feature links memcore directly. A binary built with it and **distributed to others** is covered by the AGPL. Personal use is not affected, and the default build does not enable the feature.
+- The optional `memory-core` feature links memcore directly. A binary built with it and **distributed to others** is covered by the AGPL. Personal use is not affected, and the default build does not enable the feature.
 
 ### 7. Reuse before rewrite, replace before delete
 
@@ -163,8 +163,8 @@ This section is the contract between the body and Tachi for L2 work (#381). The 
 | Header | Value |
 |---|---|
 | `x-tachi-profile` | `standard` |
-| `x-tachi-agent-identity` | `[tachi].agent_identity`, or `zeroclaw:<agent alias>` |
-| `x-tachi-client` | `zeroclaw` |
+| `x-tachi-agent-identity` | `[tachi].agent_identity`, or `reiclaw:<agent alias>` |
+| `x-tachi-client` | `reiclaw` |
 | `x-tachi-project` | `[tachi].project`, only when it is set |
 
 **Operations.**

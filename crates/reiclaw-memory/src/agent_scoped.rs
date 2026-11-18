@@ -739,23 +739,23 @@ impl ::reiclaw_api::attribution::Attributable for AgentScopedMemory {
     }
 }
 
-#[cfg(all(test, feature = "tachi"))]
+#[cfg(all(test, feature = "memorycore"))]
 mod tests {
     use super::*;
     use crate::embeddings::EmbeddingProvider;
-    use crate::tachi::TachiMemory;
+    use crate::memorycore::MemoryCore;
     use crate::traits::{MemoryKind, SemanticSubtype};
     use tempfile::TempDir;
 
-    fn fresh_tachi() -> (TempDir, Arc<TachiMemory>) {
+    fn fresh_tachi() -> (TempDir, Arc<MemoryCore>) {
         let tmp = TempDir::new().unwrap();
-        let mem = TachiMemory::new("test", tmp.path()).unwrap();
+        let mem = MemoryCore::new("test", tmp.path()).unwrap();
         (tmp, Arc::new(mem))
     }
 
     /// The query text alone maps to the live vector axis. Stored rows stay
     /// FTS-matched on orthogonal vectors, exercising FTS normalization in the
-    /// real `AgentScopedMemory -> recall_for_agents -> TachiMemory` path.
+    /// real `AgentScopedMemory -> recall_for_agents -> MemoryCore` path.
     struct SessionScopeEmbedding;
 
     #[async_trait::async_trait]
@@ -784,9 +784,9 @@ mod tests {
         }
     }
 
-    fn fresh_live_tachi() -> (TempDir, Arc<TachiMemory>) {
+    fn fresh_live_tachi() -> (TempDir, Arc<MemoryCore>) {
         let tmp = TempDir::new().unwrap();
-        let mem = TachiMemory::with_embedder(
+        let mem = MemoryCore::with_embedder(
             "test",
             tmp.path(),
             Arc::new(SessionScopeEmbedding),
@@ -797,11 +797,11 @@ mod tests {
         (tmp, Arc::new(mem))
     }
 
-    fn as_dyn(inner: Arc<TachiMemory>) -> Arc<dyn Memory> {
+    fn as_dyn(inner: Arc<MemoryCore>) -> Arc<dyn Memory> {
         inner
     }
 
-    async fn provision_agents(inner: &Arc<TachiMemory>, aliases: &[&str]) -> Vec<String> {
+    async fn provision_agents(inner: &Arc<MemoryCore>, aliases: &[&str]) -> Vec<String> {
         let mut uuids = Vec::with_capacity(aliases.len());
         for alias in aliases {
             uuids.push(inner.ensure_agent_uuid(alias).await.unwrap());
@@ -1592,7 +1592,7 @@ mod tests {
         use std::collections::BTreeMap;
 
         let tmp = TempDir::new().unwrap();
-        let tachi = TachiMemory::new("tachi", tmp.path()).unwrap();
+        let tachi = MemoryCore::new("memorycore", tmp.path()).unwrap();
         let alpha = tachi.ensure_agent_uuid("alpha").await.unwrap();
 
         let policy = MemoryPolicyConfig {

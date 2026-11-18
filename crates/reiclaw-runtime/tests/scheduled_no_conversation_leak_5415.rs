@@ -4,7 +4,7 @@ use std::sync::Arc;
 
 use axum::{Router, extract::State, routing::post};
 use reiclaw_config::schema::{AliasedAgentConfig, Config, RiskProfileConfig};
-use reiclaw_memory::{MemoryCategory, TACHI_COMPILED, create_memory};
+use reiclaw_memory::{MEMORYCORE_COMPILED, MemoryCategory, create_memory};
 use tempfile::TempDir;
 use tokio::sync::Mutex as AsyncMutex;
 
@@ -38,7 +38,7 @@ async fn spawn_mock_provider() -> (SocketAddr, CapturedBodies) {
 
 #[tokio::test]
 async fn scheduled_run_does_not_leak_conversation_memory_into_provider_request() {
-    if !TACHI_COMPILED {
+    if !MEMORYCORE_COMPILED {
         return;
     }
     let tmp = TempDir::new().unwrap();

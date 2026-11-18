@@ -28,7 +28,7 @@ impl DeviceWire {
         let protocol = if path.starts_with("/ws/bridge") {
             "zeroclaw.bridge.v2"
         } else {
-            "zeroclaw.v1"
+            "reiclaw.v1"
         };
         let request = format!(
             "GET {path} HTTP/1.1\r\nHost: {address}\r\nConnection: Upgrade\r\nUpgrade: websocket\r\nSec-WebSocket-Version: 13\r\nSec-WebSocket-Key: dGhlIHNhbXBsZSBub25jZQ==\r\nSec-WebSocket-Protocol: {protocol}\r\nAuthorization: Bearer {token}\r\n\r\n"

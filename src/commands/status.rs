@@ -449,9 +449,9 @@ pub async fn handle(config: &Config, format: Option<String>) -> Result<()> {
 
 /// Resolve the memory backend label printed by `zeroclaw status`.
 ///
-/// Runtime construction reads `config.memory.backend` directly (`tachi`,
+/// Runtime construction reads `config.memory.backend` directly (`memorycore`,
 /// `markdown`, `none`); `Config::resolve_active_storage` returns
-/// `ActiveStorage::None` for `tachi` and alias-less `markdown` because only
+/// `ActiveStorage::None` for `memorycore` and alias-less `markdown` because only
 /// explicit `[storage.markdown.<alias>]` entries appear under `config.storage`.
 fn effective_memory_backend(config: &Config) -> &'static str {
     let backend = crate::memory::backend_kind_from_dotted(&config.memory.backend);
@@ -459,14 +459,14 @@ fn effective_memory_backend(config: &Config) -> &'static str {
         return "none";
     }
     match crate::memory::classify_memory_backend(&backend) {
-        #[cfg(feature = "memory-tachi")]
-        crate::memory::MemoryBackendKind::Tachi => "tachi",
+        #[cfg(feature = "memory-core")]
+        crate::memory::MemoryBackendKind::MemoryCore => "memorycore",
         crate::memory::MemoryBackendKind::Markdown => "markdown",
         crate::memory::MemoryBackendKind::None => "none",
         crate::memory::MemoryBackendKind::Retired(name) => name,
         crate::memory::MemoryBackendKind::Unknown => {
-            if backend == "tachi" {
-                "tachi"
+            if backend == "memorycore" {
+                "memorycore"
             } else {
                 "markdown"
             }
@@ -480,9 +480,9 @@ mod tests {
     use crate::config::Config;
 
     #[test]
-    fn default_config_reports_tachi_not_none() {
+    fn default_config_reports_memorycore_not_none() {
         let config = Config::default();
-        assert_eq!(effective_memory_backend(&config), "tachi");
+        assert_eq!(effective_memory_backend(&config), "memorycore");
     }
 
     #[test]

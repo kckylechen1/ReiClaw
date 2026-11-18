@@ -8384,12 +8384,12 @@ fn autosave_memory_key_has_prefix_and_uniqueness() {
 
 #[tokio::test]
 async fn autosave_memory_keys_preserve_multiple_turns() {
-    if !reiclaw_memory::TACHI_COMPILED {
+    if !reiclaw_memory::MEMORYCORE_COMPILED {
         return;
     }
     let tmp = TempDir::new().unwrap();
     let cfg = reiclaw_config::schema::MemoryConfig {
-        backend: "tachi".into(),
+        backend: "memorycore".into(),
         hygiene_enabled: false,
         embedding_provider: "none".into(),
         ..Default::default()
@@ -11763,13 +11763,13 @@ fn lifecycle_events_for_alias(events: &[ObserverEvent], alias: &str) -> (usize, 
 
 /// A `Config::default()` rooted under a fresh temp dir instead of the
 /// real `$HOME/.zeroclaw`. `Config::default()` points `data_dir` (the
-/// tachi memory db, `{data_dir}/memory/tachi.db`) and `config_path`
+/// memorycore memory db, `{data_dir}/memory/memorycore.db`) and `config_path`
 /// (whose parent `install_root_dir()` backs `agent_workspace_dir`, i.e.
 /// `{install_root}/agents/<alias>/workspace`) at the real home
 /// directory, so a `run()`-driving test that doesn't override them
 /// creates/writes real files on every dev and CI machine and, under the
 /// crate's parallel test gate, has every such test contend on the same
-/// `tachi.db`. The returned `TempDir` must be kept alive for the
+/// `memorycore.db`. The returned `TempDir` must be kept alive for the
 /// duration of the test — it deletes the directory on drop.
 fn isolated_run_test_config() -> (tempfile::TempDir, Config) {
     let tmp = tempdir().expect("temp dir for isolated run() test config should create");
@@ -11778,7 +11778,7 @@ fn isolated_run_test_config() -> (tempfile::TempDir, Config) {
         config_path: tmp.path().join("config.toml"),
         ..Config::default()
     };
-    if !reiclaw_memory::TACHI_COMPILED {
+    if !reiclaw_memory::MEMORYCORE_COMPILED {
         config.memory.backend = "markdown".into();
     }
     (tmp, config)
@@ -12145,12 +12145,12 @@ async fn run_rejects_model_switch_tool_call_and_keeps_original_route() {
 
 #[tokio::test]
 async fn recall_uses_canonical_memory_scopes_in_sequential_and_parallel_turns() {
-    if !reiclaw_memory::TACHI_COMPILED {
+    if !reiclaw_memory::MEMORYCORE_COMPILED {
         return;
     }
     let dir = tempfile::tempdir().unwrap();
     let cfg = reiclaw_config::schema::MemoryConfig {
-        backend: "tachi".into(),
+        backend: "memorycore".into(),
         hygiene_enabled: false,
         embedding_provider: "none".into(),
         ..Default::default()
@@ -12277,14 +12277,14 @@ async fn recall_uses_canonical_memory_scopes_in_sequential_and_parallel_turns() 
 // Additive scenario regression: the canonical-scope test above remains unchanged.
 #[tokio::test]
 async fn scheduled_and_delegated_tools_obey_host_memory_policy() {
-    if !reiclaw_memory::TACHI_COMPILED {
+    if !reiclaw_memory::MEMORYCORE_COMPILED {
         return;
     }
     use reiclaw_api::ingress::TurnOrigin;
     use reiclaw_api::memory_traits::MemoryReadPolicy;
     let dir = tempfile::tempdir().unwrap();
     let cfg = reiclaw_config::schema::MemoryConfig {
-        backend: "tachi".into(),
+        backend: "memorycore".into(),
         hygiene_enabled: false,
         embedding_provider: "none".into(),
         ..Default::default()

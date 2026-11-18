@@ -1,10 +1,10 @@
-//! Sleep-memory primitives over `TachiMemory`'s single `MemoryStore` handle
+//! Sleep-memory primitives over `MemoryCore`'s single `MemoryStore` handle
 //! (ADR-025 Wave 1 Slice 2/3B).
 
 use super::{
     DEFAULT_NAMESPACE, METADATA_PINNED, METADATA_SESSION_ID, METADATA_SUPERSEDED_BY,
     METADATA_ZC_AGENT, METADATA_ZC_CATEGORY, METADATA_ZC_CREATED_AT, METADATA_ZC_KEY,
-    METADATA_ZC_NAMESPACE, METADATA_ZC_UPDATED_AT, TachiMemory,
+    METADATA_ZC_NAMESPACE, METADATA_ZC_UPDATED_AT, MemoryCore,
 };
 use crate::point_scope::PointScope;
 use crate::sleep_records::{
@@ -42,7 +42,7 @@ fn ceil_utc_millis(ts: jiff::Timestamp) -> String {
     } else {
         ts
     };
-    TachiMemory::format_utc_millis(adjusted)
+    MemoryCore::format_utc_millis(adjusted)
 }
 
 fn validate_optional_session_id(session_id: Option<&str>) -> anyhow::Result<()> {
@@ -52,7 +52,7 @@ fn validate_optional_session_id(session_id: Option<&str>) -> anyhow::Result<()> 
     Ok(())
 }
 
-impl TachiMemory {
+impl MemoryCore {
     fn episode_category() -> MemoryCategory {
         MemoryCategory::Custom(SLEEP_EPISODE_CATEGORY.to_string())
     }
@@ -163,7 +163,7 @@ impl TachiMemory {
             persons: Vec::new(),
             entities,
             location: String::new(),
-            source: "zeroclaw".into(),
+            source: "reiclaw".into(),
             scope: Self::scope_for_namespace(Some(namespace)),
             archived: false,
             access_count,
@@ -587,7 +587,7 @@ impl TachiMemory {
                 persons: Vec::new(),
                 entities: Vec::new(),
                 location: String::new(),
-                source: "zeroclaw".into(),
+                source: "reiclaw".into(),
                 scope: Self::scope_for_namespace(Some(target_ns)),
                 archived: false,
                 access_count: new_access_count,
@@ -836,16 +836,16 @@ impl TachiMemory {
     }
 }
 
-#[cfg(all(test, feature = "tachi"))]
+#[cfg(all(test, feature = "memorycore"))]
 mod tests {
     use super::*;
     use crate::sleep_records::{EpisodeSourceKind, PINNED_DIGEST_MAX_BYTES};
     use crate::traits::Memory;
     use tempfile::TempDir;
 
-    fn temp_memory() -> (TempDir, TachiMemory) {
+    fn temp_memory() -> (TempDir, MemoryCore) {
         let tmp = TempDir::new().unwrap();
-        let memory = TachiMemory::new("tachi", tmp.path()).unwrap();
+        let memory = MemoryCore::new("memorycore", tmp.path()).unwrap();
         (tmp, memory)
     }
 

@@ -298,7 +298,7 @@ sections! {
         key:   "storage",
         shape: TypedFamilyMap,
         group: Storage,
-        help:  "Tachi is the default embedded memory engine for single-node \
+        help:  "MemoryCore is the default embedded memory engine for single-node \
                 installs (file-based, zero-config, no extra services). Pick \
                 Markdown for human-readable files. Aliased markdown instances \
                 under `[storage.markdown.<alias>]` are referenced via \
@@ -308,7 +308,7 @@ sections! {
         key:   "memory",
         shape: BackendPicker,
         group: Foundation,
-        help:  "Persistent memory backend. Tachi is the default; pick `markdown` \
+        help:  "Persistent memory backend. MemoryCore is the default; pick `markdown` \
                 or `none` to change or disable memory without editing `[storage.*]`.",
     },
 
@@ -840,14 +840,14 @@ mod tests {
     }
 
     #[test]
-    fn storage_help_steers_to_tachi_default() {
+    fn storage_help_steers_to_memorycore_default() {
         let help = section_help("storage").to_lowercase();
-        let tachi_pos = help
-            .find("tachi")
-            .expect("storage help must mention Tachi by name");
+        let memorycore_pos = help
+            .find("memorycore")
+            .expect("storage help must mention MemoryCore by name");
         assert!(
             help.contains("default") || help.contains("safe") || help.contains("recommend"),
-            "storage help must signal Tachi is the default/safe/recommended choice; got: {help}",
+            "storage help must signal MemoryCore is the default/safe/recommended choice; got: {help}",
         );
         let other = "markdown";
         let other_pos = help.find(other).unwrap_or_else(|| {
@@ -857,8 +857,8 @@ mod tests {
             )
         });
         assert!(
-            tachi_pos < other_pos,
-            "Tachi (at {tachi_pos}) must be mentioned before `{other}` (at {other_pos}) so \
+            memorycore_pos < other_pos,
+            "MemoryCore (at {memorycore_pos}) must be mentioned before `{other}` (at {other_pos}) so \
              the default recommendation lands first",
         );
     }

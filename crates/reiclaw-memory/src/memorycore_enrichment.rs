@@ -199,7 +199,7 @@ fn push_raw_candidate(
     // ordinary and eligible.
     if entry
         .metadata
-        .get(crate::tachi::METADATA_ZC_NAMESPACE)
+        .get(crate::memorycore::METADATA_ZC_NAMESPACE)
         .and_then(|v| v.as_str())
         == Some(crate::SOUL_NAMESPACE)
     {
@@ -282,11 +282,11 @@ fn bound_tags(tags: Vec<String>, max_count: usize) -> Vec<String> {
         .collect()
 }
 
-#[cfg(all(test, feature = "tachi"))]
+#[cfg(all(test, feature = "memorycore"))]
 mod tests {
     use super::*;
     use crate::hygiene;
-    use crate::tachi::TachiMemory;
+    use crate::memorycore::MemoryCore;
     use crate::traits::Memory;
     use async_trait::async_trait;
     use portable_kernel::MemoryEntry;
@@ -390,7 +390,7 @@ mod tests {
             persons: Vec::new(),
             entities: Vec::new(),
             location: String::new(),
-            source: "zeroclaw-test".into(),
+            source: "reiclaw-test".into(),
             scope: "general".into(),
             archived: false,
             access_count: 0,
@@ -402,10 +402,10 @@ mod tests {
             retention_policy: None,
             domain: None,
             metadata: serde_json::json!({
-                "zeroclaw_key": id,
-                "zeroclaw_category": "core",
-                "zeroclaw_namespace": "default",
-                "zeroclaw_agent": "default",
+                "reiclaw_key": id,
+                "reiclaw_category": "core",
+                "reiclaw_namespace": "default",
+                "reiclaw_agent": "default",
             }),
             recall_count: 0,
             query_diversity: 0,
@@ -422,12 +422,12 @@ mod tests {
         match namespace {
             Some(namespace) => {
                 metadata.insert(
-                    crate::tachi::METADATA_ZC_NAMESPACE.into(),
+                    crate::memorycore::METADATA_ZC_NAMESPACE.into(),
                     serde_json::Value::String(namespace.into()),
                 );
             }
             None => {
-                metadata.remove(crate::tachi::METADATA_ZC_NAMESPACE);
+                metadata.remove(crate::memorycore::METADATA_ZC_NAMESPACE);
             }
         }
         // Seed once so the first revision remains 1; an extra upsert would
@@ -438,7 +438,7 @@ mod tests {
     #[tokio::test]
     async fn enrich_writes_summary_keywords_entities() {
         let tmp = TempDir::new().unwrap();
-        let mem = TachiMemory::new("tachi", tmp.path()).unwrap();
+        let mem = MemoryCore::new("memorycore", tmp.path()).unwrap();
         {
             let mut store = mem.store_handle().lock();
             seed_raw(
@@ -475,7 +475,7 @@ mod tests {
     #[tokio::test]
     async fn enrich_preserves_existing_summary_when_llm_returns_empty() {
         let tmp = TempDir::new().unwrap();
-        let mem = TachiMemory::new("tachi", tmp.path()).unwrap();
+        let mem = MemoryCore::new("memorycore", tmp.path()).unwrap();
         {
             let mut store = mem.store_handle().lock();
             seed_raw(
@@ -509,7 +509,7 @@ mod tests {
     #[tokio::test]
     async fn enrich_fills_missing_keywords_without_replacing_populated_fields() {
         let tmp = TempDir::new().unwrap();
-        let mem = TachiMemory::new("tachi", tmp.path()).unwrap();
+        let mem = MemoryCore::new("memorycore", tmp.path()).unwrap();
         {
             let mut store = mem.store_handle().lock();
             seed_raw(
@@ -545,7 +545,7 @@ mod tests {
     #[tokio::test]
     async fn enrich_bounds_keywords_and_entities_before_write() {
         let tmp = TempDir::new().unwrap();
-        let mem = TachiMemory::new("tachi", tmp.path()).unwrap();
+        let mem = MemoryCore::new("memorycore", tmp.path()).unwrap();
         {
             let mut store = mem.store_handle().lock();
             seed_raw(
@@ -589,7 +589,7 @@ mod tests {
     #[tokio::test]
     async fn enrich_skips_anchor_ids() {
         let tmp = TempDir::new().unwrap();
-        let mem = TachiMemory::new("tachi", tmp.path()).unwrap();
+        let mem = MemoryCore::new("memorycore", tmp.path()).unwrap();
         let anchor_id = {
             let store = mem.store_handle().lock();
             // Anchors have empty keywords → entries_missing_metadata surfaces
@@ -619,7 +619,7 @@ mod tests {
     #[tokio::test]
     async fn enrich_parses_markdown_fenced_json() {
         let tmp = TempDir::new().unwrap();
-        let mem = TachiMemory::new("tachi", tmp.path()).unwrap();
+        let mem = MemoryCore::new("memorycore", tmp.path()).unwrap();
         {
             let mut store = mem.store_handle().lock();
             seed_raw(
@@ -651,7 +651,7 @@ mod tests {
     #[tokio::test]
     async fn enrich_skips_wrong_type_keywords_leaves_row_unchanged() {
         let tmp = TempDir::new().unwrap();
-        let mem = TachiMemory::new("tachi", tmp.path()).unwrap();
+        let mem = MemoryCore::new("memorycore", tmp.path()).unwrap();
         {
             let mut store = mem.store_handle().lock();
             seed_raw(
@@ -684,7 +684,7 @@ mod tests {
     #[tokio::test]
     async fn enrich_skips_provider_errors_and_garbage() {
         let tmp = TempDir::new().unwrap();
-        let mem = TachiMemory::new("tachi", tmp.path()).unwrap();
+        let mem = MemoryCore::new("memorycore", tmp.path()).unwrap();
         {
             let mut store = mem.store_handle().lock();
             seed_raw(
@@ -722,7 +722,7 @@ mod tests {
     #[tokio::test]
     async fn enrich_skips_non_raw_and_already_enriched() {
         let tmp = TempDir::new().unwrap();
-        let mem = TachiMemory::new("tachi", tmp.path()).unwrap();
+        let mem = MemoryCore::new("memorycore", tmp.path()).unwrap();
         {
             let mut store = mem.store_handle().lock();
             seed_raw(
@@ -769,7 +769,7 @@ mod tests {
         // by summary/tier but must never reach the provider; ordinary rows
         // (default namespace and missing namespace) still enrich.
         let tmp = TempDir::new().unwrap();
-        let mem = TachiMemory::new("tachi", tmp.path()).unwrap();
+        let mem = MemoryCore::new("memorycore", tmp.path()).unwrap();
         {
             let mut store = mem.store_handle().lock();
             seed_namespaced_raw(
@@ -856,7 +856,7 @@ mod tests {
         // Empty-after-filter: every collected candidate is reserved, so the
         // provider must not be called at all and nothing is enriched.
         let tmp = TempDir::new().unwrap();
-        let mem = TachiMemory::new("tachi", tmp.path()).unwrap();
+        let mem = MemoryCore::new("memorycore", tmp.path()).unwrap();
         {
             let mut store = mem.store_handle().lock();
             seed_namespaced_raw(
@@ -923,7 +923,7 @@ mod tests {
         // A legacy row with no `zeroclaw_namespace` metadata is ordinary, not
         // reserved: it is enriched exactly as before this exclusion.
         let tmp = TempDir::new().unwrap();
-        let mem = TachiMemory::new("tachi", tmp.path()).unwrap();
+        let mem = MemoryCore::new("memorycore", tmp.path()).unwrap();
         {
             let mut store = mem.store_handle().lock();
             seed_namespaced_raw(&mut store, "raw-no-ns", "LEGACY_NO_NAMESPACE_TEXT", None);
@@ -955,7 +955,7 @@ mod tests {
     #[tokio::test]
     async fn enrichment_cadence_gates_via_state_file() {
         let tmp = TempDir::new().unwrap();
-        let mem = TachiMemory::new("tachi", tmp.path()).unwrap();
+        let mem = MemoryCore::new("memorycore", tmp.path()).unwrap();
         {
             let mut store = mem.store_handle().lock();
             seed_raw(
@@ -1002,7 +1002,7 @@ mod tests {
     #[tokio::test]
     async fn revision_mismatch_skips_write() {
         let tmp = TempDir::new().unwrap();
-        let mem = TachiMemory::new("tachi", tmp.path()).unwrap();
+        let mem = MemoryCore::new("memorycore", tmp.path()).unwrap();
         {
             let mut store = mem.store_handle().lock();
             seed_raw(

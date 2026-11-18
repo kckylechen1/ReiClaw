@@ -3,7 +3,7 @@
 //! Driven from the memory factory hygiene cadence
 //! ([`crate::create_memory_with_storage_and_routes`]) and from
 //! [`Memory::run_light_sleep_governance`](reiclaw_api::memory_traits::Memory::run_light_sleep_governance)
-//! on a live [`crate::TachiMemory`] handle. Uses memcore public APIs only —
+//! on a live [`crate::MemoryCore`] handle. Uses memcore public APIs only —
 //! no direct SQL into the kernel schema, and no second DB open on production
 //! paths.
 
@@ -26,7 +26,7 @@ const NEAR_DUP_GOVERNANCE_THRESHOLD: f64 = 0.9;
 /// SSOT: this is the source of truth for per-call counters; it is not a cache of
 /// store or config state.
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
-pub struct TachiGovernanceReport {
+pub struct MemoryCoreGovernanceReport {
     pub near_dup_archived: usize,
     pub near_dup_survivors_updated: usize,
     pub promoted: usize,
@@ -35,10 +35,12 @@ pub struct TachiGovernanceReport {
 
 /// Run tachi light-sleep governance on the live store handle.
 ///
-/// Production paths must pass the same [`MemoryStore`] owned by [`crate::TachiMemory`]
+/// Production paths must pass the same [`MemoryStore`] owned by [`crate::MemoryCore`]
 /// — never open a second connection to the same path.
-pub fn run_tachi_governance(store: &mut MemoryStore) -> anyhow::Result<TachiGovernanceReport> {
-    let mut report = TachiGovernanceReport::default();
+pub fn run_memorycore_governance(
+    store: &mut MemoryStore,
+) -> anyhow::Result<MemoryCoreGovernanceReport> {
+    let mut report = MemoryCoreGovernanceReport::default();
     let near = run_near_dup_light_sleep(store, NEAR_DUP_GOVERNANCE_THRESHOLD)?;
     report.near_dup_archived = near.0;
     report.near_dup_survivors_updated = near.1;
@@ -65,20 +67,20 @@ pub fn run_tachi_governance(store: &mut MemoryStore) -> anyhow::Result<TachiGove
     Ok(report)
 }
 
-/// Lock the shared store and run governance (same handle as [`crate::TachiMemory`]).
-pub fn run_tachi_governance_on_handle(
+/// Lock the shared store and run governance (same handle as [`crate::MemoryCore`]).
+pub fn run_memorycore_governance_on_handle(
     store: &Arc<Mutex<MemoryStore>>,
-) -> anyhow::Result<TachiGovernanceReport> {
+) -> anyhow::Result<MemoryCoreGovernanceReport> {
     let mut guard = store.lock();
-    run_tachi_governance(&mut guard)
+    run_memorycore_governance(&mut guard)
 }
 
-// Partition on the same metadata keys the TachiMemory write path uses —
+// Partition on the same metadata keys the MemoryCore write path uses —
 // shared consts so a rename cannot drift between store and governance.
-use crate::tachi::{
+use crate::memorycore::{
     METADATA_SUPERSEDED_BY, METADATA_ZC_AGENT as META_ZC_AGENT,
     METADATA_ZC_CATEGORY as META_ZC_CATEGORY, METADATA_ZC_NAMESPACE as META_ZC_NAMESPACE,
-    TachiMemory,
+    MemoryCore,
 };
 use portable_kernel::store::scoped_read::{MetadataTextFilter, RecentMemoryQuery, TextMembership};
 
@@ -112,7 +114,7 @@ fn near_dup_scope_key(entry: &MemoryEntry) -> NearDupScope {
         .get(META_ZC_CATEGORY)
         .and_then(|v| v.as_str())
         == Some("conversation"))
-    .then(|| TachiMemory::conversation_session(&entry.metadata).map(str::to_owned));
+    .then(|| MemoryCore::conversation_session(&entry.metadata).map(str::to_owned));
     NearDupScope {
         agent,
         namespace,
@@ -151,7 +153,7 @@ fn run_near_dup_light_sleep(
     let mut entries = store
         .list_recent_matching(&query)
         .map_err(|e| anyhow::Error::msg(format!("tachi governance: list failed: {e}")))?;
-    entries.retain(|entry| !TachiMemory::is_soft_superseded(entry));
+    entries.retain(|entry| !MemoryCore::is_soft_superseded(entry));
     if entries.len() < 2 {
         return Ok((0, 0));
     }
@@ -275,8 +277,8 @@ fn is_better_survivor(a: &MemoryEntry, b: &MemoryEntry) -> bool {
     match a.importance.partial_cmp(&b.importance) {
         Some(std::cmp::Ordering::Greater) => true,
         Some(std::cmp::Ordering::Less) => false,
-        _ => match TachiMemory::effective_updated_sort_key(a)
-            .cmp(&TachiMemory::effective_updated_sort_key(b))
+        _ => match MemoryCore::effective_updated_sort_key(a)
+            .cmp(&MemoryCore::effective_updated_sort_key(b))
         {
             std::cmp::Ordering::Greater => true,
             std::cmp::Ordering::Less => false,
@@ -285,11 +287,11 @@ fn is_better_survivor(a: &MemoryEntry, b: &MemoryEntry) -> bool {
     }
 }
 
-#[cfg(all(test, feature = "tachi"))]
+#[cfg(all(test, feature = "memorycore"))]
 mod tests {
     use super::*;
     use crate::create_memory_with_storage_and_routes;
-    use crate::tachi::TachiMemory;
+    use crate::memorycore::MemoryCore;
     use crate::traits::{Memory, MemoryCategory, StoreOptions};
     use reiclaw_config::schema::{ActiveStorage, MemoryConfig};
     use std::sync::Arc;
@@ -297,7 +299,7 @@ mod tests {
 
     fn tachi_config() -> MemoryConfig {
         MemoryConfig {
-            backend: "tachi".into(),
+            backend: "memorycore".into(),
             hygiene_enabled: true,
             ..MemoryConfig::default()
         }
@@ -328,7 +330,7 @@ mod tests {
             persons: Vec::new(),
             entities: Vec::new(),
             location: String::new(),
-            source: "zeroclaw-test".into(),
+            source: "reiclaw-test".into(),
             scope: "general".into(),
             archived: false,
             access_count: 0,
@@ -348,14 +350,14 @@ mod tests {
     }
 
     /// Exercises the factory hygiene-cadence wiring in
-    /// `create_memory_with_storage_and_routes` (not `run_tachi_governance` alone).
+    /// `create_memory_with_storage_and_routes` (not `run_memorycore_governance` alone).
     /// Deleting the `run_light_sleep_governance` one-liner there turns this RED.
     #[test]
     fn near_dup_merge_collapses_transitive_raw_chain_via_factory_hygiene() {
         let tmp = TempDir::new().unwrap();
         // Seed on a short-lived handle, then drop so the factory owns the live store.
         {
-            let mem = TachiMemory::new("tachi", tmp.path()).unwrap();
+            let mem = MemoryCore::new("memorycore", tmp.path()).unwrap();
             let mut store = mem.store_handle().lock();
             let base = "The operator prefers concise Rust answers for equity trading notes";
             seed_raw(
@@ -387,7 +389,7 @@ mod tests {
             );
         }
 
-        // Live cadence entry point — factory constructs TachiMemory and runs
+        // Live cadence entry point — factory constructs MemoryCore and runs
         // light-sleep when hygiene is due (no state file => due).
         let _mem = create_memory_with_storage_and_routes(
             &tachi_config(),
@@ -399,7 +401,7 @@ mod tests {
         )
         .expect("factory tachi");
 
-        let mem = TachiMemory::new("tachi", tmp.path()).unwrap();
+        let mem = MemoryCore::new("memorycore", tmp.path()).unwrap();
         let store = mem.store_handle().lock();
         let survivor = store.get("raw-b").unwrap().expect("survivor");
         assert!(!survivor.archived);
@@ -426,7 +428,7 @@ mod tests {
     fn near_dup_leaves_non_raw_tiers_untouched() {
         let tmp = TempDir::new().unwrap();
         {
-            let mem = TachiMemory::new("tachi", tmp.path()).unwrap();
+            let mem = MemoryCore::new("memorycore", tmp.path()).unwrap();
             let mut store = mem.store_handle().lock();
             let text = "Shared consolidated preference text about Rust tooling";
             seed_raw(
@@ -459,7 +461,7 @@ mod tests {
         }
 
         let report = {
-            let mem = TachiMemory::new("tachi", tmp.path()).unwrap();
+            let mem = MemoryCore::new("memorycore", tmp.path()).unwrap();
             mem.run_light_sleep_governance_report().unwrap()
         };
         assert_eq!(
@@ -467,7 +469,7 @@ mod tests {
             "consolidated twins must not archive via near-dup: {report:?}"
         );
 
-        let mem = TachiMemory::new("tachi", tmp.path()).unwrap();
+        let mem = MemoryCore::new("memorycore", tmp.path()).unwrap();
         let store = mem.store_handle().lock();
         assert!(!store.get("cons-a").unwrap().expect("cons-a").archived);
         assert!(!store.get("cons-b").unwrap().expect("cons-b").archived);
@@ -483,7 +485,7 @@ mod tests {
     #[test]
     fn promote_and_stale_archive_smoke() {
         let tmp = TempDir::new().unwrap();
-        let mem = TachiMemory::new("tachi", tmp.path()).unwrap();
+        let mem = MemoryCore::new("memorycore", tmp.path()).unwrap();
         {
             let mut store = mem.store_handle().lock();
             let now = reiclaw_api::time::format_rfc3339_zoned(&jiff::Zoned::now());
@@ -502,7 +504,7 @@ mod tests {
                 persons: Vec::new(),
                 entities: Vec::new(),
                 location: String::new(),
-                source: "zeroclaw-test".into(),
+                source: "reiclaw-test".into(),
                 scope: "general".into(),
                 archived: false,
                 access_count: 0,
@@ -531,7 +533,7 @@ mod tests {
             store.upsert(&stale).unwrap();
             // Backdate only this disposable fixture; governance keeps the live handle.
             let fixture = rusqlite::Connection::open_with_flags(
-                tmp.path().join("memory").join("tachi.db"),
+                tmp.path().join("memory").join("memorycore.db"),
                 rusqlite::OpenFlags::SQLITE_OPEN_READ_WRITE,
             )
             .expect("open existing fixture database");
@@ -564,8 +566,8 @@ mod tests {
     #[tokio::test]
     async fn pinned_row_survives_stale_archive_via_governance() {
         let tmp = TempDir::new().unwrap();
-        let mem = TachiMemory::with_embedder(
-            "tachi",
+        let mem = MemoryCore::with_embedder(
+            "memorycore",
             tmp.path(),
             Arc::new(crate::embeddings::NoopEmbedding),
             0.7,
@@ -589,13 +591,13 @@ mod tests {
                 .unwrap()
                 .into_iter()
                 .find(|e| {
-                    e.metadata.get("zeroclaw_key").and_then(|v| v.as_str()) == Some("pinned-old")
+                    e.metadata.get("reiclaw_key").and_then(|v| v.as_str()) == Some("pinned-old")
                 })
                 .expect("pinned row");
             assert_eq!(row.retention_policy.as_deref(), Some("pinned"));
             // Backdate only this disposable fixture; governance keeps the live handle.
             let fixture = rusqlite::Connection::open_with_flags(
-                tmp.path().join("memory").join("tachi.db"),
+                tmp.path().join("memory").join("memorycore.db"),
                 rusqlite::OpenFlags::SQLITE_OPEN_READ_WRITE,
             )
             .expect("open existing fixture database");
@@ -617,7 +619,7 @@ mod tests {
             .list_by_path("/agents", 64, false)
             .unwrap()
             .into_iter()
-            .find(|e| e.metadata.get("zeroclaw_key").and_then(|v| v.as_str()) == Some("pinned-old"))
+            .find(|e| e.metadata.get("reiclaw_key").and_then(|v| v.as_str()) == Some("pinned-old"))
             .expect("still present");
         assert!(!row.archived);
     }
@@ -625,8 +627,8 @@ mod tests {
     #[tokio::test]
     async fn store_after_governance_preserves_merged_keywords() {
         let tmp = TempDir::new().unwrap();
-        let mem = TachiMemory::with_embedder(
-            "tachi",
+        let mem = MemoryCore::with_embedder(
+            "memorycore",
             tmp.path(),
             Arc::new(crate::embeddings::NoopEmbedding),
             0.7,
@@ -635,18 +637,18 @@ mod tests {
         .unwrap();
 
         let base = "Keyword carry-over preference note for equity trading workflow";
-        let path_a = TachiMemory::storage_path(None, None, &MemoryCategory::Core, "kw-a");
-        let path_b = TachiMemory::storage_path(None, None, &MemoryCategory::Core, "kw-b");
+        let path_a = MemoryCore::storage_path(None, None, &MemoryCategory::Core, "kw-a");
+        let path_b = MemoryCore::storage_path(None, None, &MemoryCategory::Core, "kw-b");
         {
             let mut store = mem.store_handle().lock();
             seed_raw(&mut store, "kw-a", &path_a, base, 0.5, &["alpha"], "raw");
             // Attach identity metadata so a later store("kw-b") updates this row.
             let mut entry_a = store.get("kw-a").unwrap().unwrap();
             entry_a.metadata = serde_json::json!({
-                "zeroclaw_key": "kw-a",
-                "zeroclaw_category": "core",
-                "zeroclaw_namespace": "default",
-                "zeroclaw_agent": "default",
+                "reiclaw_key": "kw-a",
+                "reiclaw_category": "core",
+                "reiclaw_namespace": "default",
+                "reiclaw_agent": "default",
             });
             store.upsert(&entry_a).unwrap();
 
@@ -661,10 +663,10 @@ mod tests {
             );
             let mut entry_b = store.get("kw-b").unwrap().unwrap();
             entry_b.metadata = serde_json::json!({
-                "zeroclaw_key": "kw-b",
-                "zeroclaw_category": "core",
-                "zeroclaw_namespace": "default",
-                "zeroclaw_agent": "default",
+                "reiclaw_key": "kw-b",
+                "reiclaw_category": "core",
+                "reiclaw_namespace": "default",
+                "reiclaw_agent": "default",
             });
             store.upsert(&entry_b).unwrap();
         }
@@ -709,8 +711,8 @@ mod tests {
     #[tokio::test]
     async fn unpin_clears_retention_policy() {
         let tmp = TempDir::new().unwrap();
-        let mem = TachiMemory::with_embedder(
-            "tachi",
+        let mem = MemoryCore::with_embedder(
+            "memorycore",
             tmp.path(),
             Arc::new(crate::embeddings::NoopEmbedding),
             0.7,
@@ -733,7 +735,7 @@ mod tests {
                 .unwrap()
                 .into_iter()
                 .find(|e| {
-                    e.metadata.get("zeroclaw_key").and_then(|v| v.as_str()) == Some("pin-toggle")
+                    e.metadata.get("reiclaw_key").and_then(|v| v.as_str()) == Some("pin-toggle")
                 })
                 .expect("pin-toggle row")
         };
@@ -773,8 +775,8 @@ mod tests {
     #[tokio::test]
     async fn near_dup_governance_ignores_soft_superseded_rows() {
         let tmp = TempDir::new().unwrap();
-        let mem = TachiMemory::with_embedder(
-            "tachi",
+        let mem = MemoryCore::with_embedder(
+            "memorycore",
             tmp.path(),
             Arc::new(crate::embeddings::NoopEmbedding),
             0.7,
@@ -843,7 +845,7 @@ mod tests {
     #[test]
     fn near_dup_governance_not_starved_by_pinned_soft_superseded_backlog() {
         let tmp = TempDir::new().unwrap();
-        let mem = TachiMemory::new("tachi", tmp.path()).unwrap();
+        let mem = MemoryCore::new("memorycore", tmp.path()).unwrap();
         {
             let mut store = mem.store_handle().lock();
             let mut backlog = Vec::with_capacity(4_050);
@@ -863,7 +865,7 @@ mod tests {
                     persons: Vec::new(),
                     entities: Vec::new(),
                     location: String::new(),
-                    source: "zeroclaw-test".into(),
+                    source: "reiclaw-test".into(),
                     scope: "general".into(),
                     archived: false,
                     access_count: 0,
@@ -875,10 +877,10 @@ mod tests {
                     retention_policy: Some("pinned".into()),
                     domain: None,
                     metadata: serde_json::json!({
-                        "zeroclaw_key": format!("sup-{i:04}"),
-                        "zeroclaw_category": "core",
-                        "zeroclaw_namespace": "default",
-                        "zeroclaw_agent": "aaa",
+                        "reiclaw_key": format!("sup-{i:04}"),
+                        "reiclaw_category": "core",
+                        "reiclaw_namespace": "default",
+                        "reiclaw_agent": "aaa",
                         "pinned": true,
                         "superseded_by": "winner",
                     }),
@@ -910,7 +912,7 @@ mod tests {
                         persons: Vec::new(),
                         entities: Vec::new(),
                         location: String::new(),
-                        source: "zeroclaw-test".into(),
+                        source: "reiclaw-test".into(),
                         scope: "general".into(),
                         archived: false,
                         access_count: 0,
@@ -922,10 +924,10 @@ mod tests {
                         retention_policy: None,
                         domain: None,
                         metadata: serde_json::json!({
-                            "zeroclaw_key": id,
-                            "zeroclaw_category": "core",
-                            "zeroclaw_namespace": "default",
-                            "zeroclaw_agent": "zzz",
+                            "reiclaw_key": id,
+                            "reiclaw_category": "core",
+                            "reiclaw_namespace": "default",
+                            "reiclaw_agent": "zzz",
                         }),
                         recall_count: 0,
                         query_diversity: 0,

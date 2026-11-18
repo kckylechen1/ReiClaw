@@ -89,7 +89,7 @@ mod tests {
     use super::*;
     use reiclaw_config::autonomy::AutonomyLevel;
     use reiclaw_config::schema::MemoryConfig;
-    use reiclaw_memory::{MemoryCategory, NoneMemory, TACHI_COMPILED, create_memory};
+    use reiclaw_memory::{MEMORYCORE_COMPILED, MemoryCategory, NoneMemory, create_memory};
     use reiclaw_policy::SecurityPolicy;
     use tempfile::TempDir;
 
@@ -98,12 +98,12 @@ mod tests {
     }
 
     fn try_test_mem() -> Option<(TempDir, Arc<dyn Memory>)> {
-        if !TACHI_COMPILED {
+        if !MEMORYCORE_COMPILED {
             return None;
         }
         let tmp = TempDir::new().unwrap();
         let cfg = MemoryConfig {
-            backend: "tachi".into(),
+            backend: "memorycore".into(),
             hygiene_enabled: false,
             embedding_provider: "none".into(),
             ..MemoryConfig::default()

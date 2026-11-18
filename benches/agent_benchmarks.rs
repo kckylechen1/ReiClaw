@@ -136,8 +136,8 @@ fn make_memory() -> Arc<dyn Memory> {
 }
 
 fn make_bench_memory(dir: &std::path::Path) -> Arc<dyn Memory> {
-    let backend = if memory::TACHI_COMPILED {
-        "tachi"
+    let backend = if memory::MEMORYCORE_COMPILED {
+        "memorycore"
     } else {
         "markdown"
     };

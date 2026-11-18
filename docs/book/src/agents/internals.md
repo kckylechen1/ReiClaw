@@ -65,7 +65,7 @@ SubAgent spawns enforce the rule that a child cannot escalate beyond its parent.
 
 Each agent has its own `Arc<dyn Memory>` instance. The factory (`zeroclaw_memory::create_memory_for_agent`) dispatches by backend kind:
 
-- **Tachi**: default shared install-wide store (`<data_dir>/memory/tachi.db`). Each agent alias resolves to a UUID via `ensure_agent_uuid`. The factory wraps the inner backend in `AgentScopedMemory`, which stamps the bound agent's UUID on every store via `store_with_agent` and filters every recall via `recall_for_agents` with the resolved allowlist.
+- **MemoryCore**: default shared install-wide store (`<data_dir>/memory/memorycore.db`). Each agent alias resolves to a UUID via `ensure_agent_uuid`. The factory wraps the inner backend in `AgentScopedMemory`, which stamps the bound agent's UUID on every store via `store_with_agent` and filters every recall via `recall_for_agents` with the resolved allowlist.
 - **Markdown**: per-agent dir. Each agent's `MarkdownMemory` writes to `<install>/agents/<alias>/workspace/MEMORY.md` and `memory/YYYY-MM-DD.md`. Cross-agent recall is composed by `AgentScopedMarkdownMemory`, which holds the bound agent's `MarkdownMemory` plus a peer set of `(alias, MarkdownMemory)` pairs and unions their results with `[<alias>]` attribution prefixes on each row.
 - **SQLite / Lucid / Postgres / Qdrant**: removed. Selecting any of them (install-wide `memory.backend` or per-agent `memory.backend`) fails memory construction with an explicit error (existing `brain.db` data is neither read nor converted; the offline migration tool was retired); the config still loads and reports the `memory_backend_removed` warning.
 - **None**: no-op stub. The wrapper still exists so the runtime path is uniform.

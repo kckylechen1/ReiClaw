@@ -11,7 +11,7 @@ async fn list_keeps_retention_controls_visible_across_backend_changes() {
     let state = test_state(config);
 
     // Keep the retention control available while reflecting the current selector.
-    for backend in ["tachi", "markdown", "markdown.fixture", ""] {
+    for backend in ["memorycore", "markdown", "markdown.fixture", ""] {
         state.config.write().memory.backend = backend.into();
         let (status, listed) = response_json(
             handle_list(

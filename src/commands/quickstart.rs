@@ -606,8 +606,8 @@ pub async fn run_quickstart_cli(
             }
             Action::Memory => {
                 let mut kinds: Vec<MemoryChoice> = Vec::new();
-                if reiclaw_memory::TACHI_COMPILED {
-                    kinds.push(MemoryChoice::Tachi);
+                if reiclaw_memory::MEMORYCORE_COMPILED {
+                    kinds.push(MemoryChoice::MemoryCore);
                 }
                 kinds.push(MemoryChoice::Markdown);
                 kinds.push(MemoryChoice::None);
@@ -618,7 +618,7 @@ pub async fn run_quickstart_cli(
                     MemoryChoice::Sqlite
                     | MemoryChoice::Markdown
                     | MemoryChoice::Lucid
-                    | MemoryChoice::Tachi
+                    | MemoryChoice::MemoryCore
                     | MemoryChoice::None
                     | MemoryChoice::Postgres
                     | MemoryChoice::Qdrant => (),

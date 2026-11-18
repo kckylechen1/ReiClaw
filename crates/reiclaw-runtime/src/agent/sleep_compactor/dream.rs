@@ -124,7 +124,7 @@ fn save_dream_state(data_dir: &Path, state: &DreamStateFile) -> Result<()> {
 
 // ── Daemon Worker: Startup Recovery, Idle Flush, Light Sleep & 04:00 Dream ──
 
-fn agent_uses_tachi(config: &Config, agent_alias: &str) -> bool {
+fn agent_uses_memorycore(config: &Config, agent_alias: &str) -> bool {
     let Some(agent_cfg) = config.agent(agent_alias) else {
         return false;
     };
@@ -546,7 +546,7 @@ async fn tick_agent(
     startup_pass: bool,
     now: jiff::Timestamp,
 ) -> Result<bool> {
-    if !agent_uses_tachi(config, agent_alias) {
+    if !agent_uses_memorycore(config, agent_alias) {
         return Ok(false);
     }
 

@@ -584,20 +584,20 @@ mod tests {
             result.detail
         );
 
-        #[cfg(feature = "memory-tachi")]
+        #[cfg(feature = "memory-core")]
         {
-            let tachi_tmp = TempDir::new().unwrap();
-            let mut tachi_config = Config::default();
-            tachi_config.data_dir = tachi_tmp.path().to_path_buf();
-            tachi_config.memory.backend = "tachi".into();
+            let mc_tmp = TempDir::new().unwrap();
+            let mut mc_config = Config::default();
+            mc_config.data_dir = mc_tmp.path().to_path_buf();
+            mc_config.memory.backend = "memorycore".into();
 
-            let tachi_result = super::check_memory_roundtrip(&tachi_config).await;
+            let mc_result = super::check_memory_roundtrip(&mc_config).await;
             assert!(
-                tachi_result.passed,
-                "tachi memory self-test failed: {}",
-                tachi_result.detail
+                mc_result.passed,
+                "memorycore memory self-test failed: {}",
+                mc_result.detail
             );
-            assert!(tachi_tmp.path().join("memory").join("tachi.db").exists());
+            assert!(mc_tmp.path().join("memory").join("memorycore.db").exists());
         }
     }
 

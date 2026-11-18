@@ -361,7 +361,7 @@ mod tests {
         let server = reiclaw_spawn::spawn!(async move {
             let (stream, _) = listener.accept().await.unwrap();
             let mut ws = tokio_tungstenite::accept_hdr_async(stream, |_req: &tokio_tungstenite::tungstenite::handshake::server::Request, mut response: tokio_tungstenite::tungstenite::handshake::server::Response| {
-                response.headers_mut().insert("sec-websocket-protocol", "zeroclaw.v1".parse().unwrap());
+                response.headers_mut().insert("sec-websocket-protocol", "reiclaw.v1".parse().unwrap());
                 Ok(response)
             }).await.unwrap();
             ws.send(Message::Text(

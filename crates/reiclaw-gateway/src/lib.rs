@@ -432,7 +432,7 @@ pub struct AppState {
     pub temperature: Option<f64>,
     pub mem: Arc<dyn Memory>,
     pub memory_strategy: Arc<dyn MemoryStrategy>,
-    /// Companion PortableKernel store. `None` when `tachi` is off or
+    /// Companion PortableKernel store. `None` when `memorycore` is off or
     /// `[companion_memory].enable` is false.
     pub companion_store: Option<Arc<reiclaw_memory::CompanionStore>>,
     pub auto_save: bool,

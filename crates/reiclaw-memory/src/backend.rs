@@ -5,8 +5,8 @@ pub enum MemoryBackendKind {
     /// A backend that was removed (`postgres`, `qdrant`, `sqlite`, `lucid`).
     /// Selecting it is an explicit construction error, never a silent fallback.
     Retired(&'static str),
-    #[cfg(feature = "tachi")]
-    Tachi,
+    #[cfg(feature = "memorycore")]
+    MemoryCore,
     Unknown,
 }
 
@@ -32,10 +32,10 @@ const NONE_PROFILE: MemoryBackendProfile = MemoryBackendProfile {
     optional_dependency: false,
 };
 
-#[cfg(feature = "tachi")]
-const TACHI_PROFILE: MemoryBackendProfile = MemoryBackendProfile {
-    key: "tachi",
-    label: "Tachi / memcore — hybrid FTS+vector recall with tier lifecycle",
+#[cfg(feature = "memorycore")]
+const MEMORYCORE_PROFILE: MemoryBackendProfile = MemoryBackendProfile {
+    key: "memorycore",
+    label: "MemoryCore — embedded hybrid FTS+vector recall with tier lifecycle",
     auto_save_default: true,
     optional_dependency: true,
 };
@@ -49,7 +49,7 @@ const CUSTOM_PROFILE: MemoryBackendProfile = MemoryBackendProfile {
 
 const RETIRED_PROFILE: MemoryBackendProfile = MemoryBackendProfile {
     key: "retired",
-    label: "Removed backend — select tachi, markdown or none",
+    label: "Removed backend — select memorycore, markdown or none",
     auto_save_default: false,
     optional_dependency: false,
 };
@@ -60,11 +60,11 @@ const RETIRED_PROFILE: MemoryBackendProfile = MemoryBackendProfile {
 /// construction-time errors cannot drift.
 pub use reiclaw_config::validation_warnings::RETIRED_MEMORY_BACKENDS;
 
-#[cfg(feature = "tachi")]
+#[cfg(feature = "memorycore")]
 const SELECTABLE_MEMORY_BACKENDS: [MemoryBackendProfile; 3] =
-    [TACHI_PROFILE, MARKDOWN_PROFILE, NONE_PROFILE];
+    [MEMORYCORE_PROFILE, MARKDOWN_PROFILE, NONE_PROFILE];
 
-#[cfg(not(feature = "tachi"))]
+#[cfg(not(feature = "memorycore"))]
 const SELECTABLE_MEMORY_BACKENDS: [MemoryBackendProfile; 2] = [MARKDOWN_PROFILE, NONE_PROFILE];
 
 pub fn selectable_memory_backends() -> &'static [MemoryBackendProfile] {
@@ -72,11 +72,11 @@ pub fn selectable_memory_backends() -> &'static [MemoryBackendProfile] {
 }
 
 pub fn default_memory_backend_key() -> &'static str {
-    #[cfg(feature = "tachi")]
+    #[cfg(feature = "memorycore")]
     {
-        TACHI_PROFILE.key
+        MEMORYCORE_PROFILE.key
     }
-    #[cfg(not(feature = "tachi"))]
+    #[cfg(not(feature = "memorycore"))]
     {
         MARKDOWN_PROFILE.key
     }
@@ -86,8 +86,8 @@ pub fn classify_memory_backend(backend: &str) -> MemoryBackendKind {
     match backend {
         "markdown" => MemoryBackendKind::Markdown,
         "none" => MemoryBackendKind::None,
-        #[cfg(feature = "tachi")]
-        "tachi" => MemoryBackendKind::Tachi,
+        #[cfg(feature = "memorycore")]
+        "memorycore" => MemoryBackendKind::MemoryCore,
         other => RETIRED_MEMORY_BACKENDS
             .iter()
             .find(|retired| **retired == other)
@@ -102,8 +102,8 @@ pub fn memory_backend_profile(backend: &str) -> MemoryBackendProfile {
         MemoryBackendKind::Retired(_) => RETIRED_PROFILE,
         MemoryBackendKind::Markdown => MARKDOWN_PROFILE,
         MemoryBackendKind::None => NONE_PROFILE,
-        #[cfg(feature = "tachi")]
-        MemoryBackendKind::Tachi => TACHI_PROFILE,
+        #[cfg(feature = "memorycore")]
+        MemoryBackendKind::MemoryCore => MEMORYCORE_PROFILE,
         MemoryBackendKind::Unknown => CUSTOM_PROFILE,
     }
 }
@@ -114,8 +114,11 @@ mod tests {
 
     #[test]
     fn classify_known_backends() {
-        #[cfg(feature = "tachi")]
-        assert_eq!(classify_memory_backend("tachi"), MemoryBackendKind::Tachi);
+        #[cfg(feature = "memorycore")]
+        assert_eq!(
+            classify_memory_backend("memorycore"),
+            MemoryBackendKind::MemoryCore
+        );
         assert_eq!(
             classify_memory_backend("markdown"),
             MemoryBackendKind::Markdown
@@ -139,14 +142,14 @@ mod tests {
     #[test]
     fn selectable_backends_are_ordered_for_onboarding() {
         let backends = selectable_memory_backends();
-        #[cfg(feature = "tachi")]
+        #[cfg(feature = "memorycore")]
         {
             assert_eq!(backends.len(), 3);
-            assert_eq!(backends[0].key, "tachi");
+            assert_eq!(backends[0].key, "memorycore");
             assert_eq!(backends[1].key, "markdown");
             assert_eq!(backends[2].key, "none");
         }
-        #[cfg(not(feature = "tachi"))]
+        #[cfg(not(feature = "memorycore"))]
         {
             assert_eq!(backends.len(), 2);
             assert_eq!(backends[0].key, "markdown");
@@ -180,9 +183,9 @@ mod tests {
 
     #[test]
     fn each_known_backend_profile_carries_a_matching_key() {
-        #[cfg(feature = "tachi")]
-        let names = ["tachi", "markdown", "none"];
-        #[cfg(not(feature = "tachi"))]
+        #[cfg(feature = "memorycore")]
+        let names = ["memorycore", "markdown", "none"];
+        #[cfg(not(feature = "memorycore"))]
         let names = ["markdown", "none"];
         for name in names {
             assert_eq!(
@@ -195,9 +198,9 @@ mod tests {
 
     #[test]
     fn default_backend_key_is_listed_first() {
-        #[cfg(feature = "tachi")]
-        assert_eq!(default_memory_backend_key(), "tachi");
-        #[cfg(not(feature = "tachi"))]
+        #[cfg(feature = "memorycore")]
+        assert_eq!(default_memory_backend_key(), "memorycore");
+        #[cfg(not(feature = "memorycore"))]
         assert_eq!(default_memory_backend_key(), "markdown");
         assert_eq!(
             selectable_memory_backends()[0].key,

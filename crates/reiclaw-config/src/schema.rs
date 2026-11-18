@@ -271,7 +271,7 @@ pub struct Config {
     #[nested]
     pub channels: ChannelsConfig,
 
-    /// Memory backend configuration: tachi, markdown, embeddings (`[memory]`).
+    /// Memory backend configuration: memorycore, markdown, embeddings (`[memory]`).
     #[serde(default)]
     #[nested]
     pub memory: MemoryConfig,
@@ -2416,7 +2416,7 @@ impl Config {
 /// borrow of the typed config from the corresponding `Config.storage` map.
 #[derive(Debug, Clone, Copy)]
 pub enum ActiveStorage<'a> {
-    /// No storage configured (`memory.backend = "none"`, `"tachi"`, or unresolved alias).
+    /// No storage configured (`memory.backend = "none"`, `"memorycore"`, or unresolved alias).
     None,
     /// Markdown directory storage instance.
     Markdown(&'a MarkdownStorageConfig),
@@ -4797,7 +4797,7 @@ fn default_false() -> bool {
 }
 
 fn default_memory_backend() -> String {
-    "tachi".into()
+    "memorycore".into()
 }
 
 fn default_tunnel_provider() -> String {
@@ -5897,7 +5897,7 @@ fn service_selector_matches(selector: &str, service_key: &str) -> bool {
 /// parallel to `[providers.models.<type>.<alias>]`. Each backend has its own typed
 /// config struct. `MemoryConfig.backend` carries a dotted reference (`"markdown.notes"`)
 /// that resolves to one of these entries via [`Config::resolve_active_storage`], or
-/// selects `"tachi"` (the embedded kernel) / `"none"`.
+/// selects `"memorycore"` (the embedded kernel) / `"none"`.
 #[derive(Debug, Clone, Serialize, Deserialize, Default, Configurable)]
 #[cfg_attr(feature = "schema-export", derive(schemars::JsonSchema))]
 #[prefix = "storage"]
@@ -5945,9 +5945,9 @@ pub enum SearchMode {
 #[allow(clippy::struct_excessive_bools)]
 pub struct MemoryConfig {
     /// Active memory backend or dotted storage reference: `<backend>[.<alias>]`
-    /// (e.g. `"tachi"`, `"markdown.notes"`). Resolves through
+    /// (e.g. `"memorycore"`, `"markdown.notes"`). Resolves through
     /// `Config.storage.<backend>.<alias>` for configured storage backends, or
-    /// selects a built-in backend (`"tachi"`, `"markdown"`, `"none"`).
+    /// selects a built-in backend (`"memorycore"`, `"markdown"`, `"none"`).
     #[serde(default = "default_memory_backend")]
     pub backend: String,
     /// Auto-save what *you* tell ZeroClaw into memory as conversation history — the agent's own replies are not saved. Turn off if you want memory to only hold things you explicitly record via the memory tool.
@@ -5958,7 +5958,7 @@ pub struct MemoryConfig {
     pub hygiene_enabled: bool,
     /// Also extract atomic durable facts from each consolidated turn and store
     /// them as individual Core memories. Default off; the flip is sequenced in
-    /// a later phase. Tachi-only: enabling this requires the tachi memory
+    /// a later phase. MemoryCore-only: enabling this requires the memorycore memory
     /// backend globally and on every agent (validated at config load).
     #[serde(default)]
     pub consolidation_extract_facts: bool,
@@ -6139,7 +6139,7 @@ pub struct MemoryConfig {
 ///
 /// Behaviour-neutral by default: `enabled` gates MemoryKind assignment on new
 /// consolidation writes and defaults off; the flip is sequenced in a later
-/// phase. Tachi-only: enabling requires the tachi memory backend globally
+/// phase. MemoryCore-only: enabling requires the memorycore memory backend globally
 /// and on every agent (validated at config load).
 #[derive(Debug, Clone, Default, Serialize, Deserialize, Configurable)]
 #[cfg_attr(feature = "schema-export", derive(schemars::JsonSchema))]
@@ -6352,7 +6352,7 @@ fn default_response_cache_hot_entries() -> usize {
 impl Default for MemoryConfig {
     fn default() -> Self {
         Self {
-            backend: "tachi".into(),
+            backend: "memorycore".into(),
             auto_save: true,
             hygiene_enabled: default_hygiene_enabled(),
             consolidation_extract_facts: false,

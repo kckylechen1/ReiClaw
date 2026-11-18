@@ -129,11 +129,11 @@ See [runtime internals](../agents/internals.md#repeated-tool-failure-recovery).
 | Cron `allowed_tools = []` means deny-all | asserts the opposite in a test | deliberate |
 | `ModelProvider::set_credential` with real 429 rotation | logs "cannot apply … Retrying with original key" | deliberate |
 | WeChat state persistence is atomic and non-blocking | blocking, non-atomic write | deliberate |
-| Portable memory kernel behind `memory-tachi` (`reiclaw-memory/tachi`), default backend `tachi` | absent (defaults to SQLite) | deliberate; `tachi` is default in `reiclaw`, while `--no-default-features`, `--features slim-control`, and default `reiclaw-memory` stay AGPL-free |
+| Portable memory kernel behind `memory-core` (`reiclaw-memory/memorycore`), default backend `memorycore` | absent (defaults to SQLite) | deliberate; `memorycore` is default in `reiclaw`, while `--no-default-features`, `--features slim-control`, and default `reiclaw-memory` stay AGPL-free |
 | `vault:<NAME>` secret references resolved from Tachi Vault and preserved on disk | `op://` only at `87461d1ac5` | deliberate; Tachi Vault owns credentials |
 | HyperMemory custom CRUD backend | absent | retired; never re-add |
 | Builtin `calculator` / `weather` tools (`crates/reiclaw-tools/src/{calculator,weather_tool}.rs`) | present | retired; implementations deleted, names reserved in `RETIRED_OPERATOR_TOOL_NAMES`. Weather, if ever needed again, is an HTTP skill / MCP wrapper, not a builtin |
-| `knowledge` graph tool + `knowledge.db` + `[knowledge]` / `[knowledge_bundles]` config | present | retired; relationship memory belongs to the Tachi memory kernel (`memory-tachi`), not a second local graph. Leftover sections warn via `RETIRED_CONFIG_SURFACES` tombstones |
+| `knowledge` graph tool + `knowledge.db` + `[knowledge]` / `[knowledge_bundles]` config | present | retired; relationship memory belongs to the MemoryCore kernel (`memory-core`), not a second local graph. Leftover sections warn via `RETIRED_CONFIG_SURFACES` tombstones |
 | GitHub Copilot provider family (`copilot.rs`, `CopilotModelProviderConfig`) | present | retired (#673 pattern); `copilot` / `github-copilot` sit in `RETIRED_MODEL_PROVIDERS`, so old configs fail closed with an explicit migration error instead of silently dropping the OAuth token |
 | Browser tools (`browser.rs`+`browser/tests.rs`, `text_browser.rs`, `browser_open.rs`, `[browser]`+`[text_browser]` config) | present | retired; web interaction stays on `web_fetch`/`web_search_tool`/`http_request`, heavy automation goes to external harnesses via Tachi. `[browser]`/`[text_browser]` warn via `RETIRED_CONFIG_SURFACES` tombstones; names in `RETIRED_OPERATOR_TOOL_NAMES`; screenshot tool retained |
 | OpenRouter chat provider family (`openrouter.rs`, `OpenRouterModelProviderConfig`) | present | retired; reached via a `custom` (OpenAI-compatible) slot at `https://openrouter.ai/api/v1` instead. `openrouter` is in `RETIRED_MODEL_PROVIDERS` (fail-closed). **Retained on purpose**: `openrouter_catalog.rs` + `openrouter_vendor_prefix` (public-catalog model discovery & pricing for compatible families), the `[memory]` embedder `"openrouter"` arm (embeddings axis), and OpenRouter-as-compatible-gateway prose. V1/V2 configuration input is no longer supported |
@@ -236,7 +236,7 @@ own ZeroClaw's Soul, User Model, personality policy or Tachi delegation bridge.
 
 ### Portable kernel adoption (#560)
 
-`memory-tachi` pins `portable-kernel` 1.9.0 at Tachi revision
+`memory-core` pins `portable-kernel` 1.9.0 at Tachi revision
 `b8b10642372ac6910afb2e2bab5265c1d2041a9e`, without default/admin features.
 This retains the SQLite 3.54.1 security backport at
 `c35ace357375f0e3a9db32d7a3bb529507a72291` and the vault-kit system-entropy
@@ -261,8 +261,8 @@ and connection APIs from [Tachi #2284](https://github.com/kckylechen1/Tachi/pull
 It retains the snapshot-reopen fix in
 [Tachi #2205](https://github.com/kckylechen1/Tachi/pull/2205), on top of the shared
 kernel contracts in [Tachi #2198](https://github.com/kckylechen1/Tachi/pull/2198).
-Generic memory requires `PortableKernel` / `zeroclaw-memory`; companion requires
-`PortableKernel` / `zeroclaw-companion`. Existing runtime and status-probe paths
+Generic memory requires `PortableKernel` / `reiclaw-memory`; companion requires
+`PortableKernel` / `reiclaw-companion`. Existing runtime and status-probe paths
 never upgrade a schema or adopt an unowned store. Backend/config names and
 database locations remain unchanged.
 
@@ -381,8 +381,8 @@ Relative to immutable upstream decisions
 this fork converges default conversation memory on the embedded Tachi
 (`portable-kernel`) store:
 
-- `reiclaw` enables `memory-tachi` by default and defaults
-  `[memory].backend` and `[agents.<alias>.memory].backend` to `tachi` (`Tachi`).
+- `reiclaw` enables `memory-core` by default and defaults
+  `[memory].backend` and `[agents.<alias>.memory].backend` to `memorycore` (`MemoryCore`).
   `reiclaw-memory` keeps default features off, and both
   `--no-default-features` and `--features slim-control` remain 100% AGPL-free.
 - `SqliteMemory`, `LucidMemory`, `MEMORY_SNAPSHOT.md` export/hydration, SQLite

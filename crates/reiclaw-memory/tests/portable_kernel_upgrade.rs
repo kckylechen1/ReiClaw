@@ -1,4 +1,4 @@
-#![cfg(feature = "tachi")]
+#![cfg(feature = "memorycore")]
 
 const _: () = assert!(rusqlite::ffi::SQLITE_VERSION_NUMBER >= 3_054_001);
 const _: () = assert!(portable_kernel::IS_PORTABLE_BUILD);

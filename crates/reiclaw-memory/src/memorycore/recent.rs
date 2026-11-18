@@ -97,8 +97,8 @@ pub(super) fn read(
         // suffice for the global top `limit`, ordered by nanosecond-canonical
         // effective `updated_at` DESC with id tie-breaker.
         rows.sort_unstable_by(|a, b| {
-            super::TachiMemory::effective_updated_sort_key(b)
-                .cmp(&super::TachiMemory::effective_updated_sort_key(a))
+            super::MemoryCore::effective_updated_sort_key(b)
+                .cmp(&super::MemoryCore::effective_updated_sort_key(a))
                 .then_with(|| a.id.cmp(&b.id))
         });
         let mut seen = HashSet::new();

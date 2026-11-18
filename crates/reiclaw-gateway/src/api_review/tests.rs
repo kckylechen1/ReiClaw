@@ -374,7 +374,7 @@ impl reiclaw_api::attribution::Attributable for InMemoryDigestMemory {
 #[async_trait::async_trait]
 impl reiclaw_api::memory_traits::Memory for InMemoryDigestMemory {
     fn name(&self) -> &str {
-        "tachi"
+        "memorycore"
     }
     async fn store(
         &self,
@@ -494,7 +494,7 @@ async fn daily_digest_and_action_candidate_routes_are_operator_gated_and_roundtr
         window_start: "2026-11-17T04:00:00Z".into(),
         window_end: "2026-11-18T04:00:00Z".into(),
         narrative: "Initial machine narrative".into(),
-        settled_decisions: vec!["Use TachiMemory".into()],
+        settled_decisions: vec!["Use MemoryCore".into()],
         why_and_tradeoffs: vec!["Single SQLite store avoids drift".into()],
         latent_insights: vec!["Backups can run weekly".into()],
         action_candidates: vec!["Schedule weekly backup".into(), "Archive old logs".into()],
@@ -563,7 +563,7 @@ async fn daily_digest_and_action_candidate_routes_are_operator_gated_and_roundtr
         OPERATOR,
         Some(serde_json::json!({
             "narrative": "Owner refined narrative",
-            "settled_decisions": ["Use TachiMemory", "Keep single DB"],
+            "settled_decisions": ["Use MemoryCore", "Keep single DB"],
             "why_and_tradeoffs": ["Single SQLite store avoids drift"],
             "latent_insights": ["Weekly backup cadence confirmed"],
         })),

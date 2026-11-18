@@ -186,7 +186,7 @@ class WireTests(unittest.IsolatedAsyncioTestCase):
                     else:
                         digest = hashlib.sha1(lines[b"Sec-WebSocket-Key"] + b"258EAFA5-E914-47DA-95CA-C5AB0DC85B11").digest()
                         reader.feed_data(b"HTTP/1.1 101 Switching Protocols\r\nUpgrade: websocket\r\n"
-                                         b"Connection: keep-alive,Upgrade\r\nSec-WebSocket-Protocol: zeroclaw.v1\r\n"
+                                         b"Connection: keep-alive,Upgrade\r\nSec-WebSocket-Protocol: reiclaw.v1\r\n"
                                          b"Sec-WebSocket-Accept: " + base64.b64encode(digest) + b"\r\n\r\n")
                     reader.feed_eof()
 

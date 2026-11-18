@@ -6,7 +6,7 @@ use tempfile::TempDir;
 async fn point_reads_deletes_and_new_writes_do_not_grow_full_entry_pages() {
     let tmp = TempDir::new().unwrap();
     {
-        let memory = TachiMemory::new("tachi", tmp.path()).unwrap();
+        let memory = MemoryCore::new("memorycore", tmp.path()).unwrap();
         for i in 0..12 {
             memory
                 .store(
@@ -21,8 +21,8 @@ async fn point_reads_deletes_and_new_writes_do_not_grow_full_entry_pages() {
     }
     // Full-entry listing still fails closed at this deliberately tiny cap.
     // Point operations must not use that listing to find one logical key.
-    let memory = TachiMemory::with_embedder_and_page_size(
-        "tachi",
+    let memory = MemoryCore::with_embedder_and_page_size(
+        "memorycore",
         tmp.path(),
         Arc::new(crate::embeddings::NoopEmbedding),
         0.7,
@@ -71,7 +71,7 @@ async fn point_reads_deletes_and_new_writes_do_not_grow_full_entry_pages() {
 #[tokio::test]
 async fn metadata_projection_preserves_unicode_keys_and_archived_visibility() {
     let tmp = TempDir::new().unwrap();
-    let memory = TachiMemory::new("tachi", tmp.path()).unwrap();
+    let memory = MemoryCore::new("memorycore", tmp.path()).unwrap();
     let key = "quote%'_\"雪/..";
     for i in 0..12 {
         memory
@@ -108,14 +108,14 @@ async fn metadata_projection_preserves_unicode_keys_and_archived_visibility() {
         .unwrap();
     {
         let store = memory.store_handle().lock();
-        let pattern = format!("{}%", TachiMemory::agent_path_prefix(Some("alpha")));
+        let pattern = format!("{}%", MemoryCore::agent_path_prefix(Some("alpha")));
         let candidates = store.list_memories_by_path_prefix(&pattern).unwrap();
         assert_eq!(
             candidates.len(),
             14,
             "one complete projection includes unrelated metadata without bodies"
         );
-        let matching = TachiMemory::rows_matching_key(&store, key, Some("alpha")).unwrap();
+        let matching = MemoryCore::rows_matching_key(&store, key, Some("alpha")).unwrap();
         assert_eq!(matching.len(), 2);
         assert!(
             matching
@@ -123,7 +123,7 @@ async fn metadata_projection_preserves_unicode_keys_and_archived_visibility() {
                 .all(|row| row.text == "A" || row.text == "B")
         );
         store.archive_memory(&a.id).unwrap();
-        let live = TachiMemory::rows_matching_key(&store, key, Some("alpha")).unwrap();
+        let live = MemoryCore::rows_matching_key(&store, key, Some("alpha")).unwrap();
         assert_eq!(live.len(), 1);
         assert_eq!(live[0].text, "B");
     }
@@ -148,7 +148,7 @@ async fn metadata_projection_preserves_unicode_keys_and_archived_visibility() {
 #[tokio::test]
 async fn legacy_metadata_keeps_session_precedence_and_complete_delete() {
     let tmp = TempDir::new().unwrap();
-    let memory = TachiMemory::new("tachi", tmp.path()).unwrap();
+    let memory = MemoryCore::new("memorycore", tmp.path()).unwrap();
     memory
         .store_with_agent(
             "shared",
@@ -172,7 +172,7 @@ async fn legacy_metadata_keeps_session_precedence_and_complete_delete() {
         let mut row = store.get(&a_id).unwrap().unwrap();
         row.path = format!(
             "{}historical/opaque",
-            TachiMemory::agent_path_prefix(Some("alpha"))
+            MemoryCore::agent_path_prefix(Some("alpha"))
         );
         store.upsert(&row).unwrap();
     }
@@ -233,7 +233,7 @@ async fn legacy_metadata_keeps_session_precedence_and_complete_delete() {
         duplicate.id = Uuid::new_v4().to_string();
         duplicate.path = format!(
             "{}historical/duplicate",
-            TachiMemory::agent_path_prefix(Some("alpha"))
+            MemoryCore::agent_path_prefix(Some("alpha"))
         );
         store.upsert(&duplicate).unwrap();
     }
@@ -251,7 +251,7 @@ async fn legacy_metadata_keeps_session_precedence_and_complete_delete() {
 #[tokio::test]
 async fn conversation_duplicates_keep_legacy_winner_and_session_delete_scope() {
     let tmp = TempDir::new().unwrap();
-    let memory = TachiMemory::new("tachi", tmp.path()).unwrap();
+    let memory = MemoryCore::new("memorycore", tmp.path()).unwrap();
     memory
         .store_with_agent(
             "shared",
@@ -288,7 +288,7 @@ async fn conversation_duplicates_keep_legacy_winner_and_session_delete_scope() {
         let mut duplicate = store.get(&canonical.id).unwrap().unwrap();
         duplicate.path = format!(
             "{}zz-historical/duplicate",
-            TachiMemory::agent_path_prefix(Some("alpha"))
+            MemoryCore::agent_path_prefix(Some("alpha"))
         );
         assert!(duplicate.path > store.get(&canonical.id).unwrap().unwrap().path);
         duplicate.id = Uuid::new_v4().to_string();
@@ -365,7 +365,7 @@ async fn conversation_duplicates_keep_legacy_winner_and_session_delete_scope() {
 #[tokio::test]
 async fn unscoped_global_duplicates_keep_legacy_winner_and_complete_agent_delete() {
     let tmp = TempDir::new().unwrap();
-    let memory = TachiMemory::new("tachi", tmp.path()).unwrap();
+    let memory = MemoryCore::new("memorycore", tmp.path()).unwrap();
     for agent in ["alpha", "beta"] {
         memory
             .store_with_agent(
@@ -391,7 +391,7 @@ async fn unscoped_global_duplicates_keep_legacy_winner_and_complete_agent_delete
         duplicate.id = Uuid::new_v4().to_string();
         duplicate.path = format!(
             "{}zz-historical/global",
-            TachiMemory::agent_path_prefix(Some("alpha"))
+            MemoryCore::agent_path_prefix(Some("alpha"))
         );
         duplicate.text = "legacy global winner".into();
         store.upsert(&duplicate).unwrap();
@@ -433,7 +433,7 @@ async fn unscoped_global_duplicates_keep_legacy_winner_and_complete_agent_delete
 #[tokio::test]
 async fn writes_keep_exact_path_priority_and_legacy_fallback_identity_order() {
     let tmp = TempDir::new().unwrap();
-    let memory = TachiMemory::new("tachi", tmp.path()).unwrap();
+    let memory = MemoryCore::new("memorycore", tmp.path()).unwrap();
     memory
         .store("shared", "canonical", MemoryCategory::Core, None)
         .await
@@ -445,7 +445,7 @@ async fn writes_keep_exact_path_priority_and_legacy_fallback_identity_order() {
         duplicate.id = Uuid::new_v4().to_string();
         duplicate.path = format!(
             "{}aaa-historical/first",
-            TachiMemory::agent_path_prefix(Some("default"))
+            MemoryCore::agent_path_prefix(Some("default"))
         );
         assert!(duplicate.path < store.get(&canonical.id).unwrap().unwrap().path);
         duplicate.text = "legacy first".into();
@@ -491,7 +491,7 @@ async fn writes_keep_exact_path_priority_and_legacy_fallback_identity_order() {
 #[tokio::test]
 async fn candidate_path_never_overrides_exact_agent_and_key_metadata() {
     let tmp = TempDir::new().unwrap();
-    let memory = TachiMemory::new("tachi", tmp.path()).unwrap();
+    let memory = MemoryCore::new("memorycore", tmp.path()).unwrap();
     memory
         .store_with_agent(
             "shared",
@@ -512,7 +512,7 @@ async fn candidate_path_never_overrides_exact_agent_and_key_metadata() {
     {
         let mut store = memory.store_handle().lock();
         let mut row = store.get(&foreign.id).unwrap().unwrap();
-        row.path = TachiMemory::storage_path(Some("alpha"), None, &MemoryCategory::Core, "shared");
+        row.path = MemoryCore::storage_path(Some("alpha"), None, &MemoryCategory::Core, "shared");
         store.upsert(&row).unwrap();
     }
     assert!(
@@ -555,7 +555,7 @@ async fn candidate_path_never_overrides_exact_agent_and_key_metadata() {
 #[tokio::test]
 async fn streamed_key_lookup_isolates_like_wildcards_case_and_corrupt_metadata() {
     let tmp = TempDir::new().unwrap();
-    let memory = TachiMemory::new("tachi", tmp.path()).unwrap();
+    let memory = MemoryCore::new("memorycore", tmp.path()).unwrap();
 
     for (agent, key, content) in [
         ("a_one", "k_1", "agent a_one key k_1"),
@@ -641,10 +641,7 @@ async fn streamed_key_lookup_isolates_like_wildcards_case_and_corrupt_metadata()
     {
         let mut store = memory.store_handle().lock();
         duplicate.id = Uuid::new_v4().to_string();
-        duplicate.path = format!(
-            "{}legacy/kx1",
-            TachiMemory::agent_path_prefix(Some("a_one"))
-        );
+        duplicate.path = format!("{}legacy/kx1", MemoryCore::agent_path_prefix(Some("a_one")));
         duplicate.text = "legacy active kx1".into();
         store.upsert(&duplicate).unwrap();
     }
@@ -661,7 +658,7 @@ async fn streamed_key_lookup_isolates_like_wildcards_case_and_corrupt_metadata()
     // Insert spoofed rows sharing `a_one`'s exact hash suffix and metadata, differing
     // only in `_` wildcard (`axone`) and ASCII case (`A_one`). Binary prefix matching
     // must ignore both.
-    let a_one_prefix = TachiMemory::agent_path_prefix(Some("a_one"));
+    let a_one_prefix = MemoryCore::agent_path_prefix(Some("a_one"));
     let k_1_id = memory
         .get_for_agent("k_1", "a_one")
         .await
@@ -693,7 +690,7 @@ async fn streamed_key_lookup_isolates_like_wildcards_case_and_corrupt_metadata()
             store.upsert(&isolated_spoof).unwrap();
         }
         assert_eq!(
-            TachiMemory::rows_matching_key(&store, "k_1", Some("a_one"))
+            MemoryCore::rows_matching_key(&store, "k_1", Some("a_one"))
                 .unwrap()
                 .len(),
             1
@@ -739,7 +736,7 @@ async fn streamed_key_lookup_isolates_like_wildcards_case_and_corrupt_metadata()
         .unwrap()
         .unwrap()
         .id;
-    let db_path = tmp.path().join("memory").join("tachi.db");
+    let db_path = tmp.path().join("memory").join("memorycore.db");
     {
         let conn = rusqlite::Connection::open(&db_path).unwrap();
         conn.execute_batch("DROP TRIGGER IF EXISTS memories_reserved_refs_update_guard;")

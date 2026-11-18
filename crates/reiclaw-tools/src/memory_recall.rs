@@ -178,19 +178,19 @@ mod tests {
     use super::*;
     use reiclaw_config::schema::MemoryConfig;
     use reiclaw_memory::{
-        MemoryCategory, MemoryEntry, NoneMemory, TACHI_COMPILED, create_memory,
+        MEMORYCORE_COMPILED, MemoryCategory, MemoryEntry, NoneMemory, create_memory,
         is_recent_recall_query,
     };
     use std::sync::Mutex;
     use tempfile::TempDir;
 
     fn try_seeded_mem() -> Option<(TempDir, Arc<dyn Memory>)> {
-        if !TACHI_COMPILED {
+        if !MEMORYCORE_COMPILED {
             return None;
         }
         let tmp = TempDir::new().unwrap();
         let cfg = MemoryConfig {
-            backend: "tachi".into(),
+            backend: "memorycore".into(),
             hygiene_enabled: false,
             embedding_provider: "none".into(),
             ..MemoryConfig::default()

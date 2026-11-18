@@ -171,7 +171,7 @@ mod tests {
         State(tx): State<mpsc::Sender<WebSocket>>,
         ws: WebSocketUpgrade,
     ) -> axum::response::Response {
-        ws.protocols(["zeroclaw.v1"])
+        ws.protocols(["reiclaw.v1"])
             .on_upgrade(move |socket| async move {
                 tx.send(socket).await.unwrap();
             })

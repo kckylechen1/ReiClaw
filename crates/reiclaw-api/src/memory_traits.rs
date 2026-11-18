@@ -496,7 +496,7 @@ pub trait Memory: Send + Sync + crate::attribution::Attributable {
     /// without a vector index or with nothing to fill in return 0.
     ///
     /// Default: no-op. Overridden by backends that maintain separate
-    /// derived indexes (e.g. `TachiMemory`).
+    /// derived indexes (e.g. `MemoryCore`).
     async fn reindex(&self) -> anyhow::Result<usize> {
         Ok(0)
     }
@@ -666,7 +666,7 @@ pub trait Memory: Send + Sync + crate::attribution::Attributable {
     /// Store a memory entry attributed to an explicit agent UUID or alias.
     /// Every backend must implement this explicitly so attribution
     /// is never silently dropped at storage time. Persistent multi-agent
-    /// backends (`TachiMemory`) persist agent attribution alongside each entry;
+    /// backends (`MemoryCore`) persist agent attribution alongside each entry;
     /// `MarkdownMemory` attributes via the per-agent directory path;
     /// `NoneMemory` is a no-op stub.
     /// `AgentScopedMemory` is the canonical caller.
@@ -711,7 +711,7 @@ pub trait Memory: Send + Sync + crate::attribution::Attributable {
     /// Look up (or create) the identifier the backend uses to refer
     /// to the agent named by `alias`.
     ///
-    /// Backends without separate UUID indirection (`TachiMemory`,
+    /// Backends without separate UUID indirection (`MemoryCore`,
     /// `MarkdownMemory`, `NoneMemory`) return the alias verbatim.
     async fn ensure_agent_uuid(&self, alias: &str) -> anyhow::Result<String> {
         Ok(alias.to_string())
