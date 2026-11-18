@@ -194,7 +194,6 @@ async fn unavailable_calls_skip_approval_and_preserve_executor_evidence() {
             tools_registry: &registry,
             activated_tools: None,
             excluded_tools: &excluded,
-            model_switch_callback: None,
         };
         let run = prepare(std::slice::from_ref(&call), dispatch, None).await;
         assert_eq!(run.prompts, 0);
@@ -259,7 +258,6 @@ async fn available_calls_and_recoverable_batch_aliases_still_need_approval() {
         tools_registry: &registry,
         activated_tools: None,
         excluded_tools: &[],
-        model_switch_callback: None,
     };
     let run = prepare(&[call("available")], dispatch, None).await;
     assert_eq!(run.prompts, 1);
@@ -300,7 +298,6 @@ async fn hook_rewrites_and_canonical_alias_exclusions_are_checked_before_approva
         tools_registry: &[],
         activated_tools: Some(&activated),
         excluded_tools: &excluded,
-        model_switch_callback: None,
     };
     let mut hooks = HookRunner::new();
     hooks.register(Box::new(RewriteHook));

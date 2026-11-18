@@ -976,7 +976,7 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn node_allowlist_does_not_redirect_model_switch_catalog() {
+    async fn node_allowlist_preserves_registered_tools() {
         struct NodeCatalogProbe(Arc<AtomicUsize>);
         impl zeroclaw_api::node_tools::NodeTools for NodeCatalogProbe {
             fn tools(&self, allowed: &[String]) -> Vec<Box<dyn Tool>> {
@@ -992,7 +992,16 @@ mod tests {
 
         for enabled in [false, true] {
             let dir = tempfile::tempdir().unwrap();
-            let mut config = Config {
+            let workspace = dir.path().join("workspace");
+            std::fs::create_dir(&workspace).unwrap();
+            std::fs::write(workspace.join("fixture.txt"), "retained built-in data").unwrap();
+            std::fs::write(dir.path().join("outside.txt"), "outside workspace data").unwrap();
+            assert_eq!(
+                std::fs::read_to_string(workspace.join("../outside.txt")).unwrap(),
+                "outside workspace data",
+                "the traversal target must exist and be readable outside the workspace"
+            );
+            let config = Config {
                 data_dir: dir.path().to_path_buf(),
                 nodes: zeroclaw_config::schema::NodesConfig {
                     enabled,
@@ -1000,35 +1009,21 @@ mod tests {
                 },
                 ..Default::default()
             };
-            config.providers.models.ensure("openai", "default").unwrap();
-            config
-                .providers
-                .models
-                .ensure("anthropic", "review")
-                .unwrap();
-            let config = Arc::new(config);
             let security = Arc::new(SecurityPolicy {
-                allowed_tools: Some(vec![
-                    "model_switch".into(),
-                    "node:fixture:system.info".into(),
-                ]),
+                workspace_dir: workspace,
+                allowed_tools: Some(vec!["file_read".into(), "node:fixture:system.info".into()]),
                 ..Default::default()
             });
             let node_calls = Arc::new(AtomicUsize::new(0));
             let nodes = Arc::new(NodeCatalogProbe(node_calls.clone()));
             zeroclaw_api::node_tools::install(&config.data_dir, nodes.clone());
-            let families = Arc::new(std::sync::Mutex::new(Vec::new()));
-            let resolved = families.clone();
-            let switch = tools::ModelSwitchTool::new(security.clone(), config.clone())
-                .with_catalog_resolver(move |family| {
-                    resolved.lock().unwrap().push(family.clone());
-                    async move { Ok(vec![format!("{family}-live-only")]) }
-                });
             let assembled = ScopedToolRegistry::assemble(ScopedAssembly {
                 config: &config,
                 agent_alias: "default",
                 security: &security,
-                built: built_with(vec![Box::new(switch)]),
+                built: built_with(vec![Box::new(tools::FileReadTool::new(Arc::clone(
+                    &security,
+                )))]),
                 skills: &[],
                 runtime: Arc::new(crate::platform::NativeRuntime::new()),
                 caller_allowed: None,
@@ -1047,28 +1042,30 @@ mod tests {
                     .any(|tool| tool.name() == "node:fixture:system.info"),
                 enabled
             );
-            let switch = assembled
+            let file_read = assembled
                 .registry
                 .iter()
-                .find(|tool| tool.name() == "model_switch")
+                .find(|tool| tool.name() == "file_read")
+                .expect("Node assembly must preserve the registered built-in tool");
+            let result = file_read
+                .execute(serde_json::json!({"path": "fixture.txt"}))
+                .await
                 .unwrap();
-            for (profile, family) in [
-                ("openai.default", "openai"),
-                ("anthropic.review", "anthropic"),
-            ] {
-                let result = switch
-                    .execute(serde_json::json!({"action":"list_models", "model_provider":profile}))
-                    .await
-                    .unwrap();
-                assert!(result.success, "{:?}", result.error);
-                let output: serde_json::Value = serde_json::from_str(&result.output).unwrap();
-                assert_eq!(output["model_provider"], profile);
-                assert_eq!(
-                    output["models"],
-                    serde_json::json!([format!("{family}-live-only")])
-                );
-            }
-            assert_eq!(*families.lock().unwrap(), ["openai", "anthropic"]);
+            assert!(result.success, "{:?}", result.error);
+            assert!(result.output.contains("retained built-in data"));
+            let outside = file_read
+                .execute(serde_json::json!({"path": "../outside.txt"}))
+                .await
+                .unwrap();
+            assert!(
+                !outside.success,
+                "Node assembly must preserve the path guard"
+            );
+            assert_eq!(
+                outside.error.as_deref(),
+                Some("Path not allowed by security policy: ../outside.txt"),
+                "the readable outside file must be rejected by the path policy"
+            );
         }
     }
 

@@ -117,10 +117,10 @@ pub(crate) use super::turn::{
     maybe_inject_channel_delivery_defaults, resolve_display_text,
 };
 pub use super::turn::{
-    DraftEvent, LoopKnobs, MaxIterationBehavior, ModelSwitchCallback, ModelSwitchRequested,
-    PROGRESS_MIN_INTERVAL_MS, ResolvedAgentExecution, ResolvedIo, ResolvedModelAccess,
-    ResolvedRuntimeKnobs, StreamDelta, ToolLoop, ToolLoopCancelled, drain_steering_messages,
-    is_model_switch_requested, is_tool_loop_cancelled, run_tool_call_loop, scrub_credentials,
+    DraftEvent, LoopKnobs, MaxIterationBehavior, PROGRESS_MIN_INTERVAL_MS, ResolvedAgentExecution,
+    ResolvedIo, ResolvedModelAccess, ResolvedRuntimeKnobs, StreamDelta, ToolLoop,
+    ToolLoopCancelled, drain_steering_messages, is_tool_loop_cancelled, run_tool_call_loop,
+    scrub_credentials,
 };
 
 // Heavy suite gated so lib-test iteration does not pay 13.9k lines; CI runtime leg enables it.

@@ -22,9 +22,9 @@ use super::{
     AUTOSAVE_MIN_MESSAGE_CHARS, AgentRunOverrides, LoopKnobs, ResolvedAgentExecution, ResolvedIo,
     ResolvedModelAccess, ResolvedRuntimeKnobs, TOOL_LOOP_COST_TRACKING_CONTEXT, ToolLoop,
     agent_provider_composite, api_key_and_uri_for_provider, autosave_memory_key,
-    build_system_prompt_for_turn, compute_excluded_mcp_tools, is_model_switch_requested,
-    resolved_agent_for_turn, retain_registered_tool_descriptions, run_tool_call_loop,
-    scope_session_key, synthetic_session_key_for_run,
+    build_system_prompt_for_turn, compute_excluded_mcp_tools, resolved_agent_for_turn,
+    retain_registered_tool_descriptions, run_tool_call_loop, scope_session_key,
+    synthetic_session_key_for_run,
 };
 
 #[allow(clippy::too_many_lines, clippy::too_many_arguments)]
@@ -248,7 +248,7 @@ pub async fn run(
 
         // ── Resolve model_provider ─────────────────────────────────────────
         let agent_provider_ref = agent_provider_composite(&config, agent_alias);
-        let mut provider_name = provider_override
+        let provider_name = provider_override
             .as_deref()
             .or(agent_provider_ref.as_deref())
             .ok_or_else(|| {
@@ -268,7 +268,7 @@ pub async fn run(
             })?
             .to_string();
 
-        let mut model_name = match model_override
+        let model_name = match model_override
             .as_deref()
             .or(agent_model_provider.and_then(|e| e.model.as_deref()))
         {
@@ -310,7 +310,7 @@ pub async fn run(
         // (e.g. an xai key) to a different provider family that doesn't expect it.
         let (initial_api_key, initial_uri) =
             api_key_and_uri_for_provider(&config, &provider_name, agent_model_provider);
-        let mut model_provider: Box<dyn ModelProvider> =
+        let model_provider: Box<dyn ModelProvider> =
             zeroclaw_providers::create_routed_model_provider_with_options(
                 &config,
                 &provider_name,
@@ -548,172 +548,105 @@ pub async fn run(
                 &mcp_tool_names,
             );
 
-            // The retry loop yields this turn's outcome instead of settling
-            // inside itself: a model-switch retry `continue`s with the same
-            // history, which the model has still not read, so it must not
-            // settle — and the guard is settled exactly once below.
-            let turn_result: Result<String> = loop {
-                if let Some(sys_msg) = history.first_mut()
-                    && sys_msg.role == "system"
-                {
-                    sys_msg.content = build_system_prompt_for_turn(
-                        &agent_workspace,
-                        &model_name,
-                        &tool_descs,
-                        &deferred_section,
-                        &skills,
-                        Some(&agent.identity),
-                        bootstrap_max_chars,
-                        &risk_profile,
-                        model_provider.as_ref(),
-                        &tools_registry,
-                        &excluded_tools,
-                        activated_handle.as_ref(),
-                        agent.resolved.strict_tool_parsing,
-                        eff_prompt_injection_mode,
-                        eff_compact_context,
-                        eff_max_system_prompt_chars,
-                        true,
-                        config.channels.show_tool_calls,
-                        persona_section.as_deref(),
-                        persona.legacy_files,
-                        thinking_params.system_prompt_prefix.as_deref(),
-                    )?;
-                }
-                match zeroclaw_api::NATIVE_THINKING_OVERRIDE
-                    .scope(
-                        thinking_params.native_thinking,
-                        TOOL_LOOP_COST_TRACKING_CONTEXT.scope(
-                            cost_tracking_context.clone(),
-                            run_tool_call_loop(ToolLoop {
-                                exec: ResolvedAgentExecution::resolve(
-                                    ResolvedModelAccess {
-                                        model_provider: model_provider.as_ref(),
-                                        provider_name: &provider_name,
-                                        model: &model_name,
-                                        temperature: effective_temperature,
-                                    },
-                                    ResolvedIo {
-                                        tools_registry: &tools_registry,
-                                        observer: observer.as_ref(),
-                                        silent: false,
-                                        approval: approval_manager.as_ref(),
-                                        multimodal_config: &config.multimodal,
-                                        config: Some(&config),
-                                        hooks: None,
-                                        activated_tools: activated_handle.as_ref(),
-                                        model_switch_callback: None,
-                                        receipt_generator: None,
-                                    },
-                                    ResolvedRuntimeKnobs {
-                                        max_tool_iterations: agent.resolved.max_tool_iterations,
-                                        excluded_tools: &excluded_tools,
-                                        dedup_exempt_tools: &agent.resolved.tool_call_dedup_exempt,
-                                        pacing: &config.pacing,
-                                        strict_tool_parsing: agent.resolved.strict_tool_parsing,
-                                        parallel_tools: agent.resolved.parallel_tools,
-                                        max_tool_result_chars: agent.resolved.max_tool_result_chars,
-                                        keep_tool_context_turns: agent.resolved.keep_tool_context_turns,
-                                        context_token_budget: agent
-                                            .resolved
-                                            .effective_context_budget(),
-                                        knobs: &LoopKnobs::default(),
-                                    },
-                                ).with_task_owner(task_owner.as_ref()),
-                                history: &mut history,
-                                channel_name,
-                                channel_reply_target: None,
-                                cancellation_token: None,
-                                on_delta: None,
-                                shared_budget: None,
-                                channel: None,
-                                collected_receipts: None,
-                                event_tx: None,
-                                steering: None,
-                                new_messages_out: None,
-                                image_cache: None,
-                                // Origin is threaded from the entry point;
-                                // source/transport/trust stay phase-1
-                                // placeholders until per-transport stamping.
-                                memory: Some(crate::agent::memory_inject::TurnMemory {
-                                    handle: mem.as_ref(),
-                                    query: effective_msg.clone(),
-                                    sessions: vec![memory_session_id.clone()],
-                                    suppress: suppress_memory_inject,
-                                    cfg: crate::agent::memory_inject::MemoryInjectConfig::from_memory_config(
-                                        &config.memory,
-                                        crate::agent::memory_inject::DEFAULT_RECALL_LIMIT,
-                                    ),
-                                }),
-                                ingress: IngressContext::from_origin(origin),
-                                agent_alias: Some(agent_alias),
-                                parent_agent_alias: None,
-                                turn_id: &turn_id,
+            if let Some(sys_msg) = history.first_mut()
+                && sys_msg.role == "system"
+            {
+                sys_msg.content = build_system_prompt_for_turn(
+                    &agent_workspace,
+                    &model_name,
+                    &tool_descs,
+                    &deferred_section,
+                    &skills,
+                    Some(&agent.identity),
+                    bootstrap_max_chars,
+                    &risk_profile,
+                    model_provider.as_ref(),
+                    &tools_registry,
+                    &excluded_tools,
+                    activated_handle.as_ref(),
+                    agent.resolved.strict_tool_parsing,
+                    eff_prompt_injection_mode,
+                    eff_compact_context,
+                    eff_max_system_prompt_chars,
+                    true,
+                    config.channels.show_tool_calls,
+                    persona_section.as_deref(),
+                    persona.legacy_files,
+                    thinking_params.system_prompt_prefix.as_deref(),
+                )?;
+            }
+            let response = zeroclaw_api::NATIVE_THINKING_OVERRIDE
+                .scope(
+                    thinking_params.native_thinking,
+                    TOOL_LOOP_COST_TRACKING_CONTEXT.scope(
+                        cost_tracking_context.clone(),
+                        run_tool_call_loop(ToolLoop {
+                            exec: ResolvedAgentExecution::resolve(
+                                ResolvedModelAccess {
+                                    model_provider: model_provider.as_ref(),
+                                    provider_name: &provider_name,
+                                    model: &model_name,
+                                    temperature: effective_temperature,
+                                },
+                                ResolvedIo {
+                                    tools_registry: &tools_registry,
+                                    observer: observer.as_ref(),
+                                    silent: false,
+                                    approval: approval_manager.as_ref(),
+                                    multimodal_config: &config.multimodal,
+                                    config: Some(&config),
+                                    hooks: None,
+                                    activated_tools: activated_handle.as_ref(),
+                                    receipt_generator: None,
+                                },
+                                ResolvedRuntimeKnobs {
+                                    max_tool_iterations: agent.resolved.max_tool_iterations,
+                                    excluded_tools: &excluded_tools,
+                                    dedup_exempt_tools: &agent.resolved.tool_call_dedup_exempt,
+                                    pacing: &config.pacing,
+                                    strict_tool_parsing: agent.resolved.strict_tool_parsing,
+                                    parallel_tools: agent.resolved.parallel_tools,
+                                    max_tool_result_chars: agent.resolved.max_tool_result_chars,
+                                    keep_tool_context_turns: agent.resolved.keep_tool_context_turns,
+                                    context_token_budget: agent
+                                        .resolved
+                                        .effective_context_budget(),
+                                    knobs: &LoopKnobs::default(),
+                                },
+                            ).with_task_owner(task_owner.as_ref()),
+                            history: &mut history,
+                            channel_name,
+                            channel_reply_target: None,
+                            cancellation_token: None,
+                            on_delta: None,
+                            shared_budget: None,
+                            channel: None,
+                            collected_receipts: None,
+                            event_tx: None,
+                            steering: None,
+                            new_messages_out: None,
+                            image_cache: None,
+                            // Origin is threaded from the entry point;
+                            // source/transport/trust stay phase-1
+                            // placeholders until per-transport stamping.
+                            memory: Some(crate::agent::memory_inject::TurnMemory {
+                                handle: mem.as_ref(),
+                                query: effective_msg.clone(),
+                                sessions: vec![memory_session_id.clone()],
+                                suppress: suppress_memory_inject,
+                                cfg: crate::agent::memory_inject::MemoryInjectConfig::from_memory_config(
+                                    &config.memory,
+                                    crate::agent::memory_inject::DEFAULT_RECALL_LIMIT,
+                                ),
                             }),
-                        ),
-                    )
-                    .await
-                {
-                    Ok(resp) => {
-                        // Success point for this turn: the tool loop only
-                        // returns `Ok` after the provider call, so the model
-                        // has read the history containing the announcement
-                        // block.
-                        break Ok(resp);
-                    }
-                    Err(e) => {
-                        if let Some((new_model_provider, new_model)) = is_model_switch_requested(&e)
-                        {
-                            ::zeroclaw_log::record!(
-                                INFO,
-                                ::zeroclaw_log::Event::new(
-                                    module_path!(),
-                                    ::zeroclaw_log::Action::Migrate
-                                )
-                                .with_category(::zeroclaw_log::EventCategory::Provider),
-                                &format!(
-                                    "Model switch requested, switching from {} {} to {} {}",
-                                    provider_name, model_name, new_model_provider, new_model
-                                )
-                            );
-
-                            let (switch_api_key, switch_uri) = api_key_and_uri_for_provider(
-                                &config,
-                                &new_model_provider,
-                                agent_model_provider,
-                            );
-                            model_provider =
-                                zeroclaw_providers::create_routed_model_provider_with_options(
-                                    &config,
-                                    &new_model_provider,
-                                    switch_api_key.as_deref(),
-                                    switch_uri.as_deref(),
-                                    &config.reliability,
-                                    &config.model_routes,
-                                    &new_model,
-                                    &zeroclaw_providers::options_for_provider_ref(
-                                        &config,
-                                        &new_model_provider,
-                                        &zeroclaw_providers::provider_runtime_options_for_agent(
-                                            &config,
-                                            agent_alias,
-                                        ),
-                                    ),
-                                )?;
-
-                            provider_name = new_model_provider;
-                            model_name = new_model;
-
-                            turn_guard.set_model_route(provider_name.clone(), model_name.clone());
-
-                            continue;
-                        }
-                        break Err(e);
-                    }
-                }
-            };
-
-            let response = turn_result?;
+                            ingress: IngressContext::from_origin(origin),
+                            agent_alias: Some(agent_alias),
+                            parent_agent_alias: None,
+                            turn_id: &turn_id,
+                        }),
+                    ),
+                )
+                .await?;
 
             // After successful multi-step execution, attempt autonomous skill creation.
             if config.skills.skill_creation.enabled {

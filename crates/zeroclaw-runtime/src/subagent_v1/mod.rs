@@ -79,8 +79,7 @@ pub(crate) fn ambient_lineage() -> Option<LineageRef> {
 // Advisor consultations made in the current agent turn. The turn engine
 // (`run_tool_call_loop`) owns the counter and installs a fresh one per
 // turn via [`scope_advisor_turn`]; the advisor-bound `reasoning_subagent`
-// only borrows it while it executes (same shape as the loop-owned
-// model-switch state).
+// only borrows it while it executes.
 //
 // Spawn hazard: a tokio task-local is NOT inherited by a spawned task. A
 // tool future moved onto `spawn!`/`JoinSet::spawn` runs outside this scope,

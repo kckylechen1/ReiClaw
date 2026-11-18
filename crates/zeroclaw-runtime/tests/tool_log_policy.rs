@@ -294,7 +294,6 @@ async fn exercise_loop(scenario: Scenario, native: bool) {
             excluded_tools: &[],
             dedup_exempt_tools: &[],
             activated_tools: None,
-            model_switch_callback: None,
             pacing: &PacingConfig::default(),
             strict_tool_parsing: false,
             parallel_tools: false,

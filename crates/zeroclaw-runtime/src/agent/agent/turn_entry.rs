@@ -216,7 +216,6 @@ impl Agent {
                                     .and_then(|c| c.config.as_deref()),
                                 hooks: self.hook_runner.as_deref(),
                                 activated_tools: self.activated_tools.as_ref(),
-                                model_switch_callback: None,
                                 receipt_generator: receipt_scope
                                     .as_ref()
                                     .map(crate::agent::tool_receipts::ReceiptScope::generator),
@@ -405,10 +404,7 @@ impl Agent {
         }
 
         let mut new_msgs: Vec<ConversationMessage> = Vec::new();
-        // `effective_model` is `mut` so a `model_switch` requested mid-turn
-        // (handled in the round loop's `ModelSwitchRequested` arm via
-        // `try_apply_model_switch`) can rebind it for later rounds
-        let mut effective_model = self.classify_model(user_message);
+        let effective_model = self.classify_model(user_message);
         let turn_id = Self::new_turn_id();
         let mut committed_response = String::new();
         // Requested-vs-served divergence for THIS turn. Source of truth is the
@@ -553,7 +549,7 @@ impl Agent {
             detect_protocol_without_tools: false,
         };
         let pacing = self.turn_pacing();
-        // One guard spans every steering/model-switch round in this API turn.
+        // One guard spans every steering round in this API turn.
         let repetition_guard =
             std::sync::Mutex::new(crate::agent::turn::repetition::RepetitionGuard::default());
 
@@ -665,13 +661,6 @@ impl Agent {
                                     .and_then(|c| c.config.as_deref()),
                                 hooks: self.hook_runner.as_deref(),
                                 activated_tools: self.activated_tools.as_ref(),
-                                // `None` here (rather than a shared global) is
-                                // deliberate: `run_tool_call_loop` mints a fresh,
-                                // task-local switch state for this round when it
-                                // sees `None`, so a `model_switch` requested this
-                                // round can never leak into a sibling round or a
-                                // concurrently running turn/agent.
-                                model_switch_callback: None,
                                 receipt_generator: receipt_scope
                                     .as_ref()
                                     .map(crate::agent::tool_receipts::ReceiptScope::generator),
@@ -850,28 +839,6 @@ impl Agent {
                         // user provenance and round-local before-LLM input.
                         // No tool is interrupted and no second loop is spawned.
                         committed_response.push_str(&pending.display_text);
-                        continue;
-                    }
-                    // Model switch requested mid-turn: the unified loop
-                    // signals a pending `model_switch` by returning
-                    // `ModelSwitchRequested`. The
-                    // round's tool call + result are already replayed into
-                    // history/new_msgs above; rebuild the provider from the
-                    // captured `ProviderSwitchConfig` and continue the round
-                    // loop so the next provider call uses the switched
-                    // provider/model. A failed rebuild (no switch config / build
-                    // error) falls through to the normal error handling below.
-                    if let Some((new_model_provider, new_model)) =
-                        crate::agent::loop_::is_model_switch_requested(&error)
-                        && let Some(new_effective_model) = self.try_apply_model_switch(
-                            &effective_model,
-                            new_model_provider,
-                            new_model,
-                        )
-                    {
-                        let notice = self.trim_history(Some(&turn_id));
-                        forward_history_trim_notice(&event_tx, notice).await;
-                        effective_model = new_effective_model;
                         continue;
                     }
                     if let Some(rx) = steering_rx.as_deref_mut() {

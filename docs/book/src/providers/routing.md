@@ -46,15 +46,18 @@ They select only the route explicitly configured under that name. Provider
 `pricing`, live pricing and cost accounting remain available; prices do not
 automatically choose a route.
 
-## Runtime model switching
+## Owner model selection
 
-Runtime switches use the same provider-profile contract as config-backed routing:
+Owner selection uses the same provider-profile contract as config-backed routing.
+In web chat, the model selector and `/model <type>.<alias>` command persist
+`agents.<alias>.model_provider` through the gateway config API, cancel the
+active turn when needed, and reconnect the session with that selection.
+`/model` without an argument lists the current and available selections.
 
-- `/models <type>.<alias>` selects the active provider profile for the sender session. Channel runtimes can also accept a bare `<type>` shorthand when exactly one configured alias exists for that provider family.
-- `/model <model-id>` selects a model within the active provider profile. If the value matches a `[[model_routes]]` hint or model, that route can switch both provider profile and model together.
-- Runtime switching is command-only: the `model_switch` model tool is retired, and the ordinary agent cannot switch its own effective model through a tool. The `/model` command is the trusted explicit override.
-
-Runtime switches are session/runtime state. They do not edit `config.toml`; persisted defaults require an explicit config write. For tool-driven switches, bare provider family names such as `openai` are not switch targets because they do not identify which configured profile, credential, endpoint, or compatibility mode should be used.
+The `model_switch` model tool and its in-turn switching protocol are deleted.
+The agent cannot request its own provider rebuild through a tool. Configured
+route hints, query classification, vision routing, and provider fallback keep
+their existing dispatch behavior.
 
 ## Observability
 

@@ -55,8 +55,8 @@ deep clones on every iteration.
 Entry points should not assemble a turn by re-deriving policy inline. The turn
 engine receives a `ResolvedAgentExecution` bundle for stable per-agent
 dependencies: model binding, effective tool registry, observer and approval
-handles, resolved runtime knobs, the deferred-MCP activation set, model-switch
-callback, and optional receipt generator.
+handles, resolved runtime knobs, the deferred-MCP activation set, and optional
+receipt generator.
 
 Per-message state stays outside that bundle: history, streaming sinks, event
 channels, steering messages, cancellation token, memory injection state, and the

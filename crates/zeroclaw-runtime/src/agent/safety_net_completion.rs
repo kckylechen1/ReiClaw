@@ -186,80 +186,107 @@ fn endpoint_config(workspace: &Path, alias: &str, url: String, model: &str) -> C
     config
 }
 
-struct SwitchAndSteer {
+struct QueueSteering {
     steering: mpsc::Sender<String>,
 }
 
-zeroclaw_api::tool_attribution!(
-    SwitchAndSteer,
-    ::zeroclaw_api::attribution::ToolKind::Plugin
-);
+zeroclaw_api::tool_attribution!(QueueSteering, ::zeroclaw_api::attribution::ToolKind::Plugin);
 
 #[async_trait]
-impl Tool for SwitchAndSteer {
+impl Tool for QueueSteering {
     fn name(&self) -> &str {
-        "switch_and_steer"
+        "queue_steering"
     }
     fn description(&self) -> &str {
-        "switch fixture route and queue steering"
+        "queue a steering message at the tool boundary"
     }
     fn parameters_schema(&self) -> serde_json::Value {
         serde_json::json!({"type":"object"})
     }
     async fn execute(&self, _: serde_json::Value) -> Result<crate::tools::ToolResult> {
-        let pending = crate::agent::turn::current_model_switch_state()?;
-        *pending.lock().unwrap() = Some(("custom.next".into(), "next-model".into()));
         self.steering
             .send("continue with this correction".into())
             .await?;
         Ok(crate::tools::ToolResult {
             success: true,
-            output: "switch queued".into(),
+            output: "steering queued".into(),
             error: None,
         })
     }
 }
 
 #[tokio::test]
-async fn completion_route_follows_model_switch_and_steering() {
-    let (url, next_models, server) =
-        endpoint(serde_json::json!({"role":"assistant","content":"switched reply"})).await;
+async fn completion_route_survives_steering_rounds() {
     let base_models = Models::default();
+    let fast_models = Models::default();
     let (steering_tx, mut steering_rx) = mpsc::channel(4);
+    let route = ModelRouteConfig {
+        hint: "fast".into(),
+        model_provider: "custom.fast".into(),
+        model: "fast-model".into(),
+        ..Default::default()
+    };
+    let provider = zeroclaw_providers::router::RouterModelProvider::new(
+        "custom.text",
+        vec![
+            ("custom.text".into(), capture(&base_models, vec![])),
+            (
+                "custom.fast".into(),
+                capture(
+                    &fast_models,
+                    vec![
+                        tool_response(vec![tool_call("steer-1", "queue_steering")]),
+                        text_response("corrected reply"),
+                    ],
+                ),
+            ),
+        ],
+        vec![(
+            route.hint.clone(),
+            zeroclaw_providers::router::Route {
+                provider_name: route.model_provider.clone(),
+                model: route.model.clone(),
+            },
+        )],
+    );
     let mut agent = build_agent(
-        capture(
-            &base_models,
-            vec![tool_response(vec![tool_call(
-                "switch-1",
-                "switch_and_steer",
-            )])],
-        ),
-        vec![Box::new(SwitchAndSteer {
+        Box::new(provider),
+        vec![Box::new(QueueSteering {
             steering: steering_tx,
         })],
     );
     agent.model_provider_name = "custom.text".into();
     agent.model_name = "text-model".into();
+    agent.available_hints = vec!["fast".into()];
+    agent
+        .route_model_by_hint
+        .insert("fast".into(), "fast-model".into());
+    agent.classification_config = zeroclaw_config::schema::QueryClassificationConfig {
+        enabled: true,
+        rules: vec![zeroclaw_config::schema::ClassificationRule {
+            hint: "fast".into(),
+            keywords: vec!["quick".into()],
+            ..Default::default()
+        }],
+    };
     agent.provider_switch_config = Some(ProviderSwitchConfig {
-        config: Some(Arc::new(endpoint_config(
-            agent._workspace.path(),
-            "next",
-            url,
-            "next-model",
-        ))),
+        config: Some(Arc::new(Config {
+            data_dir: agent._workspace.path().to_path_buf(),
+            model_routes: vec![route],
+            ..Default::default()
+        })),
     });
     let (tx, _rx) = mpsc::channel(256);
     let outcome = agent
-        .turn_streamed_with_steering_state("switch please", tx, None, Some(&mut steering_rx))
+        .turn_streamed_with_steering_state("quick answer please", tx, None, Some(&mut steering_rx))
         .await
         .unwrap();
-    assert_eq!(outcome.response, "switched reply");
-    assert_eq!(outcome.provider_name, "custom.next");
-    assert_eq!(outcome.model, "next-model");
-    assert_eq!(base_models.lock().as_slice(), ["text-model"]);
-    assert_eq!(next_models.lock().as_slice(), ["next-model"]);
+    assert_eq!(outcome.response, "corrected reply");
+    assert_eq!(outcome.provider_name, "custom.fast");
+    assert_eq!(outcome.model, "fast-model");
+    assert_eq!(fast_models.lock().as_slice(), ["fast-model", "fast-model"]);
+    assert!(base_models.lock().is_empty());
     assert!(outcome.new_messages.iter().any(|message| matches!(message, ConversationMessage::Chat(message) if message.role == "user" && message.content.contains("continue with this correction"))));
-    server.abort();
 }
 
 #[tokio::test]

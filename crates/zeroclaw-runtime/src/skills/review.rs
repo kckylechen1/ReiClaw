@@ -97,7 +97,6 @@ pub async fn maybe_run_skill_review(
                         config: full_config,
                         hooks: None,
                         activated_tools: None,
-                        model_switch_callback: None,
                         receipt_generator: None,
                     },
                     crate::agent::loop_::ResolvedRuntimeKnobs {
