@@ -31,9 +31,14 @@
 #   services.zeroclaw.instances.me = {
 #     environmentFile = "/run/agenix/zeroclaw-bot-token";
 #     settings = {
-#       default_provider = "anthropic";
-#       default_model = "claude-sonnet-4-6";
-#       channels.telegram = {
+#       providers.models.anthropic.home.model = "claude-sonnet-4-6";
+#       agents.assistant = {
+#         model_provider = "anthropic.home";
+#         risk_profile = "assistant";
+#         channels = [ "telegram.home" ];
+#       };
+#       risk_profiles.assistant = { };
+#       channels.telegram.home = {
 #         enabled = true;
 #         bot_token = "$BOT_TOKEN";   # systemd $VAR — substituted at load
 #         allowed_users = [ "12345" ];
@@ -152,9 +157,14 @@ let
           default = { };
           example = literalExpression ''
             {
-              default_provider = "anthropic";
-              default_model = "claude-sonnet-4-6";
-              channels.telegram = {
+              providers.models.anthropic.home.model = "claude-sonnet-4-6";
+              agents.assistant = {
+                model_provider = "anthropic.home";
+                risk_profile = "assistant";
+                channels = [ "telegram.home" ];
+              };
+              risk_profiles.assistant = { };
+              channels.telegram.home = {
                 enabled = true;
                 bot_token = "$BOT_TOKEN";
                 allowed_users = [ "12345" ];
@@ -255,7 +265,14 @@ let
   renderConfigFile =
     name: instanceCfg:
     let
-      base = tomlFormat.generate "zeroclaw-${name}-config.toml" instanceCfg.settings;
+      # ZeroClaw admits only the current config generation and refuses an
+      # unversioned file, so the rendered file always declares one. Keep this
+      # in step with `CURRENT_SCHEMA_VERSION` in
+      # crates/zeroclaw-config/src/current.rs; an explicit
+      # `settings.schema_version` still wins.
+      base = tomlFormat.generate "zeroclaw-${name}-config.toml" (
+        { schema_version = 3; } // instanceCfg.settings
+      );
     in
     if instanceCfg.extraConfig == "" then
       base
