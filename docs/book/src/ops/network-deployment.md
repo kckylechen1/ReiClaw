@@ -8,12 +8,11 @@ Deploying ZeroClaw so it can receive inbound traffic: gateway exposure, webhook 
 |---|:---:|---|
 | Telegram (long-poll) | No | ZeroClaw polls `api.telegram.org`, works behind NAT |
 | Matrix / Mattermost | No | Sync/WebSocket, outbound only |
-| Discord / Slack (Socket Mode) | No | Outbound WebSocket |
 | Signal (`signal-cli-rest-api`) | No | Localhost container |
-| Nostr / IMAP / MQTT | No | All outbound |
+| Nostr / MQTT | No | All outbound |
 | Webhooks (GitHub, Slack Events API, custom) | **Yes** | Public POST endpoint required |
 | Gateway pairing from LAN | Yes (LAN-scope) | Bind to `0.0.0.0` or use a tunnel |
-| Discord / Slack (HTTP Events) | Yes | If you don't use Socket Mode |
+| Slack (HTTP Events) | Yes | If you don't use Socket Mode |
 
 **Upshot:** a Telegram-only bot runs on a Pi behind a consumer router with zero port forwarding. Anything webhook-based needs a reachable URL, which is where tunnels come in.
 

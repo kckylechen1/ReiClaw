@@ -34,11 +34,6 @@ pub use zeroclaw_tools::ask_user::ChannelMapHandle;
 pub use zeroclaw_tools::backup_tool::BackupTool;
 pub use zeroclaw_tools::content_search::ContentSearchTool;
 pub use zeroclaw_tools::data_management::DataManagementTool;
-pub use zeroclaw_tools::discord_search::DiscordSearchTool;
-#[cfg(feature = "email-tools")]
-pub use zeroclaw_tools::email_read::EmailReadTool;
-#[cfg(feature = "email-tools")]
-pub use zeroclaw_tools::email_search::EmailSearchTool;
 pub use zeroclaw_tools::escalate::EscalateToHumanTool;
 pub use zeroclaw_tools::file_download::FileDownloadTool;
 pub use zeroclaw_tools::file_edit::FileEditTool;
@@ -798,48 +793,6 @@ pub fn all_tools_with_runtime(
         task_writer,
         task_reminder_target,
     )));
-
-    // Register discord_search if any configured Discord alias has
-    // archive enabled. Multiple Discord aliases are supported (one per
-    // bot/server set); the search tool reads from the shared read-only
-    // archive DB under `data_dir` without creating files on startup.
-    if root_config.channels.discord.values().any(|d| d.archive) {
-        tool_arcs.push(Arc::new(DiscordSearchTool::from_data_dir(&config.data_dir)));
-    }
-
-    // email_search — registered when at least one email channel is enabled
-    #[cfg(feature = "email-tools")]
-    {
-        let email_configs: std::collections::HashMap<
-            String,
-            zeroclaw_config::scattered_types::EmailConfig,
-        > = root_config
-            .channels
-            .email
-            .iter()
-            .filter(|(_, c)| c.enabled)
-            .map(|(k, v)| (k.clone(), v.clone()))
-            .collect();
-
-        if !email_configs.is_empty() {
-            let auth_service = if email_configs.values().any(|c| c.oauth2.is_some()) {
-                Some(Arc::new(
-                    zeroclaw_providers::auth::AuthService::from_config(root_config),
-                ))
-            } else {
-                None
-            };
-            let configs = Arc::new(email_configs);
-            tool_arcs.push(Arc::new(EmailSearchTool::new(
-                Arc::clone(&configs),
-                auth_service.clone(),
-            )));
-            tool_arcs.push(Arc::new(EmailReadTool::new(
-                Arc::clone(&configs),
-                auth_service,
-            )));
-        }
-    }
 
     // LLM task tool — registered using the calling agent's provider
     if let Some((family, alias, entry)) = root_config.resolved_model_provider_for_agent(agent_alias)

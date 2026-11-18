@@ -50,7 +50,6 @@ const GENERIC_REGISTRY_TERMS: &[&str] = &[
     "Compatible",
     "Cron",
     "Custom",
-    "Email",
     "Manifest",
     "Voice Call",
     "Webhook",
@@ -631,7 +630,7 @@ mod tests {
     #[test]
     fn extracts_registry_channel_terms() {
         assert!(
-            texts("Send the message to Discord and WhatsApp.").contains(&"Discord".to_string())
+            texts("Send the message to Telegram and WhatsApp.").contains(&"Telegram".to_string())
         );
     }
 

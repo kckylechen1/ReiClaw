@@ -179,7 +179,7 @@ mod tests {
         config.peer_groups.insert(
             "ops".into(),
             PeerGroupConfig {
-                channel: "discord.main".into(),
+                channel: "webhook.main".into(),
                 agents: vec![AgentAlias::new("aria"), AgentAlias::new("zeph")],
                 external_peers: vec![PeerUsername::new("@operator")],
                 ..PeerGroupConfig::default()
@@ -219,7 +219,7 @@ mod tests {
             OptionDomain::PeerTargets,
             &config,
             "aria",
-            &serde_json::json!({"channel": "discord.main"}),
+            &serde_json::json!({"channel": "webhook.main"}),
             &[],
         );
         let values: Vec<&str> = entries.iter().map(|e| e.value.as_str()).collect();

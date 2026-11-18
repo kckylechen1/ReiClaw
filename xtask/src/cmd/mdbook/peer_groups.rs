@@ -911,10 +911,10 @@ mod generated_prose_gate {
 
     #[test]
     fn secret_config_escapes_alias_placeholder_in_rendered_markdown() {
-        let rendered = super::render_secret_config("channels.discord.<alias>.bot_token");
+        let rendered = super::render_secret_config("channels.telegram.<alias>.bot_token");
 
-        assert!(rendered.contains("`channels.discord.<alias>.bot_token`"));
-        assert!(rendered.contains("zeroclaw config set channels.discord.<alias>.bot_token"));
+        assert!(rendered.contains("`channels.telegram.<alias>.bot_token`"));
+        assert!(rendered.contains("zeroclaw config set channels.telegram.<alias>.bot_token"));
     }
 
     #[test]

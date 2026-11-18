@@ -333,58 +333,16 @@ fn detects_no_supervised_channels() {
 #[test]
 fn all_disabled_channels_not_supervised() {
     let mut config = Config::default();
-    config.channels.discord.insert(
-        "clamps".to_string(),
-        zeroclaw_config::schema::DiscordConfig {
-            enabled: false,
-            bot_token: "token".into(),
-            guild_ids: vec![],
-            channel_ids: vec![],
-            listen_to_bots: false,
-            mention_only: true,
-            stream_mode: zeroclaw_config::schema::StreamMode::default(),
-            draft_update_interval_ms: 0,
-            multi_message_delay_ms: 0,
-            stall_timeout_secs: 0,
-            slash_commands: false,
-            slash_command_scope: zeroclaw_config::schema::SlashCommandScope::default(),
-            intents_mask: None,
-            reaction_notifications: zeroclaw_config::schema::DiscordReactionScope::Off,
-            interrupt_on_new_message: false,
-            archive: false,
-            approval_timeout_secs: 0,
-            proxy_url: None,
-            excluded_tools: vec![],
-            reply_min_interval_secs: 0,
-            reply_queue_depth_max: 0,
-        },
-    );
-    config.channels.discord.insert(
-        "glados".to_string(),
-        zeroclaw_config::schema::DiscordConfig {
-            enabled: false,
-            bot_token: "token2".into(),
-            guild_ids: vec![],
-            channel_ids: vec![],
-            listen_to_bots: false,
-            mention_only: true,
-            stream_mode: zeroclaw_config::schema::StreamMode::default(),
-            draft_update_interval_ms: 0,
-            multi_message_delay_ms: 0,
-            stall_timeout_secs: 0,
-            slash_commands: false,
-            slash_command_scope: zeroclaw_config::schema::SlashCommandScope::default(),
-            intents_mask: None,
-            reaction_notifications: zeroclaw_config::schema::DiscordReactionScope::Off,
-            interrupt_on_new_message: false,
-            archive: false,
-            approval_timeout_secs: 0,
-            proxy_url: None,
-            excluded_tools: vec![],
-            reply_min_interval_secs: 0,
-            reply_queue_depth_max: 0,
-        },
-    );
+    for (alias, token) in [("clamps", "token"), ("glados", "token2")] {
+        config.channels.telegram.insert(
+            alias.to_string(),
+            zeroclaw_config::schema::TelegramConfig {
+                enabled: false,
+                bot_token: token.into(),
+                ..Default::default()
+            },
+        );
+    }
     assert!(!has_supervised_channels(&config));
 }
 
@@ -481,14 +439,6 @@ fn resolve_delivery_rejects_native_channels_without_a_delivery_bridge() {
     config
         .channels
         .telegram
-        .insert("default".into(), Default::default());
-    config
-        .channels
-        .discord
-        .insert("default".into(), Default::default());
-    config
-        .channels
-        .email
         .insert("default".into(), Default::default());
     config
         .channels

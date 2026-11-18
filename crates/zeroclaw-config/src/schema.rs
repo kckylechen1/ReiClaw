@@ -266,7 +266,7 @@ pub struct Config {
     #[group = "Operations"]
     pub tasks: crate::tasks::TasksConfig,
 
-    /// Channel configurations: Telegram, Discord, Slack, etc. (`[channels]`).
+    /// Channel configurations: Telegram and webhook instances (`[channels]`).
     #[serde(default, alias = "channels_config")]
     #[nested]
     pub channels: ChannelsConfig,
@@ -3025,7 +3025,7 @@ pub struct AliasedAgentConfig {
     #[tab(General)]
     #[serde(default = "default_true")]
     pub enabled: bool,
-    /// Channel aliases this agent handles (e.g. `["telegram.<alias>", "discord.<alias>"]`).
+    /// Channel aliases this agent handles (e.g. `["telegram.<alias>", "webhook.<alias>"]`).
     /// Each entry is a `ChannelRef` resolving through `[channels.<type>.<alias>]`;
     /// `Config::validate()` fails loud on dangling references.
     #[tab(Channels)]
@@ -3246,7 +3246,7 @@ impl Default for AliasedAgentConfig {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[cfg_attr(feature = "schema-export", derive(schemars::JsonSchema))]
 pub struct ChannelAliasInfo {
-    /// Channel type as the schema emits it (kebab; e.g. `"discord"`,
+    /// Channel type as the schema emits it (kebab; e.g. `"telegram"`,
     /// `"wecom-ws"`).
     pub channel_type: String,
     /// Per-alias HashMap key (e.g. `"loneliness"`).
@@ -9361,7 +9361,7 @@ pub struct DeliveryConfigDecl {
     /// Delivery mode: `"none"` or `"announce"`.
     #[serde(default = "default_delivery_mode")]
     pub mode: String,
-    /// Channel name (e.g. `"telegram"`, `"discord"`).
+    /// Channel name (e.g. `"telegram"`, `"webhook"`).
     #[serde(default)]
     pub channel: Option<String>,
     /// Target/recipient identifier.
@@ -9622,9 +9622,11 @@ pub struct CustomTunnelConfig {
 /// presents them as available transports.
 ///
 /// The retained channel surfaces are exactly the complement:
-/// `telegram` (gateway bridge), `webhook` (gateway ingress), `email`
-/// (email_search/email_read tool configuration), `discord` (Discord
-/// archive-query tool configuration), and the always-on CLI. The legacy
+/// `telegram` (gateway bridge), `webhook` (gateway ingress) and the always-on
+/// CLI. `email` and `discord` were retired by the owner on 2026-11-18 and are
+/// listed here so every admission boundary names them as retired; unlike the
+/// older entries they are also refused outright at config load
+/// (`reject_retired_channel_config`) instead of being tombstoned. The legacy
 /// `voice_duplex` event logger is retired under ADR-023; the separate voice
 /// surface does not inherit its settings. Do not add a kind here without a
 /// consumer-graph review, and do not remove one without the deletion evidence
@@ -9657,6 +9659,8 @@ pub const RETIRED_TRANSPORT_KINDS: &[&str] = &[
     "voice_wake",
     "voice_duplex",
     "amqp",
+    "email",
+    "discord",
 ];
 
 /// Whether `kind` names a retired transport. Accepts the snake_case section
@@ -9689,18 +9693,10 @@ pub struct ChannelsConfig {
     #[serde(default, skip_serializing_if = "HashMap::is_empty")]
     #[nested]
     pub telegram: HashMap<String, TelegramConfig>,
-    /// Discord bot channel instances (`[channels.discord.<alias>]`).
-    #[serde(default, skip_serializing_if = "HashMap::is_empty")]
-    #[nested]
-    pub discord: HashMap<String, DiscordConfig>,
     /// Webhook channel instances (`[channels.webhook.<alias>]`).
     #[serde(default, skip_serializing_if = "HashMap::is_empty")]
     #[nested]
     pub webhook: HashMap<String, WebhookConfig>,
-    /// Email channel instances (`[channels.email.<alias>]`).
-    #[serde(default, skip_serializing_if = "HashMap::is_empty")]
-    #[nested]
-    pub email: HashMap<String, crate::scattered_types::EmailConfig>,
     /// MQTT SOP listener instances — RETIRED. The section now
     /// fails config parse with the retirement message instead of silently
     /// no-op'ing. Field removed with the run-side config sweep.
@@ -9789,19 +9785,9 @@ impl ChannelsConfig {
             .iter()
             .map(|(alias, config)| ("telegram", alias.as_str(), config.enabled))
             .chain(
-                self.discord
-                    .iter()
-                    .map(|(alias, config)| ("discord", alias.as_str(), config.enabled)),
-            )
-            .chain(
                 self.webhook
                     .iter()
                     .map(|(alias, config)| ("webhook", alias.as_str(), config.enabled)),
-            )
-            .chain(
-                self.email
-                    .iter()
-                    .map(|(alias, config)| ("email", alias.as_str(), config.enabled)),
             )
     }
 
@@ -9812,8 +9798,7 @@ impl ChannelsConfig {
     /// populated that channel's config section, and `retired` marks kinds
     /// whose transport runner no longer exists (`RETIRED_TRANSPORT_KINDS`).
     /// Presentation surfaces must not offer `retired` kinds as connectable
-    /// channels; the retained Email/Discord rows are tool configuration, not
-    /// transports.
+    /// channels.
     pub fn channels(&self) -> Vec<super::traits::ChannelInfo> {
         use super::traits::ChannelInfo;
         vec![
@@ -9822,20 +9807,6 @@ impl ChannelsConfig {
                 name: "Telegram",
                 desc: "connect your bot",
                 configured: !self.telegram.is_empty(),
-                retired: false,
-            },
-            ChannelInfo {
-                kind: "discord",
-                name: "Discord",
-                desc: "Discord archive search config",
-                configured: !self.discord.is_empty(),
-                retired: false,
-            },
-            ChannelInfo {
-                kind: "email",
-                name: "Email",
-                desc: "email_search/email_read tool config",
-                configured: !self.email.is_empty(),
                 retired: false,
             },
             ChannelInfo {
@@ -9870,12 +9841,10 @@ impl ChannelsConfig {
     /// so a name-addressed outbound surface
     /// such as `heartbeat.target` refuses them at validation instead of
     /// accepting a target the delivery layer silently drops.
-    pub fn channel_presence(&self) -> [(&'static str, bool, bool, bool); 4] {
+    pub fn channel_presence(&self) -> [(&'static str, bool, bool, bool); 2] {
         [
             ("telegram", !self.telegram.is_empty(), true, false),
-            ("discord", !self.discord.is_empty(), true, false),
             ("webhook", !self.webhook.is_empty(), true, false),
-            ("email", !self.email.is_empty(), true, false),
         ]
     }
 
@@ -9935,9 +9904,7 @@ impl Default for ChannelsConfig {
         Self {
             cli: true,
             telegram: HashMap::new(),
-            discord: HashMap::new(),
             webhook: HashMap::new(),
-            email: HashMap::new(),
             mqtt: HashMap::new(),
             filesystem: HashMap::new(),
             message_timeout_secs: default_channel_message_timeout_secs(),
@@ -9969,31 +9936,8 @@ pub enum StreamMode {
     MultiMessage,
 }
 
-/// Where a channel registers its skill slash commands. `global` (default)
-/// registers application-wide - the commands work everywhere the bot is, but
-/// Discord takes up to ~1h to propagate changes. `guild` registers to each
-/// guild in `guild_ids`, which propagates instantly (the right choice for fast
-/// iteration and single-server bots). When `guild` is set with an empty
-/// `guild_ids`, the channel logs a warning and falls back to global.
-#[derive(
-    Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default, zeroclaw_macros::ConfigEnum,
-)]
-#[cfg_attr(feature = "schema-export", derive(schemars::JsonSchema))]
-#[serde(rename_all = "lowercase")]
-pub enum SlashCommandScope {
-    /// Application-wide commands (propagate in up to ~1h). Default.
-    #[default]
-    Global,
-    /// Commands registered to each guild in `guild_ids` (instant propagation).
-    Guild,
-}
-
 fn default_draft_update_interval_ms() -> u64 {
     1000
-}
-
-fn default_multi_message_delay_ms() -> u64 {
-    800
 }
 
 fn default_telegram_approval_timeout_secs() -> u64 {
@@ -10004,10 +9948,6 @@ pub const TELEGRAM_OFFICIAL_API_BASE_URL: &str = "https://api.telegram.org";
 
 fn default_telegram_api_base_url() -> String {
     TELEGRAM_OFFICIAL_API_BASE_URL.to_string()
-}
-
-fn default_channel_approval_timeout_secs() -> u64 {
-    300
 }
 
 /// Telegram bot channel configuration.
@@ -10123,180 +10063,6 @@ impl Default for TelegramConfig {
 impl ChannelConfig for TelegramConfig {
     fn name() -> &'static str {
         "Telegram"
-    }
-    fn desc() -> &'static str {
-        "connect your bot"
-    }
-}
-
-/// Scope of inbound Discord reaction events the bot records.
-///
-/// Anything other than `Off` adds the GUILD_MESSAGE_REACTIONS and
-/// DIRECT_MESSAGE_REACTIONS gateway intents (both unprivileged; no
-/// Developer Portal toggle needed) and archives matching reactions to the
-/// channel's `discord.db` sidecar when `archive` is enabled.
-#[derive(
-    Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default, zeroclaw_macros::ConfigEnum,
-)]
-#[cfg_attr(feature = "schema-export", derive(schemars::JsonSchema))]
-#[serde(rename_all = "lowercase")]
-pub enum DiscordReactionScope {
-    /// Ignore inbound reaction events entirely (no reaction intents requested).
-    #[default]
-    Off,
-    /// Record reactions to the bot's own messages only.
-    Own,
-    /// Record reactions to any message that passes the channel's filters.
-    All,
-}
-
-/// Discord bot channel configuration.
-#[derive(Debug, Clone, Default, Serialize, Deserialize, Configurable)]
-#[cfg_attr(feature = "schema-export", derive(schemars::JsonSchema))]
-#[prefix = "channels.discord"]
-#[allow(clippy::struct_excessive_bools)]
-pub struct DiscordConfig {
-    /// Whether this channel is active. The runtime only loads channels whose
-    /// `enabled = true`. Default: `false` so an operator who pastes a partial
-    /// `[channels.<type>.<alias>]` block doesn't accidentally bring a channel
-    /// live before the rest of its config is filled in.
-    #[tab(Behavior)]
-    #[serde(default)]
-    pub enabled: bool,
-    /// Discord bot token (from Discord Developer Portal). `#[serde(default)]`
-    /// for the same reason as `TelegramConfig::bot_token`: a missing token
-    /// must deserialize as an empty string instead of salvage-dropping the
-    /// alias; `validate_bot_token` still requires a real token once
-    /// `enabled = true`.
-    #[secret]
-    #[tab(Connection)]
-    #[serde(default)]
-    #[cfg_attr(feature = "schema-export", schemars(extend("x-secret" = true)))]
-    pub bot_token: String,
-    /// Guild (server) IDs to restrict the bot to. Empty = listen across all
-    /// guilds the bot is invited to. Migrated from the legacy `guild_id`
-    /// singular field.
-    #[tab(Advanced)]
-    #[serde(default)]
-    pub guild_ids: Vec<String>,
-    /// Channel IDs to watch. Empty = watch every channel the bot can see.
-    /// Used by the archive sidecar (when `archive = true`) and by the
-    /// in-channel filter when set.
-    #[tab(Advanced)]
-    #[serde(default)]
-    pub channel_ids: Vec<String>,
-    /// When true, the channel opens a sidecar `discord.db` SQLite memory
-    /// backend, archives every non-bot message it sees, and registers the
-    /// `discord_search` tool against it. Default: false. Folded in from
-    /// the legacy `[channels.discord-history]` block.
-    #[tab(Advanced)]
-    #[serde(default)]
-    pub archive: bool,
-    /// When true, process messages from other bots (not just humans).
-    /// The bot still ignores its own messages to prevent feedback loops.
-    #[tab(Advanced)]
-    #[serde(default)]
-    pub listen_to_bots: bool,
-    /// When true, a newer Discord message from the same sender in the same channel
-    /// cancels the in-flight request and starts a fresh response with preserved history.
-    #[tab(Behavior)]
-    #[serde(default)]
-    pub interrupt_on_new_message: bool,
-    /// When true, only respond to messages that @-mention the bot.
-    /// Other messages in the guild are silently ignored.
-    #[tab(Behavior)]
-    #[serde(default)]
-    pub mention_only: bool,
-    /// When true, register and serve Discord slash commands (e.g. `/ask`)
-    /// over the Gateway WebSocket, in addition to message handling. Default
-    /// false. (Prototype: currently registers a single `/ask <prompt>`.)
-    #[tab(Behavior)]
-    #[serde(default)]
-    pub slash_commands: bool,
-    /// Scope for registered slash commands: `global` (default, application-wide,
-    /// ~1h propagation) or `guild` (registered to each `guild_ids` entry,
-    /// instant). Only meaningful when `slash_commands = true`; `guild` with an
-    /// empty `guild_ids` warns and falls back to global. Switching scope reaps
-    /// owned commands from the now-inactive scope; note that *removing* a guild
-    /// from `guild_ids` (without switching scope) does not reap that guild's
-    /// commands - remove the bot from the guild, or switch scope, to clear them.
-    #[tab(Behavior)]
-    #[serde(default)]
-    pub slash_command_scope: SlashCommandScope,
-    /// Per-channel proxy URL (http, https, socks5, socks5h).
-    /// Overrides the global `[proxy]` setting for this channel only.
-    #[tab(Advanced)]
-    #[serde(default)]
-    pub proxy_url: Option<String>,
-    /// Streaming mode for progressive response delivery.
-    /// `off` (default): single message. `partial`: editable draft updates.
-    /// `multi_message`: split response into separate messages at paragraph boundaries.
-    #[tab(Behavior)]
-    #[serde(default)]
-    pub stream_mode: StreamMode,
-    /// Minimum interval (ms) between draft message edits to avoid rate limits.
-    /// Only used when `stream_mode = "partial"`.
-    #[tab(Behavior)]
-    #[serde(default = "default_draft_update_interval_ms")]
-    pub draft_update_interval_ms: u64,
-    /// Delay (ms) between sending each message chunk in multi-message mode.
-    /// Only used when `stream_mode = "multi_message"`.
-    #[tab(Behavior)]
-    #[serde(default = "default_multi_message_delay_ms")]
-    pub multi_message_delay_ms: u64,
-    /// Stall-watchdog timeout in seconds. When non-zero, the bot will abort
-    /// and retry if no progress is made within this duration. 0 = disabled.
-    #[tab(Advanced)]
-    #[serde(default)]
-    pub stall_timeout_secs: u64,
-    /// Raw gateway intent mask override. When set, this exact value is sent
-    /// in IDENTIFY instead of the derived mask: an operator escape hatch
-    /// for downstream deployments that consume gateway events through
-    /// custom builds or forks. The operator owns the consequences:
-    /// privileged bits still need their Developer Portal toggles, and
-    /// dropping baseline bits silences message handling (a warning is
-    /// logged). Unset (default) = derive the mask from the channel's
-    /// feature config.
-    #[tab(Advanced)]
-    #[serde(default)]
-    pub intents_mask: Option<u64>,
-    /// Which inbound reactions to record: `off` (default: reaction events
-    /// are not even requested from the gateway), `own` (reactions to the
-    /// bot's messages), or `all` (reactions to any message passing the
-    /// channel's filters). Recorded reactions are archived to `discord.db`
-    /// when `archive` is enabled, and removed again when a user removes
-    /// their reaction (bulk clears, remove-all / remove-emoji, are not
-    /// yet swept). A set `intents_mask` overrides the derived mask: if it
-    /// omits the reaction intents, nothing is recorded.
-    #[tab(Behavior)]
-    #[serde(default)]
-    pub reaction_notifications: DiscordReactionScope,
-    /// Seconds to wait for operator approval on `always_ask` tools before auto-denying.
-    #[tab(Behavior)]
-    #[serde(default = "default_channel_approval_timeout_secs")]
-    pub approval_timeout_secs: u64,
-
-    /// Tools excluded from this channel's tool spec. When set, these tools
-    /// are not exposed to the model when responding via this channel.
-    #[tab(Behavior)]
-    #[serde(default)]
-    pub excluded_tools: Vec<String>,
-    /// Per-(channel, recipient) outbound pacing floor in seconds.
-    /// Range: `0..=REPLY_MIN_INTERVAL_MAX_SECS` (0 disables).
-    #[serde(default)]
-    pub reply_min_interval_secs: u64,
-    /// Per-(channel, recipient) outbound pacing queue depth.
-    /// Range: `0..=REPLY_QUEUE_DEPTH_CEILING`. When `reply_min_interval_secs > 0`
-    /// and this value is `0`, the pacing wrapper substitutes
-    /// `DEFAULT_REPLY_QUEUE_DEPTH` (16). When the queue is full, the
-    /// newest send is dropped and a `WARN` is logged.
-    #[serde(default)]
-    pub reply_queue_depth_max: u16,
-}
-
-impl ChannelConfig for DiscordConfig {
-    fn name() -> &'static str {
-        "Discord"
     }
     fn desc() -> &'static str {
         "connect your bot"
@@ -10422,7 +10188,7 @@ impl ChannelConfig for WebhookConfig {
     }
 }
 
-impl_reply_pacing!(TelegramConfig, DiscordConfig, WebhookConfig);
+impl_reply_pacing!(TelegramConfig, WebhookConfig);
 
 // ── Security Config ─────────────────────────────────────────────────
 
@@ -11221,7 +10987,6 @@ impl Config {
             })
         }
         rows("telegram", &c.telegram)
-            .chain(rows("discord", &c.discord))
             .chain(rows("webhook", &c.webhook))
             .collect()
     }

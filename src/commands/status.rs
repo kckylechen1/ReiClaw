@@ -439,7 +439,7 @@ pub async fn handle(config: &Config, format: Option<String>) -> Result<()> {
             "{}",
             t(
                 "cli-channels-retired-hint",
-                "  Live surfaces: Telegram bridge, webhook ingress, Email tools, Discord archive search."
+                "  Live surfaces: Telegram bridge, webhook ingress."
             )
         );
     }

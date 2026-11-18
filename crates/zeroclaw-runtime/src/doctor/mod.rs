@@ -1175,16 +1175,6 @@ fn check_config_semantics(config: &Config, items: &mut Vec<DiagItem>) {
             ));
         }
     }
-    for (alias, dc) in &cc.discord {
-        if dc.enabled && zeroclaw_config::traits::is_unset_display_value(&dc.bot_token) {
-            items.push(DiagItem::warn(
-                cat,
-                format!(
-                    "channels.discord.{alias}.bot_token is unset but the channel is enabled — the channel cannot connect until a bot token is set"
-                ),
-            ));
-        }
-    }
 
     // Delegate agents: model_provider validity (resolved from model_provider alias)
     let mut agent_names: Vec<_> = config.agents.keys().collect();

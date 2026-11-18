@@ -3,7 +3,6 @@ schema_version = 3
 
 [agents.complex_agent]
 channels = [
-    "discord.default",
     "telegram.default",
 ]
 model_provider = "anthropic.agent_complex_agent"
@@ -45,29 +44,6 @@ session_backend = "sqlite"
 session_persistence = true
 session_ttl_hours = 0
 show_tool_calls = false
-
-[channels.discord.default]
-archive = true
-bot_token = "discord-v1-bot-token"
-channel_ids = ["555566667777"]
-draft_update_interval_ms = 1000
-enabled = true
-guild_ids = ["111122223333"]
-listen_to_bots = false
-mention_only = true
-multi_message_delay_ms = 500
-respond_to_dms = true
-stall_timeout_secs = 0
-store_dms = true
-stream_mode = "off"
-
-[channels.email.default]
-enabled = false
-from_address = "zeroclaw@example.com"
-imap_host = "imap.example.com"
-password = "email-password"
-smtp_host = "smtp.example.com"
-username = "zeroclaw@example.com"
 
 [channels.telegram.default]
 ack_reactions = false
@@ -261,11 +237,6 @@ loop_detection_enabled = true
 loop_detection_max_repeats = 3
 loop_detection_window_size = 20
 loop_ignore_tools = []
-
-[peer_groups.discord_default]
-agents = ["complex_agent"]
-channel = "discord"
-external_peers = ["222233334444"]
 
 [peer_groups.telegram_default]
 agents = ["complex_agent"]

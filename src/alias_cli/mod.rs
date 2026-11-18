@@ -53,7 +53,7 @@ fn parse_provider_category(category: &str) -> Result<ProviderCategory> {
 }
 
 /// The map-key section path for a kind (e.g. `agents`, `providers.models.anthropic`,
-/// `channels.discord`).
+/// `channels.telegram`).
 fn section_path(kind: &AliasKind) -> String {
     match kind {
         AliasKind::Agent => "agents".to_string(),
@@ -1234,9 +1234,9 @@ mod tests {
         );
         assert_eq!(
             section_path(&AliasKind::Channel {
-                channel_type: "discord".to_string(),
+                channel_type: "telegram".to_string(),
             }),
-            "channels.discord"
+            "channels.telegram"
         );
     }
 }

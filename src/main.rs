@@ -608,7 +608,7 @@ Examples:
 Start the long-running autonomous daemon.
 
 Launches the full ZeroClaw runtime: gateway server, all configured \
-channel surfaces (Telegram bridge, webhook ingress, Email/Discord tools), heartbeat monitor, and \
+channel surfaces (Telegram bridge, webhook ingress), heartbeat monitor, and \
 the cron scheduler. This is the recommended way to run ZeroClaw in \
 production or as an always-on assistant.
 
@@ -723,13 +723,13 @@ Examples:
         providers_command: Option<ProvidersCommands>,
     },
 
-    /// Manage channels (telegram, discord, email, webhook)
+    /// Manage channels (telegram, webhook)
     // i18n-exempt: clap derive help — framework requires a compile-time literal
     #[command(long_about = "\
 Manage communication channels.
 
 Add, remove, list, send, and health-check channels that connect ZeroClaw \
-to messaging surfaces. Live channel types: telegram, discord, email, \
+to messaging surfaces. Live channel types: telegram, \
 webhook (other legacy sections are retired; see the channels book page).
 
 Examples:
@@ -1272,15 +1272,6 @@ enum AuthCommands {
     List,
     /// Show auth status with active profile and token expiry info
     Status,
-    /// Authenticate an email channel via OAuth2 device-code flow
-    EmailLogin {
-        /// Email channel alias from [channels.email.<alias>] (e.g. 'hotmail')
-        #[arg(long)]
-        channel: String,
-        /// Profile name (default: default)
-        #[arg(long, default_value = "default")]
-        profile: String,
-    },
 }
 
 #[derive(Subcommand, Debug)]

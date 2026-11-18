@@ -89,8 +89,6 @@
 
 - [Channels & Integrations](./channels/overview.md)
   - [Peer Groups](./channels/peer-groups.md)
-  - [Email (tool configuration)](./channels/email.md)
-  - [Discord (tool configuration)](./channels/discord.md)
   - [Webhooks](./channels/webhook.md)
   - [ACP (Agent Client Protocol)](./channels/acp.md)
   - [Voice & telephony](./channels/voice.md)

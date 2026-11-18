@@ -709,28 +709,17 @@ fn config_validation_warns_enabled_tokenless_bot_channels() {
             ..Default::default()
         },
     );
-    config.channels.discord.insert(
-        "default".to_string(),
-        zeroclaw_config::schema::DiscordConfig {
-            enabled: true,
-            ..Default::default()
-        },
-    );
 
     let mut items = Vec::new();
     check_config_semantics(&config, &mut items);
-    for path in [
-        "channels.telegram.default.bot_token",
-        "channels.discord.default.bot_token",
-    ] {
-        let item = items.iter().find(|i| i.message.contains(path));
-        assert!(
-            item.is_some(),
-            "doctor should flag enabled tokenless alias at {path}, got {:?}",
-            items.iter().map(|i| &i.message).collect::<Vec<_>>()
-        );
-        assert_eq!(item.unwrap().severity, Severity::Warn);
-    }
+    let path = "channels.telegram.default.bot_token";
+    let item = items.iter().find(|i| i.message.contains(path));
+    assert!(
+        item.is_some(),
+        "doctor should flag enabled tokenless alias at {path}, got {:?}",
+        items.iter().map(|i| &i.message).collect::<Vec<_>>()
+    );
+    assert_eq!(item.unwrap().severity, Severity::Warn);
 }
 
 #[test]
@@ -742,10 +731,6 @@ fn config_validation_ignores_disabled_tokenless_bot_channels() {
     config.channels.telegram.insert(
         "default".to_string(),
         zeroclaw_config::schema::TelegramConfig::default(),
-    );
-    config.channels.discord.insert(
-        "default".to_string(),
-        zeroclaw_config::schema::DiscordConfig::default(),
     );
 
     let mut items = Vec::new();

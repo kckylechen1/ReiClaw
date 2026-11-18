@@ -355,7 +355,7 @@ mod tests {
         write_jsonl(
             &path,
             &[
-                r#"{"id":"id-1","timestamp":"2026-05-15T19:00:00Z","event_type":"llm_request","channel":"discord.clamps","model_provider":"anthropic.clamps","model":"claude-sonnet-4-6","turn_id":"t1","success":true,"agent_alias":"clamps","message":"call","payload":{"tokens":10}}"#,
+                r#"{"id":"id-1","timestamp":"2026-05-15T19:00:00Z","event_type":"llm_request","channel":"telegram.clamps","model_provider":"anthropic.clamps","model":"claude-sonnet-4-6","turn_id":"t1","success":true,"agent_alias":"clamps","message":"call","payload":{"tokens":10}}"#,
             ],
         );
 
@@ -369,8 +369,8 @@ mod tests {
         assert_eq!(v["event"]["category"], "agent");
         assert_eq!(v["event"]["outcome"], "success");
         assert_eq!(v["zeroclaw"]["agent_alias"], "clamps");
-        assert_eq!(v["zeroclaw"]["channel"], "discord.clamps");
-        assert_eq!(v["zeroclaw"]["channel_type"], "discord");
+        assert_eq!(v["zeroclaw"]["channel"], "telegram.clamps");
+        assert_eq!(v["zeroclaw"]["channel_type"], "telegram");
         assert_eq!(v["zeroclaw"]["channel_alias"], "clamps");
         assert_eq!(v["zeroclaw"]["model_provider"], "anthropic.clamps");
         assert_eq!(v["trace_id"], "t1");

@@ -260,22 +260,6 @@ Two processes are polling the same bot token. Telegram only allows one poller at
 
 Fix: stop all but one `zeroclaw daemon` / `zeroclaw channel start` using that token.
 
-### Discord / Slack auth failures
-
-Discord tokens expire if you regenerate them in the Developer Portal. Slack bot tokens don't expire but can be revoked. Check the bot is still installed in the target workspace/guild.
-
-For either:
-
-<div class="os-tabs-src">
-
-#### sh
-
-```sh
-zeroclaw channel doctor
-```
-
-</div>
-
 ### Matrix: "unknown device"
 
 If you re-onboarded without keeping device keys, the homeserver sees a new device that hasn't been verified. Re-verify from another logged-in client, or reset the key store:
@@ -287,20 +271,6 @@ If you re-onboarded without keeping device keys, the homeserver sees a new devic
 ```sh
 rm -rf ~/.zeroclaw/workspace/matrix-crypto
 # re-run pairing flow on next channel start
-```
-
-</div>
-
-### IMAP polling stopped
-
-Most often an auth failure, provider rotated the password or the app-password expired. Check:
-
-<div class="os-tabs-src">
-
-#### sh
-
-```sh
-journalctl --user -u zeroclaw -n 200 | grep -i imap
 ```
 
 </div>

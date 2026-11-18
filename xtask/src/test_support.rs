@@ -9,7 +9,7 @@
 //! (`ChannelsConfig::channels()`, `is_retired_transport`) decides retained vs
 //! retired, and the root package `[features]` table decides which features exist
 //! at all. Retained samples are restricted to the surfaces #584 protects (CLI,
-//! Telegram, gateway webhook, ACP, Email, Discord —
+//! Telegram, gateway webhook, ACP —
 //! docs/book/src/channels/overview.md), so a routine retirement batch can never
 //! empty them, and every consumer calls [`require_non_empty`] **before** looping
 //! over a derived list: an empty list is a loud end-state failure, never a loop
@@ -44,7 +44,7 @@ const LAST_RETIRED_SCHEMA: &str = "the sampled distribution rows or target polic
 
 /// Cause: no protected channel surface ships a row any more.
 const PROTECTED_SURFACE: &str = "no #584-protected channel surface (CLI, Telegram, \
-     gateway webhook, ACP, Email, Discord) ships a channel row any \
+     gateway webhook, ACP) ships a channel row any \
      more. #584 forbids retiring one, so either a batch retired a protected surface — revert it \
      — or the batch that removes the last channel row of the campaign landed, and it must DELETE \
      this consumer with `PROTECTED_RETAINED_KINDS` / `channel_features` rather than leave the \
@@ -73,14 +73,7 @@ pub fn require_non_empty(subject: &str, cause: Cause, len: usize) {
 /// stay listed so the restriction reads as the full protected set).
 /// ADR-023 explicitly retires the former voice-duplex event shell; the live
 /// voice surface is not a channel-registry sample.
-pub const PROTECTED_RETAINED_KINDS: &[&str] = &[
-    "acp_server",
-    "cli",
-    "discord",
-    "email",
-    "telegram",
-    "webhook",
-];
+pub const PROTECTED_RETAINED_KINDS: &[&str] = &["acp_server", "cli", "telegram", "webhook"];
 
 fn manifest() -> PathBuf {
     repo_root().join("Cargo.toml")
@@ -281,13 +274,7 @@ mod tests {
         }
         // Never silently some other channel than the one #584 protects.
         assert!(sampled.contains(&"channel-telegram".to_string()));
-        for feature in [
-            "channel-acp-server",
-            "channel-discord",
-            "channel-email",
-            "channel-telegram",
-            "channel-webhook",
-        ] {
+        for feature in ["channel-acp-server", "channel-telegram", "channel-webhook"] {
             assert!(
                 expected.iter().any(|s| s == feature),
                 "{feature} is a #584-protected surface and must still ship"

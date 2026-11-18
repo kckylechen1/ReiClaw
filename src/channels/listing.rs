@@ -24,16 +24,6 @@ const CHANNEL_COMPILE_SPECS: &[ChannelCompileSpec] = &[
         compiled: cfg!(feature = "channel-telegram"),
     },
     ChannelCompileSpec {
-        schema_name: Some("Discord"),
-        type_keys: &["discord"],
-        compiled: cfg!(feature = "channel-discord"),
-    },
-    ChannelCompileSpec {
-        schema_name: Some("Email"),
-        type_keys: &["email"],
-        compiled: cfg!(feature = "channel-email"),
-    },
-    ChannelCompileSpec {
         schema_name: Some("Webhook"),
         type_keys: &["webhook"],
         compiled: cfg!(feature = "channel-webhook"),
@@ -108,18 +98,14 @@ mod tests {
 
     #[cfg(all(
         feature = "channel-telegram",
-        feature = "channel-email",
         feature = "channel-webhook",
-        feature = "channel-acp-server",
-        feature = "channel-discord"
+        feature = "channel-acp-server"
     ))]
     #[test]
     fn channel_type_compilation_tracks_enabled_features() {
         assert!(is_channel_type_compiled("telegram"));
-        assert!(is_channel_type_compiled("email"));
         assert!(is_channel_type_compiled("webhook"));
         assert!(is_channel_type_compiled("acp-server"));
-        assert!(is_channel_type_compiled("discord"));
         // Retired channel types (inbound webhook routes removed) resolve
         // as unknown, never as compiled.
         for retired in [

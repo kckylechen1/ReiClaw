@@ -87,13 +87,6 @@ pub fn show_integration_info(config: &Config, name: &str) -> Result<()> {
             println!("    3. Run: zeroclaw config set channels.telegram.default.bot_token <token>");
             println!("    4. Start: zeroclaw channel start");
         }
-        "Discord" => {
-            println!("  Setup:");
-            println!("    1. Go to https://discord.com/developers/applications");
-            println!("    2. Create app → Bot → Copy token");
-            println!("    3. Enable MESSAGE CONTENT intent");
-            println!("    4. Run: zeroclaw config set channels.discord.default.bot-token <token>");
-        }
         "Ollama" => {
             println!("  Setup:");
             println!("    1. Install: brew install ollama");

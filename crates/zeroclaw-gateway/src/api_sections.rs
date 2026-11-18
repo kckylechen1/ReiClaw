@@ -293,7 +293,7 @@ pub async fn handle_section_status(State(state): State<AppState>, headers: Heade
 pub struct AgentOptionsResponse {
     pub channels: Vec<String>,
     /// Distinct channel types with at least one configured alias —
-    /// `["discord", "telegram"]`. Source for peer-group channel picker.
+    /// `["telegram", "webhook"]`. Source for peer-group channel picker.
     pub channel_types: Vec<String>,
     pub model_providers: Vec<String>,
     pub risk_profiles: Vec<String>,
@@ -1572,7 +1572,7 @@ mod tests {
     #[test]
     fn channels_picker_walks_schema_via_init_defaults() {
         // Pure schema discovery — same trick the TUI uses. Whatever channels
-        // the build has compiled in (matrix / discord / slack / etc.) appears
+        // the build has compiled in (telegram / webhook) appears
         // in the picker without any hand-maintained list. Test asserts a
         // representative sample compiled into the default `ci-all` build.
         let cfg = empty_cfg();
@@ -1581,7 +1581,7 @@ mod tests {
         assert!(!keys.is_empty(), "channel picker must not be empty");
         // Channels that are unconditionally compiled (no feature gate)
         // should always appear:
-        for expected in ["telegram", "discord", "email"] {
+        for expected in ["telegram", "webhook"] {
             assert!(
                 keys.contains(&expected),
                 "expected `{expected}` in channels picker, got: {keys:?}"

@@ -552,8 +552,8 @@ fn memory_kind_keys() -> Vec<String> {
 fn build_channel_type_options(
     channels_cfg: &zeroclaw_config::schema::ChannelsConfig,
 ) -> Vec<QuickstartTypeOption> {
-    // First-run setup may only offer live surfaces: the Telegram bridge,
-    // webhook ingress, and the Email/Discord tool configuration. Retired
+    // First-run setup may only offer live surfaces: the Telegram bridge and
+    // webhook ingress. Retired
     // transports (no runner since #579/#581) must not be offered even
     // though their config sections still parse (#584).
     channels_cfg
@@ -1575,28 +1575,6 @@ fn apply_channels(
                     && config_channel_type == "telegram"
                     && let Some(telegram) = staged.channels.telegram.get(alias)
                     && let Err(err) = telegram.validate_bot_token(alias)
-                {
-                    let structured =
-                        zeroclaw_config::api_error::ConfigApiError::from_validation(err);
-                    let terminal = structured
-                        .path
-                        .as_deref()
-                        .and_then(|path| path.rsplit('.').next())
-                        .unwrap_or("credential");
-                    errors.push(QuickstartError::for_surface(
-                        ctx,
-                        QuickstartStep::Channels,
-                        format!("channels[{idx}].fields.{terminal}"),
-                        structured.message,
-                        "cli-quickstart-error-channel-token-required",
-                        &[],
-                    ));
-                    failed = true;
-                }
-                if !failed
-                    && config_channel_type == "discord"
-                    && let Some(discord) = staged.channels.discord.get(alias)
-                    && let Err(err) = discord.validate_bot_token(alias)
                 {
                     let structured =
                         zeroclaw_config::api_error::ConfigApiError::from_validation(err);

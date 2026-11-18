@@ -202,7 +202,7 @@ cli-acp-long-about =
 cli-daemon-long-about =
     Start the long-running autonomous daemon.
 
-    Launches the full ZeroClaw runtime: gateway server, all configured channel surfaces (Telegram bridge, webhook ingress, Email/Discord tools), heartbeat monitor, and the cron scheduler. This is the recommended way to run ZeroClaw in production or as an always-on assistant.
+    Launches the full ZeroClaw runtime: gateway server, all configured channel surfaces (Telegram bridge, webhook ingress), heartbeat monitor, and the cron scheduler. This is the recommended way to run ZeroClaw in production or as an always-on assistant.
 
     Use 'zeroclaw service install' to register the daemon as an OS service (systemd/launchd) for auto-start on boot.
 
@@ -232,7 +232,7 @@ cli-cron-long-about =
 cli-channel-long-about =
     Manage communication channels.
 
-    Add, remove, list, send, and health-check channels that connect ZeroClaw to messaging platforms. Live channel types: telegram, discord, email, webhook (other legacy sections are retired).
+    Add, remove, list, send, and health-check channels that connect ZeroClaw to messaging platforms. Live channel types: telegram, webhook (other legacy sections are retired).
 
     Examples:
       zeroclaw channel list
@@ -322,13 +322,6 @@ cli-desktop-long-about =
 channel-needs-quickstart-reply = This agent isn't fully set up yet. The operator needs to run Quickstart before I can reply.
 
 
-channel-discord-interaction-unauthorized = You're not authorized to use this command here.
-channel-discord-interaction-malformed = Unknown or malformed command.
-channel-discord-interaction-unavailable = That command is no longer available, or its input was empty.
-channel-discord-component-expired = This button or menu has expired or was already used.
-channel-discord-approval-recorded = Your decision has been recorded.
-channel-discord-delivery-failure-note-one = (note: I couldn't deliver {$count} file.)
-channel-discord-delivery-failure-note-many = (note: I couldn't deliver {$count} files.)
 channel-line-bind-success = ✅ Paired! You can now chat.
 channel-line-bind-invalid-code = ❌ Invalid code. Please try again.
 channel-line-bind-rate-limited = ⏳ Too many attempts. Retry in { $secs }s.
@@ -742,7 +735,7 @@ cli-browse-file-bytes = {$name} ({$bytes} bytes)
 cli-selftest-all-passed = All {$total} checks passed.
 cli-selftest-some-failed = {$failed}/{$total} checks failed.
 cli-selftest-channel-config-uncompiled = {$compiled} compiled channel types, {$configured} compiled/configured; configured but not compiled: {$names}. Build from source with `./install.sh --source --preset full`, `--features channels-full`, or the specific `channel-*` feature.
-cli-selftest-channel-config-retired = {$compiled} channel types, {$configured} configured; configured sections of retired transports (nothing runs): {$names}. Remove those [channels.*] sections; live surfaces are the Telegram bridge, webhook ingress, Email tools, and Discord archive search.
+cli-selftest-channel-config-retired = {$compiled} channel types, {$configured} configured; configured sections of retired transports (nothing runs): {$names}. Remove those [channels.*] sections; live surfaces are the Telegram bridge and webhook ingress.
 
 # ── channels (zeroclaw channel list) ──
 cli-channels-header = Channels:
@@ -756,7 +749,7 @@ cli-channels-doctor-hint = To check health:    zeroclaw channel doctor
 cli-channels-configure-hint = To configure:      zeroclaw config set channels.<name>.<field>=<value>
 cli-channels-retired-header = {"  "}Configured sections of retired transports (no runner exists):
 cli-channels-retired-entry = {"  "}⚠️ {$name} (section parses, nothing runs; remove it)
-cli-channels-retired-hint = {"  "}Live surfaces: Telegram bridge, webhook ingress, Email tools, Discord archive search.
+cli-channels-retired-hint = {"  "}Live surfaces: Telegram bridge, webhook ingress.
 
 cli-models-set-ok = Default model set to "{ $model }" on { $provider }.
 cli-models-status-current = Default model: { $model } (provider: { $provider })

@@ -24,14 +24,14 @@ pub struct SessionMetadata {
     /// attribution landed, or for backends that don't track it.
     pub agent_alias: Option<String>,
     /// Dotted ChannelRef the session belongs to (`<type>.<alias>`,
-    /// e.g. `discord.clamps`). `None` for non-channel sessions (CLI,
+    /// e.g. `telegram.clamps`). `None` for non-channel sessions (CLI,
     /// internal cron runs) or backends without routing columns.
     pub channel_id: Option<String>,
-    /// Platform-side room / thread identifier (Discord channel id,
+    /// Platform-side room / thread identifier (chat id,
     /// Matrix room id, Slack thread ts, ...). `None` for direct messages
     /// or backends that don't track it.
     pub room_id: Option<String>,
-    /// Inbound sender id verbatim (Discord username, phone number, ...).
+    /// Inbound sender id verbatim (username, phone number, ...).
     /// Not an FK — sessions can survive deletion of the upstream user.
     pub sender_id: Option<String>,
 }
@@ -42,7 +42,7 @@ pub struct SessionMetadata {
 /// channel / room / sender without re-parsing the synthetic key.
 #[derive(Debug, Clone, Default)]
 pub struct SessionContext<'a> {
-    /// `<type>.<alias>` ChannelRef (`discord.clamps`).
+    /// `<type>.<alias>` ChannelRef (`telegram.clamps`).
     pub channel_id: Option<&'a str>,
     /// Platform-side room / thread id.
     pub room_id: Option<&'a str>,

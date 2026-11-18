@@ -721,7 +721,7 @@ async fn multiple_channels_all_bind_to_agent() {
     let mut submission = fresh_submission("bot");
     submission.channels = vec![
         SelectorChoice::Fresh(fresh_channel("telegram", "tg", &[("bot_token", "tok-a")])),
-        SelectorChoice::Fresh(fresh_channel("discord", "dc", &[("bot_token", "tok-b")])),
+        SelectorChoice::Fresh(fresh_channel("webhook", "dc", &[])),
     ];
     let (dir, _applied) = apply_to_temp(submission).await;
     let reloaded = reload(&dir);
@@ -744,13 +744,7 @@ async fn multiple_channels_all_bind_to_agent() {
         "tok-a"
     );
     assert!(reloaded.channels.telegram["tg"].enabled);
-    assert_eq!(
-        store
-            .decrypt(&reloaded.channels.discord["dc"].bot_token)
-            .unwrap(),
-        "tok-b"
-    );
-    assert!(reloaded.channels.discord["dc"].enabled);
+    assert!(reloaded.channels.webhook["dc"].enabled);
 }
 
 #[tokio::test]
@@ -799,39 +793,13 @@ fn telegram_channel_fields_reject_unusable_bot_token_values() {
 }
 
 #[test]
-fn discord_channel_fields_reject_unusable_bot_token_values() {
-    // Discord twin of telegram_channel_fields_reject_unusable_bot_token_values:
-    // the quickstart arm calls DiscordConfig::validate_bot_token.
-    for value in [
-        None,
-        Some(""),
-        Some("   "),
-        Some(zeroclaw_config::traits::UNSET_DISPLAY),
-    ] {
-        let cfg = Config::default();
-        let mut submission = fresh_submission("bot");
-        let fields = value.map_or_else(Vec::new, |value| vec![("bot_token", value)]);
-        submission.channels = vec![SelectorChoice::Fresh(fresh_channel(
-            "discord", "ops", &fields,
-        ))];
-
-        let errors = validate_only(&submission, &cfg).expect_err("token must be rejected");
-        assert!(errors.iter().any(|error| {
-            error.step == QuickstartStep::Channels
-                && error.field == "channels[0].fields.bot_token"
-                && error.message.contains("required")
-        }));
-    }
-}
-
-#[test]
 fn channel_fields_reject_unknown_keys_without_exposing_values() {
     let mut cfg = Config::default();
     let before = serde_json::to_value(&cfg).expect("serialize config");
     let before_dirty_paths = cfg.dirty_paths.clone();
     let mut submission = fresh_submission("bot");
     submission.channels = vec![SelectorChoice::Fresh(fresh_channel(
-        "discord",
+        "telegram",
         "ops",
         &[("unknown_secret", "super-secret-value")],
     ))];

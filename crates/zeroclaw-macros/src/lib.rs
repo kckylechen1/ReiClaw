@@ -3225,7 +3225,7 @@ fn snake_to_kebab(s: &str) -> String {
 
 /// Title-case a snake_case identifier for use as a default display name
 /// when a field has no `#[display_name = "..."]` override (e.g.
-/// `discord_history` becomes `"Discord History"`). Pure ASCII fallback —
+/// `voice_call` becomes `"Voice Call"`). Pure ASCII fallback —
 /// brand-cased / acronym names need an explicit attribute.
 fn snake_to_title(s: &str) -> String {
     s.split('_')
@@ -3499,7 +3499,7 @@ mod tests {
     #[test]
     fn derive_category_from_prefix() {
         assert_eq!(derive_category("channels.matrix"), "Channels");
-        assert_eq!(derive_category("channels.discord"), "Channels");
+        assert_eq!(derive_category("channels.telegram"), "Channels");
         assert_eq!(derive_category("tts.openai"), "TTS");
         assert_eq!(derive_category("tts.elevenlabs"), "TTS");
         assert_eq!(derive_category("transcription"), "Transcription");

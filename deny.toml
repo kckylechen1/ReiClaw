@@ -63,20 +63,12 @@ wildcards = "deny"
 # duplicates fail only when reached by the graph selected for the check.
 
 [[bans.skip]]
-name = "async-channel"
-version = "=1.9.0"
-
-[[bans.skip]]
 name = "chacha20"
 version = "=0.9.1"
 
 [[bans.skip]]
 name = "cpufeatures"
 version = "=0.2.17"
-
-[[bans.skip]]
-name = "event-listener"
-version = "=2.5.3"
 
 [[bans.skip]]
 name = "getrandom"

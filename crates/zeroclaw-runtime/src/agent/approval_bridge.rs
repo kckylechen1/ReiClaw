@@ -189,7 +189,7 @@ mod tests {
     }
 
     /// A back-channel whose prompt timed out, so it synthesizes `Some(Deny)`
-    /// the way Discord / Matrix / Telegram / Slack / the gateway WS all do.
+    /// the way Telegram / the gateway WS all do.
     struct TimedOutApprover {
         name: String,
     }
@@ -246,7 +246,7 @@ mod tests {
     async fn fanout_preserves_a_backchannel_synthesized_timeout() {
         let bridge = AskUserApprovalBridge::new(
             handles_with(vec![Arc::new(TimedOutApprover {
-                name: "discord".to_string(),
+                name: "telegram".to_string(),
             })]),
             None,
         );
@@ -266,7 +266,7 @@ mod tests {
         assert!(decided.source.is_runtime_fail_closed());
         assert_eq!(
             decided.decided_by.as_deref(),
-            Some("discord"),
+            Some("telegram"),
             "the fan-out still names which surface produced the outcome"
         );
     }

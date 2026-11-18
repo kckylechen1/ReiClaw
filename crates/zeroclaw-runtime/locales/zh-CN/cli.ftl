@@ -153,7 +153,7 @@ cli-acp-long-about =
 cli-daemon-long-about =
     启动长期运行的自主守护进程。
 
-    启动完整的 ZeroClaw 运行时：网关服务器、所有已配置的通道面（Telegram bridge、webhook 接入、Email/Discord 工具）、心跳监视器以及 cron 调度器。这是在生产环境中或作为始终在线助手运行 ZeroClaw 的推荐方式。
+    启动完整的 ZeroClaw 运行时：网关服务器、所有已配置的通道面（Telegram bridge、webhook 接入）、心跳监视器以及 cron 调度器。这是在生产环境中或作为始终在线助手运行 ZeroClaw 的推荐方式。
 
     使用 'zeroclaw service install' 将守护进程注册为操作系统服务（systemd/launchd），以便开机自动启动。
 
@@ -181,7 +181,7 @@ cli-cron-long-about =
 cli-channel-long-about =
     管理通信通道。
 
-    添加、删除、列出、发送以及对将 ZeroClaw 连接到消息平台的通道进行健康检查。可用通道类型：telegram、discord、email、webhook（其余旧分节均已退役）。
+    添加、删除、列出、发送以及对将 ZeroClaw 连接到消息平台的通道进行健康检查。可用通道类型：telegram、webhook（其余旧分节均已退役）。
 
     示例：
     zeroclaw channel list
@@ -259,13 +259,6 @@ cli-desktop-long-about =
     zeroclaw desktop              # 启动配套应用
     zeroclaw desktop --install    # 下载并安装
 channel-needs-quickstart-reply = 此代理尚未完全设置。操作员需要先运行 Quickstart，然后我才能回复。
-channel-discord-interaction-unauthorized = 你没有权限在此处使用该命令。
-channel-discord-interaction-malformed = 未知或格式错误的命令。
-channel-discord-interaction-unavailable = 该命令已不可用，或其输入为空。
-channel-discord-component-expired = 此按钮或菜单已过期或已被使用。
-channel-discord-approval-recorded = 您的决定已记录。
-channel-discord-delivery-failure-note-one = （注意：我无法传送 {$count} 个文件。）
-channel-discord-delivery-failure-note-many = （注意：我无法传送 {$count} 个文件。）
 channel-line-bind-success = ✅ 已配对！现在可以聊天了。
 channel-line-bind-invalid-code = ❌ 代码无效。请重试。
 channel-line-bind-rate-limited = ⏳ 尝试次数过多。请在 { $secs }s 后重试。
@@ -625,7 +618,7 @@ cli-browse-file-bytes = {$name}（{$bytes} 字节）
 cli-selftest-all-passed = 全部 {$total} 项检查通过。
 cli-selftest-some-failed = {$failed}/{$total} 项检查失败。
 cli-selftest-channel-config-uncompiled = {$compiled} 个通道类型已编译，{$configured} 个已编译且已配置；已配置但未编译：{$names}。请从源码构建：`./install.sh --source --preset full`、`--features channels-full`，或指定对应的 `channel-*` 功能。
-cli-selftest-channel-config-retired = {$compiled} 个通道类型，{$configured} 个已配置；已配置的退役传输分节（无组件运行）：{$names}。请移除这些 [channels.*] 分节；可用面为 Telegram bridge、webhook 接入、Email 工具与 Discord 归档搜索。
+cli-selftest-channel-config-retired = {$compiled} 个通道类型，{$configured} 个已配置；已配置的退役传输分节（无组件运行）：{$names}。请移除这些 [channels.*] 分节；可用面为 Telegram bridge 与 webhook 接入。
 cli-channels-header = 渠道：
 cli-channels-cli-always = {"  "}✅ CLI（始终可用）
 cli-channels-notion = {"  "}{$status} Notion
@@ -637,7 +630,7 @@ cli-channels-doctor-hint = 检查健康状况：    zeroclaw channel doctor
 cli-channels-configure-hint = 配置方法：      zeroclaw config set channels.<name>.<field>=<value>
 cli-channels-retired-header = {"  "}已配置的退役传输分节（不存在运行器）：
 cli-channels-retired-entry = {"  "}⚠️ {$name}（分节可解析，但无任何组件运行；请移除）
-cli-channels-retired-hint = {"  "}可用面：Telegram bridge、webhook 接入、Email 工具、Discord 归档搜索。
+cli-channels-retired-hint = {"  "}可用面：Telegram bridge、webhook 接入。
 cli-models-set-ok = 默认模型已设置为 "{ $model }" (provider: { $provider })。
 cli-models-status-current = 默认模型: { $model } (provider: { $provider })
 cli-models-status-none = 未配置默认模型。

@@ -469,7 +469,7 @@ mod tests {
             )
             .unwrap();
         store
-            .append("discord__bob", &ChatMessage::user("Hey from Bob"))
+            .append("webhook__bob", &ChatMessage::user("Hey from Bob"))
             .unwrap();
         (tmp, Arc::new(store))
     }
@@ -535,7 +535,7 @@ mod tests {
         assert!(result.success);
         assert!(result.output.contains("2 session(s)"));
         assert!(result.output.contains("telegram__alice"));
-        assert!(result.output.contains("discord__bob"));
+        assert!(result.output.contains("webhook__bob"));
     }
 
     #[tokio::test]
@@ -553,7 +553,7 @@ mod tests {
         let tool = SessionsListTool::new(backend);
         let result = tool.execute(json!({})).await.unwrap();
         assert!(result.output.contains("channel=telegram"));
-        assert!(result.output.contains("channel=discord"));
+        assert!(result.output.contains("channel=webhook"));
     }
 
     #[test]

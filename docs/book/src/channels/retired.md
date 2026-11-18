@@ -18,4 +18,5 @@ channel. The [channels overview](./overview.md) lists the live surfaces.
 - Git: schema removed (#584 Slice 3); leftover `[channels.git]` sections tombstone at load
 - [Voice](./voice.md): ClawdTalk, Voice Call, Voice Wake
 - AMQP: schema removed (#584 Slice 3); leftover `[channels.amqp]` sections tombstone at load
+- Email and Discord: retired by the owner on 2026-11-18 (ZeroClaw no longer reads email or Discord archives). The schemas, the `email_search` / `email_read` / `email_imap` and `discord_search` tools, the email OAuth login and the `email-tools` feature were removed. Unlike the older tombstoned sections, a config that still declares `[channels.email.*]` or `[channels.discord.*]`, or references them (`agents.*.channels`, `peer_groups.*.channel`, `ZEROCLAW_channels__email__*` / `ZEROCLAW_channels__discord__*` overrides), is refused at load and on every config write with an explicit error; credentials are not migrated. Remove those sections and references to start.
 - [MQTT](./mqtt.md) and [Filesystem](./filesystem.md): already rejected at config parse

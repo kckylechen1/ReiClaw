@@ -469,7 +469,7 @@ fn add_shell_job_persists_delivery() {
         "echo delivered",
         Some(DeliveryConfig {
             mode: "announce".into(),
-            channel: Some("discord".into()),
+            channel: Some("telegram".into()),
             to: Some("1234567890".into()),
             thread_id: None,
             best_effort: true,
@@ -478,12 +478,12 @@ fn add_shell_job_persists_delivery() {
     .unwrap();
 
     assert_eq!(job.delivery.mode, "announce");
-    assert_eq!(job.delivery.channel.as_deref(), Some("discord"));
+    assert_eq!(job.delivery.channel.as_deref(), Some("telegram"));
     assert_eq!(job.delivery.to.as_deref(), Some("1234567890"));
 
     let stored = get_job(&config, &job.id).unwrap();
     assert_eq!(stored.delivery.mode, "announce");
-    assert_eq!(stored.delivery.channel.as_deref(), Some("discord"));
+    assert_eq!(stored.delivery.channel.as_deref(), Some("telegram"));
     assert_eq!(stored.delivery.to.as_deref(), Some("1234567890"));
 }
 
@@ -505,7 +505,7 @@ fn add_agent_job_rejects_invalid_announce_delivery() {
         None,
         Some(DeliveryConfig {
             mode: "announce".into(),
-            channel: Some("discord".into()),
+            channel: Some("telegram".into()),
             to: None,
             thread_id: None,
             best_effort: true,
@@ -543,7 +543,7 @@ fn update_job_rejects_invalid_announce_delivery() {
         CronJobPatch {
             delivery: Some(DeliveryConfig {
                 mode: "announce".into(),
-                channel: Some("discord".into()),
+                channel: Some("telegram".into()),
                 to: None,
                 thread_id: None,
                 best_effort: true,
@@ -574,7 +574,7 @@ fn add_shell_job_rejects_invalid_delivery_mode() {
         "echo delivered",
         Some(DeliveryConfig {
             mode: "annouce".into(),
-            channel: Some("discord".into()),
+            channel: Some("telegram".into()),
             to: Some("1234567890".into()),
             thread_id: None,
             best_effort: true,

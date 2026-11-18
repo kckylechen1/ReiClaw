@@ -205,8 +205,7 @@ Ignore unknown message types. Invalid JSON triggers an error response.
   "paired": true,
   "channels": {
     "telegram": false,
-    "discord": true,
-    "slack": false
+    "webhook": true
   },
   "health": {}
 }

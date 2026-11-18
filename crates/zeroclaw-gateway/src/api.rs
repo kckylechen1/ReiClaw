@@ -1411,7 +1411,7 @@ pub async fn handle_api_sessions_list(
 ///
 /// Gateway WebSocket sessions are stored as `gw_{id}`, and ids may contain
 /// `_` (for example `my_chat`). Channel-driven sessions are stored under their
-/// full key (for example `discord.clamps_…`). Prefer the gateway key when that
+/// full key (for example `telegram.clamps_…`). Prefer the gateway key when that
 /// session exists; otherwise use the id as given if it already looks like a
 /// full key, and fall back to the gateway form.
 fn resolve_session_key(
@@ -2954,7 +2954,7 @@ pub(crate) mod tests {
                     "command": "echo hello",
                     "delivery": {
                         "mode": "announce",
-                        "channel": "discord",
+                        "channel": "telegram",
                         "to": "1234567890",
                         "best_effort": true
                     }
@@ -2968,7 +2968,7 @@ pub(crate) mod tests {
         let add_json = response_json(add_response).await;
         assert_eq!(add_json["status"], "ok");
         assert_eq!(add_json["job"]["delivery"]["mode"], "announce");
-        assert_eq!(add_json["job"]["delivery"]["channel"], "discord");
+        assert_eq!(add_json["job"]["delivery"]["channel"], "telegram");
         assert_eq!(add_json["job"]["delivery"]["to"], "1234567890");
 
         let list_response = handle_api_cron_list(State(state), HeaderMap::new())
@@ -2978,7 +2978,7 @@ pub(crate) mod tests {
         let jobs = list_json["jobs"].as_array().expect("jobs array");
         assert_eq!(jobs.len(), 1);
         assert_eq!(jobs[0]["delivery"]["mode"], "announce");
-        assert_eq!(jobs[0]["delivery"]["channel"], "discord");
+        assert_eq!(jobs[0]["delivery"]["channel"], "telegram");
         assert_eq!(jobs[0]["delivery"]["to"], "1234567890");
     }
 
@@ -3642,7 +3642,7 @@ pub(crate) mod tests {
                     "command": "echo hello",
                     "delivery": {
                         "mode": "announce",
-                        "channel": "discord"
+                        "channel": "telegram"
                     }
                 }))
                 .expect("body should deserialize"),
@@ -4212,7 +4212,7 @@ pub(crate) mod tests {
             .append("gw_my_chat", &ChatMessage::user("hi"))
             .unwrap();
         backend
-            .append("discord.clamps_room_user", &ChatMessage::user("hi"))
+            .append("telegram.clamps_room_user", &ChatMessage::user("hi"))
             .unwrap();
 
         // A gateway id containing `_` resolves to its `gw_` key.
@@ -4222,8 +4222,8 @@ pub(crate) mod tests {
         );
         // A full channel key is used as given.
         assert_eq!(
-            resolve_session_key(backend.as_ref(), "discord.clamps_room_user"),
-            "discord.clamps_room_user"
+            resolve_session_key(backend.as_ref(), "telegram.clamps_room_user"),
+            "telegram.clamps_room_user"
         );
         // An already-prefixed id and a plain id both map to the gateway key.
         assert_eq!(resolve_session_key(backend.as_ref(), "gw_abc"), "gw_abc");

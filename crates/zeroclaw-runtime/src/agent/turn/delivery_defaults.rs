@@ -1,13 +1,7 @@
 //! Channel delivery-default injection for cron_add and interactive tools.
 
-const AUTO_DELIVERY_DEFAULT_CHANNELS: &[&str] = &[
-    "telegram",
-    "discord",
-    "slack",
-    "mattermost",
-    "matrix",
-    "dingtalk",
-];
+const AUTO_DELIVERY_DEFAULT_CHANNELS: &[&str] =
+    &["telegram", "slack", "mattermost", "matrix", "dingtalk"];
 
 /// Tools that take an optional `channel` arg and otherwise pick
 /// `channels.iter().next()` (HashMap order). Without an originating-channel
@@ -156,7 +150,7 @@ mod tests {
         maybe_inject_channel_delivery_defaults(
             "cron_add",
             &mut args,
-            "discord",
+            "telegram",
             Some("channel-42"),
         );
 
@@ -164,7 +158,7 @@ mod tests {
             args["delivery"],
             serde_json::json!({
                 "mode": "announce",
-                "channel": "discord",
+                "channel": "telegram",
                 "to": "channel-42",
             })
         );

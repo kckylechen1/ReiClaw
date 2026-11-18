@@ -876,7 +876,7 @@ Three producers write to the outbox:
 
   The bridge must support the `/ws/bridge` control socket; credentials with
   `device` or `owner` scope cannot receive outbox deliveries. Legacy
-  `[channels.telegram]`, `[channels.discord]`, `[channels.email]` and webhook
+  `[channels.telegram]` and webhook
   entries do not provide outbound heartbeat delivery. Migrate an old target by
   registering its delivery bridge with `zeroclaw gateway bridge add <name>` and
   setting the explicit bridge name and recipient. Leaving both fields unset

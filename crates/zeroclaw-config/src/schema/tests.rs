@@ -1330,78 +1330,6 @@ async fn validate_rejects_disabled_telegram_with_unset_display_token() {
         .expect_err("the unset display sentinel must never become persisted config");
 }
 
-#[test]
-async fn validate_rejects_enabled_discord_without_bot_token() {
-    let mut config = Config::default();
-    config.channels.discord.insert(
-        "discord".to_string(),
-        DiscordConfig {
-            enabled: true,
-            bot_token: "   ".into(),
-            ..Default::default()
-        },
-    );
-
-    let err = config
-        .validate()
-        .expect_err("enabled Discord channel must require a bot token");
-    assert!(
-        err.to_string()
-            .contains("channels.discord.discord.bot_token")
-    );
-}
-
-#[test]
-async fn validate_allows_disabled_discord_without_bot_token() {
-    let mut config = Config::default();
-    config.channels.discord.insert(
-        "discord".to_string(),
-        DiscordConfig {
-            enabled: false,
-            bot_token: "   ".into(),
-            ..Default::default()
-        },
-    );
-
-    config
-        .validate()
-        .expect("disabled Discord channel may be staged without a bot token");
-}
-
-#[test]
-async fn validate_rejects_enabled_discord_with_unset_display_token() {
-    let mut config = Config::default();
-    config.channels.discord.insert(
-        "discord".to_string(),
-        DiscordConfig {
-            enabled: true,
-            bot_token: crate::traits::UNSET_DISPLAY.into(),
-            ..Default::default()
-        },
-    );
-
-    config
-        .validate()
-        .expect_err("enabled Discord channel must reject the display sentinel");
-}
-
-#[test]
-async fn validate_rejects_disabled_discord_with_unset_display_token() {
-    let mut config = Config::default();
-    config.channels.discord.insert(
-        "discord".to_string(),
-        DiscordConfig {
-            enabled: false,
-            bot_token: crate::traits::UNSET_DISPLAY.into(),
-            ..Default::default()
-        },
-    );
-
-    config
-        .validate()
-        .expect_err("the unset display sentinel must never become persisted config");
-}
-
 // Regression (fail closed, both PAT-backed forge providers): a Gitea or
 // Forgejo alias with an access token but no api_base_url must be rejected
 // at config-validation time. The old behavior silently defaulted to
@@ -1775,7 +1703,6 @@ async fn channels_default() {
     let c = ChannelsConfig::default();
     assert!(c.cli);
     assert!(c.telegram.is_empty());
-    assert!(c.discord.is_empty());
     assert!(!c.show_tool_calls);
     assert_eq!(
         c.max_concurrent_per_channel,
@@ -1919,9 +1846,7 @@ async fn config_toml_roundtrip() {
                     reply_queue_depth_max: 0,
                 },
             )]),
-            discord: HashMap::new(),
             webhook: HashMap::new(),
-            email: HashMap::new(),
             mqtt: HashMap::new(),
             filesystem: HashMap::new(),
             message_timeout_secs: 300,
@@ -3063,7 +2988,7 @@ async fn config_save_atomic_cleanup() {
     let _ = fs::remove_dir_all(&dir).await;
 }
 
-// ── Telegram / Discord config ────────────────────────────
+// ── Telegram config ────────────────────────────
 
 #[test]
 async fn telegram_config_defaults_stream_off() {
@@ -3088,43 +3013,32 @@ async fn telegram_config_defaults_stream_off() {
 // configs (V3 moved inbound peer authorization into
 // `Config::peer_groups`); V2 TOMLs with `allowed_users` are folded
 // by `parse_current` into `[peer_groups.<type>_<alias>]`. See
-// `discord_v2_allowed_users_fold_into_peer_groups` below.
+// `telegram_v2_allowed_users_fold_into_peer_groups` below.
 
 #[test]
-async fn discord_v2_allowed_users_fold_into_peer_groups() {
+async fn telegram_v2_allowed_users_fold_into_peer_groups() {
     let raw = r#"
 schema_version = 3
-[channels.discord.default]
+[channels.telegram.default]
 enabled = true
 bot_token = "tok"
-guild_ids = ["123"]
-[peer_groups.discord_default]
-channel = "discord"
+[peer_groups.telegram_default]
+channel = "telegram"
 agents = ["owner"]
 external_peers = ["111", "222"]
 "#;
     let parsed = crate::current::parse_current(raw).expect("current config parses");
     let group = parsed
         .peer_groups
-        .get("discord_default")
-        .expect("current Discord allowlist must remain in its peer group");
-    assert_eq!(group.channel, "discord");
+        .get("telegram_default")
+        .expect("current Telegram allowlist must remain in its peer group");
+    assert_eq!(group.channel, "telegram");
     let usernames: Vec<&str> = group.external_peers.iter().map(|p| p.as_str()).collect();
     assert_eq!(usernames, vec!["111", "222"]);
 }
 
 #[test]
 async fn interrupt_on_new_message_defaults_off_and_parses_true() {
-    let discord = |json: &str| {
-        serde_json::from_str::<DiscordConfig>(json)
-            .unwrap()
-            .interrupt_on_new_message
-    };
-    assert!(!discord(r#"{"bot_token":"tok"}"#));
-    assert!(discord(
-        r#"{"bot_token":"tok","interrupt_on_new_message":true}"#
-    ));
-
     let mattermost = |json: &str| {
         serde_json::from_str::<TelegramConfig>(json)
             .unwrap()
@@ -3136,16 +3050,6 @@ async fn interrupt_on_new_message_defaults_off_and_parses_true() {
     assert!(mattermost(
         r#"{"url":"https://mm.example.com","bot_token":"tok","interrupt_on_new_message":true}"#
     ));
-}
-
-#[test]
-async fn discord_config_toml_backward_compat() {
-    let toml_str = r#"
-bot_token = "tok"
-guild_id = "123"
-"#;
-    let parsed: DiscordConfig = toml::from_str(toml_str).unwrap();
-    assert_eq!(parsed.bot_token, "tok");
 }
 
 #[test]
@@ -4182,30 +4086,26 @@ async fn assert_retired_channel_settings_load_with_warning(settings: &[(&str, &s
     for (kind, fields) in settings {
         let retired_path = format!("{root}.{kind}");
         let allowlist = "";
-        let peer_group = "[agents.default]\nchannels = ['discord.default']\n\n[peer_groups.discord_default]\nchannel = 'discord'\nagents = ['default']\nexternal_peers = ['retained-peer']\nignore = []\n";
+        let peer_group = "[agents.default]\nchannels = ['telegram.default']\n\n[peer_groups.telegram_default]\nchannel = 'telegram'\nagents = ['default']\nexternal_peers = ['retained-peer']\nignore = []\n";
         let contents = format!(
             "{stamp}[{retired_path}{alias}]\nenabled = false\n{fields}\nallowed_users = ['retired-peer']\n\n\
-             [{root}.discord{alias}]\nenabled = true\nbot_token = 'synthetic-live-token'\n\
-             guild_ids = ['retained-guild']\nchannel_ids = ['retained-channel']\n\
-             mention_only = true\nlisten_to_bots = false\n{allowlist}\n\
-             [{root}.email{alias}]\nenabled = false\nimap_host = 'imap.example.test'\n\
-             smtp_host = 'smtp.example.test'\nusername = 'synthetic@example.test'\n\
-             password = 'synthetic-live-password'\nfrom_address = 'synthetic@example.test'\n\n\
+             [{root}.telegram{alias}]\nenabled = true\nbot_token = 'synthetic-live-token'\n\
+             mention_only = true\ninterrupt_on_new_message = false\n{allowlist}\n\
+             [{root}.webhook{alias}]\nenabled = false\nport = 8091\n\
+             secret = 'synthetic-live-secret'\nsend_url = 'https://synthetic.example.test/hook'\n\n\
              {peer_group}"
         );
         fs::write(&config_path, contents).await.unwrap();
         let config = Box::pin(Config::load_or_init()).await.unwrap();
-        let discord = &config.channels.discord["default"];
-        assert_eq!(discord.bot_token, "synthetic-live-token");
-        assert_eq!(discord.guild_ids, ["retained-guild"]);
-        assert_eq!(discord.channel_ids, ["retained-channel"]);
-        assert!(discord.mention_only);
-        assert!(!discord.listen_to_bots);
-        let email = &config.channels.email["default"];
-        assert_eq!(email.password, "synthetic-live-password");
-        assert_eq!(email.username, "synthetic@example.test");
-        let group = &config.peer_groups["discord_default"];
-        assert_eq!(group.channel.to_string(), "discord");
+        let telegram = &config.channels.telegram["default"];
+        assert_eq!(telegram.bot_token, "synthetic-live-token");
+        assert!(telegram.mention_only);
+        assert!(!telegram.interrupt_on_new_message);
+        let webhook = &config.channels.webhook["default"];
+        assert_eq!(webhook.secret.as_deref(), Some("synthetic-live-secret"));
+        assert_eq!(webhook.port, 8091);
+        let group = &config.peer_groups["telegram_default"];
+        assert_eq!(group.channel.to_string(), "telegram");
         assert_eq!(
             group
                 .external_peers
@@ -7678,9 +7578,6 @@ async fn generated_config_fields_keep_operator_descriptions() {
     let compression = crate::scattered_types::ContextCompressionConfig::default().prop_fields();
     assert_description(&compression, ".summary_provider", "<type>.<alias>");
     assert_description(&compression, ".summary_model", "DEPRECATED bare model id");
-
-    let email = crate::scattered_types::EmailConfig::default().prop_fields();
-    assert_description(&email, ".observer_mode", "never modifies any IMAP flag");
 }
 
 #[test]
@@ -11182,41 +11079,6 @@ async fn telegram_alias_create_survives_incremental_save() {
 }
 
 #[test]
-async fn discord_alias_create_survives_incremental_save() {
-    // Discord twin of telegram_alias_create_survives_incremental_save:
-    // DiscordConfig.bot_token has the same serde default.
-    let tmp = tempfile::TempDir::new().unwrap();
-    let config_path = tmp.path().join("config.toml");
-
-    // Seed a non-empty on-disk file so the incremental path runs, not
-    // the new-file fallback to full save().
-    std::fs::write(
-        &config_path,
-        "schema_version = 3\n\n[observability]\nbackend = \"none\"\n",
-    )
-    .unwrap();
-
-    let mut config = Config {
-        config_path: config_path.clone(),
-        ..Default::default()
-    };
-    let created = config
-        .create_map_key("channels.discord", "myalias")
-        .expect("map-keyed section accepts a new alias");
-    assert!(created);
-    config.mark_dirty("channels.discord.myalias");
-    config.save_dirty().await.unwrap();
-
-    let written = std::fs::read_to_string(&config_path).unwrap();
-    let reloaded: Config = toml::from_str(&written)
-        .unwrap_or_else(|e| panic!("rewritten config must reparse: {e}\n---\n{written}"));
-    assert!(
-        reloaded.channels.discord.contains_key("myalias"),
-        "created discord alias must survive save_dirty + reload; got:\n{written}"
-    );
-}
-
-#[test]
 async fn init_defaults_instantiates_none_sections() {
     let mut config = Config::default();
     assert!(config.channels.telegram.is_empty());
@@ -12283,19 +12145,6 @@ async fn every_enum_variant_is_settable() {
     }
 }
 
-#[test]
-async fn channel_approval_timeout_secs_defaults_to_300() {
-    let discord: DiscordConfig = serde_json::from_str(r#"{"bot_token":"tok"}"#).unwrap();
-    assert_eq!(discord.approval_timeout_secs, 300);
-}
-
-#[test]
-async fn channel_approval_timeout_secs_explicit_override() {
-    let discord: DiscordConfig =
-        serde_json::from_str(r#"{"bot_token":"tok","approval_timeout_secs":60}"#).unwrap();
-    assert_eq!(discord.approval_timeout_secs, 60);
-}
-
 // ── Multi-agent cross-reference validators ─────────────────────
 
 /// Build a minimal valid Config with one agent on a configured
@@ -12553,20 +12402,20 @@ async fn validate_rejects_peer_group_dangling_member() {
 async fn validate_rejects_peer_group_member_without_channel() {
     let mut config = multi_agent_test_config();
 
-    // Add a discord channel and a beta agent that ONLY uses discord.
+    // Add a webhook channel and a beta agent that ONLY uses webhook.
     config
         .channels
-        .discord
-        .insert("ops".to_string(), DiscordConfig::default());
+        .webhook
+        .insert("ops".to_string(), WebhookConfig::default());
     let beta = AliasedAgentConfig {
-        channels: vec![crate::providers::ChannelRef::new("discord.ops")],
+        channels: vec![crate::providers::ChannelRef::new("webhook.ops")],
         model_provider: crate::providers::ModelProviderRef::new("anthropic.default"),
         risk_profile: "default".into(),
         ..AliasedAgentConfig::default()
     };
     config.agents.insert("beta".to_string(), beta);
 
-    // Group on telegram.draft includes beta (who only has discord).
+    // Group on telegram.draft includes beta (who only has webhook).
     let group = crate::multi_agent::PeerGroupConfig {
         channel: "telegram".into(),
         agents: vec![
@@ -14283,6 +14132,8 @@ const SCHEMA_DELETED: &[&str] = &[
     "amqp",
     "feishu",
     "whatsapp",
+    "email",
+    "discord",
 ];
 
 #[test]
@@ -14296,9 +14147,9 @@ async fn retired_transport_kinds_complement_the_live_surfaces() {
     live.sort_unstable();
     assert_eq!(
         live,
-        ["discord", "email", "telegram", "webhook"],
+        ["telegram", "webhook"],
         "the non-retired registry must be exactly the retained surfaces: \
-          telegram bridge, webhook ingress, and email/discord tool config"
+          telegram bridge and webhook ingress"
     );
 
     // Every RETIRED_TRANSPORT_KINDS entry still resolves through the
@@ -14965,6 +14816,64 @@ async fn saves_reject_sop_added_after_load_without_mutating_disk_or_tracking() {
             entries_after, entries_before,
             "{mode} created a key, backup or temporary file"
         );
+    }
+}
+
+#[test]
+#[allow(clippy::large_futures)]
+async fn retired_email_and_discord_refuse_load_and_every_write_without_touching_disk() {
+    let _env_guard = env_override_lock().await;
+    for kind in crate::current::FAIL_CLOSED_RETIRED_CHANNELS {
+        let home = TempDir::new().unwrap();
+        let config_dir = home.path().join("profile");
+        fs::create_dir_all(&config_dir).await.unwrap();
+        let config_path = config_dir.join("config.toml");
+        let _home = EnvValueGuard::set("HOME", home.path());
+        let _config_dir = EnvValueGuard::set("ZEROCLAW_CONFIG_DIR", &config_dir);
+        let _workspace = EnvValueGuard::remove("ZEROCLAW_WORKSPACE");
+        let clean = "schema_version = 3\n[secrets]\nencrypt = true\n";
+        fs::write(&config_path, clean).await.unwrap();
+        let mut config = Box::pin(Config::load_or_init()).await.unwrap();
+        config
+            .set_prop_persistent("http_request.secrets.api_token", "private-new-token")
+            .unwrap();
+
+        // A retired section, or an agent reference to one, added on disk.
+        for body in [
+            format!("[channels.{kind}.main]\nenabled = true\nbot_token = 'private-test-token'\n"),
+            format!("[agents.owner]\nchannels = ['{kind}.main']\n"),
+        ] {
+            let raw = format!("{clean}\n{body}");
+            fs::write(&config_path, &raw).await.unwrap();
+
+            let load_error = Box::pin(Config::load_or_init())
+                .await
+                .expect_err("retired channel must refuse load");
+            assert!(
+                load_error.is::<crate::current::RetiredChannelConfigError>(),
+                "{kind}: {load_error:#}"
+            );
+            assert!(!format!("{load_error:#}").contains("private-test-token"));
+
+            for mode in ["save", "force_save", "save_dirty"] {
+                let result = match mode {
+                    "save" => Box::pin(config.save()).await,
+                    "force_save" => Box::pin(config.force_save()).await,
+                    "save_dirty" => Box::pin(config.save_dirty()).await,
+                    _ => unreachable!(),
+                };
+                let error = result.expect_err("retired channel must stop every write");
+                assert!(
+                    error.is::<crate::current::RetiredChannelConfigError>(),
+                    "{kind} {mode}: {error:#}"
+                );
+                assert_eq!(
+                    fs::read_to_string(&config_path).await.unwrap(),
+                    raw,
+                    "{kind} {mode} must not rewrite the refused file"
+                );
+            }
+        }
     }
 }
 

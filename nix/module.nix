@@ -190,7 +190,7 @@ let
             named environment-variable overrides on top (e.g.
             `OPENROUTER_API_KEY`, `OPENAI_API_KEY`, `ZEROCLAW_PROVIDER`,
             `ZEROCLAW_MODEL`); any other secret-bearing field — Telegram
-            `bot_token`, Discord `bot_token`, etc. — needs the
+            `bot_token`, webhook `secret`, etc. — needs the
             `envsubst` path to avoid living in `/nix/store`.
 
             See ZeroClaw's `config.toml.example` upstream for the full key

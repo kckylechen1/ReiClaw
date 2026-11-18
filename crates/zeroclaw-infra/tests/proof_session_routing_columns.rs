@@ -64,7 +64,7 @@ fn migration_adds_routing_columns_and_set_session_context_persists() {
         .set_session_context(
             session_key,
             SessionContext {
-                channel_id: Some("discord.clamps"),
+                channel_id: Some("telegram.clamps"),
                 room_id: Some("1234567890"),
                 sender_id: Some("singlerider"),
             },
@@ -76,7 +76,7 @@ fn migration_adds_routing_columns_and_set_session_context_persists() {
 
     println!("\n=== Wrote one row via SessionBackend trait ===");
     println!(
-        "  session_key={session_key:?} agent_alias=clamps channel_id=discord.clamps room_id=1234567890 sender_id=singlerider"
+        "  session_key={session_key:?} agent_alias=clamps channel_id=telegram.clamps room_id=1234567890 sender_id=singlerider"
     );
 
     println!("\n=== Reading back via raw rusqlite (bypasses backend code) ===");
@@ -103,7 +103,7 @@ fn migration_adds_routing_columns_and_set_session_context_persists() {
         row.0, row.1, row.2, row.3, row.4, row.5
     );
     assert_eq!(row.1.as_deref(), Some("clamps"));
-    assert_eq!(row.2.as_deref(), Some("discord.clamps"));
+    assert_eq!(row.2.as_deref(), Some("telegram.clamps"));
     assert_eq!(row.3.as_deref(), Some("1234567890"));
     assert_eq!(row.4.as_deref(), Some("singlerider"));
     assert_eq!(row.5, 1);
@@ -163,7 +163,7 @@ fn migration_adds_routing_columns_and_set_session_context_persists() {
     );
     assert_eq!(
         after.0.as_deref(),
-        Some("discord.clamps"),
+        Some("telegram.clamps"),
         "channel_id should not have been cleared by a None passthrough"
     );
     assert_eq!(after.1.as_deref(), Some("changed-room"));

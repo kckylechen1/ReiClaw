@@ -23,6 +23,8 @@ pub async fn apply_comments(
     };
     crate::current::reject_retired_sop_config(&table)
         .map_err(|error| std::io::Error::new(std::io::ErrorKind::InvalidData, error))?;
+    crate::current::reject_retired_channel_config(&toml::Value::Table(table.clone()))
+        .map_err(|error| std::io::Error::new(std::io::ErrorKind::InvalidData, error))?;
     for (path, comment) in annotations {
         decorate_key(doc.as_table_mut(), path, comment);
     }

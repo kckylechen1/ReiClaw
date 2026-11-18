@@ -151,7 +151,7 @@ impl AttributedApprovalResponse {
 }
 
 /// A long-lived, channel-agnostic gate prompt (e.g. a parked SOP approval):
-/// rendered natively per channel (Discord embed + buttons, Telegram inline
+/// rendered natively per channel (Telegram inline
 /// keyboard, ...), answered through the channel's normal inbound path — a
 /// component click or a `<choice> <reference>` text reply — NOT a blocking wait.
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -176,7 +176,7 @@ pub struct ChannelGatePrompt {
 
 /// The fixed vocabulary of gate-answer tokens, and the single source of truth
 /// for their wire spelling. A gate answer crosses two stringly-typed transports
-/// — a Discord `custom_id` and a `<choice> <reference>` text reply — so the
+/// — a platform `custom_id` and a `<choice> <reference>` text reply — so the
 /// token must be a string on the wire; this enum keeps producer (the route
 /// adapter that mints [`GateChoice::id`]) and consumer (the orchestrator that
 /// maps an answer to an approval decision) matching on ONE definition instead of
@@ -236,7 +236,7 @@ pub struct GateChoice {
     pub emphasis: GateChoiceEmphasis,
     /// When set, this choice collects free text from the operator before it is
     /// answered (e.g. "Edit" amends a draft, "Revise" sends guidance). Channels
-    /// with a native form (Discord modal) render one; channels without simply
+    /// with a native form (a native modal) render one; channels without simply
     /// omit the choice — plain approve/deny stays universally answerable.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub input: Option<GateChoiceInput>,
@@ -289,7 +289,7 @@ pub struct ChannelMessage {
     /// for channels without an alias concept (webhook, cli).
     pub channel_alias: Option<String>,
     pub timestamp: u64,
-    /// Platform thread identifier (e.g. Slack `ts`, Discord thread ID).
+    /// Platform thread identifier (e.g. Slack `ts`).
     /// When set, replies should be posted as threaded responses.
     pub thread_ts: Option<String>,
     /// Thread scope identifier for interruption/cancellation grouping.
@@ -647,7 +647,7 @@ pub trait Channel: Send + Sync + crate::attribution::Attributable {
     }
 
     /// The exact form the bot expects when addressed by users on this channel
-    /// (e.g. Discord `<@snowflake>`, Telegram `@bot_username`). Returned
+    /// (e.g. Telegram `@bot_username`). Returned
     /// verbatim into the per-channel system prompt. Default `None` for
     /// channels with no inbound mention concept. Channels that override
     /// `self_handle` should usually override this too.
@@ -829,8 +829,8 @@ pub trait Channel: Send + Sync + crate::attribution::Attributable {
     }
 
     /// Present a long-lived, out-of-band gate prompt (e.g. a parked SOP
-    /// approval) on this channel, rendered natively — an embed with one button
-    /// per choice on Discord, an inline keyboard on Telegram, and so on.
+    /// approval) on this channel, rendered natively — an inline keyboard
+    /// on Telegram, and so on.
     ///
     /// UNLIKE [`Channel::request_approval`] this does NOT wait for the answer:
     /// the prompt outlives the call (and daemon restarts). The choice comes

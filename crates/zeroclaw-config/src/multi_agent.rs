@@ -509,7 +509,7 @@ output_modality = "voice"
     #[test]
     fn bind_channel_into_rejects_unsupported_type() {
         let mut config = crate::schema::Config::default();
-        let err = bind_channel_identity_into(&mut config, "discord", "default", "123")
+        let err = bind_channel_identity_into(&mut config, "slack", "default", "123")
             .expect_err("unsupported type must bail");
         assert!(
             err.to_string()
@@ -517,8 +517,8 @@ output_modality = "voice"
             "error should explain the type is unsupported, got: {err}"
         );
         assert!(
-            channel_identity_normalizer("discord").is_none(),
-            "discord must not be in the bind closed-set"
+            channel_identity_normalizer("slack").is_none(),
+            "slack must not be in the bind closed-set"
         );
         assert!(channel_identity_normalizer("telegram").is_some());
         assert!(channel_identity_normalizer("wechat").is_none());

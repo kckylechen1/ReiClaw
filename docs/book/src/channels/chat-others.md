@@ -17,8 +17,6 @@ Leftover sections tombstone at load with a structured warning.
   {{#peer-group telegram}}
 
 - **Webhook**; gateway ingress; see [Webhooks](./webhook.md).
-- **Email / Discord**; retained tool configuration (see their pages), not
-  bot runners.
 - **CLI / ACP**; always-on local surfaces.
 
 ## Reply pacing fields

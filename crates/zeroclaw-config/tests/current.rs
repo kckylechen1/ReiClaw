@@ -479,7 +479,11 @@ fn generate_never_emits_retired_config_surfaces() {
     let root = "channels";
     let channels = value[root].as_table().unwrap();
     assert!(!channels.contains_key("whatsapp"));
-    for retained in ["telegram", "discord", "webhook", "email"] {
+    // Owner-retired 2026-11-18: the generator must never emit these, since
+    // loading them is refused outright.
+    assert!(!channels.contains_key("discord"));
+    assert!(!channels.contains_key("email"));
+    for retained in ["telegram", "webhook"] {
         assert!(
             channels.contains_key(retained),
             "generate({target}) must retain {retained}"
@@ -516,8 +520,8 @@ fn generate_never_emits_retired_batch_b_channel_settings() {
             "generate({target}) must omit {kind}"
         );
     }
-    assert!(channels.contains_key("discord"));
-    assert!(channels.contains_key("email"));
+    assert!(!channels.contains_key("discord"));
+    assert!(!channels.contains_key("email"));
 }
 
 #[test]
@@ -542,8 +546,8 @@ fn generate_never_emits_retired_batch_c_channel_settings() {
             "generate({target}) must omit {kind}"
         );
     }
-    assert!(channels.contains_key("discord"));
-    assert!(channels.contains_key("email"));
+    assert!(!channels.contains_key("discord"));
+    assert!(!channels.contains_key("email"));
 }
 
 #[test]
@@ -617,33 +621,12 @@ fn generate_v3_preserves_retained_channels_and_retires_transports() {
             "mention_only": false,
             "ack_reactions": false
         },
-        "discord": {
-            "enabled": true,
-            "bot_token": "discord-v1-bot-token",
-            "guild_ids": ["111122223333"],
-            "channel_ids": ["555566667777"],
-            "archive": true,
-            "listen_to_bots": false,
-            "mention_only": true,
-            "stream_mode": "off",
-            "draft_update_interval_ms": 1000,
-            "multi_message_delay_ms": 500,
-            "stall_timeout_secs": 0
-        },
         "webhook": {
             "enabled": true,
             "port": 8080,
             "listen_path": "/webhook",
             "send_url": "https://hooks.example.com/inbound",
             "send_method": "POST"
-        },
-        "email": {
-            "enabled": false,
-            "imap_host": "imap.example.com",
-            "smtp_host": "smtp.example.com",
-            "username": "zeroclaw@example.com",
-            "password": "email-password",
-            "from_address": "zeroclaw@example.com"
         }
     });
     let expected_fields = expected_fields.as_object().unwrap();
@@ -678,10 +661,6 @@ fn generate_v3_preserves_retained_channels_and_retires_transports() {
         "telegram": {
             "agents": ["complex_agent"],
             "external_peers": ["@v1_admin", "12345678"]
-        },
-        "discord": {
-            "agents": ["complex_agent"],
-            "external_peers": ["222233334444"]
         }
     });
     let expected_peers = expected_peers.as_object().unwrap();
@@ -813,12 +792,7 @@ fn generate_with_encrypt_produces_enc2_ciphertext() {
         raw.contains("enc2:"),
         "generate({target}) --encrypt produced no enc2: ciphertext"
     );
-    for plaintext in &[
-        "sk-v1-test-global",
-        "discord-v1-bot-token",
-        "telegram-v1-bot-token",
-        "email-password",
-    ] {
+    for plaintext in &["sk-v1-test-global", "telegram-v1-bot-token"] {
         assert!(
             !raw.contains(plaintext),
             "generate({target}) --encrypt leaked plaintext secret {plaintext:?}"

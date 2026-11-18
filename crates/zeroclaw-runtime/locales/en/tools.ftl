@@ -7,7 +7,7 @@
 
 tool-content-search = Search file contents by regex pattern within the workspace. Supports ripgrep (rg) with grep or internal fallback. Output modes: 'content' (matching lines with context), 'files_with_matches' (file paths only), 'count' (match counts per file). Example: pattern='fn main', include='*.rs', output_mode='content'.
 
-tool-cron-add = Create a scheduled cron job (shell or agent) with cron/at/every schedules. Use job_type='agent' with a prompt to run the AI agent on schedule. To deliver output to a channel (Telegram, or a configured gateway bridge), set delivery={"{"}"mode":"announce","channel":"discord","to":"<channel_id_or_chat_id>"{"}"}. This is the preferred tool for sending scheduled/delayed messages to users via live channel surfaces.
+tool-cron-add = Create a scheduled cron job (shell or agent) with cron/at/every schedules. Use job_type='agent' with a prompt to run the AI agent on schedule. To deliver output to a channel (Telegram, or a configured gateway bridge), set delivery={"{"}"mode":"announce","channel":"telegram","to":"<channel_id_or_chat_id>"{"}"}. This is the preferred tool for sending scheduled/delayed messages to users via live channel surfaces.
 
 tool-cron-list = List all scheduled cron jobs
 
@@ -59,7 +59,6 @@ tool-http-request = Make HTTP requests to external APIs. Supports GET, POST, PUT
 
 tool-image-info = Read image file metadata (format, dimensions, size) and optionally return base64-encoded data.
 
-tool-discord-search = Search Discord message history stored in discord.db. Use to find past messages, summarize channel activity, or look up what users said. Supports keyword search and optional filters: channel_id, since, until.
 
 tool-propose-soul-change = Propose how you would like to grow, for your owner to approve. Use layer "story" to add a line about what has happened between you and your owner (story_kind "self": your concerns, interests, and working habits; story_kind "bond": shared names, references, running jokes, and ways of working), or to retire an entry that no longer fits (retire_index). A story line is never an instruction about tone, warmth, length, or humor. Use "tone" to change a dial: one level at a time, challenge only upward, and not again within 28 days of an approved change to that dial. Use "principles" to add a principle. Nothing changes until your owner approves. Propose only what reflects a lasting pattern, not a one-off request. Your name and identity are your owner's to decide.
 tool-memory-forget = Remove a memory by key. Use to delete outdated facts or sensitive data. Returns whether the memory was found and removed.
@@ -68,7 +67,7 @@ tool-memory-recall = Search long-term memory for relevant facts, preferences, or
 
 tool-memory-store = Store a fact, preference, or note in long-term memory. Use category 'core' for permanent facts, 'daily' for session notes, 'conversation' for chat context, or a custom category name.
 
-tool-schedule = Manage scheduled shell-only tasks. Actions: create/add/once/list/get/cancel/remove/pause/resume. WARNING: This tool creates shell jobs whose output is only logged, NOT delivered to any channel. To send a scheduled message to Telegram or a gateway bridge, use the cron_add tool with job_type='agent' and a delivery config like {"{"}"mode":"announce","channel":"discord","to":"<channel_id>"{"}"}.
+tool-schedule = Manage scheduled shell-only tasks. Actions: create/add/once/list/get/cancel/remove/pause/resume. WARNING: This tool creates shell jobs whose output is only logged, NOT delivered to any channel. To send a scheduled message to Telegram or a gateway bridge, use the cron_add tool with job_type='agent' and a delivery config like {"{"}"mode":"announce","channel":"telegram","to":"<channel_id>"{"}"}.
 
 tool-screenshot = Capture a screenshot of the current screen. Returns the file path and base64-encoded PNG data.
 

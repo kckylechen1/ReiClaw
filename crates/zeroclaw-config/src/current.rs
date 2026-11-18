@@ -51,6 +51,77 @@ pub(crate) fn reject_retired_sop_config(table: &toml::Table) -> Result<()> {
     Ok(())
 }
 
+/// Channel kinds the owner retired on 2026-11-18 (ZeroClaw no longer reads
+/// email or Discord archives). Unlike the older tombstoned transports, a
+/// config that still declares or references one is refused outright: the
+/// sections carry credentials and archive/ingest authority that must not be
+/// discarded silently.
+pub const FAIL_CLOSED_RETIRED_CHANNELS: &[&str] = &["email", "discord"];
+
+/// A pre-write refusal of a retired channel declaration or reference. Like
+/// [`RetiredSopConfigError`] it names only the channel kind, never values.
+#[derive(Debug)]
+pub struct RetiredChannelConfigError(&'static str);
+
+impl std::fmt::Display for RetiredChannelConfigError {
+    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(
+            formatter,
+            "Channel `{kind}` is retired: ZeroClaw no longer reads {kind} sources. \
+             Remove every [channels.{kind}.*] section and every `{kind}.<alias>` \
+             channel reference (agents.*.channels, peer_groups.*.channel); \
+             credentials and settings are not migrated.",
+            kind = self.0
+        )
+    }
+}
+
+impl std::error::Error for RetiredChannelConfigError {}
+
+fn retired_channel_kind(name: &str) -> Option<&'static str> {
+    let kind = name.split('.').next().unwrap_or(name).trim();
+    FAIL_CLOSED_RETIRED_CHANNELS
+        .iter()
+        .copied()
+        .find(|retired| retired.eq_ignore_ascii_case(kind))
+}
+
+/// Refuse a retired channel kind named by `name` (a bare kind or a
+/// `<kind>.<alias>` reference). Never echoes the alias.
+pub(crate) fn reject_retired_channel(name: &str) -> Result<()> {
+    match retired_channel_kind(name) {
+        Some(kind) => Err(RetiredChannelConfigError(kind).into()),
+        None => Ok(()),
+    }
+}
+
+/// Reject retired channel sections and references before parsing or salvage
+/// can discard their credentials. Inspects only keys and channel references.
+pub(crate) fn reject_retired_channel_config(value: &toml::Value) -> Result<()> {
+    if let Some(channels) = value.get("channels").and_then(toml::Value::as_table) {
+        for key in channels.keys() {
+            reject_retired_channel(key)?;
+        }
+    }
+    if let Some(agents) = value.get("agents").and_then(toml::Value::as_table) {
+        for agent in agents.values() {
+            if let Some(refs) = agent.get("channels").and_then(toml::Value::as_array) {
+                for reference in refs.iter().filter_map(toml::Value::as_str) {
+                    reject_retired_channel(reference)?;
+                }
+            }
+        }
+    }
+    if let Some(groups) = value.get("peer_groups").and_then(toml::Value::as_table) {
+        for group in groups.values() {
+            if let Some(reference) = group.get("channel").and_then(toml::Value::as_str) {
+                reject_retired_channel(reference)?;
+            }
+        }
+    }
+    Ok(())
+}
+
 pub(crate) struct ConfigLoadAttribution;
 
 impl zeroclaw_api::attribution::Attributable for ConfigLoadAttribution {
@@ -95,6 +166,7 @@ pub fn require_current_schema(value: &toml::Value) -> Result<()> {
         reject_retired_sop_config(table)?;
     }
     crate::providers::reject_retired_model_provider_config(value)?;
+    reject_retired_channel_config(value)?;
     let version = detect_version(value).map_err(|err| UnsupportedSchemaError(err.to_string()))?;
     if version != CURRENT_SCHEMA_VERSION {
         return Err(UnsupportedSchemaError(format!(
@@ -483,20 +555,17 @@ mod tests {
 
     #[test]
     fn broken_channel_alias_is_dropped_not_fatal() {
-        // Email alias missing required `imap_host` must not abort the load.
+        // A webhook alias with a mistyped port must not abort the load.
         let raw = r#"
 schema_version = 3
 
-[channels.email.fakeemail]
+[channels.webhook.fakehook]
 enabled = true
-smtp_host = "smtp.example.com"
-username = "u"
-password = "p"
-from_address = "a@example.com"
+port = "not-a-port"
 "#;
         let cfg = parse_current_resilient(raw).unwrap();
         assert!(
-            !cfg.channels.email.contains_key("fakeemail"),
+            !cfg.channels.webhook.contains_key("fakehook"),
             "invalid alias must be pruned"
         );
     }
@@ -553,30 +622,6 @@ bot_token = 42
             load.dropped,
             vec!["channels.telegram.bad"],
             "dropped list must pin the exact malformed section path, got {:?}",
-            load.dropped
-        );
-    }
-
-    #[test]
-    fn partial_discord_alias_survives_salvage() {
-        // Discord twin of partial_telegram_alias_survives_salvage: a Discord
-        // alias with no `bot_token` must survive salvage now that
-        // `DiscordConfig.bot_token` also has `#[serde(default)]`.
-        let raw = r#"
-schema_version = 3
-
-[channels.discord.default]
-enabled = true
-"#;
-        let load = parse_current_salvaged(raw).unwrap();
-        assert!(
-            load.config.channels.discord.contains_key("default"),
-            "a partial (tokenless) alias must survive salvage, got {:?}",
-            load.config.channels.discord.keys().collect::<Vec<_>>()
-        );
-        assert!(
-            load.dropped.is_empty(),
-            "a partial (tokenless) alias must not be reported as dropped, got {:?}",
             load.dropped
         );
     }
@@ -697,28 +742,21 @@ model = "m"
         let raw = r#"
 schema_version = 3
 
-[channels.email.broken]
+[channels.webhook.broken]
 enabled = true
-smtp_host = "smtp.example.com"
-username = "u"
-password = "p"
-from_address = "a@example.com"
+port = "not-a-port"
 
-[channels.email.good]
+[channels.webhook.good]
 enabled = true
-imap_host = "imap.example.com"
-smtp_host = "smtp.example.com"
-username = "u"
-password = "p"
-from_address = "a@example.com"
+port = 8091
 "#;
         let cfg = parse_current_resilient(raw).unwrap();
         assert!(
-            cfg.channels.email.contains_key("good"),
+            cfg.channels.webhook.contains_key("good"),
             "valid sibling must be kept"
         );
         assert!(
-            !cfg.channels.email.contains_key("broken"),
+            !cfg.channels.webhook.contains_key("broken"),
             "invalid sibling must be pruned"
         );
     }
@@ -784,12 +822,9 @@ enabled = "not-a-bool"
         let raw = r#"
 schema_version = 3
 
-[channels.email.fakeemail]
+[channels.webhook.fakehook]
 enabled = true
-smtp_host = "smtp.example.com"
-username = "u"
-password = "p"
-from_address = "a@example.com"
+port = "not-a-port"
 "#;
         assert!(
             parse_current(raw).is_err(),
@@ -841,7 +876,7 @@ enabled = "not-a-bool"
 schema_version = 3
 
 [channels]
-email = "oops-this-should-be-a-table"
+webhook = "oops-this-should-be-a-table"
 
 [channels.telegram.main]
 enabled = true
@@ -849,7 +884,7 @@ bot_token = "t"
 "#;
         let load = parse_current_salvaged(raw).unwrap();
         assert!(
-            load.dropped.iter().any(|p| p == "channels.email"),
+            load.dropped.iter().any(|p| p == "channels.webhook"),
             "the broken whole-type block must be dropped, got {:?}",
             load.dropped
         );
@@ -956,6 +991,36 @@ uri = "https://api.example.invalid/v1"
             reloaded.providers.models.gemini["gemini_cli"].oauth_client_secret,
             gemini.oauth_client_secret
         );
+    }
+
+    #[test]
+    fn retired_email_and_discord_fail_closed_without_exposing_values() {
+        for kind in FAIL_CLOSED_RETIRED_CHANNELS {
+            for body in [
+                format!("[channels.{kind}.private_alias]\nenabled = false\n"),
+                format!("[channels.{kind}.private_alias]\nbot_token = 'private-test-key'\n"),
+                format!("[channels]\n{kind} = {{}}\n"),
+                format!("[agents.owner]\nchannels = ['{kind}.private_alias']\n"),
+                format!("[agents.owner]\nchannels = ['telegram.main', '{kind}']\n"),
+                format!("[peer_groups.crew]\nchannel = '{kind}.private_alias'\n"),
+            ] {
+                let raw = format!("schema_version = 3\n{body}");
+                for error in [
+                    parse_current(&raw).unwrap_err(),
+                    parse_current_salvaged(&raw).unwrap_err(),
+                ] {
+                    assert!(error.is::<RetiredChannelConfigError>(), "{kind}: {error:#}");
+                    let message = format!("{error:#}");
+                    assert!(message.contains(&format!("Channel `{kind}` is retired")));
+                    assert!(!message.contains("private-test-key"));
+                    assert!(!message.contains("private_alias"));
+                }
+            }
+        }
+        // A retained channel that merely mentions the word is not refused.
+        let ok = "schema_version = 3\n[channels.webhook.email]\nenabled = false\n\
+                  [agents.owner]\nchannels = ['webhook.email']\n";
+        assert!(parse_current(ok).is_ok());
     }
 
     #[test]

@@ -910,10 +910,10 @@ mod tests {
         // land on an arbitrary configured channel while the operator watched
         // the channel that actually issued the turn.
         let origin = Arc::new(SilentChannel::new("telegram"));
-        let other_a = Arc::new(SilentChannel::new("discord"));
+        let other_a = Arc::new(SilentChannel::new("webhook"));
         let other_b = Arc::new(SilentChannel::new("slack"));
         let tool = make_tool_with_channels(vec![
-            ("discord", Arc::clone(&other_a) as Arc<dyn Channel>),
+            ("webhook", Arc::clone(&other_a) as Arc<dyn Channel>),
             ("telegram", Arc::clone(&origin) as Arc<dyn Channel>),
             ("slack", Arc::clone(&other_b) as Arc<dyn Channel>),
         ]);

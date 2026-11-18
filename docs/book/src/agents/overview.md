@@ -65,8 +65,8 @@ used to add a second, policy-gated hand-off path is removed; see
                     ─────────────────          ──────────────
   model provider     openai.prod ◀───────────── openai.prod       (same one)
   risk profile       hardened                   permissive        (diverge)
-  channel            discord.main               slack.helpdesk    (diverge)
-  peers              └──────▶ peer group on discord.main ◀───────┘
+  channel            telegram.main              webhook.helpdesk    (diverge)
+  peers              └──────▶ peer group on telegram.main ◀───────┘
 ```
 
 Two agents share one model provider, run under different risk profiles, answer

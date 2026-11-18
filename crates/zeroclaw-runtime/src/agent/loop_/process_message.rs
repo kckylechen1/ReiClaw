@@ -23,7 +23,7 @@ use super::{
 };
 
 /// Process a single message through the full agent (with tools and memory).
-/// Used by channels (Telegram, Discord, etc.) to enable tool use.
+/// Used by channels (Telegram, etc.) to enable tool use.
 pub async fn process_message(
     config: Config,
     agent_alias: &str,

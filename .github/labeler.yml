@@ -82,20 +82,6 @@
           - "src/channels/dingtalk.rs"
           - "crates/zeroclaw-channels/src/dingtalk.rs"
 
-"channel:discord":
-  - changed-files:
-      - any-glob-to-any-file:
-          - "src/channels/discord.rs"
-          - "src/channels/discord_history.rs"
-          - "crates/zeroclaw-channels/src/discord.rs"
-          - "crates/zeroclaw-channels/src/discord_history.rs"
-
-"channel:email":
-  - changed-files:
-      - any-glob-to-any-file:
-          - "src/channels/email_channel.rs"
-          - "crates/zeroclaw-channels/src/email_channel.rs"
-
 "channel:imessage":
   - changed-files:
       - any-glob-to-any-file:

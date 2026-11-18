@@ -322,13 +322,12 @@ schema_version = 3
 bot_token = "test_token"
 allowed_users = ["zeroclaw_user"]
 
-[channels.discord.default]
-bot_token = "test_token"
+[channels.webhook.default]
+secret = "test_secret"
 "#;
     let parsed: Config = toml::from_str(toml_str).expect("multi-channel config should parse");
     assert!(!parsed.channels.telegram.is_empty());
-    assert!(!parsed.channels.discord.is_empty());
-    assert!(parsed.channels.webhook.is_empty());
+    assert!(!parsed.channels.webhook.is_empty());
 }
 
 #[test]

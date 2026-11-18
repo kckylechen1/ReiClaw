@@ -207,8 +207,8 @@ pub struct ChannelInfo {
     /// (`zeroclaw-channels` and its tool callers, #579/#581): the
     /// `[channels.<kind>]` section may still parse, but no runtime, bridge,
     /// Node, or Tachi consumer reads it. Retired kinds must not be presented
-    /// as available transports. The retained non-bridge surfaces (`email`,
-    /// `discord`) are tool configuration and are never `retired`.
+    /// as available transports. The retained surfaces (`telegram`,
+    /// `webhook`) are never `retired`.
     pub retired: bool,
 }
 
