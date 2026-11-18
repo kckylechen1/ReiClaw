@@ -1491,6 +1491,11 @@ on standard input. With the existing operator-authenticated identity API:
 filesystem, camera, microphone, motion, face or other actuation is available.
 `approved=true` and grant-proof arguments cannot expand this set.
 
+Capability definitions, argument schemas and risk classes belong to the kernel
+catalog in `zeroclaw_api::node_capability`. Devices advertise names only. Catalog
+eligibility does not replace the approved capability ceiling, live advertisement
+or the requesting agent's exact tool grants. Effect capabilities remain disabled.
+
 The foreground stdin commands are `info-only` (reduce the live advertisement),
 `reconnect` (same process-held identity and local allowlist, new connection) and `stop`. EOF, Ctrl-C,
 SIGTERM or gateway closure exits the host. There is no unattended retry or replay.

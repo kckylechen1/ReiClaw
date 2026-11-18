@@ -3,10 +3,10 @@ use super::*;
 use sha2::{Digest, Sha256};
 use tokio::sync::{mpsc, oneshot};
 use zeroclaw_api::attribution::{Attributable, Role, ToolKind};
+use zeroclaw_api::node_capability::{self, NodeCapability};
 use zeroclaw_api::node_tools::NodeTools;
 use zeroclaw_api::tool::{Tool, ToolResult};
 
-pub const SAFE_CAPS: [&str; 2] = ["system.info", "test.echo"];
 pub const CALL_TIMEOUT: Duration = Duration::from_secs(2);
 const MAX_PENDING: usize = 16;
 
@@ -39,23 +39,6 @@ impl InvocationState {
         for (_, pending) in self.pending.drain() {
             let _ = pending.tx.send(ToolResult::err(reason));
         }
-    }
-}
-
-pub fn validate_args(cap: &str, args: &serde_json::Value) -> bool {
-    let Some(object) = args.as_object() else {
-        return false;
-    };
-    match cap {
-        "system.info" => object.is_empty(),
-        "test.echo" => {
-            object.len() == 1
-                && object
-                    .get("text")
-                    .and_then(serde_json::Value::as_str)
-                    .is_some_and(|s| s.len() <= 4096)
-        }
-        _ => false,
     }
 }
 
@@ -184,7 +167,7 @@ impl NodeRegistry {
     }
 
     async fn invoke_current(&self, device: &str, cap: &str, args: serde_json::Value) -> ToolResult {
-        if !validate_args(cap, &args) {
+        if !node_capability::invocable(cap).is_some_and(|spec| spec.validate_args(&args)) {
             return ToolResult::err("invalid_or_unsupported_capability");
         }
         let snapshot = {
@@ -218,7 +201,7 @@ impl NodeRegistry {
         cap: &str,
         args: serde_json::Value,
     ) -> ToolResult {
-        if !validate_args(cap, &args) {
+        if !node_capability::invocable(cap).is_some_and(|spec| spec.validate_args(&args)) {
             return ToolResult::err("invalid_or_unsupported_capability");
         }
         let Some((bound_device, fingerprint)) = self.bound_identity(connection) else {
@@ -312,7 +295,7 @@ struct NodeTool {
     registry: NodeRegistry,
     name: String,
     device: String,
-    cap: String,
+    capability: &'static NodeCapability,
 }
 impl Attributable for NodeTool {
     fn role(&self) -> Role {
@@ -328,19 +311,15 @@ impl Tool for NodeTool {
         &self.name
     }
     fn description(&self) -> &str {
-        "Read-only info or echo from an explicitly authorized local node."
+        self.capability.description
     }
     fn parameters_schema(&self) -> serde_json::Value {
-        if self.cap == "test.echo" {
-            serde_json::json!({"type":"object","properties":{"text":{"type":"string","maxLength":4096}},"required":["text"],"additionalProperties":false})
-        } else {
-            serde_json::json!({"type":"object","properties":{},"additionalProperties":false})
-        }
+        self.capability.parameters_schema()
     }
     async fn execute(&self, args: serde_json::Value) -> anyhow::Result<ToolResult> {
         Ok(self
             .registry
-            .invoke_current(&self.device, &self.cap, args)
+            .invoke_current(&self.device, self.capability.name, args)
             .await)
     }
 }
@@ -359,16 +338,16 @@ impl NodeTools for NodeRegistry {
             else {
                 continue;
             };
-            if !device.is_empty()
-                && device != "*"
-                && SAFE_CAPS.contains(&cap)
-                && !tools.iter().any(|tool| tool.name() == name)
+            let Some(capability) = node_capability::invocable(cap) else {
+                continue;
+            };
+            if !device.is_empty() && device != "*" && !tools.iter().any(|tool| tool.name() == name)
             {
                 tools.push(Box::new(NodeTool {
                     registry: self.clone(),
                     name: name.clone(),
                     device: device.into(),
-                    cap: cap.into(),
+                    capability,
                 }));
             }
         }
