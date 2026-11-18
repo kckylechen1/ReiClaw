@@ -4,6 +4,7 @@ pub(crate) mod approval_gate;
 pub(crate) mod call_prep;
 pub(crate) mod context;
 pub(crate) mod context_recovery;
+pub(crate) mod dehydrate;
 pub(crate) mod delivery_defaults;
 pub(crate) mod events;
 pub(crate) mod execution;
@@ -150,7 +151,7 @@ async fn enforce_reported_budget(
     );
     if result.trimmed {
         let mut trimmed = result.history;
-        crate::agent::history_trim::insert_breadcrumb_deduped(&mut trimmed);
+        crate::agent::history_trim::insert_checkpoint_or_breadcrumb_deduped(&mut trimmed, None);
         *history = trimmed;
         if let Some(tx) = event_tx {
             let _ = tx
@@ -259,7 +260,7 @@ impl<'a> TurnState<'a> {
             crate::agent::history_trim::trim_to_recent_turns(taken, context_token_budget);
         let mut history = std::mem::take(&mut result.history);
         if result.trimmed {
-            crate::agent::history_trim::insert_breadcrumb_deduped(&mut history);
+            crate::agent::history_trim::insert_checkpoint_or_breadcrumb_deduped(&mut history, None);
         }
         *self.history = history;
         result
@@ -395,33 +396,52 @@ async fn run_tool_call_loop_turn(
             ingress.origin,
             has_session,
             turn_memory.suppress,
-        ) && let Some(last_user_idx) = turn_state.history.iter().rposition(|m| m.role == "user")
-            // Idempotence: re-entering the engine for steering can retain an
-            // enriched user message; the preamble must not stack.
-            && !turn_state.history[last_user_idx]
-                .content
-                .starts_with(zeroclaw_memory::MEMORY_CONTEXT_OPEN)
-        {
-            let scopes: Vec<Option<&str>> =
-                turn_memory.sessions.iter().map(|s| s.as_deref()).collect();
-            let context = crate::agent::memory_inject::render_memory_context(
-                turn_memory.handle,
-                observer,
-                &turn_memory.query,
-                &scopes,
-                &turn_memory.cfg,
-                exclude_conversation,
-                TurnMeta {
-                    agent_alias,
-                    parent_agent_alias,
-                    turn_id,
-                    channel_name,
-                },
-            )
-            .await;
-            if !context.is_empty() {
-                let existing = &turn_state.history[last_user_idx].content;
-                turn_state.history[last_user_idx].content = format!("{context}{existing}");
+        ) {
+            // L0 cache-pinned prefix: freeze `[Pinned memory index]` in the
+            // leading system prompt across the 300s warm window so provider
+            // prompt caching stays intact.
+            if let Some(alias) = agent_alias
+                && let Some(pinned_block) =
+                    crate::agent::memory_inject::shared_pinned_digest_cache()
+                        .get_or_load(turn_memory.handle, alias)
+                        .await
+            {
+                crate::agent::memory_inject::inject_pinned_memory_index(
+                    turn_state.history,
+                    &pinned_block,
+                );
+            }
+
+            // Dynamic query-matched `[Memory context]` is tail-attached near
+            // the active user turn rather than mutating the frozen L0 prefix.
+            if let Some(last_user_idx) = turn_state.history.iter().rposition(|m| m.role == "user")
+                // Idempotence: re-entering the engine for steering can retain an
+                // enriched user message; the preamble must not stack.
+                && !turn_state.history[last_user_idx]
+                    .content
+                    .starts_with(zeroclaw_memory::MEMORY_CONTEXT_OPEN)
+            {
+                let scopes: Vec<Option<&str>> =
+                    turn_memory.sessions.iter().map(|s| s.as_deref()).collect();
+                let context = crate::agent::memory_inject::render_memory_context(
+                    turn_memory.handle,
+                    observer,
+                    &turn_memory.query,
+                    &scopes,
+                    &turn_memory.cfg,
+                    exclude_conversation,
+                    TurnMeta {
+                        agent_alias,
+                        parent_agent_alias,
+                        turn_id,
+                        channel_name,
+                    },
+                )
+                .await;
+                if !context.is_empty() {
+                    let existing = &turn_state.history[last_user_idx].content;
+                    turn_state.history[last_user_idx].content = format!("{context}{existing}");
+                }
             }
         }
     }
@@ -671,8 +691,10 @@ async fn run_tool_call_loop_turn(
             );
         }
 
+        let dehydrated_history =
+            dehydrate::dehydrate_cold_window(turn_state.history, keep_tool_context_turns);
         let prepared_messages = prepare_messages_for_iteration(
-            turn_state.history,
+            &dehydrated_history,
             multimodal_config,
             degrade_strip_images,
             keep_tool_context_turns,
@@ -1536,5 +1558,356 @@ mod shared_iteration_budget_tests {
 
         assert_eq!(granted.load(Ordering::Relaxed), AVAILABLE);
         assert_eq!(budget.load(Ordering::Acquire), 0);
+    }
+}
+
+#[cfg(test)]
+mod context_stack_tests {
+    use super::*;
+    use async_trait::async_trait;
+    use parking_lot::Mutex;
+    use std::sync::atomic::{AtomicUsize, Ordering};
+    use zeroclaw_api::ingress::{IngressContext, TurnOrigin};
+    use zeroclaw_api::memory_traits::{Memory, MemoryCategory, MemoryEntry};
+    use zeroclaw_api::sleep_records::PinnedDigest;
+    use zeroclaw_providers::{ChatRequest, ChatResponse};
+
+    struct CapturingModelProvider {
+        seen_requests: Mutex<Vec<Vec<ChatMessage>>>,
+    }
+
+    #[async_trait]
+    impl ModelProvider for CapturingModelProvider {
+        async fn chat_with_system(
+            &self,
+            _system_prompt: Option<&str>,
+            _message: &str,
+            _model: &str,
+            _temperature: Option<f64>,
+        ) -> anyhow::Result<String> {
+            Ok("ok".into())
+        }
+
+        async fn chat(
+            &self,
+            request: ChatRequest<'_>,
+            _model: &str,
+            _temperature: Option<f64>,
+        ) -> anyhow::Result<ChatResponse> {
+            self.seen_requests.lock().push(request.messages.to_vec());
+            Ok(ChatResponse {
+                text: Some("done".into()),
+                tool_calls: Vec::new(),
+                usage: None,
+                reasoning_content: None,
+            })
+        }
+    }
+
+    impl zeroclaw_api::attribution::Attributable for CapturingModelProvider {
+        fn role(&self) -> zeroclaw_api::attribution::Role {
+            zeroclaw_api::attribution::Role::Provider(
+                zeroclaw_api::attribution::ProviderKind::Model(
+                    zeroclaw_api::attribution::ModelProviderKind::Custom,
+                ),
+            )
+        }
+        fn alias(&self) -> &str {
+            "capturing-test"
+        }
+    }
+
+    struct ContextStackMemory {
+        pinned_loads: AtomicUsize,
+        agent_alias: String,
+    }
+
+    #[async_trait]
+    impl Memory for ContextStackMemory {
+        fn name(&self) -> &str {
+            "context-stack-test"
+        }
+        async fn store(
+            &self,
+            _key: &str,
+            _content: &str,
+            _category: MemoryCategory,
+            _session_id: Option<&str>,
+        ) -> anyhow::Result<()> {
+            Ok(())
+        }
+        async fn recall(
+            &self,
+            query: &str,
+            _limit: usize,
+            _session_id: Option<&str>,
+            _since: Option<&str>,
+            _until: Option<&str>,
+        ) -> anyhow::Result<Vec<MemoryEntry>> {
+            Ok(vec![MemoryEntry {
+                id: "k1".into(),
+                key: "active_recall".into(),
+                content: format!("recalled for {query}"),
+                category: MemoryCategory::Core,
+                timestamp: zeroclaw_api::time::format_rfc3339(jiff::Timestamp::now()),
+                session_id: None,
+                score: Some(0.95),
+                namespace: "default".into(),
+                importance: None,
+                superseded_by: None,
+                kind: None,
+                pinned: false,
+                tenant_id: None,
+                agent_alias: None,
+                agent_id: None,
+            }])
+        }
+        async fn get(&self, _key: &str) -> anyhow::Result<Option<MemoryEntry>> {
+            Ok(None)
+        }
+        async fn list(
+            &self,
+            _category: Option<&MemoryCategory>,
+            _session_id: Option<&str>,
+        ) -> anyhow::Result<Vec<MemoryEntry>> {
+            Ok(Vec::new())
+        }
+        async fn forget(&self, _key: &str) -> anyhow::Result<bool> {
+            Ok(false)
+        }
+        async fn forget_for_agent(&self, _key: &str, _agent_id: &str) -> anyhow::Result<bool> {
+            Ok(false)
+        }
+        async fn count(&self) -> anyhow::Result<usize> {
+            Ok(0)
+        }
+        async fn health_check(&self) -> bool {
+            true
+        }
+        async fn store_with_agent(
+            &self,
+            _key: &str,
+            _content: &str,
+            _category: MemoryCategory,
+            _session_id: Option<&str>,
+            _namespace: Option<&str>,
+            _importance: Option<f64>,
+            _agent_id: Option<&str>,
+        ) -> anyhow::Result<()> {
+            Ok(())
+        }
+        async fn recall_for_agents(
+            &self,
+            _allowed_agent_ids: &[&str],
+            _query: &str,
+            _limit: usize,
+            _session_id: Option<&str>,
+            _since: Option<&str>,
+            _until: Option<&str>,
+        ) -> anyhow::Result<Vec<MemoryEntry>> {
+            Ok(Vec::new())
+        }
+        async fn load_pinned_digest(&self, agent_id: &str) -> anyhow::Result<Option<PinnedDigest>> {
+            if agent_id != self.agent_alias {
+                return Ok(None);
+            }
+            let n = self.pinned_loads.fetch_add(1, Ordering::SeqCst) + 1;
+            Ok(Some(PinnedDigest {
+                agent_id: agent_id.into(),
+                rendered_index: format!("pinned-v{n}"),
+                updated_at: "2026-11-18T09:00:00Z".into(),
+                source_day_key: None,
+            }))
+        }
+    }
+
+    impl zeroclaw_api::attribution::Attributable for ContextStackMemory {
+        fn role(&self) -> zeroclaw_api::attribution::Role {
+            zeroclaw_api::attribution::Role::Memory(zeroclaw_api::attribution::MemoryKind::InMemory)
+        }
+        fn alias(&self) -> &str {
+            "context-stack-test"
+        }
+    }
+
+    #[tokio::test]
+    async fn run_tool_call_loop_pins_l0_system_prefix_tail_attaches_recall_and_dehydrates_cold_turns()
+     {
+        let alias = format!("ctx-stack-{}", uuid::Uuid::new_v4());
+        let mem = ContextStackMemory {
+            pinned_loads: AtomicUsize::new(0),
+            agent_alias: alias.clone(),
+        };
+        let provider = CapturingModelProvider {
+            seen_requests: Mutex::new(Vec::new()),
+        };
+        let observer = crate::observability::NoopObserver;
+        let multimodal = zeroclaw_config::schema::MultimodalConfig::default();
+        let pacing = zeroclaw_config::schema::PacingConfig::default();
+        let knobs = LoopKnobs::default();
+        let tools: Vec<Box<dyn crate::tools::Tool>> = Vec::new();
+        let huge_cold_report = format!(
+            "{{\"request_id\":\"req-1\",\"artifact\":\"result.md\",\"trust\":\"untrusted_external_report\",\"body\":\"{}\"}}",
+            "report detail ".repeat(350)
+        );
+
+        let mut history1 = vec![
+            ChatMessage::system("base sys"),
+            ChatMessage::user("old turn"),
+            ChatMessage::assistant(
+                serde_json::json!({
+                    "content": "",
+                    "tool_calls": [{"id": "c1", "name": "tachi_result", "arguments": "{}"}],
+                    "reasoning_content": "Thoughts: checking delegated report"
+                })
+                .to_string(),
+            ),
+            ChatMessage::tool(
+                serde_json::json!({"tool_call_id": "c1", "content": huge_cold_report}).to_string(),
+            ),
+            ChatMessage::assistant("Thoughts: old reasoning preserved"),
+            ChatMessage::user("turn one"),
+        ];
+
+        run_tool_call_loop(ToolLoop {
+            exec: ResolvedAgentExecution::resolve(
+                ResolvedModelAccess {
+                    model_provider: &provider,
+                    provider_name: "custom",
+                    model: "m",
+                    temperature: None,
+                },
+                ResolvedIo {
+                    tools_registry: &tools,
+                    observer: &observer,
+                    silent: true,
+                    approval: None,
+                    multimodal_config: &multimodal,
+                    config: None,
+                    hooks: None,
+                    activated_tools: None,
+                    receipt_generator: None,
+                },
+                ResolvedRuntimeKnobs {
+                    max_tool_iterations: 2,
+                    excluded_tools: &[],
+                    dedup_exempt_tools: &[],
+                    pacing: &pacing,
+                    strict_tool_parsing: false,
+                    parallel_tools: false,
+                    max_tool_result_chars: 16_000,
+                    keep_tool_context_turns: 0,
+                    context_token_budget: 0,
+                    knobs: &knobs,
+                },
+            ),
+            history: &mut history1,
+            channel_name: "cli",
+            channel_reply_target: None,
+            cancellation_token: None,
+            on_delta: None,
+            shared_budget: None,
+            channel: None,
+            collected_receipts: None,
+            event_tx: None,
+            steering: None,
+            new_messages_out: None,
+            image_cache: None,
+            ingress: IngressContext::from_origin(TurnOrigin::Interactive),
+            memory: Some(crate::agent::memory_inject::TurnMemory {
+                handle: &mem,
+                query: "alpha".into(),
+                sessions: vec![Some("s1".into())],
+                suppress: false,
+                cfg: crate::agent::memory_inject::MemoryInjectConfig::default(),
+            }),
+            agent_alias: Some(&alias),
+            parent_agent_alias: None,
+            turn_id: "t1",
+        })
+        .await
+        .unwrap();
+
+        let mut history2 = vec![
+            ChatMessage::system("base sys"),
+            ChatMessage::user("turn two"),
+        ];
+        run_tool_call_loop(ToolLoop {
+            exec: ResolvedAgentExecution::resolve(
+                ResolvedModelAccess {
+                    model_provider: &provider,
+                    provider_name: "custom",
+                    model: "m",
+                    temperature: None,
+                },
+                ResolvedIo {
+                    tools_registry: &tools,
+                    observer: &observer,
+                    silent: true,
+                    approval: None,
+                    multimodal_config: &multimodal,
+                    config: None,
+                    hooks: None,
+                    activated_tools: None,
+                    receipt_generator: None,
+                },
+                ResolvedRuntimeKnobs {
+                    max_tool_iterations: 2,
+                    excluded_tools: &[],
+                    dedup_exempt_tools: &[],
+                    pacing: &pacing,
+                    strict_tool_parsing: false,
+                    parallel_tools: false,
+                    max_tool_result_chars: 16_000,
+                    keep_tool_context_turns: 0,
+                    context_token_budget: 0,
+                    knobs: &knobs,
+                },
+            ),
+            history: &mut history2,
+            channel_name: "cli",
+            channel_reply_target: None,
+            cancellation_token: None,
+            on_delta: None,
+            shared_budget: None,
+            channel: None,
+            collected_receipts: None,
+            event_tx: None,
+            steering: None,
+            new_messages_out: None,
+            image_cache: None,
+            ingress: IngressContext::from_origin(TurnOrigin::Interactive),
+            memory: Some(crate::agent::memory_inject::TurnMemory {
+                handle: &mem,
+                query: "beta".into(),
+                sessions: vec![Some("s1".into())],
+                suppress: false,
+                cfg: crate::agent::memory_inject::MemoryInjectConfig::default(),
+            }),
+            agent_alias: Some(&alias),
+            parent_agent_alias: None,
+            turn_id: "t2",
+        })
+        .await
+        .unwrap();
+
+        crate::agent::memory_inject::shared_pinned_digest_cache().invalidate(&alias);
+
+        let reqs = provider.seen_requests.lock();
+        assert_eq!(reqs.len(), 2);
+        // L0 pinned prefix is identical across both rapid consecutive turns (only 1 backend load).
+        assert_eq!(mem.pinned_loads.load(Ordering::SeqCst), 1);
+        assert_eq!(reqs[0][0].content, reqs[1][0].content);
+        assert!(reqs[0][0].content.contains("[Pinned memory index]"));
+        assert!(reqs[0][0].content.contains("pinned-v1"));
+        // Dynamic recall is tail-attached to the active user turn, not in system[0].
+        assert!(!reqs[0][0].content.contains("[Memory context]"));
+        assert!(reqs[0][5].content.contains("[Memory context]"));
+        assert!(reqs[0][5].content.contains("recalled for alpha"));
+        assert!(reqs[1][1].content.contains("recalled for beta"));
+        // Cold delegated report was dehydrated, while assistant reasoning stayed intact.
+        assert!(reqs[0][3].content.contains("session_search"));
+        assert!(reqs[0][3].content.contains("episode_read"));
+        assert_eq!(reqs[0][4].content, "Thoughts: old reasoning preserved");
     }
 }

@@ -21,14 +21,18 @@
 //! Exactly one `MemoryRecall` observer event is emitted per render,
 //! covering all recalls.
 
-use std::collections::HashSet;
+use std::collections::{HashMap, HashSet};
 use std::fmt::Write as _;
-use std::time::Instant;
+use std::sync::OnceLock;
+use std::time::{Duration, Instant};
 
+use parking_lot::Mutex;
 use zeroclaw_api::ingress::TurnOrigin;
+use zeroclaw_api::sleep_records::{PinnedDigest, validate_agent_id};
 use zeroclaw_memory::{
     self, MEMORY_CONTEXT_CLOSE, MEMORY_CONTEXT_OPEN, Memory, MemoryEntry, decay, rerank,
 };
+use zeroclaw_providers::ChatMessage;
 
 use super::loop_::make_query_summary;
 use crate::agent::TurnMeta;
@@ -43,6 +47,128 @@ pub const DEFAULT_MAX_ENTRIES: usize = 4;
 pub const DEFAULT_ENTRY_MAX_CHARS: usize = 800;
 /// Default total character budget for the rendered block.
 pub const DEFAULT_MAX_TOTAL_CHARS: usize = 4_000;
+/// Opening delimiter for the L0 cache-pinned memory index block.
+pub const PINNED_MEMORY_INDEX_OPEN: &str = "[Pinned memory index]";
+/// Closing delimiter for the L0 cache-pinned memory index block.
+pub const PINNED_MEMORY_INDEX_CLOSE: &str = "[/Pinned memory index]";
+/// Warm-cache window keeping an agent's L0 pinned prefix byte-identical across
+/// rapid consecutive turns to preserve provider prompt caching.
+pub const PINNED_DIGEST_CACHE_TTL: Duration = Duration::from_secs(300);
+
+#[derive(Debug, Clone)]
+struct CachedPinnedDigest {
+    rendered: String,
+    cached_at: Instant,
+}
+
+/// In-process per-agent warm cache for rendered L0 `[Pinned memory index]`
+/// prefixes (default 300-second window).
+pub struct PinnedDigestCache {
+    ttl: Duration,
+    entries: Mutex<HashMap<String, CachedPinnedDigest>>,
+}
+
+impl Default for PinnedDigestCache {
+    fn default() -> Self {
+        Self::new(PINNED_DIGEST_CACHE_TTL)
+    }
+}
+
+impl PinnedDigestCache {
+    #[must_use]
+    pub fn new(ttl: Duration) -> Self {
+        Self {
+            ttl,
+            entries: Mutex::new(HashMap::new()),
+        }
+    }
+
+    pub async fn get_or_load(&self, mem: &dyn Memory, agent_alias: &str) -> Option<String> {
+        self.get_or_load_at(mem, agent_alias, Instant::now()).await
+    }
+
+    pub async fn get_or_load_at(
+        &self,
+        mem: &dyn Memory,
+        agent_alias: &str,
+        now: Instant,
+    ) -> Option<String> {
+        let alias = agent_alias.trim();
+        if alias.is_empty() || validate_agent_id(alias).is_err() {
+            return None;
+        }
+        {
+            let guard = self.entries.lock();
+            if let Some(entry) = guard.get(alias)
+                && now.saturating_duration_since(entry.cached_at) < self.ttl
+            {
+                return Some(entry.rendered.clone());
+            }
+        }
+
+        let loaded = match mem.load_pinned_digest(alias).await {
+            Ok(Some(digest)) => format_pinned_memory_index(&digest),
+            Ok(None) => None,
+            Err(_) => None,
+        };
+
+        let mut guard = self.entries.lock();
+        if let Some(rendered) = loaded {
+            guard.insert(
+                alias.to_string(),
+                CachedPinnedDigest {
+                    rendered: rendered.clone(),
+                    cached_at: now,
+                },
+            );
+            Some(rendered)
+        } else {
+            guard.remove(alias);
+            None
+        }
+    }
+
+    pub fn invalidate(&self, agent_alias: &str) {
+        self.entries.lock().remove(agent_alias.trim());
+    }
+
+    pub fn clear(&self) {
+        self.entries.lock().clear();
+    }
+}
+
+/// Process-wide per-agent L0 pinned digest warm cache (300-second TTL).
+pub fn shared_pinned_digest_cache() -> &'static PinnedDigestCache {
+    static CACHE: OnceLock<PinnedDigestCache> = OnceLock::new();
+    CACHE.get_or_init(PinnedDigestCache::default)
+}
+
+/// Format a [`PinnedDigest`] into the `[Pinned memory index]` L0 prefix block.
+#[must_use]
+pub fn format_pinned_memory_index(digest: &PinnedDigest) -> Option<String> {
+    let trimmed = digest.rendered_index.trim();
+    if trimmed.is_empty() {
+        return None;
+    }
+    Some(format!(
+        "{PINNED_MEMORY_INDEX_OPEN}\n{trimmed}\n{PINNED_MEMORY_INDEX_CLOSE}"
+    ))
+}
+
+/// Idempotently attach the frozen L0 `[Pinned memory index]` prefix into the
+/// leading `system` message so prompt-cache prefixes stay stable across turns.
+pub fn inject_pinned_memory_index(history: &mut Vec<ChatMessage>, block: &str) {
+    if block.trim().is_empty() {
+        return;
+    }
+    if history
+        .iter()
+        .any(|msg| msg.role == "system" && msg.content.contains(PINNED_MEMORY_INDEX_OPEN))
+    {
+        return;
+    }
+    crate::agent::history::append_or_merge_system_message(history, block);
+}
 
 /// The stable, per-agent-config half of the injection policy. Callers build
 /// it from the agent's resolved memory config; the per-turn half (origin,
@@ -2022,5 +2148,200 @@ mod tests {
             assert!(rendered.contains("GROUP_FACT"), "{rendered}");
             assert!(!rendered.contains("SENDER_CANARY"), "{rendered}");
         }
+    }
+
+    struct PinnedDigestFixtureMemory {
+        loads: std::sync::atomic::AtomicUsize,
+        digests_by_agent: Mutex<HashMap<String, Vec<PinnedDigest>>>,
+    }
+
+    impl PinnedDigestFixtureMemory {
+        fn new(digests_by_agent: HashMap<String, Vec<PinnedDigest>>) -> Self {
+            Self {
+                loads: std::sync::atomic::AtomicUsize::new(0),
+                digests_by_agent: Mutex::new(digests_by_agent),
+            }
+        }
+    }
+
+    #[async_trait]
+    impl Memory for PinnedDigestFixtureMemory {
+        fn name(&self) -> &str {
+            "pinned-fixture"
+        }
+        async fn store(
+            &self,
+            _key: &str,
+            _content: &str,
+            _category: MemoryCategory,
+            _session_id: Option<&str>,
+        ) -> anyhow::Result<()> {
+            Ok(())
+        }
+        async fn recall(
+            &self,
+            _query: &str,
+            _limit: usize,
+            _session_id: Option<&str>,
+            _since: Option<&str>,
+            _until: Option<&str>,
+        ) -> anyhow::Result<Vec<MemoryEntry>> {
+            Ok(Vec::new())
+        }
+        async fn get(&self, _key: &str) -> anyhow::Result<Option<MemoryEntry>> {
+            Ok(None)
+        }
+        async fn list(
+            &self,
+            _category: Option<&MemoryCategory>,
+            _session_id: Option<&str>,
+        ) -> anyhow::Result<Vec<MemoryEntry>> {
+            Ok(Vec::new())
+        }
+        async fn forget(&self, _key: &str) -> anyhow::Result<bool> {
+            Ok(false)
+        }
+        async fn forget_for_agent(&self, _key: &str, _agent_id: &str) -> anyhow::Result<bool> {
+            Ok(false)
+        }
+        async fn count(&self) -> anyhow::Result<usize> {
+            Ok(0)
+        }
+        async fn health_check(&self) -> bool {
+            true
+        }
+        async fn store_with_agent(
+            &self,
+            _key: &str,
+            _content: &str,
+            _category: MemoryCategory,
+            _session_id: Option<&str>,
+            _namespace: Option<&str>,
+            _importance: Option<f64>,
+            _agent_id: Option<&str>,
+        ) -> anyhow::Result<()> {
+            Ok(())
+        }
+        async fn recall_for_agents(
+            &self,
+            _allowed_agent_ids: &[&str],
+            _query: &str,
+            _limit: usize,
+            _session_id: Option<&str>,
+            _since: Option<&str>,
+            _until: Option<&str>,
+        ) -> anyhow::Result<Vec<MemoryEntry>> {
+            Ok(Vec::new())
+        }
+        async fn load_pinned_digest(&self, agent_id: &str) -> anyhow::Result<Option<PinnedDigest>> {
+            self.loads.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+            let mut map = self.digests_by_agent.lock();
+            let Some(queue) = map.get_mut(agent_id) else {
+                return Ok(None);
+            };
+            if queue.len() > 1 {
+                Ok(Some(queue.remove(0)))
+            } else {
+                Ok(queue.first().cloned())
+            }
+        }
+    }
+
+    impl ::zeroclaw_api::attribution::Attributable for PinnedDigestFixtureMemory {
+        fn role(&self) -> ::zeroclaw_api::attribution::Role {
+            ::zeroclaw_api::attribution::Role::Memory(
+                ::zeroclaw_api::attribution::MemoryKind::InMemory,
+            )
+        }
+        fn alias(&self) -> &str {
+            "PinnedDigestFixtureMemory"
+        }
+    }
+
+    #[tokio::test]
+    async fn pinned_digest_cache_freezes_prefix_within_300s_and_refreshes_after_ttl() {
+        let mem = PinnedDigestFixtureMemory::new(HashMap::from([
+            (
+                "agent-a".to_string(),
+                vec![
+                    PinnedDigest {
+                        agent_id: "agent-a".into(),
+                        rendered_index: "v1-project-alpha".into(),
+                        updated_at: "2026-11-18T08:00:00Z".into(),
+                        source_day_key: Some("2026-11-18".into()),
+                    },
+                    PinnedDigest {
+                        agent_id: "agent-a".into(),
+                        rendered_index: "v2-project-beta".into(),
+                        updated_at: "2026-11-18T08:05:00Z".into(),
+                        source_day_key: Some("2026-11-18".into()),
+                    },
+                ],
+            ),
+            (
+                "agent-b".to_string(),
+                vec![PinnedDigest {
+                    agent_id: "agent-b".into(),
+                    rendered_index: "agent-b-only".into(),
+                    updated_at: "2026-11-18T08:00:00Z".into(),
+                    source_day_key: None,
+                }],
+            ),
+        ]));
+
+        let cache = PinnedDigestCache::default();
+        let t0 = Instant::now();
+
+        let first = cache.get_or_load_at(&mem, "agent-a", t0).await.unwrap();
+        assert!(first.starts_with(PINNED_MEMORY_INDEX_OPEN));
+        assert!(first.contains("v1-project-alpha"));
+        assert!(first.ends_with(PINNED_MEMORY_INDEX_CLOSE));
+        assert_eq!(mem.loads.load(std::sync::atomic::Ordering::SeqCst), 1);
+
+        // Within 300s warm window: identical frozen prefix, zero extra backend loads.
+        let warm = cache
+            .get_or_load_at(&mem, "agent-a", t0 + Duration::from_secs(299))
+            .await
+            .unwrap();
+        assert_eq!(warm, first);
+        assert_eq!(mem.loads.load(std::sync::atomic::Ordering::SeqCst), 1);
+
+        // Distinct agent_alias has its own cache slot.
+        let agent_b = cache
+            .get_or_load_at(&mem, "agent-b", t0 + Duration::from_secs(10))
+            .await
+            .unwrap();
+        assert!(agent_b.contains("agent-b-only"));
+        assert_eq!(mem.loads.load(std::sync::atomic::Ordering::SeqCst), 2);
+
+        // At 300s boundary: TTL expired, reloads v2.
+        let refreshed = cache
+            .get_or_load_at(&mem, "agent-a", t0 + Duration::from_secs(300))
+            .await
+            .unwrap();
+        assert!(refreshed.contains("v2-project-beta"));
+        assert_eq!(mem.loads.load(std::sync::atomic::Ordering::SeqCst), 3);
+
+        // Soul namespace alias fails closed.
+        assert!(cache.get_or_load_at(&mem, "soul", t0).await.is_none());
+    }
+
+    #[test]
+    fn inject_pinned_memory_index_is_idempotent_and_keeps_leading_system() {
+        let block = "[Pinned memory index]\nkey fact\n[/Pinned memory index]";
+        let mut history = vec![
+            ChatMessage::system("base system prompt"),
+            ChatMessage::user("hello"),
+        ];
+        inject_pinned_memory_index(&mut history, block);
+        inject_pinned_memory_index(&mut history, block);
+
+        assert_eq!(history.len(), 2);
+        assert_eq!(history[0].role, "system");
+        assert!(history[0].content.starts_with("base system prompt"));
+        assert_eq!(
+            history[0].content.matches(PINNED_MEMORY_INDEX_OPEN).count(),
+            1
+        );
     }
 }

@@ -3,9 +3,14 @@
 
 use crate::agent::history::estimate_history_tokens;
 use zeroclaw_api::model_provider::ConversationMessage;
+use zeroclaw_infra::session_backend::{SessionCheckpoint, SessionWindow};
 use zeroclaw_providers::ChatMessage;
 
 const TOOL_RESULTS_PREFIX: &str = "[Tool results]";
+/// Opening delimiter for an L1 rolling session checkpoint injected into history.
+pub const SESSION_CHECKPOINT_OPEN: &str = "[Session checkpoint]";
+/// Closing delimiter for an L1 rolling session checkpoint injected into history.
+pub const SESSION_CHECKPOINT_CLOSE: &str = "[/Session checkpoint]";
 
 /// Outcome of a trim pass. `trimmed` is true only when at least one whole turn
 /// was dropped, in which case the caller emits a user-visible event and injects
@@ -126,8 +131,62 @@ fn is_system(msg: &ChatMessage) -> bool {
 
 fn has_leading_chat_breadcrumb(body: &[ChatMessage]) -> bool {
     let crumb = breadcrumb();
-    body.first()
-        .is_some_and(|m| m.role == crumb.role && m.content == crumb.content)
+    body.first().is_some_and(|m| {
+        (m.role == crumb.role && m.content == crumb.content) || is_session_checkpoint_message(m)
+    })
+}
+
+fn leading_preserved_checkpoint(body: &[ChatMessage]) -> Option<&ChatMessage> {
+    body.first().filter(|m| is_session_checkpoint_message(m))
+}
+
+/// Format an L1 [`SessionCheckpoint`] into a model-visible summary block.
+#[must_use]
+pub fn format_session_checkpoint(checkpoint: &SessionCheckpoint) -> String {
+    format!(
+        "{SESSION_CHECKPOINT_OPEN}\nup_to_message_id: {}\n{}\n{SESSION_CHECKPOINT_CLOSE}",
+        checkpoint.up_to_message_id,
+        checkpoint.digest.trim()
+    )
+}
+
+/// Build the synthetic `user` [`ChatMessage`] carrying an L1 [`SessionCheckpoint`].
+#[must_use]
+pub fn session_checkpoint_message(checkpoint: &SessionCheckpoint) -> ChatMessage {
+    ChatMessage::user(format_session_checkpoint(checkpoint))
+}
+
+/// Returns true when `msg` is a synthetic L1 `[Session checkpoint]` message.
+#[must_use]
+pub fn is_session_checkpoint_message(msg: &ChatMessage) -> bool {
+    msg.role == "user"
+        && msg
+            .content
+            .trim_start()
+            .starts_with(SESSION_CHECKPOINT_OPEN)
+}
+
+/// Materialize a chat history from a [`SessionWindow`], injecting its active L1
+/// `[Session checkpoint]` ahead of the post-watermark delta messages when present.
+#[must_use]
+pub fn history_from_session_window(window: &SessionWindow) -> Vec<ChatMessage> {
+    let mut history = Vec::with_capacity(
+        usize::from(window.active_checkpoint.is_some()) + window.delta_messages.len(),
+    );
+    if let Some(ckpt) = window
+        .active_checkpoint
+        .as_ref()
+        .filter(|c| !c.digest.trim().is_empty())
+    {
+        history.push(session_checkpoint_message(ckpt));
+    }
+    history.extend(
+        window
+            .delta_messages
+            .iter()
+            .map(|(_, ts_msg)| ts_msg.message.clone()),
+    );
+    history
 }
 
 /// Drop oldest whole turns until the history fits `budget_tokens`, always
@@ -152,6 +211,7 @@ pub fn trim_to_recent_turns(history: Vec<ChatMessage>, budget_tokens: usize) -> 
     let system: Vec<ChatMessage> = history[..leading_system].to_vec();
     let body = &history[leading_system..];
     let has_leading_breadcrumb = has_leading_chat_breadcrumb(body);
+    let preserved_checkpoint = leading_preserved_checkpoint(body);
     let synthetic_messages = usize::from(has_leading_breadcrumb);
 
     let boundaries: Vec<usize> = body
@@ -177,6 +237,9 @@ pub fn trim_to_recent_turns(history: Vec<ChatMessage>, budget_tokens: usize) -> 
     for &b in boundaries.iter().take(boundaries.len() - 1) {
         let candidate_start = next_boundary_after(&boundaries, b);
         let mut probe = system.clone();
+        if let Some(ckpt) = preserved_checkpoint {
+            probe.push(ckpt.clone());
+        }
         probe.extend_from_slice(&body[candidate_start..]);
         start = candidate_start;
         if estimate_history_tokens(&probe) <= budget_tokens {
@@ -199,6 +262,9 @@ pub fn trim_to_recent_turns(history: Vec<ChatMessage>, budget_tokens: usize) -> 
     let dropped_messages = start.saturating_sub(synthetic_messages);
     let dropped_turns = boundaries.iter().filter(|&&b| b < start).count();
     let mut kept = system;
+    if let Some(ckpt) = preserved_checkpoint {
+        kept.push(ckpt.clone());
+    }
     kept.extend_from_slice(&body[start..]);
     let kept_turns = total_turns - dropped_turns;
     let tokens_after = estimate_history_tokens(&kept);
@@ -212,6 +278,22 @@ pub fn trim_to_recent_turns(history: Vec<ChatMessage>, budget_tokens: usize) -> 
         tokens_after,
         trimmed: true,
     }
+}
+
+/// Trim oldest whole turns to `budget_tokens` while preserving an active
+/// [`SessionCheckpoint`] (or any leading checkpoint already in `history`) in
+/// place of a bare trim notice when trimming occurs.
+pub fn trim_to_recent_turns_with_checkpoint(
+    history: Vec<ChatMessage>,
+    budget_tokens: usize,
+    checkpoint: Option<&SessionCheckpoint>,
+) -> TrimResult {
+    let mut result = trim_to_recent_turns(history, budget_tokens);
+    if result.trimmed {
+        insert_checkpoint_or_breadcrumb_deduped(&mut result.history, checkpoint);
+        result.tokens_after = estimate_history_tokens(&result.history);
+    }
+    result
 }
 
 pub fn trim_to_reported_budget(
@@ -268,17 +350,43 @@ pub fn breadcrumb() -> ChatMessage {
 }
 
 /// Insert the trim breadcrumb after the leading system messages, unless one is
-/// already sitting there.
+/// already sitting there (or an L1 `[Session checkpoint]` already occupies that slot).
 pub fn insert_breadcrumb_deduped(history: &mut Vec<ChatMessage>) {
     let system_count = history.iter().take_while(|m| is_system(m)).count();
     let crumb = breadcrumb();
-    let already_present = history
-        .get(system_count)
-        .is_some_and(|m| m.role == crumb.role && m.content == crumb.content);
+    let already_present = history.get(system_count).is_some_and(|m| {
+        (m.role == crumb.role && m.content == crumb.content) || is_session_checkpoint_message(m)
+    });
     if already_present {
         return;
     }
     history.insert(system_count, crumb);
+}
+
+/// Insert or refresh an L1 `[Session checkpoint]` after leading system messages
+/// when `checkpoint` is present, otherwise preserve any existing checkpoint or
+/// fall back to [`insert_breadcrumb_deduped`].
+pub fn insert_checkpoint_or_breadcrumb_deduped(
+    history: &mut Vec<ChatMessage>,
+    checkpoint: Option<&SessionCheckpoint>,
+) {
+    let system_count = history.iter().take_while(|m| is_system(m)).count();
+    let Some(ckpt) = checkpoint.filter(|c| !c.digest.trim().is_empty()) else {
+        insert_breadcrumb_deduped(history);
+        return;
+    };
+    let ckpt_msg = session_checkpoint_message(ckpt);
+    let crumb = breadcrumb();
+    if let Some(existing) = history.get_mut(system_count)
+        && ((existing.role == crumb.role && existing.content == crumb.content)
+            || is_session_checkpoint_message(existing))
+    {
+        if existing.content != ckpt_msg.content {
+            *existing = ckpt_msg;
+        }
+        return;
+    }
+    history.insert(system_count, ckpt_msg);
 }
 
 /// Insert the trim breadcrumb into structured history after leading system
@@ -1022,5 +1130,88 @@ mod tests {
         assert_eq!(r2.dropped_turns, 1);
         assert_eq!(r2.dropped_messages, 2);
         assert_eq!(r2.kept_turns, 1);
+    }
+
+    fn sample_checkpoint(up_to: i64, digest: &str) -> SessionCheckpoint {
+        let now = zeroclaw_api::time::parse_rfc3339("2026-11-18T10:00:00Z").unwrap();
+        SessionCheckpoint {
+            session_key: "sess-1".into(),
+            slot: zeroclaw_infra::session_backend::CheckpointSlot::Active,
+            up_to_message_id: up_to,
+            digest: digest.into(),
+            created_at: now,
+            updated_at: now,
+        }
+    }
+
+    #[test]
+    fn history_from_session_window_injects_active_checkpoint_and_deltas() {
+        let ckpt = sample_checkpoint(42, "Settled: use L0-L3 foreground stack.");
+        let window = SessionWindow {
+            active_checkpoint: Some(ckpt),
+            staged_checkpoint: None,
+            delta_messages: vec![(
+                43,
+                zeroclaw_infra::session_backend::TimestampedMessage {
+                    message: user("latest question"),
+                    created_at: None,
+                    ingress: None,
+                },
+            )],
+        };
+
+        let history = history_from_session_window(&window);
+        assert_eq!(history.len(), 2);
+        assert!(is_session_checkpoint_message(&history[0]));
+        assert!(history[0].content.contains("up_to_message_id: 42"));
+        assert!(
+            history[0]
+                .content
+                .contains("Settled: use L0-L3 foreground stack.")
+        );
+        assert_eq!(history[1].content, "latest question");
+    }
+
+    #[test]
+    fn trim_preserves_session_checkpoint_over_bare_breadcrumb() {
+        let ckpt = sample_checkpoint(42, "Settled: keep checkpoint across overflow.");
+        let big = "x".repeat(4000);
+        let mut h = vec![sys("system")];
+        h.extend(history_from_session_window(&SessionWindow {
+            active_checkpoint: Some(ckpt.clone()),
+            staged_checkpoint: None,
+            delta_messages: vec![],
+        }));
+        h.push(user(&format!("turn1 {big}")));
+        h.push(asst("a1"));
+        h.push(user("turn2 short"));
+        h.push(asst("a2"));
+
+        let r = trim_to_recent_turns_with_checkpoint(h, 200, Some(&ckpt));
+        assert!(r.trimmed);
+        assert_eq!(r.dropped_turns, 1);
+        assert_eq!(r.kept_turns, 1);
+        assert!(is_session_checkpoint_message(&r.history[1]));
+        assert!(r.history[1].content.contains("up_to_message_id: 42"));
+        assert!(
+            !r.history.iter().any(|m| m.content == breadcrumb().content),
+            "must preserve [Session checkpoint] rather than replacing it with bare breadcrumb"
+        );
+        assert!(r.history.iter().any(|m| m.content == "turn2 short"));
+    }
+
+    #[test]
+    fn insert_checkpoint_or_breadcrumb_deduped_upgrades_bare_breadcrumb_and_preserves_existing() {
+        let ckpt = sample_checkpoint(99, "Active checkpoint summary");
+        let mut h = vec![sys("system"), breadcrumb(), user("turn1"), asst("a1")];
+        insert_checkpoint_or_breadcrumb_deduped(&mut h, Some(&ckpt));
+        assert_eq!(h.len(), 4);
+        assert!(is_session_checkpoint_message(&h[1]));
+        assert!(h[1].content.contains("up_to_message_id: 99"));
+
+        // Calling with None preserves existing [Session checkpoint] without stacking bare breadcrumb.
+        insert_checkpoint_or_breadcrumb_deduped(&mut h, None);
+        assert_eq!(h.len(), 4);
+        assert!(is_session_checkpoint_message(&h[1]));
     }
 }

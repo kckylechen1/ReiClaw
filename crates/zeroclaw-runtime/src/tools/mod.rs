@@ -34,6 +34,7 @@ pub use zeroclaw_tools::ask_user::ChannelMapHandle;
 pub use zeroclaw_tools::backup_tool::BackupTool;
 pub use zeroclaw_tools::content_search::ContentSearchTool;
 pub use zeroclaw_tools::data_management::DataManagementTool;
+pub use zeroclaw_tools::episode_read::EpisodeReadTool;
 pub use zeroclaw_tools::escalate::EscalateToHumanTool;
 pub use zeroclaw_tools::file_download::FileDownloadTool;
 pub use zeroclaw_tools::file_edit::FileEditTool;
@@ -63,6 +64,7 @@ pub use zeroclaw_tools::memory_store::MemoryStoreTool;
 pub use zeroclaw_tools::pipeline::PipelineTool;
 pub use zeroclaw_tools::propose_soul_change::ProposeSoulChangeTool;
 pub use zeroclaw_tools::screenshot::ScreenshotTool;
+pub use zeroclaw_tools::session_search::SessionSearchTool;
 pub use zeroclaw_tools::sessions::{
     SessionsCurrentTool, SessionsHistoryTool, SessionsListTool, SessionsSendTool,
 };
@@ -656,6 +658,7 @@ pub fn all_tools_with_runtime(
         Arc::new(CronRunsTool::new(config.clone())),
         Arc::new(MemoryStoreTool::new(memory.clone(), security.clone())),
         Arc::new(MemoryRecallTool::new(memory.clone())),
+        Arc::new(EpisodeReadTool::new(memory.clone(), agent_alias)),
         Arc::new(MemoryForgetTool::new(memory.clone(), security.clone())),
         Arc::new(MemoryExportTool::new(memory.clone())),
         Arc::new(MemoryPurgeTool::new(memory.clone(), security.clone())),
@@ -930,6 +933,10 @@ pub fn all_tools_with_runtime(
         tool_arcs.push(Arc::new(SessionsHistoryTool::new(
             backend.clone(),
             security.clone(),
+        )));
+        tool_arcs.push(Arc::new(SessionSearchTool::new(
+            backend.clone(),
+            agent_alias,
         )));
         tool_arcs.push(Arc::new(SessionsSendTool::new(backend, security.clone())));
     }

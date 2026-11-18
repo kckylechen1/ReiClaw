@@ -57,3 +57,15 @@ tool-mcp-arguments-server-rejected = MCP 服务端拒绝了这些参数。
 tool-mcp-arguments-root-type = 参数必须为 { $expected } 类型，实际为 { $actual }。
 tool-mcp-arguments-missing = 缺少必填字段 { $field }。
 tool-mcp-arguments-field-type = 字段 { $field } 应为 { $expected } 类型，实际为 { $actual }。
+
+# 前台上下文下钻检索工具（session_search、episode_read）。
+tool-session-search = 按关键词搜索当前代理自己持久化的会话记录。返回带 message_id、时间戳的匹配片段，并在存在更新消息时附带时间线警告，以便核实最终结果而非中间尝试。
+tool-session-search-param-query = 要在当前代理持久化会话记录中搜索的关键词。
+tool-session-search-param-session-key = 可选，指定归属于当前代理的单个 session key 以缩小范围。
+tool-session-search-param-limit = 最多返回的匹配条数（默认：10，上限：50）。
+tool-episode-read = 读取当前代理在可选 RFC 3339 时间窗口或会话内未被取代的睡眠记忆片段（episodes），并可选择附带近期每日摘要。已被取代的片段已排除；请勿将早期尝试误认为最终定论。
+tool-episode-read-param-since = 可选，episode ended_at 的 RFC 3339 起始下界。
+tool-episode-read-param-until = 可选，episode ended_at 的 RFC 3339 结束上界。
+tool-episode-read-param-session-id = 可选，按 session_id 过滤。
+tool-episode-read-param-limit = 最多返回的 episode 数量（默认：5，上限：25）。
+tool-episode-read-param-include-daily-digests = 设为 true 时同时附带近期每日摘要（daily digests）。
