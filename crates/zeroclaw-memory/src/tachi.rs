@@ -30,8 +30,8 @@
 
 use super::embeddings::EmbeddingProvider;
 use super::traits::{
-    ExportFilter, Memory, MemoryCategory, MemoryEntry, MemoryStats, RecallEntryPredicate,
-    StoreOptions, is_recent_recall_query,
+    DailyDigest, EpisodeRecord, ExportFilter, Memory, MemoryCategory, MemoryEntry, MemoryStats,
+    PinnedDigest, RecallEntryPredicate, StoreOptions, is_recent_recall_query,
 };
 use crate::kernel_store::{KernelStoreKind, LEGACY_STORE_UNSUPPORTED};
 use crate::point_scope::PointScope;
@@ -1947,6 +1947,52 @@ impl Memory for TachiMemory {
             })
         })
         .await?
+    }
+
+    async fn commit_episode(&self, episode: &EpisodeRecord) -> anyhow::Result<String> {
+        TachiMemory::commit_episode(self, episode).await
+    }
+
+    async fn read_episodes_in_window(
+        &self,
+        agent_id: &str,
+        since: Option<&str>,
+        until: Option<&str>,
+        session_id: Option<&str>,
+        limit: usize,
+    ) -> anyhow::Result<Vec<EpisodeRecord>> {
+        TachiMemory::read_episodes_in_window(self, agent_id, since, until, session_id, limit).await
+    }
+
+    async fn supersede_fact(
+        &self,
+        agent_id: &str,
+        old_key: &str,
+        new_key: &str,
+        new_content: &str,
+        namespace: Option<&str>,
+    ) -> anyhow::Result<String> {
+        TachiMemory::supersede_fact(self, agent_id, old_key, new_key, new_content, namespace).await
+    }
+
+    async fn publish_pinned_digest(&self, digest: &PinnedDigest) -> anyhow::Result<String> {
+        TachiMemory::publish_pinned_digest(self, digest).await
+    }
+
+    async fn load_pinned_digest(&self, agent_id: &str) -> anyhow::Result<Option<PinnedDigest>> {
+        TachiMemory::load_pinned_digest(self, agent_id).await
+    }
+
+    async fn publish_daily_digest(&self, digest: &DailyDigest) -> anyhow::Result<String> {
+        TachiMemory::publish_daily_digest(self, digest).await
+    }
+
+    async fn load_daily_digests(
+        &self,
+        agent_id: &str,
+        limit: usize,
+    ) -> anyhow::Result<Vec<DailyDigest>> {
+        TachiMemory::load_daily_digests(self, agent_id, limit).await
     }
 }
 

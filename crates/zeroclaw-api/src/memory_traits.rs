@@ -1,6 +1,11 @@
 use async_trait::async_trait;
 use serde::{Deserialize, Serialize};
 
+pub use crate::sleep_records::{
+    ActionCandidateStatus, DailyDigest, EpisodeRecord, EpisodeSourceKind, PINNED_DIGEST_MAX_BYTES,
+    PinnedDigest, validate_agent_id, validate_non_soul_key, validate_non_soul_namespace,
+};
+
 /// Host-resolved, ephemeral read authority for one tool-loop turn.
 /// This is independent of automatic-preamble suppression and is never a tool argument.
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
@@ -712,6 +717,88 @@ pub trait Memory: Send + Sync + crate::attribution::Attributable {
         Ok(alias.to_string())
     }
 
+    /// Persist an [`EpisodeRecord`] under the agent's sleep-episode namespace.
+    ///
+    /// Default fails closed so backends without durable sleep storage never
+    /// silently drop writes.
+    async fn commit_episode(&self, _episode: &EpisodeRecord) -> anyhow::Result<String> {
+        anyhow::bail!(
+            "sleep memory writes unsupported by backend '{}'",
+            self.name()
+        )
+    }
+
+    /// Read non-superseded [`EpisodeRecord`]s for `agent_id` within `[since, until]`
+    /// (inclusive on `ended_at`), optionally filtered to `session_id`, newest first.
+    ///
+    /// Default returns an empty list.
+    async fn read_episodes_in_window(
+        &self,
+        _agent_id: &str,
+        _since: Option<&str>,
+        _until: Option<&str>,
+        _session_id: Option<&str>,
+        _limit: usize,
+    ) -> anyhow::Result<Vec<EpisodeRecord>> {
+        Ok(Vec::new())
+    }
+
+    /// Atomically insert/upsert a replacement `Core` fact for `new_key` and
+    /// mark `old_key` as superseded within `agent_id`'s scope.
+    ///
+    /// Default fails closed.
+    async fn supersede_fact(
+        &self,
+        _agent_id: &str,
+        _old_key: &str,
+        _new_key: &str,
+        _new_content: &str,
+        _namespace: Option<&str>,
+    ) -> anyhow::Result<String> {
+        anyhow::bail!(
+            "sleep memory writes unsupported by backend '{}'",
+            self.name()
+        )
+    }
+
+    /// Publish or replace the agent-scoped [`PinnedDigest`].
+    ///
+    /// Default fails closed.
+    async fn publish_pinned_digest(&self, _digest: &PinnedDigest) -> anyhow::Result<String> {
+        anyhow::bail!(
+            "sleep memory writes unsupported by backend '{}'",
+            self.name()
+        )
+    }
+
+    /// Load the active [`PinnedDigest`] for `agent_id`, if present.
+    ///
+    /// Default returns `None`.
+    async fn load_pinned_digest(&self, _agent_id: &str) -> anyhow::Result<Option<PinnedDigest>> {
+        Ok(None)
+    }
+
+    /// Publish or update an agent-scoped [`DailyDigest`].
+    ///
+    /// Default fails closed.
+    async fn publish_daily_digest(&self, _digest: &DailyDigest) -> anyhow::Result<String> {
+        anyhow::bail!(
+            "sleep memory writes unsupported by backend '{}'",
+            self.name()
+        )
+    }
+
+    /// Load agent-scoped [`DailyDigest`]s, ordered newest first, bounded by `limit`.
+    ///
+    /// Default returns an empty list.
+    async fn load_daily_digests(
+        &self,
+        _agent_id: &str,
+        _limit: usize,
+    ) -> anyhow::Result<Vec<DailyDigest>> {
+        Ok(Vec::new())
+    }
+
     #[doc(hidden)]
     #[allow(clippy::too_many_arguments)]
     async fn recall_with_filter(
@@ -1084,6 +1171,95 @@ mod tests {
         assert!(
             err.to_string()
                 .contains("does not support agent-attributed StoreOptions")
+        );
+    }
+
+    #[tokio::test]
+    async fn sleep_memory_defaults_read_empty_and_fail_closed_on_writes() {
+        let memory = LegacyOptionsMemory;
+
+        assert!(
+            memory
+                .read_episodes_in_window("agent_a", None, None, None, 10)
+                .await
+                .unwrap()
+                .is_empty()
+        );
+        assert!(
+            memory
+                .load_pinned_digest("agent_a")
+                .await
+                .unwrap()
+                .is_none()
+        );
+        assert!(
+            memory
+                .load_daily_digests("agent_a", 10)
+                .await
+                .unwrap()
+                .is_empty()
+        );
+
+        let episode = EpisodeRecord {
+            episode_id: "ep-1".into(),
+            agent_id: "agent_a".into(),
+            session_key: "sess-1".into(),
+            started_at: "2026-11-18T00:00:00Z".into(),
+            ended_at: "2026-11-18T01:00:00Z".into(),
+            up_to_message_id: None,
+            summary: "summary".into(),
+            why_and_tradeoffs: vec![],
+            settled_decisions: vec![],
+            rejected_options: vec![],
+            entities: vec![],
+            source_kind: EpisodeSourceKind::Dialogue,
+        };
+        let err = memory.commit_episode(&episode).await.unwrap_err();
+        assert!(
+            err.to_string()
+                .contains("sleep memory writes unsupported by backend 'legacy-options'")
+        );
+
+        let err = memory
+            .supersede_fact("agent_a", "old_k", "new_k", "new_v", None)
+            .await
+            .unwrap_err();
+        assert!(
+            err.to_string()
+                .contains("sleep memory writes unsupported by backend 'legacy-options'")
+        );
+
+        let pinned = PinnedDigest {
+            agent_id: "agent_a".into(),
+            rendered_index: "index".into(),
+            updated_at: "2026-11-18T01:00:00Z".into(),
+            source_day_key: None,
+        };
+        let err = memory.publish_pinned_digest(&pinned).await.unwrap_err();
+        assert!(
+            err.to_string()
+                .contains("sleep memory writes unsupported by backend 'legacy-options'")
+        );
+
+        let daily = DailyDigest {
+            day_key: "2026-11-18".into(),
+            agent_id: "agent_a".into(),
+            window_start: "2026-11-17T04:00:00Z".into(),
+            window_end: "2026-11-18T04:00:00Z".into(),
+            narrative: "daily narrative".into(),
+            settled_decisions: vec![],
+            why_and_tradeoffs: vec![],
+            latent_insights: vec![],
+            action_candidates: vec![],
+            entities: vec![],
+            created_at: "2026-11-18T04:01:00Z".into(),
+            owner_edited: false,
+            action_decisions: std::collections::BTreeMap::new(),
+        };
+        let err = memory.publish_daily_digest(&daily).await.unwrap_err();
+        assert!(
+            err.to_string()
+                .contains("sleep memory writes unsupported by backend 'legacy-options'")
         );
     }
 }

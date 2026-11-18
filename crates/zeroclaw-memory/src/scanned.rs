@@ -28,8 +28,8 @@ use crate::policy::PolicyEnforcer;
 use crate::redact::{self, RedactCategory};
 use crate::threat::{self, Scope};
 use crate::traits::{
-    ExportFilter, Memory, MemoryCategory, MemoryEntry, MemoryStats, ProceduralMessage,
-    RecallEntryPredicate, StoreOptions,
+    DailyDigest, EpisodeRecord, ExportFilter, Memory, MemoryCategory, MemoryEntry, MemoryStats,
+    PinnedDigest, ProceduralMessage, RecallEntryPredicate, StoreOptions,
 };
 use async_trait::async_trait;
 use std::sync::Arc;
@@ -694,6 +694,75 @@ impl<M: Memory> Memory for ScannedMemory<M> {
                 combined,
             )
             .await
+    }
+
+    async fn commit_episode(&self, episode: &EpisodeRecord) -> anyhow::Result<String> {
+        let summary =
+            self.process_content(&episode.episode_id, &episode.summary, Some("sleep_episode"))?;
+        let mut sanitized = episode.clone();
+        sanitized.summary = summary;
+        self.inner.commit_episode(&sanitized).await
+    }
+
+    async fn read_episodes_in_window(
+        &self,
+        agent_id: &str,
+        since: Option<&str>,
+        until: Option<&str>,
+        session_id: Option<&str>,
+        limit: usize,
+    ) -> anyhow::Result<Vec<EpisodeRecord>> {
+        self.inner
+            .read_episodes_in_window(agent_id, since, until, session_id, limit)
+            .await
+    }
+
+    async fn supersede_fact(
+        &self,
+        agent_id: &str,
+        old_key: &str,
+        new_key: &str,
+        new_content: &str,
+        namespace: Option<&str>,
+    ) -> anyhow::Result<String> {
+        let new_content = self.process_content(new_key, new_content, namespace)?;
+        self.inner
+            .supersede_fact(agent_id, old_key, new_key, &new_content, namespace)
+            .await
+    }
+
+    async fn publish_pinned_digest(&self, digest: &PinnedDigest) -> anyhow::Result<String> {
+        let rendered_index = self.process_content(
+            "sleep:pinned_digest",
+            &digest.rendered_index,
+            Some("sleep_pinned_digest"),
+        )?;
+        let mut sanitized = digest.clone();
+        sanitized.rendered_index = rendered_index;
+        self.inner.publish_pinned_digest(&sanitized).await
+    }
+
+    async fn load_pinned_digest(&self, agent_id: &str) -> anyhow::Result<Option<PinnedDigest>> {
+        self.inner.load_pinned_digest(agent_id).await
+    }
+
+    async fn publish_daily_digest(&self, digest: &DailyDigest) -> anyhow::Result<String> {
+        let narrative = self.process_content(
+            &digest.day_key,
+            &digest.narrative,
+            Some("sleep_daily_digest"),
+        )?;
+        let mut sanitized = digest.clone();
+        sanitized.narrative = narrative;
+        self.inner.publish_daily_digest(&sanitized).await
+    }
+
+    async fn load_daily_digests(
+        &self,
+        agent_id: &str,
+        limit: usize,
+    ) -> anyhow::Result<Vec<DailyDigest>> {
+        self.inner.load_daily_digests(agent_id, limit).await
     }
 }
 

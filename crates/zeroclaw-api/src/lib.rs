@@ -30,6 +30,7 @@ pub mod runtime_status;
 pub mod runtime_traits;
 pub mod schema;
 pub mod session_keys;
+pub mod sleep_records;
 pub mod subagent_v1;
 pub mod tachi_staff;
 pub mod time;
@@ -70,3 +71,8 @@ tokio::task_local! {
 pub mod policy;
 
 pub mod node_tools;
+
+pub use sleep_records::{
+    ActionCandidateStatus, DailyDigest, EpisodeRecord, EpisodeSourceKind, PINNED_DIGEST_MAX_BYTES,
+    PinnedDigest, validate_agent_id, validate_non_soul_key, validate_non_soul_namespace,
+};
