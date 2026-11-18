@@ -975,50 +975,6 @@ impl Agent {
         ))
     }
 
-    /// Build this turn's user message and put it in history.
-    ///
-    /// Called once per user message, which includes each mid-turn steering
-    /// message.
-    async fn append_streamed_user_message_to_history(
-        &mut self,
-        user_message: &str,
-        new_msgs: &mut Vec<ConversationMessage>,
-        turn_id: &str,
-    ) {
-        // Memory context is injected once in the engine, keyed on the
-        // ingress origin (agent::memory_inject).
-        if self.auto_save {
-            let store_start = std::time::Instant::now();
-            let store_result = self
-                .memory
-                .store(
-                    "user_msg",
-                    user_message,
-                    MemoryCategory::Conversation,
-                    self.memory_session_id.as_deref(),
-                )
-                .await;
-            self.observer.record_event(&ObserverEvent::MemoryStore {
-                category: MemoryCategory::Conversation.to_string(),
-                backend: self.memory.name().to_string(),
-                duration: store_start.elapsed(),
-                success: store_result.is_ok(),
-                channel: Some(self.channel_name.clone()),
-                agent_alias: self.observer_agent_alias(),
-                turn_id: Some(turn_id.to_string()),
-            });
-        }
-
-        let now = self
-            .current_turn_datetime()
-            .strftime("%Y-%m-%d %H:%M:%S %:z");
-        let enriched = format!("[{now}] {user_message}");
-
-        let user_msg = ConversationMessage::Chat(ChatMessage::user(enriched));
-        new_msgs.push(user_msg.clone());
-        self.history.push(user_msg);
-    }
-
     pub fn set_memory_session_id(&mut self, session_id: Option<String>) {
         self.memory_session_id = session_id;
     }

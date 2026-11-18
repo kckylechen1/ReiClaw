@@ -822,10 +822,11 @@ struct TranscriptCaptureModelProvider {
 }
 
 #[tokio::test]
-async fn dated_turns_share_an_undated_system_prefix_across_entry_points() {
+async fn dated_turns_share_provider_payload_and_history_across_entry_points() {
     let workspace = tempfile::tempdir().unwrap();
     let seen = Arc::new(Mutex::new(Vec::new()));
     let mut expected_dates = Vec::new();
+    let mut histories = Vec::new();
     for streamed in [false, true] {
         for timestamp in ["2026-01-01T12:00:00+00:00", "2026-01-02T12:00:00+00:00"] {
             let fixed = zeroclaw_api::time::parse_rfc3339(timestamp)
@@ -851,13 +852,19 @@ async fn dated_turns_share_an_undated_system_prefix_across_entry_points() {
                 .unwrap();
             if streamed {
                 let (event_tx, _event_rx) = tokio::sync::mpsc::channel(64);
-                agent
+                let (_, new_messages) = agent
                     .turn_streamed("fixture question", event_tx, None)
                     .await
                     .unwrap();
+                assert_eq!(
+                    serde_json::to_value(&new_messages).unwrap(),
+                    serde_json::to_value(&agent.history[1..]).unwrap(),
+                    "streamed output must contain the same committed user/reply history"
+                );
             } else {
                 agent.turn("fixture question").await.unwrap();
             }
+            histories.push(serde_json::to_value(&agent.history).unwrap());
         }
     }
     let requests = seen.lock();
@@ -870,14 +877,21 @@ async fn dated_turns_share_an_undated_system_prefix_across_entry_points() {
             system.content
         );
         let user = request.iter().rev().find(|m| m.role == "user").unwrap();
-        assert!(
-            user.content.contains(date),
-            "missing current turn date: {}",
-            user.content
-        );
-        assert!(user.content.contains("fixture question"));
+        assert_eq!(user.content, format!("[{date}] fixture question"));
     }
     assert_ne!(expected_dates[0], expected_dates[1]);
+    for date_index in 0..2 {
+        assert_eq!(
+            serde_json::to_value(&requests[date_index]).unwrap(),
+            serde_json::to_value(&requests[date_index + 2]).unwrap(),
+            "ordinary and streamed entry points must send the same provider payload"
+        );
+        assert_eq!(
+            histories[date_index],
+            histories[date_index + 2],
+            "ordinary and streamed entry points must retain the same conversation"
+        );
+    }
 }
 
 #[tokio::test]
@@ -4784,7 +4798,7 @@ async fn response_cache_does_not_cross_serve_memory_conditioned_answers() {
     }
 
     // Frozen clock so both turns share a byte-identical bare transcript (the
-    // per-turn `[CURRENT DATE & TIME]` prefix is otherwise second-precision),
+    // per-turn timestamp prefix is otherwise second-precision),
     // which is what makes the two pre-injection cache keys collide.
     let fixed = zeroclaw_api::time::parse_rfc3339("2026-01-01T00:00:00+00:00")
         .unwrap()

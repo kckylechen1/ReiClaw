@@ -6,26 +6,13 @@ use anyhow::Result;
 use zeroclaw_api::agent::TurnEvent;
 use zeroclaw_providers::{ChatMessage, ConversationMessage};
 
-impl Agent {
-    pub async fn turn(&mut self, user_message: &str) -> Result<String> {
-        if user_message.trim().is_empty() {
-            ::zeroclaw_log::record!(
-                WARN,
-                ::zeroclaw_log::Event::new(module_path!(), ::zeroclaw_log::Action::Reject)
-                    .with_category(::zeroclaw_log::EventCategory::Agent)
-                    .with_outcome(::zeroclaw_log::EventOutcome::Failure)
-                    .with_attrs(::serde_json::json!({
-                        "reason": "empty_user_message",
-                        "entry_point": "Agent::turn",
-                        "raw_len": user_message.len(),
-                    })),
-                "Refusing blank user turn (would emit timestamp-only message and risk prompt-template bleed-through)"
-            );
-            return Err(anyhow::Error::msg(
-                "empty user message: refusing to dispatch a blank turn",
-            ));
-        }
+struct PreparedProviderMessages {
+    messages: Vec<ChatMessage>,
+    vision_provider: Option<crate::agent::turn::vision_route::ResolvedVisionProvider>,
+}
 
+impl Agent {
+    async fn initialize_turn_history(&mut self) -> Result<()> {
         self.assemble_turn_context().await;
         if self.history.is_empty() {
             let system_prompt = self.build_system_prompt()?;
@@ -34,20 +21,13 @@ impl Agent {
                     system_prompt,
                 )));
         }
+        Ok(())
+    }
 
-        let effective_model = self.classify_model(user_message);
-
-        let turn_id = Self::new_turn_id();
-        let turn_observer = Arc::clone(&self.observer);
-        let mut guard = crate::observability::AgentTurnGuard::start(
-            turn_observer.as_ref(),
-            self.model_provider_name.clone(),
-            effective_model.clone(),
-            Some(self.channel_name.clone()),
-            self.observer_agent_alias(),
-            Some(turn_id.clone()),
-        );
-
+    /// Prepare one accepted user message, including mid-turn steering.
+    /// Callers own transcript insertion so steering stays round-local until
+    /// hooks have observed it and the completed round is replayed.
+    async fn prepare_user_message(&mut self, user_message: &str, turn_id: &str) -> ChatMessage {
         // Memory context is injected once in the engine, keyed on the
         // ingress origin (agent::memory_inject).
         if self.auto_save {
@@ -68,55 +48,90 @@ impl Agent {
                 success: store_result.is_ok(),
                 channel: Some(self.channel_name.clone()),
                 agent_alias: self.observer_agent_alias(),
-                turn_id: Some(turn_id.clone()),
+                turn_id: Some(turn_id.to_string()),
             });
         }
 
-        let now = self.current_turn_datetime();
-        let (year, month, day) = (now.year(), now.month(), now.day());
-        let (hour, minute, second) = (now.hour(), now.minute(), now.second());
-        let tz = now.strftime("%:z");
-        let date_str =
-            format!("{year:04}-{month:02}-{day:02} {hour:02}:{minute:02}:{second:02} {tz}");
+        let now = self
+            .current_turn_datetime()
+            .strftime("%Y-%m-%d %H:%M:%S %:z");
+        ChatMessage::user(format!("[{now}] {user_message}"))
+    }
 
-        let enriched = format!("[CURRENT DATE & TIME: {date_str}]\n\n{user_message}");
+    /// Select the initial vision route and render the prompt/transcript for
+    /// its dispatcher. Entry points keep their own error and event handling.
+    fn prepare_provider_messages(
+        &mut self,
+        effective_model: &str,
+    ) -> Result<PreparedProviderMessages> {
+        let base_messages = self.tool_dispatcher.to_provider_messages(&self.history);
+        let (vision_provider, _degrade_strip_images) = crate::agent::turn::resolve_vision_provider(
+            self.full_config(),
+            self.model_provider.as_ref(),
+            &base_messages,
+            &self.multimodal_config,
+            &self.model_provider_name,
+            effective_model,
+        )?;
+        let active_provider: &dyn ModelProvider = vision_provider
+            .as_ref()
+            .map(|resolved| resolved.provider.as_ref())
+            .unwrap_or(self.model_provider.as_ref());
+        let dispatcher = tool_dispatcher_for_provider(&self.config, active_provider);
+        self.rebuild_system_prompt_for_dispatcher(dispatcher.as_ref())?;
+        Ok(PreparedProviderMessages {
+            messages: dispatcher.to_provider_messages(&self.history),
+            vision_provider,
+        })
+    }
 
-        self.history
-            .push(ConversationMessage::Chat(ChatMessage::user(enriched)));
-
-        let (active_dispatcher, initial_vision_provider) = {
-            let base_provider_messages = self.tool_dispatcher.to_provider_messages(&self.history);
-            let (vision_provider_box, _degrade_strip_images) =
-                match crate::agent::turn::resolve_vision_provider(
-                    self.full_config(),
-                    self.model_provider.as_ref(),
-                    &base_provider_messages,
-                    &self.multimodal_config,
-                    &self.model_provider_name,
-                    &effective_model,
-                ) {
-                    Ok(resolved) => resolved,
-                    Err(error) => {
-                        let _ = self.trim_history(Some(&turn_id));
-                        return Err(error);
-                    }
-                };
-            let active_provider: &dyn ModelProvider = vision_provider_box
-                .as_ref()
-                .map(|resolved| resolved.provider.as_ref())
-                .unwrap_or(self.model_provider.as_ref());
-            (
-                tool_dispatcher_for_provider(&self.config, active_provider),
-                vision_provider_box,
-            )
-        };
-
-        if let Err(error) = self.rebuild_system_prompt_for_dispatcher(active_dispatcher.as_ref()) {
-            let _ = self.trim_history(Some(&turn_id));
-            return Err(error);
+    pub async fn turn(&mut self, user_message: &str) -> Result<String> {
+        if user_message.trim().is_empty() {
+            ::zeroclaw_log::record!(
+                WARN,
+                ::zeroclaw_log::Event::new(module_path!(), ::zeroclaw_log::Action::Reject)
+                    .with_category(::zeroclaw_log::EventCategory::Agent)
+                    .with_outcome(::zeroclaw_log::EventOutcome::Failure)
+                    .with_attrs(::serde_json::json!({
+                        "reason": "empty_user_message",
+                        "entry_point": "Agent::turn",
+                        "raw_len": user_message.len(),
+                    })),
+                "Refusing blank user turn (would emit timestamp-only message and risk prompt-template bleed-through)"
+            );
+            return Err(anyhow::Error::msg(
+                "empty user message: refusing to dispatch a blank turn",
+            ));
         }
 
-        let provider_messages = active_dispatcher.to_provider_messages(&self.history);
+        self.initialize_turn_history().await?;
+
+        let effective_model = self.classify_model(user_message);
+
+        let turn_id = Self::new_turn_id();
+        let turn_observer = Arc::clone(&self.observer);
+        let mut guard = crate::observability::AgentTurnGuard::start(
+            turn_observer.as_ref(),
+            self.model_provider_name.clone(),
+            effective_model.clone(),
+            Some(self.channel_name.clone()),
+            self.observer_agent_alias(),
+            Some(turn_id.clone()),
+        );
+
+        let user_msg = self.prepare_user_message(user_message, &turn_id).await;
+        self.history.push(ConversationMessage::Chat(user_msg));
+
+        let PreparedProviderMessages {
+            messages: provider_messages,
+            vision_provider: initial_vision_provider,
+        } = match self.prepare_provider_messages(&effective_model) {
+            Ok(prepared) => prepared,
+            Err(error) => {
+                let _ = self.trim_history(Some(&turn_id));
+                return Err(error);
+            }
+        };
         let _side_query_turn_guard = self.side_query.enter_turn(&turn_id);
         let (side_provider, side_provider_name, side_model) =
             initial_vision_provider.as_ref().map_or_else(
@@ -387,21 +402,13 @@ impl Agent {
             });
         }
 
-        // ── Preamble (identical to turn) ───────────────────────────────
-        self.assemble_turn_context().await;
-        if self.history.is_empty() {
-            let system_prompt = self
-                .build_system_prompt()
-                .map_err(|error| StreamedTurnError {
-                    error,
-                    committed_response: String::new(),
-                    new_messages: Vec::new(),
-                })?;
-            self.history
-                .push(ConversationMessage::Chat(ChatMessage::system(
-                    system_prompt,
-                )));
-        }
+        self.initialize_turn_history()
+            .await
+            .map_err(|error| StreamedTurnError {
+                error,
+                committed_response: String::new(),
+                new_messages: Vec::new(),
+            })?;
 
         let mut new_msgs: Vec<ConversationMessage> = Vec::new();
         let effective_model = self.classify_model(user_message);
@@ -422,52 +429,26 @@ impl Agent {
             self.observer_agent_alias(),
             Some(turn_id.clone()),
         );
-        self.append_streamed_user_message_to_history(user_message, &mut new_msgs, &turn_id)
-            .await;
+        let user_msg =
+            ConversationMessage::Chat(self.prepare_user_message(user_message, &turn_id).await);
+        new_msgs.push(user_msg.clone());
+        self.history.push(user_msg);
 
-        let (active_dispatcher, initial_vision_provider) = {
-            let base_provider_messages = self.tool_dispatcher.to_provider_messages(&self.history);
-            let (vision_provider_box, _degrade_strip_images) =
-                match crate::agent::turn::resolve_vision_provider(
-                    self.full_config(),
-                    self.model_provider.as_ref(),
-                    &base_provider_messages,
-                    &self.multimodal_config,
-                    &self.model_provider_name,
-                    &effective_model,
-                ) {
-                    Ok(resolved) => resolved,
-                    Err(error) => {
-                        let notice = self.trim_history(Some(&turn_id));
-                        forward_history_trim_notice(&event_tx, notice).await;
-                        return Err(StreamedTurnError {
-                            error,
-                            committed_response: String::new(),
-                            new_messages: new_msgs,
-                        });
-                    }
-                };
-            let active_provider: &dyn ModelProvider = vision_provider_box
-                .as_ref()
-                .map(|resolved| resolved.provider.as_ref())
-                .unwrap_or(self.model_provider.as_ref());
-            (
-                tool_dispatcher_for_provider(&self.config, active_provider),
-                vision_provider_box,
-            )
+        let PreparedProviderMessages {
+            messages: provider_messages,
+            vision_provider: initial_vision_provider,
+        } = match self.prepare_provider_messages(&effective_model) {
+            Ok(prepared) => prepared,
+            Err(error) => {
+                let notice = self.trim_history(Some(&turn_id));
+                forward_history_trim_notice(&event_tx, notice).await;
+                return Err(StreamedTurnError {
+                    error,
+                    committed_response: String::new(),
+                    new_messages: new_msgs,
+                });
+            }
         };
-
-        if let Err(error) = self.rebuild_system_prompt_for_dispatcher(active_dispatcher.as_ref()) {
-            let notice = self.trim_history(Some(&turn_id));
-            forward_history_trim_notice(&event_tx, notice).await;
-            return Err(StreamedTurnError {
-                error,
-                committed_response: String::new(),
-                new_messages: new_msgs,
-            });
-        }
-
-        let provider_messages = active_dispatcher.to_provider_messages(&self.history);
         let _side_query_turn_guard = self.side_query.enter_turn(&turn_id);
         let (side_provider, side_provider_name, side_model) =
             initial_vision_provider.as_ref().map_or_else(
@@ -605,36 +586,9 @@ impl Agent {
             // the message that triggered it is better than holding it back
             // until the whole turn ends.
             for steering_message in crate::agent::loop_::drain_steering_messages(&mut steering_rx) {
-                // Mirror the enrichment logic from append_streamed_user_message_to_history
-                // but route through round_added instead of self.history/new_msgs, so
-                // the before-llm-call hook sees steering messages as round-local context
-                // without polluting the durable history (PR-A behavioral equivalence).
-                if self.auto_save {
-                    let store_start = std::time::Instant::now();
-                    let store_result = self
-                        .memory
-                        .store(
-                            "user_msg",
-                            &steering_message,
-                            MemoryCategory::Conversation,
-                            self.memory_session_id.as_deref(),
-                        )
-                        .await;
-                    self.observer.record_event(&ObserverEvent::MemoryStore {
-                        category: MemoryCategory::Conversation.to_string(),
-                        backend: self.memory.name().to_string(),
-                        duration: store_start.elapsed(),
-                        success: store_result.is_ok(),
-                        channel: Some(self.channel_name.clone()),
-                        agent_alias: self.observer_agent_alias(),
-                        turn_id: Some(turn_id.clone()),
-                    });
-                }
-                let now = self
-                    .current_turn_datetime()
-                    .strftime("%Y-%m-%d %H:%M:%S %:z");
-                let enriched = format!("[{now}] {steering_message}");
-                round_added.push(ChatMessage::user(enriched));
+                // Keep steering round-local until the before-llm-call hook
+                // has seen it; replay below owns durable history/new_msgs.
+                round_added.push(self.prepare_user_message(&steering_message, &turn_id).await);
             }
             let round_loop = crate::agent::loop_::TOOL_LOOP_COST_TRACKING_CONTEXT.scope(
                 Some(cost_context.clone()),
