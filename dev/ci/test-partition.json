@@ -10,6 +10,9 @@
       "zeroclawlabs",
       "zeroclaw-config"
     ],
+    "eval": [
+      "zeroclaw-eval"
+    ],
     "tail": [
       "fill-translations",
       "xtask",
@@ -17,7 +20,6 @@
       "zeroclaw-bridge-acp",
       "zeroclaw-bridge-telegram",
       "zeroclaw-cost",
-      "zeroclaw-eval",
       "zeroclaw-gateway-client",
       "zeroclaw-http",
       "zeroclaw-infra",
@@ -45,6 +47,9 @@
     ],
     "app": [
       "zeroclawlabs/nodes"
+    ],
+    "eval": [
+      "zeroclaw-memory/tachi"
     ],
     "tail": [
       "zeroclaw-memory/tachi"

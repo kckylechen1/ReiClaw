@@ -11,12 +11,16 @@
 #   scripts/dev/leg.sh --dry-run <leg>         print the commands only
 #   scripts/dev/leg.sh --no-run <leg>          compile every phase without running tests
 #   scripts/dev/leg.sh --no-fail-fast <leg>    finish the tests within each phase
+#   scripts/dev/leg.sh --phase <name> <leg>    run one phase: `main` or an extra run's name
 #   scripts/dev/leg.sh --list                  list legs and their packages
+#   scripts/dev/leg.sh --matrix                print every leg phase as a CI matrix (JSON)
 #   scripts/dev/leg.sh --check                 partition covers every member once
 #   scripts/dev/leg.sh --help
 #
-# Options before <leg> apply to the main and extra runs. Cargo args after
-# <leg> (including --no-run) still apply to the main run only.
+# Without --phase a leg runs its main phase, then each extra run, in order;
+# CI runs each phase as its own parallel job. Options before <leg> apply to
+# every selected phase. Cargo args after <leg> (including --no-run) still
+# apply to the main run only.
 # The runner is cargo-nextest when installed (as in CI), otherwise
 # `cargo test`; force one with LEG_RUNNER=nextest|test.
 #
@@ -55,12 +59,45 @@ check_partition() {
     diff <(printf '%s\n' "$members") <(printf '%s\n' "$listed") >&2 || true
     exit 1
   fi
+  check_phases
   echo "test-partition.json covers every workspace member exactly once."
+}
+
+# Each phase becomes its own CI job, so a phase name must be addressable:
+# `features`/`extra_runs` may only name existing legs, and extra-run names
+# are unique within their leg and never `main`.
+check_phases() {
+  local problems
+  problems="$(jq -r '
+    (.legs | keys) as $legs
+    | ((.features // {}) | keys[] | select(. as $k | $legs | index($k) | not)
+        | "features names unknown leg \(.)"),
+      ((.extra_runs // {}) | keys[] | select(. as $k | $legs | index($k) | not)
+        | "extra_runs names unknown leg \(.)"),
+      ((.extra_runs // {}) | to_entries[] | .key as $leg | [.value[].name]
+        | (.[] | select(. == "main") | "\($leg): an extra run may not be named main"),
+          (group_by(.)[] | select(length > 1) | "\($leg): duplicate extra run \(.[0])"))
+  ' "$PARTITION")"
+  if [[ -n "$problems" ]]; then
+    die "test-partition.json phases: $problems"
+  fi
+}
+
+# One CI job per phase: each leg's main run, then each of its extra runs.
+print_matrix() {
+  jq -c '
+    . as $partition
+    | [ .legs | keys_unsorted[] as $leg
+        | {name: $leg, leg: $leg, phase: "main"},
+          ($partition.extra_runs[$leg] // [] | .[]
+            | {name: "\($leg) / \(.name)", leg: $leg, phase: .name}) ]
+  ' "$PARTITION"
 }
 
 dry_run=0
 compile_only=0
 no_fail_fast=0
+phase=""
 if [[ $# -eq 0 ]]; then
   usage >&2
   exit 2
@@ -78,6 +115,16 @@ while [[ $# -gt 0 ]]; do
     --check)
       check_partition
       exit 0
+      ;;
+    --matrix)
+      check_phases
+      print_matrix
+      exit 0
+      ;;
+    --phase)
+      [[ $# -ge 2 && -n "$2" ]] || die "--phase needs a name (main or an extra run)"
+      phase="$2"
+      shift 2
       ;;
     --dry-run)
       dry_run=1
@@ -107,6 +154,12 @@ shift
 if ! jq -e --arg leg "$leg" '.legs | has($leg)' "$PARTITION" >/dev/null; then
   die "unknown leg '$leg' (known: $(jq -r '.legs | keys | join(", ")' "$PARTITION"))"
 fi
+if [[ -n "$phase" && "$phase" != main ]] \
+  && ! jq -e --arg leg "$leg" --arg phase "$phase" \
+    '(.extra_runs[$leg] // []) | any(.name == $phase)' "$PARTITION" >/dev/null; then
+  die "unknown phase '$phase' for leg '$leg' (known: main$(jq -r --arg leg "$leg" \
+    '(.extra_runs[$leg] // [])[] | ", " + .name' "$PARTITION" | tr -d '\n'))"
+fi
 
 mapfile -t pkg_args < <(jq -r --arg leg "$leg" '.legs[$leg][] | "-p", .' "$PARTITION")
 features="$(jq -r --arg leg "$leg" '.features[$leg] // [] | join(",")' "$PARTITION")"
@@ -132,12 +185,16 @@ run() {
   fi
 }
 
-main=("${run_cmd[@]}" "${pkg_args[@]}")
-[[ -n "$features" ]] && main+=(--features "$features")
-run "${main[@]}" "$@"
+if [[ -z "$phase" || "$phase" == main ]]; then
+  main=("${run_cmd[@]}" "${pkg_args[@]}")
+  [[ -n "$features" ]] && main+=(--features "$features")
+  run "${main[@]}" "$@"
+fi
+[[ "$phase" != main ]] || exit 0
 
 while IFS= read -r extra_run; do
   name="$(jq -r '.name' <<<"$extra_run")"
+  [[ -z "$phase" || "$phase" == "$name" ]] || continue
   extra="$(jq -r '.features | join(",")' <<<"$extra_run")"
   filter="$(jq -r '.filter' <<<"$extra_run")"
   echo "--- extra run: $name"

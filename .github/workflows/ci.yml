@@ -40,6 +40,7 @@ jobs:
       full: ${{ steps.scope.outputs.full }}
       docs_build: ${{ steps.scope.outputs.docs_build }}
       base_sha: ${{ steps.scope.outputs.base_sha }}
+      test_matrix: ${{ steps.test-matrix.outputs.matrix }}
     steps:
       - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
         with:
@@ -59,6 +60,18 @@ jobs:
       - name: Classify the event's actual diff
         id: scope
         run: python3 scripts/ci/change_scope.py
+      # One Test job per partition phase (each leg's main run and each extra
+      # run), derived from dev/ci/test-partition.json so a new leg or extra
+      # run cannot be left out of the matrix. A malformed partition fails
+      # here, and the required gate rejects a failed classification.
+      - name: Derive the test matrix
+        id: test-matrix
+        shell: bash
+        run: |
+          matrix="$(bash scripts/dev/leg.sh --matrix)"
+          jq -e 'type == "array" and length > 0' <<<"$matrix" >/dev/null
+          echo "matrix=$matrix" >> "$GITHUB_OUTPUT"
+          jq -r '.[] | "  Test (\(.name))"' <<<"$matrix"
 
   # Fail Rust formatting before the runtime matrix; docs run independently.
 
@@ -200,6 +213,13 @@ jobs:
       # too cost a second debug build of the root package on the critical path.
       - name: Provider dispatch gate (no direct ModelProvider method calls outside ProviderDispatch)
         run: bash scripts/ci/provider_dispatch_gate.sh
+      # Fluent catalog syntax gate. Locales drift silently otherwise — the
+      # runtime embeds en and falls back to it, so a broken translated
+      # catalog only shows at runtime. It builds xtask in the dev profile,
+      # which no test phase reuses, so it lives here instead of serially
+      # extending a test leg on the critical path.
+      - name: Fluent catalog syntax gate
+        run: cargo fluent check
 
   windows-clippy-tools-changes:
     name: Detect Windows Clippy changes
@@ -487,23 +507,27 @@ jobs:
 
   # ── Post-format tests ─────────────────────────────────────────────────────
 
-  # The workspace is tested as four matrix legs so no single job carries the
-  # whole compile. The single source of truth for which package belongs to
-  # which leg is dev/ci/test-partition.json; the guard step fails the job the
-  # moment a workspace member is missing from (or duplicated in) that file.
+  # The workspace is tested as matrix legs so no single job carries the whole
+  # compile, and each extra feature run is its own job instead of a second,
+  # serial compile after its leg. The single source of truth for which
+  # package belongs to which leg, and for every leg phase, is
+  # dev/ci/test-partition.json (see `scripts/dev/leg.sh --matrix`); the guard
+  # step fails the job the moment a workspace member is missing from (or
+  # duplicated in) that file. The required gate reads this job's aggregate
+  # result, so every matrix entry must succeed.
   test:
-    name: Test (${{ matrix.leg }})
+    name: Test (${{ matrix.name }})
     needs: [changes, fmt]
     if: needs.changes.outputs.full == 'true'
     runs-on: ubuntu-latest
-    # 45 per leg. A leg is roughly a quarter of the old serial lane, whose
-    # cold run measured ~35 minutes; a timed-out job also skips the
-    # rust-cache save step, so the cap must clear a cold leg with room.
+    # 45 per phase. A cold leg once measured ~35 minutes; a timed-out job
+    # also skips the rust-cache save step, so the cap must clear a cold leg
+    # with room.
     timeout-minutes: 45
     strategy:
       fail-fast: false
       matrix:
-        leg: [runtime, channels, app, tail]
+        include: ${{ fromJSON(needs.changes.outputs.test_matrix) }}
     steps:
       - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
       - uses: dtolnay/rust-toolchain@e97e2d8cc328f1b50210efc529dca0028893a2d9 # v1
@@ -514,8 +538,10 @@ jobs:
         id: rust-cache
         with:
           cache-on-failure: true
-          save-if: ${{ github.ref == 'refs/heads/master' }}
-          # Per-leg cache so each leg only carries its own build graph.
+          # Per-leg cache so each leg only carries its own build graph. Extra
+          # runs share their leg's dependency graph, so they restore the
+          # leg's cache and only the main phase writes it.
+          save-if: ${{ github.ref == 'refs/heads/master' && matrix.phase == 'main' }}
           shared-key: test-${{ matrix.leg }}
       - name: Ensure web/dist placeholder exists
         run: mkdir -p web/dist && touch web/dist/.gitkeep
@@ -546,6 +572,7 @@ jobs:
         shell: bash
         env:
           LEG: ${{ matrix.leg }}
+          PHASE: ${{ matrix.phase }}
           LEG_RUNNER: nextest
           # Keep hosted CI's existing profile when using the local entrypoint.
           CARGO_PROFILE_DEV_DEBUG: line-tables-only
@@ -557,19 +584,11 @@ jobs:
         # feature: with `sandbox-landlock` on,
         # Auto sandbox detection prefers Landlock, which would silently change
         # every other runtime test. --no-fail-fast: one failing test must not
-        # cancel the rest of the leg — a single flake otherwise hides real
+        # cancel the rest of the phase — a single flake otherwise hides real
         # failures in the same run (observed on master: one bridge e2e flake
         # cancelled ~8.6k queued tests).
         run: |
-          bash scripts/dev/leg.sh --no-fail-fast "$LEG"
-
-          # Fluent catalog syntax gate (xtask lives in this leg). Locales
-          # drift silently otherwise — the runtime embeds en and falls back
-          # to it, so a broken translated catalog only shows at runtime.
-          if [ "$LEG" = "tail" ]; then
-            echo "==> leg $LEG: cargo fluent check"
-            cargo fluent check
-          fi
+          bash scripts/dev/leg.sh --no-fail-fast --phase "$PHASE" "$LEG"
 
   # ── Post-format security checks ───────────────────────────────────────────
 
