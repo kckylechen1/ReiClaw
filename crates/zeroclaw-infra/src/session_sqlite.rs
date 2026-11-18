@@ -1,8 +1,8 @@
 //! SQLite-backed session persistence with FTS5 search.
 
 use crate::session_backend::{
-    REQUEST_RECEIPT_PROTECTION_MINUTES, RequestReceipt, SessionBackend, SessionContext,
-    SessionMetadata, SessionQuery, SessionState,
+    REQUEST_RECEIPT_PROTECTION_MINUTES, RequestReceipt, SessionBackend, SessionCheckpoint,
+    SessionContext, SessionFtsHit, SessionMetadata, SessionQuery, SessionState, SessionWindow,
 };
 use anyhow::{Context, Result};
 use parking_lot::Mutex;
@@ -12,6 +12,7 @@ use zeroclaw_api::model_provider::ChatMessage;
 
 pub mod agent_tasks;
 mod bridge_intake;
+mod checkpoints;
 mod delegation;
 pub mod reminder_occurrences;
 #[cfg(test)]
@@ -154,6 +155,7 @@ impl SqliteSessionBackend {
         .context("Failed to initialize session schema")?;
 
         bridge_intake::initialize(&tx)?;
+        checkpoints::initialize(&tx)?;
 
         // Historical messages have no attributable ingress source. Leave
         // them NULL rather than guessing from the session's latest sender.
@@ -642,6 +644,7 @@ impl SessionBackend for SqliteSessionBackend {
                 params![key],
             )
             .map_err(std::io::Error::other)?;
+            checkpoints::delete_for_session_tx(&tx, key)?;
             bridge_intake::redact_session_inputs(&tx, key)?;
         }
 
@@ -682,6 +685,7 @@ impl SessionBackend for SqliteSessionBackend {
             )
             .map_err(std::io::Error::other)?;
         }
+        checkpoints::delete_for_session_tx(&tx, session_key)?;
         bridge_intake::redact_session_inputs(&tx, session_key)?;
         tx.commit().map_err(std::io::Error::other)?;
         Ok(count)
@@ -721,6 +725,7 @@ impl SessionBackend for SqliteSessionBackend {
             params![session_key],
         )
         .map_err(std::io::Error::other)?;
+        checkpoints::delete_for_session_tx(&tx, session_key)?;
         bridge_intake::redact_session_inputs(&tx, session_key)?;
         tx.commit().map_err(std::io::Error::other)?;
         Ok(exists)
@@ -892,6 +897,35 @@ impl SessionBackend for SqliteSessionBackend {
         state: &str,
     ) -> std::io::Result<()> {
         self.bridge_finish_impl(source, update_id, state)
+    }
+
+    fn stage_checkpoint(
+        &self,
+        session_key: &str,
+        up_to_message_id: i64,
+        digest: &str,
+    ) -> std::io::Result<SessionCheckpoint> {
+        self.stage_checkpoint_impl(session_key, up_to_message_id, digest)
+    }
+
+    fn promote_staged_checkpoint(
+        &self,
+        session_key: &str,
+    ) -> std::io::Result<Option<SessionCheckpoint>> {
+        self.promote_staged_checkpoint_impl(session_key)
+    }
+
+    fn load_session_window(&self, session_key: &str) -> std::io::Result<SessionWindow> {
+        self.load_session_window_impl(session_key)
+    }
+
+    fn search_session_fts(
+        &self,
+        allowed_session_keys: &[&str],
+        query: &str,
+        limit: usize,
+    ) -> std::io::Result<Vec<SessionFtsHit>> {
+        self.search_session_fts_impl(allowed_session_keys, query, limit)
     }
 
     fn record_request(
