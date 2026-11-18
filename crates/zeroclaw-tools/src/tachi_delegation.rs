@@ -4,8 +4,8 @@
 //! Protocol caller identity and routing metadata accompany the admitted task.
 
 use crate::tachi_staff::{
-    MirrorCallSite, StaffRefs, StaffingReason, TachiStaffClient, TachiStaffError,
-    nonterminal_status_for_dispatch, run_status_from_receipt,
+    ContinueReceipt, MirrorCallSite, RunState, RunStatus, StaffRefs, StaffingReason,
+    TachiStaffClient, TachiStaffError, nonterminal_status_for_dispatch, run_status_from_receipt,
 };
 use async_trait::async_trait;
 use serde::Deserialize;
@@ -26,6 +26,12 @@ use zeroclaw_policy::ToolOperation;
 pub const STORAGE_ROOT_CHANGED: &str = "delegation_storage_root_changed";
 /// Noninteractive callers must refuse a live policy requiring fresh approval.
 pub const APPROVAL_REQUIRED: &str = "delegation_approval_required";
+/// Maximum automatic proxy-continuation rounds per dispatch (ADR-025 §8).
+pub const MAX_PROXY_CONTINUATIONS_PER_DISPATCH: u8 = 3;
+/// Maximum UTF-8 byte length of an outbound redacted `[Task Context]` brief (ADR-025 §8).
+pub const MAX_TASK_CONTEXT_BRIEF_BYTES: usize = 4_096;
+/// Header prepended when an outbound task carries a redacted technical context brief.
+pub const TASK_CONTEXT_HEADER: &str = "[Task Context]";
 
 /// The runtime rechecks live agent/card policy and returns ephemeral config.
 type DelegationResolver =
@@ -619,5 +625,455 @@ impl Tool for TachiDelegationTool {
             Ok(value) => ToolResult::ok(value),
             Err(error) => staff_failure(error),
         })
+    }
+}
+
+// ─────────────────────────────────────────────────────────────────────────
+// ADR-025 §8 proxy-continuation gates and outbound redacted briefs
+// ─────────────────────────────────────────────────────────────────────────
+
+const PROTECTED_IDENTITY_MARKERS: &[&str] = &[
+    "soul::",
+    "[agentsoul]",
+    "## identity",
+    "## who i've become",
+    "## principles",
+    "## our story so far",
+    "## owner profile",
+    "[user model]",
+    "## user model",
+    "user_model",
+    "soul.db",
+    "user_model.db",
+];
+
+fn find_protected_identity_marker(text: &str) -> Option<&'static str> {
+    let lower = text.to_ascii_lowercase();
+    PROTECTED_IDENTITY_MARKERS
+        .iter()
+        .copied()
+        .find(|marker| lower.contains(marker))
+}
+
+fn value_has_auth_required(value: &Value, depth: u8) -> bool {
+    if depth == 0 {
+        return false;
+    }
+    match value {
+        Value::String(raw) => raw.to_ascii_lowercase().contains("auth_required"),
+        Value::Array(items) => items
+            .iter()
+            .any(|item| value_has_auth_required(item, depth - 1)),
+        Value::Object(map) => {
+            if map.get("auth_required").and_then(Value::as_bool) == Some(true) {
+                return true;
+            }
+            map.values()
+                .any(|item| value_has_auth_required(item, depth - 1))
+        }
+        _ => false,
+    }
+}
+
+fn status_indicates_auth_required(status: &RunStatus) -> bool {
+    if let RunState::Other(raw) = &status.state
+        && raw.to_ascii_lowercase().contains("auth_required")
+    {
+        return true;
+    }
+    if status
+        .closure_kind
+        .as_deref()
+        .is_some_and(|kind| kind.to_ascii_lowercase().contains("auth_required"))
+    {
+        return true;
+    }
+    status
+        .read_projection
+        .as_ref()
+        .is_some_and(|projection| value_has_auth_required(projection, 8))
+}
+
+/// Refusal reasons for automatic proxy continuation (`tachi_staff(action = "continue")`).
+#[derive(Debug, Clone, PartialEq, Eq, thiserror::Error)]
+pub enum ProxyContinuationError {
+    /// `AUTH_REQUIRED` states must never be auto-answered by the body.
+    #[error("proxy continuation refused: AUTH_REQUIRED must be handled by the owner")]
+    AuthRequired,
+    /// Run is closed as `INPUT_REQUIRED` + `partial` (terminal).
+    #[error("proxy continuation refused: run is terminally closed (closure_kind=partial)")]
+    PartialClosure,
+    /// Run is in a state other than `TASK_STATE_INPUT_REQUIRED`.
+    #[error("proxy continuation refused: state {state} is not TASK_STATE_INPUT_REQUIRED")]
+    NotInputRequired { state: RunState },
+    /// Per-dispatch automatic proxy-continuation cap reached.
+    #[error("proxy continuation refused: automatic continuation cap reached ({prior}/{max})")]
+    CapExceeded { prior: u8, max: u8 },
+    /// Canonical status did not include a `status_revision` to quote on `continue`.
+    #[error("proxy continuation refused: missing canonical status_revision")]
+    MissingRevision,
+    /// Empty or whitespace-only answer.
+    #[error("proxy continuation refused: answer must not be empty")]
+    EmptyAnswer,
+    /// Answer violates outbound task admission rules or carries protected Soul/UserModel markers.
+    #[error("proxy continuation refused: {0}")]
+    ForbiddenContent(String),
+    /// Underlying `tachi_staff` client error during `continue_run`.
+    #[error(transparent)]
+    Staff(#[from] TachiStaffError),
+}
+
+/// Validate whether automatic proxy continuation is permitted for a verified
+/// canonical [`RunStatus`], current auto-continuation count, and proposed `answer`.
+///
+/// Enforces ADR-025 §8:
+/// - refuses `AUTH_REQUIRED` (in `state`, `closure_kind`, or `read_projection`);
+/// - allows `continue` ONLY when `state == RunState::InputRequired` and
+///   `closure_kind != Some("partial")`;
+/// - refuses once `prior_auto_continuations >= MAX_PROXY_CONTINUATIONS_PER_DISPATCH`;
+/// - rejects empty/whitespace `answer`, forbidden execution/credential content,
+///   and Soul/UserModel markers.
+pub fn validate_proxy_continuation(
+    status: &RunStatus,
+    prior_auto_continuations: u8,
+    answer: &str,
+) -> Result<(), ProxyContinuationError> {
+    if status_indicates_auth_required(status) {
+        return Err(ProxyContinuationError::AuthRequired);
+    }
+    if status.state != RunState::InputRequired {
+        return Err(ProxyContinuationError::NotInputRequired {
+            state: status.state.clone(),
+        });
+    }
+    if status
+        .closure_kind
+        .as_deref()
+        .is_some_and(|kind| kind.trim().eq_ignore_ascii_case("partial"))
+    {
+        return Err(ProxyContinuationError::PartialClosure);
+    }
+    if prior_auto_continuations >= MAX_PROXY_CONTINUATIONS_PER_DISPATCH {
+        return Err(ProxyContinuationError::CapExceeded {
+            prior: prior_auto_continuations,
+            max: MAX_PROXY_CONTINUATIONS_PER_DISPATCH,
+        });
+    }
+    let answer = answer.trim();
+    if answer.is_empty() {
+        return Err(ProxyContinuationError::EmptyAnswer);
+    }
+    if let Some(marker) = find_protected_identity_marker(answer) {
+        return Err(ProxyContinuationError::ForbiddenContent(format!(
+            "protected identity marker `{marker}`"
+        )));
+    }
+    if let Err(category) = crate::tachi_admission::scan_text(answer) {
+        return Err(ProxyContinuationError::ForbiddenContent(
+            category.to_string(),
+        ));
+    }
+    Ok(())
+}
+
+/// Stateful per-dispatch gate enforcing ADR-025 §8 proxy-continuation safety
+/// and loop caps before invoking [`TachiStaffClient::continue_run`].
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ProxyContinuationGate {
+    dispatch_id: String,
+    prior_auto_continuations: u8,
+    max_auto_continuations: u8,
+}
+
+impl ProxyContinuationGate {
+    /// Create a fresh gate for `dispatch_id` capped at [`MAX_PROXY_CONTINUATIONS_PER_DISPATCH`].
+    #[must_use]
+    pub fn new(dispatch_id: impl Into<String>) -> Self {
+        Self::with_prior_count(dispatch_id, 0)
+    }
+
+    /// Create a gate initialized with `prior_auto_continuations` already consumed.
+    #[must_use]
+    pub fn with_prior_count(dispatch_id: impl Into<String>, prior_auto_continuations: u8) -> Self {
+        Self {
+            dispatch_id: dispatch_id.into(),
+            prior_auto_continuations,
+            max_auto_continuations: MAX_PROXY_CONTINUATIONS_PER_DISPATCH,
+        }
+    }
+
+    /// Canonical dispatch id bound to this gate.
+    #[must_use]
+    pub fn dispatch_id(&self) -> &str {
+        &self.dispatch_id
+    }
+
+    /// Number of automatic continuations already consumed for this dispatch.
+    #[must_use]
+    pub const fn prior_auto_continuations(&self) -> u8 {
+        self.prior_auto_continuations
+    }
+
+    /// Remaining automatic continuations allowed for this dispatch.
+    #[must_use]
+    pub const fn remaining_auto_continuations(&self) -> u8 {
+        self.max_auto_continuations
+            .saturating_sub(self.prior_auto_continuations)
+    }
+
+    /// Verify all proxy-continuation invariants for `status` and `answer`,
+    /// returning the canonical `status_revision` to quote on `continue`.
+    pub fn admit(&self, status: &RunStatus, answer: &str) -> Result<u64, ProxyContinuationError> {
+        if status.dispatch_id != self.dispatch_id {
+            return Err(TachiStaffError::Protocol("continue dispatch mismatch".to_string()).into());
+        }
+        validate_proxy_continuation(status, self.prior_auto_continuations, answer)?;
+        status
+            .revision
+            .ok_or(ProxyContinuationError::MissingRevision)
+    }
+
+    /// Admit and send `tachi_staff(action = "continue")` through `client`.
+    ///
+    /// Increments the consumed continuation count when `continue_run` is
+    /// accepted or returns `SubmissionUnknown` (transmitted mutation).
+    pub async fn continue_run(
+        &mut self,
+        client: &TachiStaffClient,
+        status: &RunStatus,
+        answer: &str,
+    ) -> Result<ContinueReceipt, ProxyContinuationError> {
+        let expected_revision = self.admit(status, answer)?;
+        let result = client
+            .continue_run(&status.dispatch_id, expected_revision, answer.trim())
+            .await;
+        if result.is_ok() || matches!(result, Err(TachiStaffError::SubmissionUnknown(_))) {
+            self.prior_auto_continuations = self.prior_auto_continuations.saturating_add(1);
+        }
+        result.map_err(ProxyContinuationError::from)
+    }
+}
+
+/// Error returned when composing an outbound task with a redacted `[Task Context]` brief.
+#[derive(Debug, Clone, PartialEq, Eq, thiserror::Error)]
+pub enum TaskBriefError {
+    /// Task text is empty or whitespace-only.
+    #[error("task must not be empty")]
+    EmptyTask,
+    /// Context brief exceeds [`MAX_TASK_CONTEXT_BRIEF_BYTES`].
+    #[error("context brief exceeds {max} byte limit (got {actual} bytes)")]
+    BriefTooLarge { actual: usize, max: usize },
+    /// Protected Soul or User Model marker detected; fail closed.
+    #[error("forbidden protected identity marker in outbound text: {marker}")]
+    ProtectedIdentityMarker { marker: &'static str },
+    /// Existing `TaskIntent` / `tachi_admission` text guard refused the text.
+    #[error("forbidden outbound task content: {0}")]
+    Admission(#[from] zeroclaw_api::delegation_admission::ForbiddenCategory),
+}
+
+/// Compose an outbound delegated task, optionally prepending a bounded
+/// `[Task Context]` brief derived from technical checkpoint/memory facts.
+///
+/// Enforces ADR-017 §8 and ADR-025 §8 fail-closed:
+/// - rejects empty `task`;
+/// - bounds `context_brief` to `<= 4_096` bytes;
+/// - rejects any Soul/UserModel markers (`soul::`, `[AgentSoul]`, `## Identity`,
+///   `## Who I've become`, `user_model`, etc.) in either `task` or `context_brief`;
+/// - validates `task`, `context_brief`, and the combined payload through
+///   [`crate::tachi_admission::scan_text`] so CLI flags, worktrees, SSH/tmux
+///   overrides, and credential patterns stay rejected.
+pub fn format_redacted_task_with_brief(
+    task: &str,
+    context_brief: Option<&str>,
+) -> Result<String, TaskBriefError> {
+    let task = task.trim();
+    if task.is_empty() {
+        return Err(TaskBriefError::EmptyTask);
+    }
+    if let Some(marker) = find_protected_identity_marker(task) {
+        return Err(TaskBriefError::ProtectedIdentityMarker { marker });
+    }
+    crate::tachi_admission::scan_text(task)?;
+
+    let Some(raw_brief) = context_brief else {
+        return Ok(task.to_string());
+    };
+    if raw_brief.len() > MAX_TASK_CONTEXT_BRIEF_BYTES {
+        return Err(TaskBriefError::BriefTooLarge {
+            actual: raw_brief.len(),
+            max: MAX_TASK_CONTEXT_BRIEF_BYTES,
+        });
+    }
+    let brief = raw_brief.trim();
+    if brief.is_empty() {
+        return Ok(task.to_string());
+    }
+    if let Some(marker) = find_protected_identity_marker(brief) {
+        return Err(TaskBriefError::ProtectedIdentityMarker { marker });
+    }
+    crate::tachi_admission::scan_text(brief)?;
+
+    let combined = format!("{TASK_CONTEXT_HEADER}\n{brief}\n\n{task}");
+    crate::tachi_admission::scan_text(&combined)?;
+    Ok(combined)
+}
+
+#[cfg(test)]
+mod continuity_tests {
+    use super::*;
+
+    fn status_with(
+        state: RunState,
+        closure_kind: Option<&str>,
+        revision: Option<u64>,
+    ) -> RunStatus {
+        RunStatus {
+            dispatch_id: "d-continuity".to_string(),
+            state,
+            revision,
+            closure_kind: closure_kind.map(str::to_string),
+            result_written: None,
+            updated_at: None,
+            read_projection: None,
+        }
+    }
+
+    #[test]
+    fn proxy_continuation_cap_constant_matches_adr_025() {
+        assert_eq!(MAX_PROXY_CONTINUATIONS_PER_DISPATCH, 3);
+    }
+
+    #[test]
+    fn validate_proxy_continuation_allows_only_non_partial_input_required_under_cap() {
+        let ready = status_with(RunState::InputRequired, None, Some(4));
+        assert!(validate_proxy_continuation(&ready, 0, "Use snake_case columns").is_ok());
+        assert!(validate_proxy_continuation(&ready, 2, "Keep the current API").is_ok());
+        assert_eq!(
+            validate_proxy_continuation(&ready, 3, "Fourth round").unwrap_err(),
+            ProxyContinuationError::CapExceeded { prior: 3, max: 3 }
+        );
+    }
+
+    #[test]
+    fn validate_proxy_continuation_refuses_auth_required_partial_other_states_and_empty() {
+        let auth_state = status_with(
+            RunState::Other("TASK_STATE_AUTH_REQUIRED".into()),
+            None,
+            Some(1),
+        );
+        assert_eq!(
+            validate_proxy_continuation(&auth_state, 0, "proceed").unwrap_err(),
+            ProxyContinuationError::AuthRequired
+        );
+
+        let mut auth_proj = status_with(RunState::InputRequired, None, Some(1));
+        auth_proj.read_projection = Some(json!({"auth_required": true}));
+        assert_eq!(
+            validate_proxy_continuation(&auth_proj, 0, "proceed").unwrap_err(),
+            ProxyContinuationError::AuthRequired
+        );
+
+        let partial = status_with(RunState::InputRequired, Some("partial"), Some(1));
+        assert_eq!(
+            validate_proxy_continuation(&partial, 0, "proceed").unwrap_err(),
+            ProxyContinuationError::PartialClosure
+        );
+
+        for state in [
+            RunState::Submitted,
+            RunState::Working,
+            RunState::Completed,
+            RunState::Failed,
+            RunState::Canceled,
+        ] {
+            let st = status_with(state.clone(), None, Some(1));
+            assert_eq!(
+                validate_proxy_continuation(&st, 0, "proceed").unwrap_err(),
+                ProxyContinuationError::NotInputRequired { state }
+            );
+        }
+
+        let ready = status_with(RunState::InputRequired, None, Some(1));
+        assert_eq!(
+            validate_proxy_continuation(&ready, 0, "   ").unwrap_err(),
+            ProxyContinuationError::EmptyAnswer
+        );
+        assert!(matches!(
+            validate_proxy_continuation(&ready, 0, "run --full-auto").unwrap_err(),
+            ProxyContinuationError::ForbiddenContent(_)
+        ));
+    }
+
+    #[test]
+    fn format_redacted_task_with_brief_prepends_context_and_enforces_bounds_and_markers() {
+        assert_eq!(
+            format_redacted_task_with_brief("Review the SQLite schema", None).unwrap(),
+            "Review the SQLite schema"
+        );
+        assert_eq!(
+            format_redacted_task_with_brief("Review the SQLite schema", Some("   ")).unwrap(),
+            "Review the SQLite schema"
+        );
+        let formatted = format_redacted_task_with_brief(
+            "Review the SQLite schema",
+            Some("Decision: preserve existing sessions table columns."),
+        )
+        .unwrap();
+        assert_eq!(
+            formatted,
+            "[Task Context]\nDecision: preserve existing sessions table columns.\n\nReview the SQLite schema"
+        );
+
+        let at_limit = "a".repeat(MAX_TASK_CONTEXT_BRIEF_BYTES);
+        assert!(format_redacted_task_with_brief("Review schema", Some(&at_limit)).is_ok());
+
+        let over_limit = "a".repeat(MAX_TASK_CONTEXT_BRIEF_BYTES + 1);
+        assert_eq!(
+            format_redacted_task_with_brief("Review schema", Some(&over_limit)).unwrap_err(),
+            TaskBriefError::BriefTooLarge {
+                actual: MAX_TASK_CONTEXT_BRIEF_BYTES + 1,
+                max: MAX_TASK_CONTEXT_BRIEF_BYTES,
+            }
+        );
+
+        for forbidden_brief in [
+            "soul::identity::tone",
+            "[AgentSoul] persona summary",
+            "## Identity\nAgent persona",
+            "## Who I've become\nGrowth",
+            "Loaded from user_model table",
+        ] {
+            assert!(
+                matches!(
+                    format_redacted_task_with_brief("Review schema", Some(forbidden_brief))
+                        .unwrap_err(),
+                    TaskBriefError::ProtectedIdentityMarker { .. }
+                ),
+                "expected protected marker rejection for `{forbidden_brief}`"
+            );
+        }
+
+        for forbidden_text in [
+            "pass --full-auto to the runner",
+            "use /Users/zeroclaw_user/worktrees/slice",
+            "connect over ssh to build host",
+        ] {
+            assert!(
+                matches!(
+                    format_redacted_task_with_brief("Review schema", Some(forbidden_text))
+                        .unwrap_err(),
+                    TaskBriefError::Admission(_)
+                ),
+                "expected admission rejection for brief `{forbidden_text}`"
+            );
+            assert!(
+                matches!(
+                    format_redacted_task_with_brief(forbidden_text, Some("Valid context"))
+                        .unwrap_err(),
+                    TaskBriefError::Admission(_)
+                ),
+                "expected admission rejection for task `{forbidden_text}`"
+            );
+        }
     }
 }
