@@ -1,6 +1,6 @@
 #[cfg(test)]
 use super::*;
-use crate::mcp_transport::create_transport;
+use crate::mcp_transport::create_shared_transport;
 #[cfg(unix)]
 use crate::mcp_transport::{StdioTransport, StdioWriteTestHook};
 use reiclaw_config::schema::McpTransport;
@@ -234,7 +234,7 @@ fn http_transport_requires_url() {
         transport: McpTransport::Http,
         ..Default::default()
     };
-    let result = create_transport(&config);
+    let result = create_shared_transport(&config);
     assert!(result.is_err());
 }
 
@@ -245,7 +245,7 @@ fn sse_transport_requires_url() {
         transport: McpTransport::Sse,
         ..Default::default()
     };
-    let result = create_transport(&config);
+    let result = create_shared_transport(&config);
     assert!(result.is_err());
 }
 

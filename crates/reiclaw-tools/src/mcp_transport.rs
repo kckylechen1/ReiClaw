@@ -157,7 +157,7 @@ pub(crate) struct McpRequestLifecycle {
     phase: AtomicU8,
     epoch: AtomicU64,
     epoch_gate: Option<Arc<RwLock<u64>>>,
-    recovery_gate: Option<Arc<dyn McpRecoveryGate>>,
+    recovery_gate: Option<Arc<crate::mcp_client::RecoveryBarrier>>,
     fixed_epoch: u64,
     /// Spoken wire for this request. Always taken from the session's
     /// [`PeerProtocol`] (or the discover probe's modern pin) — not re-derived
@@ -169,7 +169,7 @@ pub(crate) struct McpRequestLifecycle {
 impl McpRequestLifecycle {
     pub(crate) fn coordinated(
         epoch_gate: Arc<RwLock<u64>>,
-        recovery_gate: Option<Arc<dyn McpRecoveryGate>>,
+        recovery_gate: Option<Arc<crate::mcp_client::RecoveryBarrier>>,
         peer: &PeerProtocol,
     ) -> Self {
         Self {
@@ -265,13 +265,6 @@ impl McpRequestLifecycle {
     }
 }
 
-/// Coordination surface shared by the client recovery state and concrete
-/// transport writer boundaries.
-pub(crate) trait McpRecoveryGate: Send + Sync {
-    fn arm(&self, epoch: u64);
-    fn write_blocked(&self) -> bool;
-}
-
 /// Owns the concrete stdio state boundary while a write is being prepared.
 ///
 /// Its explicit `Drop` publishes recovery before releasing `state`; this is
@@ -330,25 +323,6 @@ impl Drop for McpWritePermit {
 }
 
 // ── Transport Traits ─────────────────────────────────────────────────────
-
-/// Public compatibility surface for direct transport users.
-///
-/// The MCP client uses the cancellation-aware shared transport trait below;
-/// this mutable facade preserves the existing downstream API.
-#[async_trait::async_trait]
-pub trait McpTransportConn: Send + Sync {
-    async fn send_and_recv(&mut self, request: &JsonRpcRequest) -> Result<JsonRpcResponse>;
-
-    async fn reset(&mut self) -> Result<()> {
-        Ok(())
-    }
-
-    fn health_check(&mut self) -> bool {
-        true
-    }
-
-    async fn close(&mut self) -> Result<()>;
-}
 
 #[async_trait::async_trait]
 pub(crate) trait SharedMcpTransportConn: Send + Sync {
@@ -1924,44 +1898,7 @@ impl SharedMcpTransportConn for SseTransport {
     }
 }
 
-macro_rules! impl_legacy_transport {
-    ($transport:ty) => {
-        #[async_trait::async_trait]
-        impl McpTransportConn for $transport {
-            async fn send_and_recv(&mut self, request: &JsonRpcRequest) -> Result<JsonRpcResponse> {
-                let lifecycle = McpRequestLifecycle::uncoordinated(0);
-                SharedMcpTransportConn::send_and_recv(self, request, &lifecycle).await
-            }
-
-            async fn reset(&mut self) -> Result<()> {
-                SharedMcpTransportConn::reset(self).await
-            }
-
-            fn health_check(&mut self) -> bool {
-                SharedMcpTransportConn::health_check(self)
-            }
-
-            async fn close(&mut self) -> Result<()> {
-                SharedMcpTransportConn::close(self).await
-            }
-        }
-    };
-}
-
-impl_legacy_transport!(StdioTransport);
-impl_legacy_transport!(HttpTransport);
-impl_legacy_transport!(SseTransport);
-
 // ── Factory ──────────────────────────────────────────────────────────────
-
-/// Create a transport based on config.
-pub fn create_transport(config: &McpServerConfig) -> Result<Box<dyn McpTransportConn>> {
-    match config.transport {
-        McpTransport::Stdio => Ok(Box::new(StdioTransport::new(config)?)),
-        McpTransport::Http => Ok(Box::new(HttpTransport::new(config)?)),
-        McpTransport::Sse => Ok(Box::new(SseTransport::new(config)?)),
-    }
-}
 
 pub(crate) fn create_shared_transport(
     config: &McpServerConfig,

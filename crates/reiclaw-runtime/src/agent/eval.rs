@@ -57,150 +57,14 @@ pub fn estimate_complexity(message: &str) -> ComplexityTier {
     ComplexityTier::Standard
 }
 
-// ── Auto-classify extension ─────────────────────────────────────
+// ── Auto-classify helper ────────────────────────────────────────
 
-/// Extension trait adding complexity-tier mapping to `AutoClassifyConfig`.
-/// This lives here rather than in `reiclaw_config` because `ComplexityTier`
-/// is defined in the main crate.
-pub trait AutoClassifyExt {
-    /// Map a complexity tier to the configured hint, if any.
-    fn hint_for(&self, tier: ComplexityTier) -> Option<&str>;
-}
-
-impl AutoClassifyExt for AutoClassifyConfig {
-    fn hint_for(&self, tier: ComplexityTier) -> Option<&str> {
-        match tier {
-            ComplexityTier::Simple => self.simple_hint.as_deref(),
-            ComplexityTier::Standard => self.standard_hint.as_deref(),
-            ComplexityTier::Complex => self.complex_hint.as_deref(),
-        }
-    }
-}
-
-/// Result of evaluating a response against quality heuristics.
-#[derive(Debug, Clone)]
-pub struct EvalResult {
-    /// Aggregate quality score from 0.0 (terrible) to 1.0 (excellent).
-    pub score: f64,
-    /// Individual check outcomes (for observability).
-    pub checks: Vec<EvalCheck>,
-    /// If score < threshold, the suggested higher-tier hint for retry.
-    pub retry_hint: Option<String>,
-}
-
-#[derive(Debug, Clone)]
-pub struct EvalCheck {
-    pub name: &'static str,
-    pub passed: bool,
-    pub weight: f64,
-}
-
-/// Code-related keywords in user queries.
-const CODE_KEYWORDS: &[&str] = &[
-    "code",
-    "function",
-    "implement",
-    "class",
-    "struct",
-    "module",
-    "script",
-    "program",
-    "bug",
-    "error",
-    "compile",
-    "syntax",
-    "refactor",
-];
-
-pub fn evaluate_response(
-    query: &str,
-    response: &str,
-    complexity: ComplexityTier,
-    auto_classify: Option<&AutoClassifyConfig>,
-) -> EvalResult {
-    let mut checks = Vec::new();
-
-    // Check 1: Non-empty
-    let non_empty = !response.trim().is_empty();
-    checks.push(EvalCheck {
-        name: "non_empty",
-        passed: non_empty,
-        weight: 0.3,
-    });
-
-    // Check 2: Not a cop-out
-    let lower_resp = response.to_lowercase();
-    let cop_out_phrases = [
-        "i don't know",
-        "i'm not sure",
-        "i cannot",
-        "i can't help",
-        "as an ai",
-    ];
-    let is_cop_out = cop_out_phrases
-        .iter()
-        .any(|phrase| lower_resp.starts_with(phrase));
-    let not_cop_out = !is_cop_out || response.len() > 200; // long responses with caveats are fine
-    checks.push(EvalCheck {
-        name: "not_cop_out",
-        passed: not_cop_out,
-        weight: 0.25,
-    });
-
-    // Check 3: Sufficient length for complexity
-    let min_len = match complexity {
-        ComplexityTier::Simple => 5,
-        ComplexityTier::Standard => 20,
-        ComplexityTier::Complex => 50,
-    };
-    let sufficient_length = response.len() >= min_len;
-    checks.push(EvalCheck {
-        name: "sufficient_length",
-        passed: sufficient_length,
-        weight: 0.2,
-    });
-
-    // Check 4: Code presence when expected
-    let query_lower = query.to_lowercase();
-    let expects_code = CODE_KEYWORDS.iter().any(|kw| query_lower.contains(kw));
-    let has_code = response.contains("```") || response.contains("    "); // code block or indented
-    let code_check_passed = !expects_code || has_code;
-    checks.push(EvalCheck {
-        name: "code_presence",
-        passed: code_check_passed,
-        weight: 0.25,
-    });
-
-    // Compute weighted score
-    let total_weight: f64 = checks.iter().map(|c| c.weight).sum();
-    let earned: f64 = checks.iter().filter(|c| c.passed).map(|c| c.weight).sum();
-    let score = if total_weight > 0.0 {
-        earned / total_weight
-    } else {
-        1.0
-    };
-
-    // Determine retry hint: if score is low, suggest escalating
-    let retry_hint = if score <= EvalConfig::default().min_quality_score {
-        // Try to escalate: Simple→Standard→Complex
-        let next_tier = match complexity {
-            ComplexityTier::Simple => Some(ComplexityTier::Standard),
-            ComplexityTier::Standard => Some(ComplexityTier::Complex),
-            ComplexityTier::Complex => None, // already at max
-        };
-        next_tier.and_then(|tier| {
-            auto_classify
-                .and_then(|ac| ac.hint_for(tier))
-                .map(String::from)
-        })
-    } else {
-        None
-    };
-
-    EvalResult {
-        score,
-        checks,
-        retry_hint,
+/// Map a complexity tier to the configured hint, if any.
+pub fn hint_for_tier(cfg: &AutoClassifyConfig, tier: ComplexityTier) -> Option<&str> {
+    match tier {
+        ComplexityTier::Simple => cfg.simple_hint.as_deref(),
+        ComplexityTier::Standard => cfg.standard_hint.as_deref(),
+        ComplexityTier::Complex => cfg.complex_hint.as_deref(),
     }
 }
 
@@ -258,87 +122,11 @@ mod tests {
             standard_hint: None,
             complex_hint: Some("reasoning".into()),
         };
-        assert_eq!(ac.hint_for(ComplexityTier::Simple), Some("fast"));
-        assert_eq!(ac.hint_for(ComplexityTier::Standard), None);
-        assert_eq!(ac.hint_for(ComplexityTier::Complex), Some("reasoning"));
-    }
-
-    // ── evaluate_response ───────────────────────────────────────
-
-    #[test]
-    fn empty_response_scores_low() {
-        let result = evaluate_response("hello", "", ComplexityTier::Simple, None);
-        assert!(result.score <= 0.5, "empty response should score low");
-    }
-
-    #[test]
-    fn good_response_scores_high() {
-        let result = evaluate_response(
-            "what is 2+2?",
-            "The answer is 4.",
-            ComplexityTier::Simple,
-            None,
+        assert_eq!(hint_for_tier(&ac, ComplexityTier::Simple), Some("fast"));
+        assert_eq!(hint_for_tier(&ac, ComplexityTier::Standard), None);
+        assert_eq!(
+            hint_for_tier(&ac, ComplexityTier::Complex),
+            Some("reasoning")
         );
-        assert!(
-            result.score >= 0.9,
-            "good simple response should score high, got {}",
-            result.score
-        );
-    }
-
-    #[test]
-    fn cop_out_response_penalized() {
-        let result = evaluate_response(
-            "explain quantum computing",
-            "I don't know much about that.",
-            ComplexityTier::Standard,
-            None,
-        );
-        assert!(
-            result.score < 1.0,
-            "cop-out should be penalized, got {}",
-            result.score
-        );
-    }
-
-    #[test]
-    fn code_query_without_code_response_penalized() {
-        let result = evaluate_response(
-            "write a function to sort an array",
-            "You should use a sorting algorithm.",
-            ComplexityTier::Standard,
-            None,
-        );
-        // "code_presence" check should fail
-        let code_check = result.checks.iter().find(|c| c.name == "code_presence");
-        assert!(
-            code_check.is_some() && !code_check.unwrap().passed,
-            "code check should fail"
-        );
-    }
-
-    #[test]
-    fn retry_hint_escalation() {
-        let ac = AutoClassifyConfig {
-            simple_hint: Some("fast".into()),
-            standard_hint: Some("default".into()),
-            complex_hint: Some("reasoning".into()),
-        };
-        // Empty response for a Simple query → should suggest Standard hint
-        let result = evaluate_response("hello", "", ComplexityTier::Simple, Some(&ac));
-        assert_eq!(result.retry_hint, Some("default".into()));
-    }
-
-    #[test]
-    fn no_retry_when_already_complex() {
-        let ac = AutoClassifyConfig {
-            simple_hint: Some("fast".into()),
-            standard_hint: Some("default".into()),
-            complex_hint: Some("reasoning".into()),
-        };
-        // Empty response for Complex → no escalation possible
-        let result =
-            evaluate_response("explain everything", "", ComplexityTier::Complex, Some(&ac));
-        assert_eq!(result.retry_hint, None);
     }
 }

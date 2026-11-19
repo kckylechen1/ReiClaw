@@ -29,8 +29,7 @@ use crate::mcp_task::{
     TaskHandleError, parse_continuation, poll_delay, require_responses_if_needed,
 };
 use crate::mcp_transport::{
-    McpRecoveryGate, McpRequestLifecycle, McpTransportError, SharedMcpTransportConn,
-    create_shared_transport,
+    McpRequestLifecycle, McpTransportError, SharedMcpTransportConn, create_shared_transport,
 };
 use reiclaw_config::schema::{McpServerConfig, McpTransport};
 
@@ -528,7 +527,7 @@ struct McpServerInner {
 /// reset + re-handshake succeed; `poison` leaves it permanently closed after a
 /// failed recovery so later writes fail closed rather than proceeding without a
 /// successful MCP handshake.
-struct RecoveryBarrier {
+pub(crate) struct RecoveryBarrier {
     /// The epoch that must be recovered before writes may resume. `None` means
     /// no recovery is pending.
     needed_epoch: std::sync::Mutex<Option<u64>>,
@@ -552,7 +551,7 @@ impl RecoveryBarrier {
     /// write. Idempotent for a given epoch; a newer epoch supersedes an older
     /// pending one. This is intentionally synchronous (no `.await`) so it takes
     /// effect the instant an outcome becomes unknown.
-    fn arm(&self, epoch: u64) {
+    pub(crate) fn arm(&self, epoch: u64) {
         let mut needed = self.needed_epoch.lock().unwrap();
         match *needed {
             Some(existing) if existing >= epoch => {}
@@ -586,14 +585,8 @@ impl RecoveryBarrier {
     fn recovery_pending(&self) -> bool {
         self.needed_epoch.lock().unwrap().is_some()
     }
-}
 
-impl McpRecoveryGate for RecoveryBarrier {
-    fn arm(&self, epoch: u64) {
-        RecoveryBarrier::arm(self, epoch);
-    }
-
-    fn write_blocked(&self) -> bool {
+    pub(crate) fn write_blocked(&self) -> bool {
         self.is_poisoned() || self.recovery_pending()
     }
 }
@@ -1113,7 +1106,7 @@ impl McpServer {
                 PeerEra::Legacy => params.clone(),
             };
             let request = JsonRpcRequest::new(id, rpc_method, params);
-            let recovery_gate: Arc<dyn McpRecoveryGate> = self.recovery.clone();
+            let recovery_gate = Arc::clone(&self.recovery);
             let lifecycle = Arc::new(McpRequestLifecycle::coordinated(
                 Arc::clone(&self.epoch_gate),
                 Some(recovery_gate),

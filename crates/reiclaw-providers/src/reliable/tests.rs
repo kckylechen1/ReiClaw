@@ -3315,8 +3315,7 @@ async fn reliable_wrapper_exposes_inner_provider_attribution() {
     let mut rx = reiclaw_log::subscribe_or_install();
     while rx.try_recv().is_ok() {}
 
-    let reliable: Arc<dyn ModelProvider> = Arc::new(reliable);
-    let dispatch = ProviderDispatch::new(reliable);
+    let dispatch = ProviderDispatch::from_ref(&reliable);
     let req = ChatRequest {
         messages: &[],
         tools: None,

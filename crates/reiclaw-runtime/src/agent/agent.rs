@@ -1,7 +1,6 @@
 #[cfg(test)]
 use crate::agent::dispatcher::NativeToolDispatcher;
 use crate::agent::dispatcher::ToolDispatcher;
-use crate::agent::eval::AutoClassifyExt;
 use crate::agent::prompt::{PromptContext, SystemPromptBuilder};
 use crate::approval::ApprovalManager;
 #[cfg(test)]
@@ -835,18 +834,6 @@ impl Agent {
         &self.channel_handles
     }
 
-    pub fn populate_channels(
-        &self,
-        channel_map: &std::collections::HashMap<String, Arc<dyn reiclaw_api::channel::Channel>>,
-    ) -> Vec<String> {
-        let mut names = Vec::new();
-        for (name, ch) in channel_map {
-            self.channel_handles.register_channel(name, Arc::clone(ch));
-            names.push(name.clone());
-        }
-        names
-    }
-
     /// Attribution fields for opening a turn span at external call sites
     /// (ACP, gateway WS) so every record inside a streamed turn carries the
     /// same `agent_alias`/`model_provider`/`model` the RPC dispatch path sets.
@@ -1399,7 +1386,7 @@ impl Agent {
         // Fallback: auto-classify by complexity when no rule matched.
         if let Some(ref ac) = self.config.resolved.auto_classify {
             let tier = super::eval::estimate_complexity(user_message);
-            if let Some(hint) = ac.hint_for(tier)
+            if let Some(hint) = super::eval::hint_for_tier(ac, tier)
                 && self.available_hints.contains(&hint.to_string())
             {
                 ::reiclaw_log::record!(INFO, ::reiclaw_log::Event::new(module_path!(), ::reiclaw_log::Action::Note).with_attrs(::serde_json::json!({"hint": hint, "complexity": format!("{:?}", tier), "message_length": user_message.len()})), "Auto-classified by complexity");

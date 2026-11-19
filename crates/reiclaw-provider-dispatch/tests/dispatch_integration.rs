@@ -3,8 +3,6 @@
 //! asserts every captured `LogEvent` carries the inner provider's
 //! `model_provider_type` / `model_provider_alias`.
 
-use std::sync::Arc;
-
 use futures_util::StreamExt;
 use reiclaw_api::attribution::{Attributable, ModelProviderKind, ProviderKind, Role};
 use reiclaw_api::model_provider::{
@@ -165,10 +163,10 @@ async fn every_dispatcher_method_attributes() {
     let mut rx = reiclaw_log::subscribe_or_install();
     while rx.try_recv().is_ok() {}
 
-    let fake: Arc<dyn ModelProvider> = Arc::new(EverythingFake {
+    let fake = EverythingFake {
         alias: "integ".into(),
-    });
-    let d = ProviderDispatch::new(fake);
+    };
+    let d = ProviderDispatch::from_ref(&fake);
     let req = ChatRequest {
         messages: &[],
         tools: None,

@@ -5,7 +5,7 @@ use std::hint::black_box;
 use std::sync::{Arc, Mutex};
 
 use reiclaw::agent::agent::Agent;
-use reiclaw::agent::dispatcher::{NativeToolDispatcher, ToolDispatcher, XmlToolDispatcher};
+use reiclaw::agent::dispatcher::NativeToolDispatcher;
 use reiclaw::config::MemoryConfig;
 use reiclaw::memory;
 use reiclaw::memory::{Memory, MemoryCategory};
@@ -153,86 +153,6 @@ fn make_observer() -> Arc<dyn Observer> {
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
-// Benchmark: XML tool-call parsing
-// ─────────────────────────────────────────────────────────────────────────────
-
-fn bench_xml_parsing(c: &mut Criterion) {
-    let dispatcher = XmlToolDispatcher;
-
-    let single_tool = ChatResponse {
-        text: Some(
-            r#"Here is my analysis.
-<tool_call>
-{"name": "search", "arguments": {"query": "zeroclaw architecture"}}
-</tool_call>
-Let me know if you need more."#
-                .into(),
-        ),
-        tool_calls: vec![],
-        usage: None,
-        reasoning_content: None,
-    };
-
-    let multi_tool = ChatResponse {
-        text: Some(
-            r#"<tool_call>
-{"name": "read_file", "arguments": {"path": "src/main.rs"}}
-</tool_call>
-<tool_call>
-{"name": "search", "arguments": {"query": "config"}}
-</tool_call>
-<tool_call>
-{"name": "list_dir", "arguments": {"path": "src/"}}
-</tool_call>"#
-                .into(),
-        ),
-        tool_calls: vec![],
-        usage: None,
-        reasoning_content: None,
-    };
-
-    c.bench_function("xml_parse_single_tool_call", |b| {
-        b.iter(|| dispatcher.parse_response(black_box(&single_tool)))
-    });
-
-    c.bench_function("xml_parse_multi_tool_call", |b| {
-        b.iter(|| dispatcher.parse_response(black_box(&multi_tool)))
-    });
-}
-
-// ─────────────────────────────────────────────────────────────────────────────
-// Benchmark: Native tool-call parsing
-// ─────────────────────────────────────────────────────────────────────────────
-
-fn bench_native_parsing(c: &mut Criterion) {
-    let dispatcher = NativeToolDispatcher;
-
-    let response = ChatResponse {
-        text: Some("I'll help you.".into()),
-        tool_calls: vec![
-            ToolCall {
-                id: "tc1".into(),
-                name: "search".into(),
-                arguments: r#"{"query": "zeroclaw"}"#.into(),
-                extra_content: None,
-            },
-            ToolCall {
-                id: "tc2".into(),
-                name: "read_file".into(),
-                arguments: r#"{"path": "src/main.rs"}"#.into(),
-                extra_content: None,
-            },
-        ],
-        usage: None,
-        reasoning_content: None,
-    };
-
-    c.bench_function("native_parse_tool_calls", |b| {
-        b.iter(|| dispatcher.parse_response(black_box(&response)))
-    });
-}
-
-// ─────────────────────────────────────────────────────────────────────────────
 // Benchmark: Memory store + recall
 // ─────────────────────────────────────────────────────────────────────────────
 
@@ -331,11 +251,5 @@ fn bench_agent_turn(c: &mut Criterion) {
     });
 }
 
-criterion_group!(
-    benches,
-    bench_xml_parsing,
-    bench_native_parsing,
-    bench_memory_operations,
-    bench_agent_turn,
-);
+criterion_group!(benches, bench_memory_operations, bench_agent_turn);
 criterion_main!(benches);

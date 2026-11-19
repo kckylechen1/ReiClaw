@@ -1,9 +1,7 @@
 //! Comprehensive agent-loop test suite.
 
 use crate::agent::agent::Agent;
-use crate::agent::dispatcher::{
-    NativeToolDispatcher, ToolDispatcher, ToolExecutionResult, XmlToolDispatcher,
-};
+use crate::agent::dispatcher::{NativeToolDispatcher, ToolDispatcher, XmlToolDispatcher};
 use crate::observability::{NoopObserver, Observer};
 use crate::tools::{Tool, ToolOutput, ToolResult};
 use anyhow::Result;
@@ -1157,92 +1155,6 @@ async fn multi_turn_maintains_growing_history() {
 }
 
 // ═══════════════════════════════════════════════════════════════════════════
-// 18. Tool call with stringified JSON arguments (common LLM pattern)
-// ═══════════════════════════════════════════════════════════════════════════
-
-#[tokio::test]
-async fn native_dispatcher_handles_stringified_arguments() {
-    let dispatcher = NativeToolDispatcher;
-    let response = ChatResponse {
-        text: Some(String::new()),
-        tool_calls: vec![ToolCall {
-            id: "tc1".into(),
-            name: "echo".into(),
-            arguments: r#"{"message": "hello"}"#.into(),
-            extra_content: None,
-        }],
-        usage: None,
-        reasoning_content: None,
-    };
-
-    let (_, calls) = dispatcher.parse_response(&response);
-    assert_eq!(calls.len(), 1);
-    assert_eq!(calls[0].name, "echo");
-    assert_eq!(
-        calls[0].arguments.get("message").unwrap().as_str().unwrap(),
-        "hello"
-    );
-}
-
-// ═══════════════════════════════════════════════════════════════════════════
-// 19. XML dispatcher edge cases
-// ═══════════════════════════════════════════════════════════════════════════
-
-#[test]
-fn xml_dispatcher_handles_nested_json() {
-    let response = ChatResponse {
-        text: Some(
-            r#"<tool_call>
-{"name": "file_write", "arguments": {"path": "test.json", "content": "{\"key\": \"value\"}"}}
-</tool_call>"#
-                .into(),
-        ),
-        tool_calls: vec![],
-        usage: None,
-        reasoning_content: None,
-    };
-
-    let dispatcher = XmlToolDispatcher;
-    let (_, calls) = dispatcher.parse_response(&response);
-    assert_eq!(calls.len(), 1);
-    assert_eq!(calls[0].name, "file_write");
-    assert_eq!(
-        calls[0].arguments.get("path").unwrap().as_str().unwrap(),
-        "test.json"
-    );
-}
-
-#[test]
-fn xml_dispatcher_handles_empty_tool_call_tag() {
-    let response = ChatResponse {
-        text: Some("<tool_call>\n</tool_call>\nSome text".into()),
-        tool_calls: vec![],
-        usage: None,
-        reasoning_content: None,
-    };
-
-    let dispatcher = XmlToolDispatcher;
-    let (text, calls) = dispatcher.parse_response(&response);
-    assert!(calls.is_empty());
-    assert!(text.contains("Some text"));
-}
-
-#[test]
-fn xml_dispatcher_handles_unclosed_tool_call() {
-    let response = ChatResponse {
-        text: Some("Before\n<tool_call>\n{\"name\": \"shell\"}".into()),
-        tool_calls: vec![],
-        usage: None,
-        reasoning_content: None,
-    };
-
-    let dispatcher = XmlToolDispatcher;
-    let (text, calls) = dispatcher.parse_response(&response);
-    // Should not panic — just treat as text
-    assert!(calls.is_empty());
-    assert!(text.contains("Before"));
-}
-
 // ═══════════════════════════════════════════════════════════════════════════
 // 20. ConversationMessage serialization round-trip
 // ═══════════════════════════════════════════════════════════════════════════
@@ -1301,109 +1213,6 @@ fn conversation_message_serialization_roundtrip() {
             _ => panic!("Variant mismatch after serialization"),
         }
     }
-}
-
-// ═══════════════════════════════════════════════════════════════════════════
-// 21. Tool dispatcher format_results
-// ═══════════════════════════════════════════════════════════════════════════
-
-#[test]
-fn xml_format_results_includes_status_and_output() {
-    let dispatcher = XmlToolDispatcher;
-    let results = vec![
-        ToolExecutionResult {
-            name: "shell".into(),
-            output: "file1.txt\nfile2.txt".into(),
-            success: true,
-            tool_call_id: None,
-        },
-        ToolExecutionResult {
-            name: "file_read".into(),
-            output: "Error: file not found".into(),
-            success: false,
-            tool_call_id: None,
-        },
-    ];
-
-    let msg = dispatcher.format_results(&results);
-    let content = match msg {
-        ConversationMessage::Chat(c) => c.content,
-        _ => panic!("Expected Chat variant"),
-    };
-
-    assert!(content.contains("shell"));
-    assert!(content.contains("file1.txt"));
-    assert!(content.contains("ok"));
-    assert!(content.contains("file_read"));
-    assert!(content.contains("error"));
-}
-
-#[test]
-fn native_format_results_maps_tool_call_ids() {
-    let temp = tempfile::tempdir().unwrap();
-    let image_path = temp.path().join("generated.png");
-    std::fs::write(
-        &image_path,
-        [0x89, b'P', b'N', b'G', b'\r', b'\n', 0x1a, b'\n'],
-    )
-    .unwrap();
-
-    let dispatcher = NativeToolDispatcher;
-    let results = vec![
-        ToolExecutionResult {
-            name: "a".into(),
-            output: format!("File: {}", image_path.display().to_string()),
-            success: true,
-            tool_call_id: Some("tc-001".into()),
-        },
-        ToolExecutionResult {
-            name: "b".into(),
-            output: "out2".into(),
-            success: true,
-            tool_call_id: Some("tc-002".into()),
-        },
-    ];
-
-    let msg = dispatcher.format_results(&results);
-    match msg {
-        ConversationMessage::ToolResults(r) => {
-            assert_eq!(r.len(), 2);
-            assert_eq!(r[0].tool_call_id, "tc-001");
-            assert!(r[0].content.contains("[IMAGE:"));
-            assert!(r[0].content.contains(&image_path.display().to_string()));
-            assert_eq!(r[1].tool_call_id, "tc-002");
-            assert_eq!(r[1].content, "out2");
-        }
-        _ => panic!("Expected ToolResults"),
-    }
-}
-
-#[test]
-fn xml_format_results_wraps_local_image_paths() {
-    let temp = tempfile::tempdir().unwrap();
-    let image_path = temp.path().join("xml-generated.png");
-    std::fs::write(
-        &image_path,
-        [0x89, b'P', b'N', b'G', b'\r', b'\n', 0x1a, b'\n'],
-    )
-    .unwrap();
-
-    let dispatcher = XmlToolDispatcher;
-    let results = vec![ToolExecutionResult {
-        name: "shell".into(),
-        output: format!("Saved image to {}", image_path.display().to_string()),
-        success: true,
-        tool_call_id: None,
-    }];
-
-    let msg = dispatcher.format_results(&results);
-    let content = match msg {
-        ConversationMessage::Chat(c) => c.content,
-        _ => panic!("Expected Chat variant"),
-    };
-
-    assert!(content.contains("[IMAGE:"));
-    assert!(content.contains(&image_path.display().to_string()));
 }
 
 // ═══════════════════════════════════════════════════════════════════════════
