@@ -81,11 +81,16 @@ TARGET_KINDS = (
 
 RAW_STRING = re.compile(r'(?:b|c)?r(#*)"')
 CHAR_LITERAL = re.compile(r"'(?:\\(?:x[0-9a-fA-F]{2}|u\{[0-9a-fA-F]+\}|.)|[^\\'\n])'")
+# Identifiers: ASCII word characters plus any non-ASCII character other than
+# Rust's non-ASCII whitespace, a superset of XID that rustc narrows itself.
+IDENT_CHAR = r"(?:\w|[^\x00-\x7f\u0085\u200e\u200f\u2028\u2029])"
 # Matched against lexed source, where every string literal is a `"N"`
 # placeholder indexing the literal values.
 TOKEN = re.compile(
     r"(?P<attr>#!?\[)"
-    r"|(?P<mod>\b(?:pub(?:\s*\([^)]*\))?\s+)?mod\s+(?:r#)?(?P<name>[^\W\d]\w*)\s*(?P<term>[;{]))"
+    # `#` or `'` before the keyword makes it a raw identifier or raw label.
+    rf"|(?P<mod>\b(?:pub(?:\s*\([^)]*\))?\s+)?(?<![#'])mod\s+(?:r#)?"
+    rf"(?P<name>(?!\d){IDENT_CHAR}+)\s*(?P<term>[;{{]))"
     r'|(?P<include>\binclude!\s*\(\s*"(?P<lit>\d+)"\s*\))'
     r"|(?P<brace>[{}])"
 )

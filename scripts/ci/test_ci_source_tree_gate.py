@@ -48,6 +48,12 @@ class OrphanTests(unittest.TestCase):
                 }
                 mod/* note */spliced;
                 // mod commented;
+                fn label() -> u8 {
+                    let ghost = 7;
+                    'r#mod: loop {
+                        break 'r#mod ghost;
+                    }
+                }
             """,
             "src/raw_impl.rs": "",
             "src/impls/child.rs": "",
@@ -110,13 +116,16 @@ class SilencingTests(unittest.TestCase):
                 mod nested;
                 mod tests;
                 mod unicode;
+                mod combining;
                 mod clean;
             """,
             "src/inner.rs": "#![cfg_attr(test, allow(non_snake_case), allow(unused))]\n",
             "src/legacy.rs": "",
             "src/nested.rs": "#![cfg_attr(test, cfg_attr(unix, expect(dead_code)))]\n",
             "src/tests.rs": "mod cases {\n    #![allow(unused_variables)]\n}\n",
-            "src/unicode.rs": "mod 模块 {\n    #![allow(dead_code)]\n}\n",
+            "src/unicode.rs": "mod 模块 {\n    #![allow(dead_code)]\n}\n"
+            "mod \u2118 {\n    #![allow(dead_code)]\n}\n",
+            "src/combining.rs": "mod a\u0301 {\n    #![allow(dead_code)]\n}\n",
             # Item-level allows, function-scoped inner attributes and text in
             # literals are not module-wide.
             "src/item.rs": """
@@ -137,6 +146,7 @@ class SilencingTests(unittest.TestCase):
             found,
             [
                 "src/clean.rs",
+                "src/combining.rs",
                 "src/inner.rs",
                 "src/lib.rs",
                 "src/nested.rs",
