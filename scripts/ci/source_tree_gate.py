@@ -59,8 +59,6 @@ APPROVED_CRATES = frozenset(
 # that retires each entry. An entry whose file no longer silences anything
 # fails the gate, so the list only shrinks.
 SILENCING_EXCEPTIONS = {
-    "src/main.rs": "the binary re-declares the library's modules; "
-    "remove once main.rs consumes the reiclaw library crate",
     "tests/support/mod.rs": "shared helpers compiled into several test "
     "binaries, each of which uses a subset",
 }

@@ -53,13 +53,7 @@ pub mod commands {
 }
 pub mod config;
 #[cfg(feature = "agent-runtime")]
-pub(crate) mod cost;
-#[cfg(feature = "agent-runtime")]
 pub mod cron;
-#[cfg(feature = "agent-runtime")]
-pub(crate) mod daemon;
-#[cfg(feature = "agent-runtime")]
-pub(crate) mod doctor;
 #[cfg(feature = "gateway")]
 pub mod gateway;
 #[cfg(feature = "agent-runtime")]
@@ -788,22 +782,17 @@ Examples:
 pub enum MemoryCommands {
     /// List memory entries with optional filters
     List {
-        /// Filter by category (core, daily, conversation, or custom name)
         #[arg(long)]
         category: Option<String>,
-        /// Filter by session ID
         #[arg(long)]
         session: Option<String>,
-        /// Maximum number of entries to display
         #[arg(long, default_value = "50")]
         limit: usize,
-        /// Number of entries to skip (for pagination)
         #[arg(long, default_value = "0")]
         offset: usize,
     },
     /// Get a specific memory entry by key
     Get {
-        /// Memory key to look up
         key: String,
     },
     /// Show memory backend statistics and health
@@ -813,19 +802,16 @@ pub enum MemoryCommands {
         /// Delete a single entry by key (supports prefix match)
         #[arg(long)]
         key: Option<String>,
-        /// Only clear entries in this category
         #[arg(long)]
         category: Option<String>,
         /// Skip confirmation prompt
         #[arg(long)]
         yes: bool,
     },
-    /// Rebuild backend indexes: FTS tables + any missing embedding vectors.
-    ///
-    /// Run after `rei migrate openclaw` or other bulk writes that
-    /// land rows with `embedding = NULL`. Safe to re-run; only touches
-    /// entries whose vector is missing. No-op for backends without a
-    /// vector index.
+    // Rebuild backend indexes: FTS tables + any missing embedding vectors.
+    // Run after `rei migrate openclaw` or other bulk writes that land rows
+    // with `embedding = NULL`. Safe to re-run; only touches entries whose
+    // vector is missing. No-op for backends without a vector index.
     Reindex,
 }
 

@@ -59,10 +59,6 @@ pub async fn handle(config: &Config, format: Option<String>) -> Result<()> {
     );
     let trace_storage_mode = config.observability.log_persistence.as_wire().to_string();
     let trace_storage_path = config.observability.log_persistence_path.to_string();
-    let trace_storage_fallback = format!(
-        "🧾 Trace storage:  {} ({})",
-        trace_storage_mode, trace_storage_path
-    );
     println!("🧾 Trace storage:  {trace_storage_mode} ({trace_storage_path})");
     // Per-agent autonomy: each enabled agent picks its own
     // risk_profile, so list them rather than collapsing to one.
@@ -94,12 +90,10 @@ pub async fn handle(config: &Config, format: Option<String>) -> Result<()> {
     let effective_memory_backend = self::effective_memory_backend(config);
     let heartbeat_value = if config.heartbeat.enabled {
         let interval_minutes = config.heartbeat.interval_minutes.to_string();
-        let heartbeat_every_fallback = format!("every {}min", interval_minutes);
         format!("every {interval_minutes}min")
     } else {
         "disabled".to_string()
     };
-    let heartbeat_fallback = format!("💓 Heartbeat:      {}", heartbeat_value);
     println!("💓 Heartbeat:      {heartbeat_value}");
     let memory_backend = effective_memory_backend.to_string();
     let memory_auto_save = if config.memory.auto_save {
@@ -107,10 +101,6 @@ pub async fn handle(config: &Config, format: Option<String>) -> Result<()> {
     } else {
         "off".to_string()
     };
-    let memory_fallback = format!(
-        "🧠 Memory:         {} (auto-save: {})",
-        memory_backend, memory_auto_save
-    );
     println!("🧠 Memory:         {memory_backend} (auto-save: {memory_auto_save})");
     print_companion_outbox_line(config);
 
@@ -128,10 +118,8 @@ pub async fn handle(config: &Config, format: Option<String>) -> Result<()> {
         } else {
             profile.allowed_roots.join(", ")
         };
-        let allowed_roots_fallback = format!("  Allowed roots:     {}", allowed_roots);
         println!("  Allowed roots:     {allowed_roots}");
         let allowed_commands = profile.allowed_commands.join(", ");
-        let allowed_commands_fallback = format!("  Allowed commands:  {}", allowed_commands);
         println!("  Allowed commands:  {allowed_commands}");
         let actions_cap = config
             .runtime_profile_for_agent(alias)
@@ -152,13 +140,9 @@ pub async fn handle(config: &Config, format: Option<String>) -> Result<()> {
                 Ok(summary) => {
                     let spent_today = format!("{:.4}", summary.daily_cost_usd);
                     let daily_limit = format!("{:.2}", config.cost.daily_limit_usd);
-                    let spent_today_fallback =
-                        format!("  Spent today:       ${spent_today} / ${daily_limit}");
                     println!("  Spent today:       ${spent_today} / ${daily_limit}");
                     let spent_month = format!("{:.4}", summary.monthly_cost_usd);
                     let monthly_limit = format!("{:.2}", config.cost.monthly_limit_usd);
-                    let spent_month_fallback =
-                        format!("  Spent this month:  ${spent_month} / ${monthly_limit}");
                     println!("  Spent this month:  ${spent_month} / ${monthly_limit}");
                 }
                 Err(e) => {

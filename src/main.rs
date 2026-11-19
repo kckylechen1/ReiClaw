@@ -1,4 +1,3 @@
-#![recursion_limit = "256"]
 #![warn(clippy::all, clippy::pedantic)]
 #![allow(
     clippy::assigning_clones,
@@ -29,20 +28,23 @@
     clippy::unnecessary_lazy_evaluations,
     clippy::unnecessary_literal_bound,
     clippy::unnecessary_map_or,
-    clippy::unnecessary_wraps,
-    dead_code,
-    unused_variables,
-    unused_imports
+    clippy::unnecessary_wraps
 )]
 #![allow(clippy::exit, reason = "the CLI binary owns the process exit status")]
 
-use anyhow::{Context, Result, bail};
+#[cfg(feature = "agent-runtime")]
+use anyhow::Context;
+use anyhow::{Result, bail};
 use clap::{CommandFactory, FromArgMatches, Parser, Subcommand, ValueEnum};
-use dialoguer::{Password, Select};
-use serde::{Deserialize, Serialize};
+#[cfg(feature = "agent-runtime")]
+use dialoguer::Password;
+#[cfg(feature = "agent-runtime")]
 use std::fmt::Write as _;
-use std::io::{BufRead, ErrorKind, Read, Write};
+#[cfg(feature = "agent-runtime")]
+use std::io::ErrorKind;
+use std::io::Write;
 
+#[cfg(not(feature = "agent-runtime"))]
 const STDIN_LINE_CAP: usize = 1024 * 1024;
 
 /// Result of [`read_capped_line`].
@@ -98,7 +100,8 @@ fn discard_until_newline<R: std::io::BufRead>(reader: &mut R) -> std::io::Result
     }
 }
 
-use std::path::{Path, PathBuf};
+use std::path::PathBuf;
+#[cfg(feature = "agent-runtime")]
 use std::sync::Arc;
 
 fn parse_temperature(s: &str) -> std::result::Result<f64, String> {
@@ -144,64 +147,46 @@ fn print_no_command_help(cmd: clap::Command) -> Result<()> {
 }
 
 #[cfg(feature = "agent-runtime")]
-mod agent;
 mod alias_cli;
-#[cfg(feature = "agent-runtime")]
-mod auth;
 #[cfg(feature = "agent-runtime")]
 mod browse;
 #[cfg(feature = "agent-runtime")]
-mod channels;
-#[cfg(feature = "agent-runtime")]
 mod cli_input;
 mod commands;
-mod config;
 #[cfg(feature = "agent-runtime")]
-mod cost;
-#[cfg(feature = "agent-runtime")]
-mod cron;
-#[cfg(feature = "agent-runtime")]
-mod daemon;
-#[cfg(feature = "agent-runtime")]
-mod doctor;
-#[cfg(feature = "gateway")]
-mod gateway;
 mod gateway_helpers;
 #[cfg(feature = "agent-runtime")]
-mod hooks;
-#[cfg(feature = "agent-runtime")]
 mod integrations;
-mod memory;
 #[cfg(feature = "agent-runtime")]
 mod migration;
-#[cfg(feature = "agent-runtime")]
-mod observability;
-mod providers;
-#[cfg(feature = "agent-runtime")]
-mod security;
 #[cfg(feature = "agent-runtime")]
 mod security_status;
 #[cfg(feature = "agent-runtime")]
 mod service;
 #[cfg(feature = "agent-runtime")]
 mod skills;
+
+use reiclaw::config;
+#[cfg(feature = "gateway")]
+use reiclaw::gateway;
 #[cfg(feature = "agent-runtime")]
-mod tools;
+use reiclaw::{agent, auth, channels, cron, memory, observability};
+#[cfg(feature = "agent-runtime")]
+use reiclaw_runtime::{cost, daemon, doctor, security};
 
 use config::Config;
 
 #[cfg(feature = "agent-runtime")]
 use gateway_helpers::{
-    PaircodeAction, PaircodeResult, fetch_paircode, gateway_admin_url, paircode_no_code_message,
-    shutdown_gateway,
+    PaircodeAction, PaircodeResult, fetch_paircode, log_gateway_start, paircode_no_code_message,
+    resolve_gateway_addr, shutdown_gateway,
 };
-use gateway_helpers::{log_gateway_start, resolve_gateway_addr};
 
 // Re-export so binary modules can use crate::<CommandEnum> while keeping a single source of truth.
 pub use reiclaw::{
     AgentsCommands, BridgeCommands, ChannelCommands, ChannelsCommands, CronCommands,
-    GatewayCommands, IntegrationCommands, MigrateCommands, ProvidersCommands, ServiceCommands,
-    SkillBundleCommands, SkillCommands,
+    GatewayCommands, IntegrationCommands, MemoryCommands, MigrateCommands, ProvidersCommands,
+    ServiceCommands, SkillBundleCommands, SkillCommands,
 };
 
 #[derive(Copy, Clone, Debug, Eq, PartialEq, ValueEnum)]
@@ -879,7 +864,13 @@ Examples:
 #[derive(Subcommand, Debug)]
 enum DeprecatedPropsCommands {
     #[command(external_subcommand)]
-    Any(Vec<String>),
+    Any(
+        #[expect(
+            dead_code,
+            reason = "clap needs the payload to accept any argv; the rename error ignores it"
+        )]
+        Vec<String>,
+    ),
 }
 
 #[derive(Subcommand, Debug)]
@@ -1162,39 +1153,6 @@ enum DoctorCommands {
         #[arg(long)]
         dry_run: bool,
     },
-}
-
-#[derive(Subcommand, Debug)]
-enum MemoryCommands {
-    /// List memory entries with optional filters
-    List {
-        #[arg(long)]
-        category: Option<String>,
-        #[arg(long)]
-        session: Option<String>,
-        #[arg(long, default_value = "50")]
-        limit: usize,
-        #[arg(long, default_value = "0")]
-        offset: usize,
-    },
-    /// Get a specific memory entry by key
-    Get {
-        key: String,
-    },
-    /// Show memory backend statistics and health
-    Stats,
-    /// Clear memories by category, by key, or clear all
-    Clear {
-        /// Delete a single entry by key (supports prefix match)
-        #[arg(long)]
-        key: Option<String>,
-        #[arg(long)]
-        category: Option<String>,
-        /// Skip confirmation prompt
-        #[arg(long)]
-        yes: bool,
-    },
-    Reindex,
 }
 
 /// Bootstrap the value of the global `--config-dir` flag before clap renders
@@ -2121,26 +2079,7 @@ async fn async_main(command: clap::Command) -> Result<()> {
         Commands::Cron { cron_command } => cron::handle_command(cron_command, &config),
 
         Commands::Models { model_command } => {
-            #[cfg(feature = "agent-runtime")]
-            {
-                dispatch_models_command(model_command, &mut config).await
-            }
-            #[cfg(not(feature = "agent-runtime"))]
-            {
-                match model_command {
-                    ModelCommands::List {
-                        model_provider,
-                        check,
-                    } => {
-                        doctor::run_configured_models(&config, model_provider.as_deref(), check)
-                            .await
-                    }
-                    ModelCommands::Refresh { model_provider, .. } => {
-                        doctor::run_models(&config, model_provider.as_deref(), false, false).await
-                    }
-                    _ => doctor::run_models(&config, None, false, false).await,
-                }
-            }
+            dispatch_models_command(model_command, &mut config).await
         }
 
         Commands::Providers {
@@ -2264,15 +2203,15 @@ async fn async_main(command: clap::Command) -> Result<()> {
             commands::auth::handle_auth_command(auth_command, &config).await
         }
 
-        Commands::Update { .. } => commands::update::unavailable(),
+        Commands::Update { .. } => reiclaw::commands::update::unavailable(),
 
         Commands::SelfTest { quick } => {
             let results = if quick {
-                commands::self_test::run_quick(&config).await?
+                reiclaw::commands::self_test::run_quick(&config).await?
             } else {
-                commands::self_test::run_full(&config).await?
+                reiclaw::commands::self_test::run_full(&config).await?
             };
-            commands::self_test::print_results(&results);
+            reiclaw::commands::self_test::print_results(&results);
             let failed = results.iter().filter(|r| !r.passed).count();
             if failed > 0 {
                 std::process::exit(1);
@@ -2628,6 +2567,7 @@ fn warn_withheld_operator_tools(config: &Config) {
     }
 }
 
+#[cfg(feature = "agent-runtime")]
 fn gate_security_posture(
     config: &reiclaw::config::Config,
     allow_degraded: bool,
@@ -2670,12 +2610,14 @@ fn gate_security_posture(
     Ok(Some(handle))
 }
 
+#[cfg(feature = "agent-runtime")]
 fn companion_outbox_health_for_cli(
     config: &reiclaw_config::schema::Config,
 ) -> reiclaw_api::companion::CompanionOutboxHealth {
     reiclaw_memory::probe_companion_outbox_health(config)
 }
 
+#[cfg(feature = "agent-runtime")]
 fn print_companion_outbox_line(config: &reiclaw_config::schema::Config) {
     use reiclaw_api::companion::CompanionOutboxStatus;
 
@@ -2688,17 +2630,15 @@ fn print_companion_outbox_line(config: &reiclaw_config::schema::Config) {
             let pending = health.pending_count.to_string();
             if let Some(age) = health.oldest_pending_age_secs {
                 let age = age.to_string();
-                let fallback =
-                    format!("Companion outbox: pending ({pending} events, oldest {age}s)");
                 println!("Companion outbox: pending ({pending} events, oldest {age}s)");
             } else {
-                let fallback = format!("Companion outbox: pending ({pending} events)");
                 println!("Companion outbox: pending ({pending} events)");
             }
         }
     }
 }
 
+#[cfg(feature = "agent-runtime")]
 fn spawn_companion_outbox_observer(
     store: Option<std::sync::Arc<reiclaw_memory::CompanionStore>>,
 ) -> Option<tokio::task::JoinHandle<()>> {
@@ -2715,7 +2655,7 @@ fn spawn_companion_outbox_observer(
     }))
 }
 
-#[cfg(feature = "gateway")]
+#[cfg(all(feature = "agent-runtime", feature = "gateway"))]
 async fn run_gateway_if_enabled(
     host: &str,
     port: u16,
@@ -2758,7 +2698,7 @@ async fn run_gateway_if_enabled(
     }
 }
 
-#[cfg(not(feature = "gateway"))]
+#[cfg(all(feature = "agent-runtime", not(feature = "gateway")))]
 #[allow(clippy::unused_async)]
 async fn run_gateway_if_enabled(
     _host: &str,
@@ -2769,6 +2709,7 @@ async fn run_gateway_if_enabled(
     anyhow::bail!("Gateway feature is not enabled. Rebuild with --features gateway")
 }
 
+#[cfg(feature = "agent-runtime")]
 fn is_addr_in_use_error(err: &anyhow::Error) -> bool {
     err.chain().any(|cause| {
         cause
@@ -2777,10 +2718,12 @@ fn is_addr_in_use_error(err: &anyhow::Error) -> bool {
     })
 }
 
+#[cfg(feature = "agent-runtime")]
 fn is_default_gateway_addr(host: &str, port: u16, default_host: &str, default_port: u16) -> bool {
     host == default_host && port == default_port
 }
 
+#[cfg(feature = "agent-runtime")]
 fn gateway_addr_in_use_message(
     host: &str,
     port: u16,
@@ -2821,6 +2764,7 @@ fn gateway_addr_in_use_message(
     lines.join("\n")
 }
 
+#[cfg(feature = "agent-runtime")]
 fn gateway_restart_recovery_command(host: &str, port: u16, default_host: &str) -> String {
     let mut command = format!("    rei gateway start --port {port}");
     if host != default_host {
@@ -2829,6 +2773,7 @@ fn gateway_restart_recovery_command(host: &str, port: u16, default_host: &str) -
     command
 }
 
+#[cfg(feature = "agent-runtime")]
 fn gateway_paircode_recovery_command(
     host: &str,
     port: u16,
@@ -2846,6 +2791,7 @@ fn gateway_paircode_recovery_command(
     command
 }
 
+#[cfg(feature = "agent-runtime")]
 fn available_gateway_restart_hint_port(host: &str, port: u16) -> Option<u16> {
     const SCAN_LIMIT: u16 = 20;
 

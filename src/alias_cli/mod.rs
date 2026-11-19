@@ -109,7 +109,6 @@ fn delete_config(
     dry_run: bool,
     yes: bool,
 ) -> Result<()> {
-    let section = section_path(kind);
     if dry_run {
         print_impact(kind, alias, config);
         return Ok(());
