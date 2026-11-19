@@ -85,7 +85,7 @@ CHAR_LITERAL = re.compile(r"'(?:\\(?:x[0-9a-fA-F]{2}|u\{[0-9a-fA-F]+\}|.)|[^\\'\
 # placeholder indexing the literal values.
 TOKEN = re.compile(
     r"(?P<attr>#!?\[)"
-    r"|(?P<mod>\b(?:pub(?:\s*\([^)]*\))?\s+)?mod\s+(?:r#)?(?P<name>[A-Za-z_]\w*)\s*(?P<term>[;{]))"
+    r"|(?P<mod>\b(?:pub(?:\s*\([^)]*\))?\s+)?mod\s+(?:r#)?(?P<name>[^\W\d]\w*)\s*(?P<term>[;{]))"
     r'|(?P<include>\binclude!\s*\(\s*"(?P<lit>\d+)"\s*\))'
     r"|(?P<brace>[{}])"
 )
@@ -289,10 +289,12 @@ class Workspace:
             return meta.get(flag, True) is not False
 
         roots: list[Path] = []
-        lib = manifest.get("lib", {})
-        if "path" in lib:
+        # Disabling discovery never drops an explicitly declared target. All
+        # packages here are edition 2024, so 2015's legacy paths do not apply.
+        lib = manifest.get("lib")
+        if lib is not None and "path" in lib:
             roots.append(package / lib["path"])
-        elif auto("autolib"):
+        elif lib is not None or auto("autolib"):
             roots.append(package / "src/lib.rs")
         if auto("autobins"):
             roots.append(package / "src/main.rs")

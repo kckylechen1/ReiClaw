@@ -25,7 +25,7 @@ def paths(violations, check):
 class OrphanTests(unittest.TestCase):
     def test_follows_rustc_module_resolution(self):
         root = workspace({
-            "Cargo.toml": '[workspace]\nmembers = ["crates/a", "crates/b"]\n\n'
+            "Cargo.toml": '[workspace]\nmembers = ["crates/a", "crates/b", "crates/c"]\n\n'
             + PACKAGE.format(name="root"),
             # A crate root resolves children beside itself whatever its name.
             # Literals and comments never count as code, and a comment still
@@ -81,6 +81,9 @@ class OrphanTests(unittest.TestCase):
             "crates/b/src/actual.rs": "",
             "crates/b/src/lib.rs": "",
             "crates/b/tests/stale.rs": "",
+            # An explicit [lib] keeps its default path when discovery is off.
+            "crates/c/Cargo.toml": '[package]\nname = "c"\nautolib = false\n\n[lib]\nname = "renamed"\n',
+            "crates/c/src/lib.rs": "",
         })
         self.assertEqual(
             paths(gate.Workspace(root).orphans(), "orphans"),
@@ -106,12 +109,14 @@ class SilencingTests(unittest.TestCase):
                 mod item;
                 mod nested;
                 mod tests;
+                mod unicode;
                 mod clean;
             """,
             "src/inner.rs": "#![cfg_attr(test, allow(non_snake_case), allow(unused))]\n",
             "src/legacy.rs": "",
             "src/nested.rs": "#![cfg_attr(test, cfg_attr(unix, expect(dead_code)))]\n",
             "src/tests.rs": "mod cases {\n    #![allow(unused_variables)]\n}\n",
+            "src/unicode.rs": "mod 模块 {\n    #![allow(dead_code)]\n}\n",
             # Item-level allows, function-scoped inner attributes and text in
             # literals are not module-wide.
             "src/item.rs": """
@@ -130,7 +135,14 @@ class SilencingTests(unittest.TestCase):
             found = paths(gate.Workspace(root).silencing(), "silencing")
         self.assertEqual(
             found,
-            ["src/clean.rs", "src/inner.rs", "src/lib.rs", "src/nested.rs", "src/tests.rs"],
+            [
+                "src/clean.rs",
+                "src/inner.rs",
+                "src/lib.rs",
+                "src/nested.rs",
+                "src/tests.rs",
+                "src/unicode.rs",
+            ],
         )
 
 
