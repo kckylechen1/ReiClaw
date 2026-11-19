@@ -1,13 +1,7 @@
 pub use reiclaw_runtime::migration::*;
 
 use crate::config::Config;
-use crate::memory::{self, Memory, MemoryCategory};
-use anyhow::{Context, Result, bail};
-use directories::UserDirs;
-use rusqlite::{Connection, OpenFlags, OptionalExtension};
-use std::collections::HashSet;
-use std::fs;
-use std::path::{Path, PathBuf};
+use anyhow::Result;
 
 pub async fn handle_command(command: crate::MigrateCommands, config: &Config) -> Result<()> {
     match command {

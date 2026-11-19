@@ -10,8 +10,8 @@ use anyhow::Result;
 use reiclaw_gateway_client::{Client, ConnectOptions, Decision, Frame, Rejected};
 use tokio::io::{AsyncBufReadExt, BufReader};
 
-use crate::commands::self_test::{resolve_gateway_bearer_token, resolve_probe_host};
 use crate::config::Config;
+use reiclaw::commands::self_test::{resolve_gateway_bearer_token, resolve_probe_host};
 
 /// This machine's gateway as a WebSocket base URL.
 fn local_gateway_url(config: &Config) -> String {

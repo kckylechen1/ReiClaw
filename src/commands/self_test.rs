@@ -340,7 +340,7 @@ fn web_dist_dir_expansion_reason(value: &str) -> Option<&'static str> {
     }
 }
 
-pub(crate) fn resolve_probe_host(configured: &str) -> (&str, Option<&str>) {
+pub fn resolve_probe_host(configured: &str) -> (&str, Option<&str>) {
     match configured {
         "0.0.0.0" => ("127.0.0.1", Some("0.0.0.0")),
         // Normalise both shapes to bracketed form for the display URL so the
@@ -499,7 +499,7 @@ fn build_websocket_probe_url(
 /// `rei chat`). Precedence: `REI_GATEWAY_TOKEN`, then
 /// `REI_ACP_BRIDGE_TOKEN`, then the first plaintext (`zc_*`) entry in
 /// `gateway.paired_tokens`.
-pub(crate) fn resolve_gateway_bearer_token(config: &crate::config::Config) -> Option<String> {
+pub fn resolve_gateway_bearer_token(config: &crate::config::Config) -> Option<String> {
     for key in ["REI_GATEWAY_TOKEN", "REI_ACP_BRIDGE_TOKEN"] {
         if let Ok(value) = std::env::var(key) {
             let trimmed = value.trim();

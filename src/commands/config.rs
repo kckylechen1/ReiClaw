@@ -693,22 +693,18 @@ pub async fn handle(config_command: crate::ConfigCommands, config: &mut Config) 
                     );
                     config_patch_fail_json_or_human(json, err, human)?;
                 }
-                let comment = match object.get("comment") {
-                    Some(value) => match value.as_str() {
-                        Some(comment) => Some(comment),
-                        None => {
-                            let message =
-                                format!("JSON Patch op[{idx}] `comment` field must be a string");
-                            let api_err = config_patch_json_value_type_error(
-                                message.clone(),
-                                Some(path.clone()),
-                                Some(idx),
-                            );
-                            config_patch_fail_json_or_human(json, api_err, message)?
-                        }
-                    },
-                    None => None,
-                };
+                if object
+                    .get("comment")
+                    .is_some_and(|value| !value.is_string())
+                {
+                    let message = format!("JSON Patch op[{idx}] `comment` field must be a string");
+                    let api_err = config_patch_json_value_type_error(
+                        message.clone(),
+                        Some(path.clone()),
+                        Some(idx),
+                    );
+                    config_patch_fail_json_or_human(json, api_err, message)?;
+                }
                 let is_secret = Config::prop_is_secret(&path);
 
                 let result_entry: serde_json::Value = match op_name {

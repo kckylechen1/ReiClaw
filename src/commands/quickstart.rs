@@ -46,7 +46,7 @@ pub async fn run_quickstart_cli(
     api_key: Option<String>,
     agent: Option<String>,
 ) -> anyhow::Result<()> {
-    use dialoguer::{Confirm, Editor, FuzzySelect, Input, Password};
+    use dialoguer::{Confirm, Editor, FuzzySelect, Input};
     use reiclaw_config::presets::{
         AgentIdentity, BuilderSubmission, ChannelQuickStart, MemoryChoice, ModelProviderChoice,
         SelectorChoice,
@@ -107,7 +107,6 @@ pub async fn run_quickstart_cli(
     enum ChannelChoice {
         Fresh {
             kind: String,
-            display_name: String,
             alias: String,
             extras: std::collections::BTreeMap<String, String>,
         },
@@ -679,7 +678,6 @@ pub async fn run_quickstart_cli(
                         }
                         form.channels.push(ChannelChoice::Fresh {
                             kind: chosen.kind.clone(),
-                            display_name: chosen.display_name.clone(),
                             alias,
                             extras,
                         });

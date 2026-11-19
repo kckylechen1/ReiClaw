@@ -132,8 +132,6 @@ uuid = { version = "1.22", default-features = false, features = ["v4", "std"] }
 # Async traits
 async-trait = "0.1"
 
-# Memory / persistence (migration.rs, behind agent-runtime)
-rusqlite = { version = "0.41.1", features = ["bundled", "fallible_uint"], optional = true }
 jiff.workspace = true
 
 # Interactive CLI prompts (memory CLI uses dialoguer unconditionally)
@@ -200,7 +198,6 @@ slim-control = [
 agent-runtime = [
     "dep:reiclaw-runtime", "dep:reiclaw-tools",
     "dep:reiclaw-gateway-client",
-    "dep:rusqlite",
     "dep:tokio-tungstenite",
     "dep:rustls",
 ]
@@ -314,6 +311,8 @@ criterion = { version = "0.8", features = ["async_tokio"] }
 wiremock = "0.6"
 scopeguard = "1.2"
 rcgen = "0.13"
+# Reads the audit database in alias_cli tests.
+rusqlite = { version = "0.41.1", features = ["bundled", "fallible_uint"] }
 
 [[test]]
 name = "component"
