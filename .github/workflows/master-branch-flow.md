@@ -88,8 +88,8 @@ for the full procedure. In summary:
 2. Version bump PR is merged.
 3. Maintainer triggers `release-stable-manual.yml` via `workflow_dispatch`
    with the version number, or pushes an annotated tag `vX.Y.Z`.
-4. Workflow builds all targets, creates the GitHub Release, updates Scoop and
-   AUR, and sends announcements. Homebrew Core discovers the release through
+4. Workflow builds all targets, creates the GitHub Release, updates AUR, and
+   sends announcements. Homebrew Core discovers the release through
    its own autobump service.
 5. Maintainer approves the `github-releases` environment gate
    when prompted.
@@ -113,7 +113,6 @@ for the full procedure. In summary:
 | `aarch64-apple-darwin` | ✓ | ✓ | ✓ |
 | `aarch64-linux-android` | | ✓ | ✓ (experimental) |
 | `x86_64-apple-darwin` | | ✓ | ✓ |
-| `x86_64-pc-windows-msvc` | | ✓ | ✓ |
 
 ---
 
