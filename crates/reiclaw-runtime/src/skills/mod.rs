@@ -1561,15 +1561,7 @@ fn render_skill_location(skill: &Skill, workspace_dir: &Path, prefer_relative: b
 }
 
 fn display_skill_location(path: &Path) -> String {
-    let rendered = path.display().to_string();
-    #[cfg(target_os = "windows")]
-    {
-        rendered.replace('\\', "/")
-    }
-    #[cfg(not(target_os = "windows"))]
-    {
-        rendered
-    }
+    path.display().to_string()
 }
 
 /// Build the "Available Skills" system prompt section with full skill instructions.

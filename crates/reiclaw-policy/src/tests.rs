@@ -5,98 +5,46 @@ fn default_policy() -> SecurityPolicy {
     SecurityPolicy::default()
 }
 
-// Platform-specific test paths: Unix uses `/…` paths, Windows uses
-// `C:\…` paths so that `Path::is_absolute()` returns the correct
-// value on each platform.
+// Shared absolute test paths.
 
-#[cfg(not(target_os = "windows"))]
 fn tp_ws() -> PathBuf {
     PathBuf::from("/home/user/.zeroclaw/workspace")
 }
-#[cfg(target_os = "windows")]
-fn tp_ws() -> PathBuf {
-    PathBuf::from("C:\\Users\\user\\.zeroclaw\\workspace")
-}
 
-#[cfg(not(target_os = "windows"))]
 fn tp_ws_shared() -> PathBuf {
     PathBuf::from("/home/user/.zeroclaw/shared")
 }
-#[cfg(target_os = "windows")]
-fn tp_ws_shared() -> PathBuf {
-    PathBuf::from("C:\\Users\\user\\.zeroclaw\\shared")
-}
 
-#[cfg(not(target_os = "windows"))]
 fn tp_outside1() -> &'static str {
     "/home/user/other/file.txt"
 }
-#[cfg(target_os = "windows")]
-fn tp_outside1() -> &'static str {
-    "C:\\Users\\user\\other\\file.txt"
-}
 
-#[cfg(not(target_os = "windows"))]
 fn tp_outside2() -> &'static str {
     "/tmp/file.txt"
 }
-#[cfg(target_os = "windows")]
-fn tp_outside2() -> &'static str {
-    "C:\\Users\\Public\\file.txt"
-}
 
-#[cfg(not(target_os = "windows"))]
 fn tp_sys() -> &'static str {
     "/etc"
 }
-#[cfg(target_os = "windows")]
-fn tp_sys() -> &'static str {
-    "C:\\Windows\\System32"
-}
 
-#[cfg(not(target_os = "windows"))]
 fn tp_sys_sub(sub: &str) -> String {
     format!("/{sub}")
 }
-#[cfg(target_os = "windows")]
-fn tp_sys_sub(sub: &str) -> String {
-    format!("C:\\Windows\\{}", sub.replace('/', "\\"))
-}
 
-#[cfg(not(target_os = "windows"))]
 fn tp_proj() -> PathBuf {
     PathBuf::from("/projects")
 }
-#[cfg(target_os = "windows")]
-fn tp_proj() -> PathBuf {
-    PathBuf::from("C:\\projects")
-}
 
-#[cfg(not(target_os = "windows"))]
 fn tp_data() -> PathBuf {
     PathBuf::from("/data")
 }
-#[cfg(target_os = "windows")]
-fn tp_data() -> PathBuf {
-    PathBuf::from("C:\\data")
-}
 
-#[cfg(not(target_os = "windows"))]
 fn tp_rw() -> PathBuf {
     PathBuf::from("/rw-data")
 }
-#[cfg(target_os = "windows")]
-fn tp_rw() -> PathBuf {
-    PathBuf::from("C:\\rw-data")
-}
 
-#[cfg(not(target_os = "windows"))]
 fn tp_ro() -> PathBuf {
     PathBuf::from("/ro-shared")
-}
-#[cfg(target_os = "windows")]
-fn tp_ro() -> PathBuf {
-    PathBuf::from("C:\\ro-shared")
 }
 
 #[test]
@@ -1676,7 +1624,6 @@ fn forbidden_path_argument_allows_safe_device_redirect_targets() {
     assert_eq!(p.forbidden_path_argument("echo err 1> /dev/stderr"), None);
     assert_eq!(p.forbidden_path_argument("cat </dev/zero"), None);
     assert_eq!(p.forbidden_path_argument("cat < /dev/zero"), None);
-    #[cfg(not(target_os = "windows"))]
     assert_eq!(p.forbidden_path_argument("cat /dev/null"), None);
     assert_eq!(p.forbidden_path_argument("cat ./safe.txt>/dev/null"), None);
     assert_eq!(p.forbidden_path_argument("cat> /dev/null"), None);
@@ -2430,36 +2377,15 @@ fn checklist_all_system_dirs_blocked() {
         workspace_only: false,
         ..SecurityPolicy::default()
     };
-    #[cfg(not(target_os = "windows"))]
-    {
-        for dir in ["/etc", "/root", "/proc", "/sys", "/dev", "/var", "/tmp"] {
-            assert!(
-                p.forbidden_paths.iter().any(|f| f == dir),
-                "Default forbidden_paths must include {dir} on Unix"
-            );
-            assert!(
-                !p.is_path_allowed(dir),
-                "System dir should be blocked: {dir}"
-            );
-        }
-    }
-    #[cfg(target_os = "windows")]
-    {
-        for dir in [
-            "C:\\Windows",
-            "C:\\Windows\\System32",
-            "C:\\Program Files",
-            "C:\\ProgramData",
-        ] {
-            assert!(
-                p.forbidden_paths.iter().any(|f| f == dir),
-                "Default forbidden_paths must include {dir} on Windows"
-            );
-            assert!(
-                !p.is_path_allowed(dir),
-                "System dir should be blocked: {dir}"
-            );
-        }
+    for dir in ["/etc", "/root", "/proc", "/sys", "/dev", "/var", "/tmp"] {
+        assert!(
+            p.forbidden_paths.iter().any(|f| f == dir),
+            "Default forbidden_paths must include {dir} on Unix"
+        );
+        assert!(
+            !p.is_path_allowed(dir),
+            "System dir should be blocked: {dir}"
+        );
     }
     for dot in &["~/.ssh", "~/.gnupg", "~/.aws"] {
         assert!(
@@ -2537,28 +2463,11 @@ fn checklist_default_policy_is_workspace_only() {
 #[test]
 fn checklist_default_forbidden_paths_comprehensive() {
     let p = SecurityPolicy::default();
-    #[cfg(not(target_os = "windows"))]
-    {
-        for dir in ["/etc", "/root", "/proc", "/sys", "/dev", "/var", "/tmp"] {
-            assert!(
-                p.forbidden_paths.iter().any(|f| f == dir),
-                "Default forbidden_paths must include {dir} on Unix"
-            );
-        }
-    }
-    #[cfg(target_os = "windows")]
-    {
-        for dir in [
-            "C:\\Windows",
-            "C:\\Windows\\System32",
-            "C:\\Program Files",
-            "C:\\ProgramData",
-        ] {
-            assert!(
-                p.forbidden_paths.iter().any(|f| f == dir),
-                "Default forbidden_paths must include {dir} on Windows"
-            );
-        }
+    for dir in ["/etc", "/root", "/proc", "/sys", "/dev", "/var", "/tmp"] {
+        assert!(
+            p.forbidden_paths.iter().any(|f| f == dir),
+            "Default forbidden_paths must include {dir} on Unix"
+        );
     }
     for dot in &["~/.ssh", "~/.gnupg", "~/.aws", "~/.config"] {
         assert!(
@@ -4156,9 +4065,7 @@ fn stdin_interpreter_contract_explicit_opt_in_requires_approval() {
         "python3 <<-EOF\n\tprint(1)\n\tEOF",
         "cat <<EOF\nx\nEOF\necho x | python3",
         "echo x | python3 script.py",
-        #[cfg(not(windows))]
         "cat <<EOF # <<HIDDEN\nx\nEOF\necho x | python3",
-        #[cfg(not(windows))]
         "echo x | # comment\npython3",
         "echo x | python3\\\n",
     ] {
@@ -4228,18 +4135,4 @@ fn stdin_interpreter_comment_and_heredoc_boundaries() {
             "{command}"
         );
     }
-}
-
-#[cfg(windows)]
-#[test]
-fn stdin_interpreter_windows_hash_is_not_a_comment() {
-    let mut p = default_policy();
-    let command = "echo # && echo x | python3";
-    assert!(p.validate_command_execution(command, false).is_err());
-    p.allowed_commands.push("python3".into());
-    assert!(
-        p.validate_command_execution(command, false)
-            .unwrap_err()
-            .contains("explicit approval")
-    );
 }

@@ -36,11 +36,9 @@ systemd restarts the daemon on any exit with a 3-second backoff. There is no exi
 
 On macOS, the LaunchAgent (`~/Library/LaunchAgents/com.zeroclaw.daemon.plist`) sets `RunAtLoad` and `KeepAlive` to `true`, so launchd keeps the daemon running and relaunches it whenever it exits.
 
-On Windows, `zeroclaw service install` registers a Task Scheduler task triggered `ONLOGON` at the `LIMITED` run level. It starts the daemon at logon; it does not add an automatic restart-on-failure policy.
-
 ## Graceful shutdown
 
-On Unix the daemon traps `SIGINT` and `SIGTERM`; on Windows it traps Ctrl+C (`ctrl_c`). Any of these triggers a clean shutdown: the daemon stops its channel server and the gateway listener and exits.
+The daemon traps `SIGINT` and `SIGTERM`. Either triggers a clean shutdown: the daemon stops its channel server and the gateway listener and exits.
 
 `SIGHUP` is ignored (the daemon stays running). A reload requested via the `/admin/reload` endpoint restarts the daemon loop in place rather than exiting.
 

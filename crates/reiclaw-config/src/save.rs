@@ -2712,50 +2712,7 @@ pub(crate) async fn sync_directory(path: &Path) -> Result<()> {
         Ok(())
     }
 
-    #[cfg(windows)]
-    {
-        use std::os::windows::fs::OpenOptionsExt;
-        const FILE_FLAG_BACKUP_SEMANTICS: u32 = 0x02000000;
-        let dir = std::fs::OpenOptions::new()
-            .read(true)
-            .custom_flags(FILE_FLAG_BACKUP_SEMANTICS)
-            .open(path)
-            .with_context(|| {
-                format!(
-                    "Failed to open directory for fsync: {}",
-                    path.display().to_string()
-                )
-            })?;
-        // FlushFileBuffers on directory handles returns ERROR_ACCESS_DENIED on
-        // Windows (OS Error 5). This is expected — NTFS does not support
-        // flushing directory metadata the same way Unix does. The individual
-        // files have already been synced, so it is safe to ignore this error.
-        if let Err(e) = dir.sync_all() {
-            if e.raw_os_error() == Some(5) {
-                ::reiclaw_log::record!(
-                    TRACE,
-                    ::reiclaw_log::Event::new(
-                        crate::schema::CONFIG_SCHEMA_LOG_TARGET,
-                        ::reiclaw_log::Action::Note
-                    ),
-                    &format!(
-                        "Ignoring expected ACCESS_DENIED when fsyncing directory on Windows: {}",
-                        path.display().to_string()
-                    )
-                );
-            } else {
-                return Err(e).with_context(|| {
-                    format!(
-                        "Failed to fsync directory metadata: {}",
-                        path.display().to_string()
-                    )
-                });
-            }
-        }
-        Ok(())
-    }
-
-    #[cfg(not(any(unix, windows)))]
+    #[cfg(not(unix))]
     {
         let _ = path;
         Ok(())

@@ -103,7 +103,7 @@ jobs:
           }
           # The installer generator derives every install surface from Cargo
           # manifests (features), xtask, and the surfaces themselves.
-          pick '(^|/)Cargo\.toml$|^Cargo\.lock$|^xtask/|^dev/ci/|^dist/|^scripts/ci/install|^install\.sh$|^setup\.bat$|^flake\.nix$|^\.cargo/config\.toml$|^\.github/workflows/ci\.yml$' installer
+          pick '(^|/)Cargo\.toml$|^Cargo\.lock$|^xtask/|^dev/ci/|^dist/|^scripts/ci/install|^install\.sh$|^flake\.nix$|^\.cargo/config\.toml$|^\.github/workflows/ci\.yml$' installer
       # Fail Rust formatting before the runtime matrix starts.
       - uses: dtolnay/rust-toolchain@e97e2d8cc328f1b50210efc529dca0028893a2d9 # v1
         if: steps.scope.outputs.full == 'true'

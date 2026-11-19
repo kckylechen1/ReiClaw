@@ -52,34 +52,4 @@ brew install zeroclaw
 ```
 <!-- ANCHOR_END: macos -->
 
-<!-- ANCHOR: windows -->
-### Windows
-
-**Prebuilt binary (recommended):**
-
-Download the latest `zeroclaw-x86_64-pc-windows-msvc.zip`, extract it, add its directory to `PATH`, and run `zeroclaw quickstart`. The [Windows setup guide](../setup/windows.md) provides an idempotent PowerShell installation block.
-
-**`setup.bat` (currently checks for Rust before its prebuilt path):**
-
-```cmd
-setup.bat --prebuilt
-```
-
-**Scoop:**
-
-```cmd
-scoop bucket add zeroclaw https://github.com/zeroclaw-labs/scoop-zeroclaw
-scoop install zeroclaw
-```
-
-**From source:**
-
-```cmd
-cargo install --locked --path .
-```
-
-On WSL2, follow the Linux path; `install.sh` runs unchanged. See
-[Setup → Windows](../setup/windows.md) for the full walkthrough and current Scoop status.
-<!-- ANCHOR_END: windows -->
-
 </div>

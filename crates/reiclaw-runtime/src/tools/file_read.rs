@@ -556,11 +556,6 @@ mod tests {
 
         #[cfg(unix)]
         let target = "/etc/passwd";
-        #[cfg(windows)]
-        let target = {
-            let sysroot = std::env::var("SystemRoot").unwrap_or_else(|_| r"C:\Windows".to_string());
-            std::path::PathBuf::from(sysroot).join(r"System32\drivers\etc\hosts")
-        };
 
         let result = tool.execute(json!({"path": target})).await.unwrap();
         assert!(!result.success);

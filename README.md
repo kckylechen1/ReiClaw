@@ -132,9 +132,9 @@ with the same preset and features as your existing installation. The legacy
 `rei update` command (including `--check`, `--force`, and `--version`)
 returns source-update instructions without accessing a release server or
 replacing the executable. This fork does not yet publish a verified binary
-update channel. Both bootstrap scripts now default to source builds;
-`--prebuilt` exits with source-install instructions before downloading or
-installing anything. On Windows, run `setup.bat` from the fork checkout.
+update channel. The bootstrap script defaults to source builds; `--prebuilt`
+exits with source-install instructions before downloading or installing
+anything. ReiClaw supports Linux and macOS; Windows is not supported.
 
 Source installs verify that the checkout's `origin` is this fork before any
 update or toolchain bootstrap. A cached upstream checkout is rejected and
@@ -173,14 +173,14 @@ Flags:
 ./install.sh --uninstall             # remove ReiClaw
 ```
 
-Platform-specific notes: [Linux](docs/book/src/setup/linux.md) · [macOS](docs/book/src/setup/macos.md) · [Windows](docs/book/src/setup/windows.md) · [FreeBSD](docs/book/src/setup/freebsd.md) · [NixOS](docs/book/src/setup/nixos.md) · [Docker](docs/book/src/setup/container.md)
+Platform-specific notes: [Linux](docs/book/src/setup/linux.md) · [macOS](docs/book/src/setup/macos.md) · [FreeBSD](docs/book/src/setup/freebsd.md) · [NixOS](docs/book/src/setup/nixos.md) · [Docker](docs/book/src/setup/container.md)
 
 ## Quick start
 
 ```bash
 rei quickstart                    # one-shot setup: pick a provider, write a working config
 rei chat -a <alias>               # chat with the [agents.<alias>] entry through the gateway
-rei service install               # register as systemd/launchctl/Windows Service
+rei service install               # register as a systemd/launchctl service
 rei service start                 # run it always-on in the background
 ```
 

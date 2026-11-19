@@ -145,44 +145,6 @@ fn cli_quickstart_uses_state_fallback_when_provider_has_no_override() {
 }
 
 #[test]
-fn cap_line_utf8_safe_no_panic_on_multibyte_boundary() {
-    // Neutral multi-byte placeholder text; each CJK char is 3 bytes, so a
-    // byte cap can land inside a character. Pre-fix this panicked via the
-    // raw `String::truncate(cap)`.
-    let mut line = "语言".repeat(64); // 128 chars, 384 bytes, all 3-byte
-    let cap = 10; // byte index 10 is mid-character (10 % 3 != 0)
-    assert!(
-        !line.is_char_boundary(cap),
-        "precondition: cap splits a char"
-    );
-    cap_line_utf8_safe(&mut line, cap);
-    assert!(line.len() <= cap, "must not exceed the byte cap");
-    assert!(
-        line.is_char_boundary(line.len()),
-        "result must end on a valid UTF-8 char boundary"
-    );
-    // cap 10 floors to byte 9 = three whole 3-byte chars.
-    assert_eq!(
-        line, "语言语",
-        "should keep whole chars up to the floored cap"
-    );
-}
-
-#[test]
-fn cap_line_utf8_safe_is_noop_when_within_cap() {
-    let mut line = String::from("héllo"); // 6 bytes
-    cap_line_utf8_safe(&mut line, 1024);
-    assert_eq!(line, "héllo");
-}
-
-#[test]
-fn cap_line_utf8_safe_ascii_exact_cap() {
-    let mut line = String::from("abcdefgh");
-    cap_line_utf8_safe(&mut line, 4);
-    assert_eq!(line, "abcd");
-}
-
-#[test]
 #[cfg(feature = "agent-runtime")]
 fn cli_definition_has_no_flag_conflicts() {
     Cli::command().debug_assert();

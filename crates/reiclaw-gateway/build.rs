@@ -30,13 +30,7 @@ fn build_web_dashboard() {
     );
     println!("cargo:rerun-if-changed={}", web_dir.join("src").display());
 
-    let npm = if cfg!(target_os = "windows") {
-        "npm.cmd"
-    } else {
-        "npm"
-    };
-
-    let ok = Command::new(npm)
+    let ok = Command::new("npm")
         .args(["ci", "--ignore-scripts"])
         .current_dir(&web_dir)
         .status()
@@ -48,7 +42,7 @@ fn build_web_dashboard() {
         return;
     }
 
-    let _ = Command::new(npm)
+    let _ = Command::new("npm")
         .args(["run", "build"])
         .current_dir(&web_dir)
         .status();

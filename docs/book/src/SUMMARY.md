@@ -17,7 +17,6 @@
 - [Installation](./setup/index.md)
   - [Linux](./setup/linux.md)
   - [macOS](./setup/macos.md)
-  - [Windows](./setup/windows.md)
   - [FreeBSD](./setup/freebsd.md)
   - [NixOS](./setup/nixos.md)
   - [Migrating from a product container](./setup/container.md)

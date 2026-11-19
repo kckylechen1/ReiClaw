@@ -17,7 +17,7 @@ Notable submodules:
 - `cron/`, `daemon/`, `heartbeat/`: scheduling and long-running process management
 - `skills/`: skill loading and execution
 - `quickstart/`: onboarding apply path, preset catalogue and selection policy
-- `service/`: systemd / launchctl / Windows Service integration
+- `service/`: systemd / OpenRC / launchctl integration
 
 ### `reiclaw-config`
 
@@ -172,11 +172,11 @@ No provider, channel or tool policy is owned by this crate.
 ### `reiclaw-platform`
 
 Native and Docker command adapters for the body's local tools. Owns the runtime
-factory, configured-shell validation, Docker workspace mount checks and Windows
-command construction. `reiclaw-config` retains `[runtime]` and its defaults;
+factory, configured-shell validation and Docker workspace mount checks.
+`reiclaw-config` retains `[runtime]` and its defaults;
 `reiclaw-api::runtime_traits` owns the shared adapter contract and typed mount
 errors. `reiclaw-runtime::platform` re-exports the adapters for existing runtime,
-gateway and channel callers. Providers use the Windows command helper directly.
+gateway and channel callers.
 
 This crate does not own agent sessions, task state or delegated execution.
 External harnesses continue through Tachi under ADR-017.

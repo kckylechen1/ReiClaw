@@ -1,6 +1,6 @@
 <!-- Canonical deployment-shape diagram. Edit here; reuse via {{#include}}. -->
 ```text
-zeroclaw service                          — systemd / launchctl / Windows Service
+zeroclaw service                          — systemd / launchctl
 └── zeroclaw daemon                       — the single long-running process
     ├── gateway listener  :42617          — REST / WebSocket / webhook intake
     ├── channel pollers                   — Telegram long-poll (outbound poll)
@@ -18,5 +18,5 @@ on disk (everything but the binary can move)
     ├── sessions/                         — per-session conversation stores
     └── state/                            — scheduler, cost, health, misc runtime state
 
-logs                                      — journald / launchctl / Windows Event Log (platform-native)
+logs                                      — journald / launchctl (platform-native)
 ```

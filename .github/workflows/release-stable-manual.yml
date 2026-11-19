@@ -252,10 +252,6 @@ jobs:
             ext: tar.gz
             ndk: true
             experimental: true
-          - os: windows-latest
-            target: x86_64-pc-windows-msvc
-            artifact: rei.exe
-            ext: zip
     continue-on-error: ${{ matrix.experimental || false }}
     steps:
       - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
@@ -264,7 +260,6 @@ jobs:
           toolchain: 1.96.1
           targets: ${{ matrix.target }}
       - uses: Swatinem/rust-cache@c19371144df3bb44fab255c43d04cbc2ab54d1c4 # v2.9.1
-        if: runner.os != 'Windows'
         with:
           prefix-key: ${{ matrix.os }}-${{ matrix.target }}
 
@@ -324,24 +319,13 @@ jobs:
         env:
           BINARY_SIZE_HARD_LIMIT: "67108864" # 64MB cap for standard release builds
 
-      - name: Package (Unix)
-        if: runner.os != 'Windows'
+      - name: Package
         run: |
           mkdir -p staging/web
           cp target/${{ matrix.target }}/release/${{ matrix.artifact }} staging/
           cp -r web/dist staging/web/dist
           cd staging
           tar czf ../reiclaw-${{ matrix.target }}.${{ matrix.ext }} ${{ matrix.artifact }} web/dist
-
-      - name: Package (Windows)
-        if: runner.os == 'Windows'
-        shell: bash
-        run: |
-          mkdir -p staging/web
-          cp target/${{ matrix.target }}/release/${{ matrix.artifact }} staging/
-          cp -r web/dist staging/web/dist
-          cd staging
-          7z a ../reiclaw-${{ matrix.target }}.${{ matrix.ext }} ${{ matrix.artifact }} web/dist
 
       - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
@@ -385,7 +369,6 @@ jobs:
             "reiclaw-aarch64-apple-darwin.tar.gz"
             "reiclaw-x86_64-apple-darwin.tar.gz"
             "reiclaw-aarch64-linux-android.tar.gz"
-            "reiclaw-x86_64-pc-windows-msvc.zip"
           )
           missing=0
           for asset in "${required_assets[@]}"; do

@@ -22,7 +22,6 @@ use tokio::io::{AsyncRead, AsyncReadExt};
 use tokio::process::{Child, Command as TokioCommand};
 
 const SERVICE_LABEL: &str = "com.reiclaw.daemon";
-const WINDOWS_TASK_NAME: &str = "ReiClaw Daemon";
 #[cfg(any(target_os = "macos", test))]
 const LAUNCHD_LOG_MAX_BYTES: u64 = 8 * 1024 * 1024;
 #[cfg(any(target_os = "macos", test))]
@@ -531,10 +530,6 @@ pub(crate) fn linux_systemd_runtime_present() -> bool {
     cfg!(target_os = "linux") && Path::new("/run/systemd/system").exists()
 }
 
-fn windows_task_name() -> &'static str {
-    WINDOWS_TASK_NAME
-}
-
 fn linux_service_base(config: &Config) -> String {
     let Some(dir_name) = config
         .config_path
@@ -621,16 +616,6 @@ pub fn is_running(config: &Config) -> bool {
             .unwrap_or(false)
     } else if cfg!(target_os = "linux") {
         is_running_linux(config)
-    } else if cfg!(target_os = "windows") {
-        run_capture(Command::new("schtasks").args([
-            "/Query",
-            "/TN",
-            WINDOWS_TASK_NAME,
-            "/FO",
-            "LIST",
-        ]))
-        .map(|out| out.contains("Running"))
-        .unwrap_or(false)
     } else {
         false
     }
@@ -655,8 +640,6 @@ pub fn install(config: &Config, init_system: InitSystem) -> Result<()> {
     } else if cfg!(target_os = "linux") {
         let resolved = init_system.resolve()?;
         install_linux(config, resolved)
-    } else if cfg!(target_os = "windows") {
-        install_windows(config)
     } else {
         anyhow::bail!("Service management is supported on macOS and Linux only");
     }
@@ -680,11 +663,6 @@ pub fn start(config: &Config, init_system: InitSystem) -> Result<()> {
     } else if cfg!(target_os = "linux") {
         let resolved = init_system.resolve()?;
         start_linux(config, resolved)
-    } else if cfg!(target_os = "windows") {
-        let _ = config;
-        run_checked(Command::new("schtasks").args(["/Run", "/TN", windows_task_name()]))?;
-        println!("✅ Service started");
-        Ok(())
     } else {
         let _ = config;
         anyhow::bail!("Service management is supported on macOS and Linux only")
@@ -726,12 +704,6 @@ pub fn stop(config: &Config, init_system: InitSystem) -> Result<()> {
     } else if cfg!(target_os = "linux") {
         let resolved = init_system.resolve()?;
         stop_linux(config, resolved)
-    } else if cfg!(target_os = "windows") {
-        let _ = config;
-        let task_name = windows_task_name();
-        let _ = run_checked(Command::new("schtasks").args(["/End", "/TN", task_name]));
-        println!("✅ Service stopped");
-        Ok(())
     } else {
         let _ = config;
         anyhow::bail!("Service management is supported on macOS and Linux only")
@@ -767,13 +739,6 @@ pub fn restart(config: &Config, init_system: InitSystem) -> Result<()> {
     if cfg!(target_os = "linux") {
         let resolved = init_system.resolve()?;
         return restart_linux(config, resolved);
-    }
-
-    if cfg!(target_os = "windows") {
-        stop(config, init_system)?;
-        start(config, init_system)?;
-        println!("✅ Service restarted");
-        return Ok(());
     }
 
     anyhow::bail!("Service management is supported on macOS and Linux only")
@@ -819,31 +784,6 @@ pub fn status(config: &Config, init_system: InitSystem) -> Result<()> {
         return status_linux(config, resolved);
     }
 
-    if cfg!(target_os = "windows") {
-        let _ = config;
-        let task_name = windows_task_name();
-        let out =
-            run_capture(Command::new("schtasks").args(["/Query", "/TN", task_name, "/FO", "LIST"]));
-        match out {
-            Ok(text) => {
-                let running = text.contains("Running");
-                println!(
-                    "Service: {}",
-                    if running {
-                        "✅ running"
-                    } else {
-                        "❌ not running"
-                    }
-                );
-                println!("Task: {}", task_name);
-            }
-            Err(_) => {
-                println!("Service: ❌ not installed");
-            }
-        }
-        return Ok(());
-    }
-
     anyhow::bail!("Service management is supported on macOS and Linux only")
 }
 
@@ -881,10 +821,7 @@ pub fn logs(config: &Config, init_system: InitSystem, lines: usize, follow: bool
         let resolved = init_system.resolve()?;
         return logs_linux(config, resolved, lines, follow);
     }
-    if cfg!(target_os = "windows") {
-        return logs_windows(config, lines, follow);
-    }
-    anyhow::bail!("Service log viewing is supported on macOS, Linux, and Windows only")
+    anyhow::bail!("Service log viewing is supported on macOS and Linux only")
 }
 
 fn logs_macos(config: &Config, lines: usize, follow: bool) -> Result<()> {
@@ -973,62 +910,6 @@ fn logs_linux(config: &Config, init_system: InitSystem, lines: usize, follow: bo
     Ok(())
 }
 
-fn logs_windows(config: &Config, lines: usize, follow: bool) -> Result<()> {
-    let logs_dir = config
-        .config_path
-        .parent()
-        .map_or_else(|| PathBuf::from("."), PathBuf::from)
-        .join("logs");
-
-    let stderr_log = logs_dir.join("daemon.stderr.log");
-    let stdout_log = logs_dir.join("daemon.stdout.log");
-
-    let log_file = if stderr_log.exists() {
-        stderr_log
-    } else if stdout_log.exists() {
-        stdout_log
-    } else {
-        bail!(
-            "No log files found in {}. Is the service installed?",
-            logs_dir.display()
-        );
-    };
-
-    if follow {
-        // Windows: use PowerShell Get-Content -Wait for tail -f equivalent
-        let status = Command::new("powershell")
-            .args([
-                "-Command",
-                &format!(
-                    "Get-Content -Path '{}' -Tail {} -Wait",
-                    log_file.display().to_string(),
-                    lines
-                ),
-            ])
-            .status()
-            .context("Failed to run PowerShell Get-Content")?;
-        if !status.success() {
-            bail!("PowerShell Get-Content exited with non-zero status");
-        }
-    } else {
-        let status = Command::new("powershell")
-            .args([
-                "-Command",
-                &format!(
-                    "Get-Content -Path '{}' -Tail {}",
-                    log_file.display().to_string(),
-                    lines
-                ),
-            ])
-            .status()
-            .context("Failed to run PowerShell Get-Content")?;
-        if !status.success() {
-            bail!("PowerShell Get-Content exited with non-zero status");
-        }
-    }
-    Ok(())
-}
-
 /// Tail a log file using the system `tail` command.
 fn tail_file(path: &Path, lines: usize, follow: bool) -> Result<()> {
     let mut args = vec!["-n".to_string(), lines.to_string()];
@@ -1063,28 +944,6 @@ pub fn uninstall(config: &Config, init_system: InitSystem) -> Result<()> {
                 .with_context(|| format!("Failed to remove {}", file.display().to_string()))?;
         }
         println!("✅ Service uninstalled ({})", file.display().to_string());
-        return Ok(());
-    }
-
-    if cfg!(target_os = "windows") {
-        let task_name = windows_task_name();
-        let _ = run_checked(Command::new("schtasks").args(["/Delete", "/TN", task_name, "/F"]));
-        // Remove the wrapper script. It now lives in the config dir root, but
-        // older installs left it under logs/ — clean up both so an upgrade
-        // doesn't strand the legacy copy.
-        let base_dir = config
-            .config_path
-            .parent()
-            .map_or_else(|| PathBuf::from("."), PathBuf::from);
-        for wrapper in [
-            base_dir.join("rei-daemon.cmd"),
-            base_dir.join("logs").join("rei-daemon.cmd"),
-        ] {
-            if wrapper.exists() {
-                fs::remove_file(&wrapper).ok();
-            }
-        }
-        println!("✅ Service uninstalled");
         return Ok(());
     }
 
@@ -1896,58 +1755,6 @@ fn install_linux_openrc(config: &Config) -> Result<()> {
     Ok(())
 }
 
-fn install_windows(config: &Config) -> Result<()> {
-    let exe = std::env::current_exe().context("Failed to resolve current executable")?;
-    let base_dir = config
-        .config_path
-        .parent()
-        .map_or_else(|| PathBuf::from("."), PathBuf::from);
-    let logs_dir = base_dir.join("logs");
-    fs::create_dir_all(&logs_dir)?;
-
-    // The launch wrapper is an install artifact, not log output — keep it in
-    // the config dir root so the logs dir holds only `.log` files. (Previously
-    // it landed in logs/, where a `.cmd` next to the daemon's log files reads
-    // as misplaced.)
-    let wrapper = base_dir.join("rei-daemon.cmd");
-    let stdout_log = logs_dir.join("daemon.stdout.log");
-    let stderr_log = logs_dir.join("daemon.stderr.log");
-
-    let wrapper_content = format!(
-        "@echo off\r\n\"{}\" daemon >>\"{}\" 2>>\"{}\"",
-        exe.display().to_string(),
-        stdout_log.display().to_string(),
-        stderr_log.display()
-    );
-    fs::write(&wrapper, &wrapper_content)?;
-
-    let task_name = windows_task_name();
-
-    // Remove any existing task first (ignore errors if it doesn't exist)
-    let _ = Command::new("schtasks")
-        .args(["/Delete", "/TN", task_name, "/F"])
-        .output();
-
-    run_checked(Command::new("schtasks").args([
-        "/Create",
-        "/TN",
-        task_name,
-        "/SC",
-        "ONLOGON",
-        "/TR",
-        &format!("\"{}\"", wrapper.display().to_string()),
-        "/RL",
-        "LIMITED",
-        "/F",
-    ]))?;
-
-    println!("✅ Installed Windows scheduled task: {}", task_name);
-    println!("   Wrapper: {}", wrapper.display().to_string());
-    println!("   Logs: {}", logs_dir.display().to_string());
-    println!("   Start with: rei service start");
-    Ok(())
-}
-
 fn macos_service_file() -> Result<PathBuf> {
     let home = directories::UserDirs::new()
         .map(|u| u.home_dir().to_path_buf())
@@ -2475,7 +2282,6 @@ mod linux_service_tests {
         assert!(hint.contains("loginctl enable-linger 1000"));
     }
 
-    #[cfg(not(target_os = "windows"))]
     #[test]
     fn linux_service_file_stays_default_for_install_path() {
         let file = linux_service_file(&config_at("/home/user/.rei-p100-104/config.toml")).unwrap();
@@ -2494,7 +2300,6 @@ mod service_helper_tests {
         assert_eq!(escaped, "&lt;&amp;&gt;&quot;&apos; and text");
     }
 
-    #[cfg(not(target_os = "windows"))]
     #[test]
     fn run_capture_reads_stdout() {
         let out = run_capture(Command::new("sh").args(["-c", "echo hello"]))
@@ -2502,7 +2307,6 @@ mod service_helper_tests {
         assert_eq!(out.trim(), "hello");
     }
 
-    #[cfg(not(target_os = "windows"))]
     #[test]
     fn run_capture_falls_back_to_stderr() {
         let out = run_capture(Command::new("sh").args(["-c", "echo warn 1>&2"]))
@@ -2510,7 +2314,6 @@ mod service_helper_tests {
         assert_eq!(out.trim(), "warn");
     }
 
-    #[cfg(not(target_os = "windows"))]
     #[test]
     fn run_checked_errors_on_non_zero_status() {
         let err = run_checked(Command::new("sh").args(["-c", "exit 17"]))
@@ -2518,33 +2321,11 @@ mod service_helper_tests {
         assert!(err.to_string().contains("Command failed"));
     }
 
-    #[cfg(not(target_os = "windows"))]
     #[test]
     fn linux_service_file_has_expected_suffix() {
         let file = linux_service_file(&Config::default()).unwrap();
         let path = file.to_string_lossy();
         assert!(path.ends_with(".config/systemd/user/rei.service"));
-    }
-
-    #[test]
-    fn windows_task_name_is_constant() {
-        assert_eq!(windows_task_name(), "ReiClaw Daemon");
-    }
-
-    #[cfg(target_os = "windows")]
-    #[test]
-    fn run_capture_reads_stdout_windows() {
-        let out = run_capture(Command::new("cmd").args(["/C", "echo hello"]))
-            .expect("stdout capture should succeed");
-        assert_eq!(out.trim(), "hello");
-    }
-
-    #[cfg(target_os = "windows")]
-    #[test]
-    fn run_checked_errors_on_non_zero_status_windows() {
-        let err = run_checked(Command::new("cmd").args(["/C", "exit /b 17"]))
-            .expect_err("non-zero exit should error");
-        assert!(err.to_string().contains("Command failed"));
     }
 
     #[test]
@@ -2681,7 +2462,6 @@ mod service_helper_tests {
         );
     }
 
-    #[cfg(not(target_os = "windows"))]
     #[test]
     fn tail_file_errors_on_missing_file() {
         let missing = Path::new("/tmp/rei-test-nonexistent-log-file.log");
@@ -2689,7 +2469,6 @@ mod service_helper_tests {
         assert!(result.is_err(), "tail on missing file should fail");
     }
 
-    #[cfg(not(target_os = "windows"))]
     #[test]
     fn tail_file_reads_existing_file() {
         let dir = tempfile::tempdir().expect("failed to create temp dir");

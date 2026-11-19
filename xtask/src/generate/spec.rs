@@ -1,5 +1,5 @@
 //! Canonical install spec. install.sh@HEAD is the behavioral reference; this
-//! spec reproduces it and every surface (install.sh, setup.bat, ...) renders
+//! spec reproduces it and every surface (install.sh, ...) renders
 //! from it. Dry-run is intrinsic: each step pairs a `narration` (the dry-run
 //! line) with its `action` (the real op), and the rendered script chooses
 
@@ -9,11 +9,10 @@ use std::path::Path;
 #[derive(Clone, Copy, PartialEq, Eq)]
 pub enum Platform {
     Unix,
-    Windows,
 }
 
 /// A value resolved from canonical sources, never a literal in a surface.
-/// Renderers expand these into their platform dialect (`$VAR` vs `%VAR%`).
+/// Renderers expand these into their platform dialect (`$VAR`).
 #[derive(Clone)]
 pub enum Value {
     /// Workspace version from `[workspace.package] version`.
@@ -24,7 +23,7 @@ pub enum Value {
     CargoFlags,
     /// Platform web/dist data dir (matches gateway auto-detect).
     WebDataDir,
-    /// Install bin dir (cargo bin on Unix, %USERPROFILE%\.rei\bin on Win).
+    /// Install bin dir (cargo bin).
     BinDir,
     /// Literal text that is platform-invariant and not drift-prone.
     Lit(String),
@@ -256,7 +255,7 @@ pub fn exclude_features(
 /// Source build steps. Conditional actions retain their existing guards.
 pub fn source_branch() -> Vec<Step> {
     use Action::*;
-    use Platform::{Unix, Windows};
+    use Platform::Unix;
     use When::*;
     vec![
         Step {
@@ -264,7 +263,7 @@ pub fn source_branch() -> Vec<Step> {
             narration: Value::Lit("install Rust via rustup".into()),
             action: InstallToolchain,
             when: ToolchainMissing,
-            platforms: &[Unix, Windows],
+            platforms: &[Unix],
         },
         Step {
             id: "cargo-install-self",
@@ -274,14 +273,14 @@ pub fn source_branch() -> Vec<Step> {
             ]),
             action: CargoInstallSelf,
             when: Always,
-            platforms: &[Unix, Windows],
+            platforms: &[Unix],
         },
         Step {
             id: "build-web-dashboard",
             narration: Value::Lit("build the web dashboard".into()),
             action: BuildWebDashboard,
             when: GatewayResolvedAndNpm,
-            platforms: &[Unix, Windows],
+            platforms: &[Unix],
         },
         Step {
             id: "install-web-dist",
@@ -291,7 +290,7 @@ pub fn source_branch() -> Vec<Step> {
             ]),
             action: InstallWebDist,
             when: GatewayResolved,
-            platforms: &[Unix, Windows],
+            platforms: &[Unix],
         },
     ]
 }
@@ -299,7 +298,7 @@ pub fn source_branch() -> Vec<Step> {
 /// Final source-install steps.
 pub fn finish_steps() -> Vec<Step> {
     use Action::*;
-    use Platform::{Unix, Windows};
+    use Platform::Unix;
     use When::Always;
     vec![Step {
         id: "add-to-path",
@@ -310,7 +309,7 @@ pub fn finish_steps() -> Vec<Step> {
         ]),
         action: AddToPath,
         when: Always,
-        platforms: &[Unix, Windows],
+        platforms: &[Unix],
     }]
 }
 
@@ -670,7 +669,6 @@ pub fn web_data_dir_expr(platform: Platform) -> &'static str {
         // Unix renderer's else-arm (Linux). The macOS arm is emitted by the
         // sh renderer's own case; both forms live in the renderer, not baked.
         Platform::Unix => "${XDG_DATA_HOME:-${PREFIX}/.local/share}/reiclaw/web/dist",
-        Platform::Windows => "%LOCALAPPDATA%\\reiclaw\\web\\dist",
     }
 }
 
@@ -1037,7 +1035,7 @@ mod tests {
     fn dry_run_coverage_is_total() {
         // validate() already ran in build(); assert every step narrates so
         // the dry-run pass can describe the whole plan with no silent mutations.
-        let p = Plan::build(&root(), Platform::Windows, &Selection::Full).unwrap();
+        let p = Plan::build(&root(), Platform::Unix, &Selection::Full).unwrap();
         for s in p.all_steps() {
             let empty = matches!(s.narration, Value::Lit(ref l) if l.is_empty());
             assert!(!empty, "step {} has no dry-run narration", s.id);
@@ -1054,8 +1052,6 @@ mod tests {
 
     #[test]
     fn web_data_dir_expr_matches_data_local_dir_semantics() {
-        let win = web_data_dir_expr(Platform::Windows);
-        assert!(win.contains("LOCALAPPDATA") && win.ends_with("reiclaw\\web\\dist"));
         let unix = web_data_dir_expr(Platform::Unix);
         assert!(unix.contains("XDG_DATA_HOME") && unix.ends_with("reiclaw/web/dist"));
     }

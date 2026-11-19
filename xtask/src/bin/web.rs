@@ -43,7 +43,7 @@ fn main() -> Result<()> {
 fn npm_install(web_dir: &Path) -> Result<()> {
     require_tool("npm", "https://nodejs.org/ or `nvm install --lts`")?;
     println!("==> npm install ({})", web_dir.display());
-    run_cmd(Command::new(bin("npm")).current_dir(web_dir).arg("install"))
+    run_cmd(Command::new("npm").current_dir(web_dir).arg("install"))
 }
 
 fn node_modules_needs_install(web_dir: &Path) -> bool {
@@ -67,7 +67,7 @@ fn node_modules_needs_install(web_dir: &Path) -> bool {
 fn npm_run(web_dir: &Path, script: &str) -> Result<()> {
     println!("==> npm run {script}");
     run_cmd(
-        Command::new(bin("npm"))
+        Command::new("npm")
             .current_dir(web_dir)
             .args(["run", script]),
     )
@@ -75,17 +75,9 @@ fn npm_run(web_dir: &Path, script: &str) -> Result<()> {
 
 fn npx(web_dir: &Path, args: &[&str]) -> Result<()> {
     println!("==> npx {}", args.join(" "));
-    let mut cmd = Command::new(bin("npx"));
+    let mut cmd = Command::new("npx");
     cmd.current_dir(web_dir).arg("--no-install").args(args);
     run_cmd(&mut cmd)
-}
-
-fn bin(tool: &str) -> String {
-    if cfg!(windows) {
-        format!("{tool}.cmd")
-    } else {
-        tool.to_string()
-    }
 }
 
 #[cfg(test)]

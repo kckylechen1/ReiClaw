@@ -439,7 +439,6 @@ cli-cron-every = {"  "}Every(ms): {$v}
 
 # ── main / status / quickstart / pairing / desktop ──
 cli-no-command = No command provided.
-cli-press-enter = Press Enter to exit...
 cli-quickstart-title = Quickstart — create one working agent end-to-end.
 cli-quickstart-needs-tty = Quickstart is interactive and needs a terminal on stdin and stderr. Run it from an interactive shell, or use `rei config set <path> <value>` for headless configuration.
 cli-quickstart-cancelled = Quickstart cancelled. No config written.

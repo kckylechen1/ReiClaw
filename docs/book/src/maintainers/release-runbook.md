@@ -61,8 +61,8 @@ Bump `workspace.package.version` in the workspace `Cargo.toml`, then run the two
 
 This updates README badges and workflow description
 examples, then regenerates every spec-driven install surface via
-`cargo generate installers`: setup.bat, `dist/aur/PKGBUILD`,
-`dist/scoop/reiclaw.json`, and `flake.nix`. Those surfaces derive their version and
+`cargo generate installers`: `install.sh`, `dist/aur/PKGBUILD`, and
+`flake.nix`. Those surfaces derive their version and
 feature lists from the canonical install spec (`Cargo.toml` plus
 `[package.metadata.reiclaw]`), so the bump keeps them in step automatically;
 never hand-edit a generated region. This script also refreshes the Nix git
@@ -360,7 +360,7 @@ Once `publish` completes, confirm:
 publish job only reads it as the release body, it does not delete it. The next
 release cycle overwrites it, so no manual cleanup is required.
 
-Scoop and AUR need separate attention only when their jobs show red.
+AUR needs separate attention only when its job shows red.
 Homebrew Core is external to this workflow; its
 [autobump service](https://docs.brew.sh/Autobump) checks eligible formulae on
 its own schedule.
@@ -455,10 +455,10 @@ you typed the wrong version. Fix the mismatch and re-trigger.
 **An environment gate timed out:** Re-run only the timed-out job. No need to
 restart the workflow.
 
-**A Scoop or AUR distribution job failed:** Each has a corresponding
-manually-triggerable sub-workflow. Re-run the specific one with `dry_run: true`
-first to confirm the fix, then `dry_run: false`. These are nice-to-have: a
-failed distribution job does not invalidate the release itself.
+**An AUR distribution job failed:** It has a corresponding
+manually-triggerable sub-workflow. Re-run it with `dry_run: true` first to
+confirm the fix, then `dry_run: false`. It is nice-to-have: a failed
+distribution job does not invalidate the release itself.
 
 **Homebrew Core is stale:** Homebrew is not a release-workflow job. Check the
 [Homebrew autobump status and documented manual bump

@@ -161,7 +161,6 @@ mod tests {
     }
 
     #[test]
-    #[cfg(not(target_os = "windows"))]
     fn factory_native_default_shell_is_sh() {
         let cfg = RuntimeConfig {
             kind: RuntimeKind::Native,

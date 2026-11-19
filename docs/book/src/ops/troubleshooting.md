@@ -32,7 +32,7 @@ curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh
 
 </div>
 
-Or pass `--prebuilt` to `install.sh` / `setup.bat` to skip Rust entirely.
+Or pass `--prebuilt` to `install.sh` to skip Rust entirely.
 
 ### Missing build dependencies (Linux)
 

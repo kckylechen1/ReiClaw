@@ -23,7 +23,7 @@ An unavailable, invalid, empty, or unresolvable comparison retains full runtime 
 | Selected work | Coverage |
 |---|---|
 | Every run | Scope-policy checks, workflow validation, `Docs Style`, and `CI Required Gate` |
-| Full runtime lane | Rust formatting; workspace Clippy with `ci-all` and `-D warnings`; provider-dispatch guard; Fluent catalog syntax; Linux build and macOS/Windows checks; no-default, minimal-companion, slim-control and i686 checks; parallel nextest jobs, one per partition phase; dependency security; Web regressions/build; applicable repository, Nix, installer and targeted Windows checks |
+| Full runtime lane | Rust formatting; workspace Clippy with `ci-all` and `-D warnings`; provider-dispatch guard; Fluent catalog syntax; Linux build and macOS check; no-default, minimal-companion, slim-control and i686 checks; parallel nextest jobs, one per partition phase; dependency security; Web regressions/build; applicable repository, Nix and installer checks |
 | Docs Build | Real references, rustdoc, preprocessors, translation checks and all locales through `cargo mdbook build`, without publishing |
 
 The test partitions and their feature-specific runs come from `dev/ci/test-partition.json`; each leg's main run and each extra run is its own parallel job (`scripts/dev/leg.sh --matrix`). Formatting precedes the runtime fan-out; documentation checks depend on scope classification and run independently of Rust formatting.
@@ -132,11 +132,11 @@ First triage step for a new issue: check if the reported outdated crates have se
 
 ### Cross-Platform Build (`cross-platform-build-manual.yml`)
 
-Manual trigger for building release binaries across the full target matrix: Linux x86_64/aarch64 GNU plus armv7 and arm hard-float, macOS Intel/ARM, Windows x86_64, and `aarch64-linux-android` (built with the NDK). Use this to verify a branch compiles cleanly on non-Linux targets before tagging.
+Manual trigger for building release binaries across the full target matrix: Linux x86_64/aarch64 GNU plus armv7 and arm hard-float, macOS Intel/ARM, and `aarch64-linux-android` (built with the NDK). Use this to verify a branch compiles cleanly on non-Linux targets before tagging.
 
 ### Cross-Platform Clippy (`cross-platform-clippy.yml`)
 
-Runs on PRs changing `crates/reiclaw-runtime/`, `crates/reiclaw-infra/`, or this workflow, as well as manual dispatch and the weekly schedule. Each selected run checks the workspace's targets on macOS aarch64 and Windows x86_64 with `ci-all` and `-D warnings`. This catches test-only imports and conditional-compilation errors that a normal platform `cargo check` does not cover.
+Runs on PRs changing `crates/reiclaw-runtime/`, `crates/reiclaw-infra/`, or this workflow, as well as manual dispatch and the weekly schedule. Each selected run checks the workspace's targets on macOS aarch64 with `ci-all` and `-D warnings`. This catches test-only imports and conditional-compilation errors that a normal platform `cargo check` does not cover.
 
 Ordinary prose PRs do not trigger this workflow. It remains separate advisory coverage outside `CI Required Gate`; inspect its current-head results when the changed surface needs it. The Linux i686 and minimal-companion checks remain in the main workflow.
 
@@ -167,7 +167,6 @@ Rust compilation jobs in `ci.yml` use `Swatinem/rust-cache@v2`; scope checks, fo
 
 - **Main-gate Rust cache writes are master-only.** `save-if` is conditioned on `github.ref == 'refs/heads/master'`. PRs restore eligible caches without saving them. A prose-only master push skips the Rust jobs and does not refresh their caches.
 - **Partial dependency caches may be saved.** The configured `cache-on-failure: true` preserves eligible artifacts from failed jobs when the action's save step can run; cancellation or timeout is not a promise of a saved cache.
-- **Windows build cache is enabled.** The Windows build leg runs the same pinned Rust cache action as Linux and macOS. If Windows cache behavior flakes or regresses, revert the workflow change and document the failing restore/save evidence in the cache issue.
 - **Incremental compilation is disabled.** `CARGO_INCREMENTAL: 0` at the workflow level. Incremental builds inflate cache size and produce non-reproducible artifacts under partial-stale conditions.
 - **Tool installation downloads prebuilt binaries.** The `security` job downloads the pinned `cargo-deny` 0.19.9 Linux musl archive from its GitHub release; the `test` job downloads `cargo-nextest` from `get.nexte.st/latest/linux`. Both install steps run unconditionally, including after a Rust cache hit.
 

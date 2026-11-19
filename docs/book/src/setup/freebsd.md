@@ -1,9 +1,9 @@
 # FreeBSD
 
-ZeroClaw runs natively on FreeBSD (tested on FreeBSD 15.0-RELEASE, `amd64`). Two things differ from the Linux/macOS/Windows paths:
+ZeroClaw runs natively on FreeBSD (tested on FreeBSD 15.0-RELEASE, `amd64`). Two things differ from the Linux/macOS paths:
 
 1. **No prebuilt binary and no `install.sh` support.** FreeBSD is not a target of the bootstrap installer, so you build from source with the system Rust toolchain.
-2. **No `zeroclaw service` backend.** The `zeroclaw service install` command knows systemd, OpenRC, launchd, and Windows Task Scheduler, not FreeBSD `rc.d`. You install a small `rc.d` script yourself. This page gives you a complete, tested one.
+2. **No `zeroclaw service` backend.** The `zeroclaw service install` command knows systemd, OpenRC, and launchd, not FreeBSD `rc.d`. You install a small `rc.d` script yourself. This page gives you a complete, tested one.
 
 Everything else, config, providers, channels, the daemon, the gateway, is identical to any other platform.
 
