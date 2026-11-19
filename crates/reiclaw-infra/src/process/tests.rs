@@ -139,7 +139,7 @@ async fn dropping_the_running_future_kills_descendants() {
         .arg(&escaped)
         .arg(&started)
         .arg(&release);
-    let task = reiclaw_spawn::spawn!(async move { run_bounded(&mut command, limits()).await });
+    let task = reiclaw_log::spawn!(async move { run_bounded(&mut command, limits()).await });
     wait_for_file(&started).await;
     task.abort();
     assert!(task.await.unwrap_err().is_cancelled());

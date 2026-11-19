@@ -11,7 +11,6 @@ reiclaw-http.workspace = true
 reiclaw-log.workspace = true
 reiclaw-api.workspace = true
 reiclaw-provider-dispatch.workspace = true
-reiclaw-spawn.workspace = true
 reiclaw-config = { workspace = true, default-features = false }
 anyhow = "1.0"
 async-trait = "0.1"

@@ -1735,7 +1735,7 @@ mod tests {
         ceiling: Vec<String>,
     ) -> (
         crate::device_identity::DeviceKeyPair,
-        reiclaw_api::device_identity::DeviceIdentityV1,
+        crate::device_identity::DeviceIdentityV1,
     ) {
         let keys = crate::device_identity::DeviceKeyPair::generate().unwrap();
         let store = registry.identities().expect("test identity store");
@@ -2090,7 +2090,7 @@ mod tests {
             .route("/ws/nodes", axum::routing::get(handle_ws_nodes))
             .route("/ws/chat", axum::routing::get(crate::ws::handle_ws_chat))
             .with_state(state);
-        reiclaw_spawn::spawn!(async move {
+        reiclaw_log::spawn!(async move {
             axum::serve(
                 listener,
                 app.into_make_service_with_connect_info::<SocketAddr>(),

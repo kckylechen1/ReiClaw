@@ -137,7 +137,7 @@ impl Fixture {
         let peer = Router::new()
             .route("/mcp", post(mcp))
             .with_state(fake.clone());
-        let server = reiclaw_spawn::spawn!(async move {
+        let server = reiclaw_log::spawn!(async move {
             axum::serve(listener, peer).await.unwrap();
         });
         let mut config = Config {
@@ -426,7 +426,7 @@ async fn dropping_http_caller_does_not_abort_admitted_start_or_send_cancel() {
     let app = fixture.app.clone();
     let body = fixture.start("r1");
     let caller =
-        reiclaw_spawn::spawn!(async move { call(app, AGENT, "start", Some(TOKEN), body).await });
+        reiclaw_log::spawn!(async move { call(app, AGENT, "start", Some(TOKEN), body).await });
     tokio::time::timeout(Duration::from_secs(3), fixture.fake.entered.notified())
         .await
         .unwrap();
@@ -561,7 +561,7 @@ async fn ingress_capacity_and_deadline_bound_admission_without_claiming_a_stop()
     let caller_app = app.clone();
     let start = fixture.start("r1");
     let caller =
-        reiclaw_spawn::spawn!(
+        reiclaw_log::spawn!(
             async move { call(caller_app, AGENT, "start", Some(TOKEN), start).await }
         );
     tokio::time::timeout(Duration::from_secs(3), fixture.fake.entered.notified())

@@ -14,17 +14,19 @@ pub mod event;
 pub mod layer;
 pub mod migrate;
 pub mod reader;
+mod spawn_task;
 mod subscriber;
 pub mod tool_io;
 pub mod writer;
 
-/// Private re-export root. The `record!` / `scope!` / `attribution_span!`
-/// macros expand to paths under here so external crates can never
-/// reach `tracing` types via `reiclaw_log::*`. Do NOT use directly
-/// from anywhere outside this crate.
+/// Private re-export root. The `record!` / `scope!` / `attribution_span!` /
+/// `spawn!` macros expand to paths under here so external crates can never
+/// reach `tracing` or `tokio` types directly via `reiclaw_log::*`. Do NOT use
+/// directly from anywhere outside this crate.
 #[doc(hidden)]
 pub mod __private {
     pub use ::serde_json;
+    pub use ::tokio;
     pub use ::tracing;
     pub use ::uuid;
 }
@@ -67,6 +69,7 @@ pub mod field {
 
 pub use migrate::migrate_legacy_jsonl_in_place;
 pub use reader::{LogFilter, LogPage, current_log_path, find_event_by_id, load_page};
+pub use spawn_task::TASK_EVENT_NAME;
 pub use subscriber::{install_global_subscriber, try_install_capture_subscriber};
 pub use tool_io::{ToolIoCapture, capture_llm_request, capture_tool_input, capture_tool_output};
 pub use writer::{

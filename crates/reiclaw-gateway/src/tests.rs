@@ -848,9 +848,10 @@ async fn run_gateway_starts_with_zero_agents() {
         "regression assumes default Config has no agents",
     );
 
-    let handle = reiclaw_spawn::spawn!(async move {
-        run_gateway("127.0.0.1", 0, config, None, None, None).await
-    });
+    let handle =
+        reiclaw_log::spawn!(
+            async move { run_gateway("127.0.0.1", 0, config, None, None, None).await }
+        );
 
     match tokio::time::timeout(
         std::time::Duration::from_millis(750),
@@ -904,9 +905,10 @@ async fn run_gateway_starts_with_unresolved_agent_risk_profile() {
     };
     config.agents.insert("fake123".to_string(), agent);
 
-    let handle = reiclaw_spawn::spawn!(async move {
-        run_gateway("127.0.0.1", 0, config, None, None, None).await
-    });
+    let handle =
+        reiclaw_log::spawn!(
+            async move { run_gateway("127.0.0.1", 0, config, None, None, None).await }
+        );
 
     match tokio::time::timeout(
         std::time::Duration::from_millis(750),
@@ -950,9 +952,10 @@ async fn run_gateway_starts_with_mismatched_provider_api_key() {
         },
     );
 
-    let handle = reiclaw_spawn::spawn!(async move {
-        run_gateway("127.0.0.1", 0, config, None, None, None).await
-    });
+    let handle =
+        reiclaw_log::spawn!(
+            async move { run_gateway("127.0.0.1", 0, config, None, None, None).await }
+        );
 
     match tokio::time::timeout(
         std::time::Duration::from_millis(750),
@@ -998,7 +1001,7 @@ async fn run_gateway_uses_external_shutdown_sender() {
         reload_tx,
     };
 
-    let handle = reiclaw_spawn::spawn!(async move {
+    let handle = reiclaw_log::spawn!(async move {
         run_gateway("127.0.0.1", port, config, None, Some(reload_controls), None).await
     });
 
@@ -3508,7 +3511,7 @@ async fn container_bind_startup_allowed_matrix_serves_health() {
             shutdown_tx: shutdown_tx.clone(),
             reload_tx,
         };
-        let handle = reiclaw_spawn::spawn!(async move {
+        let handle = reiclaw_log::spawn!(async move {
             run_gateway(host, port, config, None, Some(controls), None).await
         });
         let response = tokio::time::timeout(std::time::Duration::from_secs(5), async {
@@ -3588,7 +3591,7 @@ async fn gateway_restart_settles_abandoned_turns_and_refuses_a_second_owner() {
         reload_tx,
     };
     let first_config = config.clone();
-    let task = reiclaw_spawn::spawn!(async move {
+    let task = reiclaw_log::spawn!(async move {
         run_gateway("127.0.0.1", port, first_config, None, Some(controls), None).await
     });
     let response = tokio::time::timeout(std::time::Duration::from_secs(10), async {

@@ -1,7 +1,18 @@
 //! Per-turn presentation only. The shared Agent never captures a client's surface.
 
-use reiclaw_api::chat_surface::ChatSurface;
 use reiclaw_runtime::agent::prompt::{PromptContext, PromptSection};
+use serde::{Deserialize, Serialize};
+
+/// Presentation register requested by a chat client, never an authority grant.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub(crate) enum ChatSurface {
+    Web,
+    Telegram,
+    Cli,
+    /// Spoken-text presentation. Gateway builds must opt in explicitly.
+    Voice,
+}
 
 pub(super) const VERSION: u32 = 1;
 

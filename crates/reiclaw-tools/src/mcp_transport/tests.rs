@@ -145,7 +145,7 @@ async fn cancelled_direct_stdio_request_removes_pending_waiter() {
     let task_transport = Arc::clone(&transport);
     let request = JsonRpcRequest::new(7, "tools/call", serde_json::json!({}));
     let lifecycle = McpRequestLifecycle::uncoordinated(0);
-    let call = reiclaw_spawn::spawn!(async move {
+    let call = reiclaw_log::spawn!(async move {
         SharedMcpTransportConn::send_and_recv(task_transport.as_ref(), &request, &lifecycle).await
     });
     timeout(Duration::from_secs(2), async {
@@ -262,7 +262,7 @@ async fn sse_pre_write_cancellation_does_not_leak_pending_waiter() {
         ..Default::default()
     };
     let transport = SseTransport::new(&config).expect("build transport");
-    let reader = reiclaw_spawn::spawn!(std::future::pending::<()>());
+    let reader = reiclaw_log::spawn!(std::future::pending::<()>());
     {
         let mut conn = transport.conn.lock().await;
         conn.stream_state = SseStreamState::Connected;
@@ -651,7 +651,7 @@ async fn read_body_bounded_refuses_oversized_body() {
 
     let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
     let addr = listener.local_addr().unwrap();
-    let server = reiclaw_spawn::spawn!(async move {
+    let server = reiclaw_log::spawn!(async move {
         for body in ["small", &"x".repeat(100)] {
             let (mut socket, _) = listener.accept().await.unwrap();
             let mut request = [0_u8; 1024];
@@ -964,7 +964,7 @@ async fn sse_oversized_direct_response_is_an_error_not_an_empty_reply() {
     let transport = SseTransport::new(&config).expect("build transport");
     // A connected stream that never delivers: before the fix the swallowed
     // body left the request waiting here for a reply already sent.
-    let reader = reiclaw_spawn::spawn!(std::future::pending::<()>());
+    let reader = reiclaw_log::spawn!(std::future::pending::<()>());
     {
         let mut conn = transport.conn.lock().await;
         conn.stream_state = SseStreamState::Connected;
@@ -1106,7 +1106,7 @@ async fn cancelled_direct_sse_request_removes_pending_waiter() {
         ..Default::default()
     };
     let transport = Arc::new(SseTransport::new(&config).expect("build transport"));
-    let reader = reiclaw_spawn::spawn!(std::future::pending::<()>());
+    let reader = reiclaw_log::spawn!(std::future::pending::<()>());
     {
         let mut conn = transport.conn.lock().await;
         conn.stream_state = SseStreamState::Connected;
@@ -1121,7 +1121,7 @@ async fn cancelled_direct_sse_request_removes_pending_waiter() {
     let task_transport = Arc::clone(&transport);
     let request = JsonRpcRequest::new(7, "tools/call", serde_json::json!({}));
     let lifecycle = McpRequestLifecycle::uncoordinated(0);
-    let call = reiclaw_spawn::spawn!(async move {
+    let call = reiclaw_log::spawn!(async move {
         SharedMcpTransportConn::send_and_recv(task_transport.as_ref(), &request, &lifecycle).await
     });
     timeout(Duration::from_secs(2), async {
@@ -1186,7 +1186,7 @@ async fn sse_transport_close_clears_reader_endpoint_and_pending_state() {
         ..Default::default()
     };
     let transport = SseTransport::new(&config).expect("build transport");
-    let reader = reiclaw_spawn::spawn!(std::future::pending::<()>());
+    let reader = reiclaw_log::spawn!(std::future::pending::<()>());
     {
         let mut conn = transport.conn.lock().await;
         conn.stream_state = SseStreamState::Connected;

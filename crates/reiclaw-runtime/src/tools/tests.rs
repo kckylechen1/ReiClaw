@@ -124,7 +124,7 @@ async fn retired_tools_stay_absent_without_removing_human_channel_tools() {
         &security,
         &risk,
         "test-agent",
-        Arc::new(reiclaw_platform::NativeRuntime::new()),
+        Arc::new(crate::platform::NativeRuntime::new()),
         mem,
         &reiclaw_config::schema::HttpRequestConfig::default(),
         &reiclaw_config::schema::WebFetchConfig::default(),

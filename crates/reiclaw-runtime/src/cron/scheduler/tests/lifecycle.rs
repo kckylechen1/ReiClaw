@@ -151,7 +151,7 @@ async fn dropping_shell_run_kills_its_background_descendant() {
     )
     .await;
     let run_config = config.clone();
-    let run = reiclaw_spawn::spawn!(async move { execute_job_now(&run_config, &job).await });
+    let run = reiclaw_log::spawn!(async move { execute_job_now(&run_config, &job).await });
     wait_for_marker(&config.data_dir.join("started")).await;
     run.abort();
     assert!(run.await.unwrap_err().is_cancelled());
@@ -213,7 +213,7 @@ async fn scheduler_cancel_and_restart_cannot_resume_the_old_agent() {
         let app = Router::new()
             .route("/v1/chat/completions", post(chat))
             .with_state(fixture.clone());
-        let server = AbortOnDropHandle::new(reiclaw_spawn::spawn!(async move {
+        let server = AbortOnDropHandle::new(reiclaw_log::spawn!(async move {
             axum::serve(listener, app).await.unwrap();
         }));
         config.providers.models.ollama.insert(
@@ -274,7 +274,7 @@ async fn scheduler_cancel_and_restart_cannot_resume_the_old_agent() {
                 let config = config.clone();
                 let cancel = cancel.clone();
                 let identities = identities.clone();
-                AbortOnDropHandle::new(reiclaw_spawn::spawn!(run(config, None, cancel, identities)))
+                AbortOnDropHandle::new(reiclaw_log::spawn!(run(config, None, cancel, identities)))
             };
             time::timeout(Duration::from_secs(10), fixture.started.notified())
                 .await
@@ -293,7 +293,7 @@ async fn scheduler_cancel_and_restart_cannot_resume_the_old_agent() {
             let next = {
                 let config = config.clone();
                 let cancel = next_cancel.clone();
-                AbortOnDropHandle::new(reiclaw_spawn::spawn!(run(
+                AbortOnDropHandle::new(reiclaw_log::spawn!(run(
                     config,
                     Some(tx),
                     cancel,

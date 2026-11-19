@@ -1034,7 +1034,7 @@ impl Agent {
         self.build_system_prompt()
     }
 
-    #[cfg(test)]
+    #[doc(hidden)]
     pub async fn execute_tool_for_test(
         &self,
         name: &str,

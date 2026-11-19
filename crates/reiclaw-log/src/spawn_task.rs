@@ -1,19 +1,4 @@
-//! `zeroclaw-spawn` — the sanctioned interface against `tokio::spawn` for
-//! the ZeroClaw workspace.
-
-#![forbid(unsafe_code)]
-
-/// Private re-export root for macro expansion. External crates must not
-/// reach through here — it exists solely so `spawn!` can expand without
-/// callers needing `tokio`, `tracing`, or `reiclaw_log` as direct
-/// dependencies.
-#[doc(hidden)]
-pub mod __private {
-    pub use ::reiclaw_log;
-    pub use ::serde_json;
-    pub use ::tokio;
-    pub use ::tracing;
-}
+//! Attribution-propagating, lifecycle-logged wrapper around `tokio::spawn`.
 
 /// Stable event name for spawn-lifecycle records emitted by [`spawn!`].
 /// Exposed so dashboards / queries can match on a single string instead
@@ -36,16 +21,14 @@ macro_rules! spawn {
         // Spawn-time record — fires synchronously on the caller's
         // thread, attributed to whatever span the caller currently has
         // entered.
-        $crate::__private::reiclaw_log::record!(
+        $crate::record!(
             INFO,
-            $crate::__private::reiclaw_log::Event::new(
-                $crate::TASK_EVENT_NAME,
-                $crate::__private::reiclaw_log::Action::Spawn,
-            )
-            .with_attrs($crate::__private::serde_json::json!({
-                "task_site": format!("{}:{}", __ZC_TASK_FILE, __ZC_TASK_LINE),
-                "task_module": __ZC_TASK_MODULE,
-            })),
+            $crate::Event::new($crate::TASK_EVENT_NAME, $crate::Action::Spawn).with_attrs(
+                $crate::__private::serde_json::json!({
+                    "task_site": format!("{}:{}", __ZC_TASK_FILE, __ZC_TASK_LINE),
+                    "task_module": __ZC_TASK_MODULE,
+                })
+            ),
             "task spawned"
         );
 
@@ -57,18 +40,15 @@ macro_rules! spawn {
         let __zc_task_future = async move {
             let __zc_task_output = { $body }.await;
             let __zc_task_elapsed_ms = __zc_task_started_at.elapsed().as_millis() as u64;
-            $crate::__private::reiclaw_log::record!(
+            $crate::record!(
                 INFO,
-                $crate::__private::reiclaw_log::Event::new(
-                    $crate::TASK_EVENT_NAME,
-                    $crate::__private::reiclaw_log::Action::Complete,
-                )
-                .with_outcome($crate::__private::reiclaw_log::EventOutcome::Success)
-                .with_duration(__zc_task_elapsed_ms)
-                .with_attrs($crate::__private::serde_json::json!({
-                    "task_site": format!("{}:{}", __ZC_TASK_FILE, __ZC_TASK_LINE),
-                    "task_module": __ZC_TASK_MODULE,
-                })),
+                $crate::Event::new($crate::TASK_EVENT_NAME, $crate::Action::Complete)
+                    .with_outcome($crate::EventOutcome::Success)
+                    .with_duration(__zc_task_elapsed_ms)
+                    .with_attrs($crate::__private::serde_json::json!({
+                        "task_site": format!("{}:{}", __ZC_TASK_FILE, __ZC_TASK_LINE),
+                        "task_module": __ZC_TASK_MODULE,
+                    })),
                 "task complete"
             );
             __zc_task_output

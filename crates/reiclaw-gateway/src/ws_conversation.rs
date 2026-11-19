@@ -184,7 +184,7 @@ pub(crate) struct TurnClaim {
     pub(crate) request_id: Option<String>,
     /// Reference to the canonical durable bridge input, when this is one.
     pub(crate) intake: Option<crate::ws::intake::Claim>,
-    pub(crate) surface: Option<reiclaw_api::chat_surface::ChatSurface>,
+    pub(crate) surface: Option<crate::ws::surface::ChatSurface>,
     pub(crate) generation: u64,
     /// Session deletion invalidates admissions that have not run yet.
     pub(crate) reset_revision: u64,
@@ -904,7 +904,7 @@ mod tests {
         let (publish_tx, publish_rx) = tokio::sync::oneshot::channel();
         let publisher = Arc::clone(&conversation);
         let publisher_cancel = old_cancel.clone();
-        let old_query = reiclaw_spawn::spawn!(async move {
+        let old_query = reiclaw_log::spawn!(async move {
             let _retention = retention;
             // Model a provider result that already passed its cancellation check.
             // Hold publication until after reset: cancellation alone cannot

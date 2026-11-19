@@ -11799,7 +11799,7 @@ async fn run_brackets_successful_turn_with_agent_start_and_agent_end() {
         .expect("test listener should bind");
     let addr = listener.local_addr().expect("listener should have address");
     let app = Router::new().route("/v1/chat/completions", post(respond_with_done));
-    let server = reiclaw_spawn::spawn!(async move {
+    let server = reiclaw_log::spawn!(async move {
         axum::serve(listener, app)
             .await
             .expect("test server should run");
@@ -12019,7 +12019,7 @@ async fn run_rejects_model_switch_tool_call_and_keeps_original_route() {
     let app = Router::new()
         .route("/v1/chat/completions", post(respond_switch_then_done))
         .with_state(calls);
-    let server = reiclaw_spawn::spawn!(async move {
+    let server = reiclaw_log::spawn!(async move {
         axum::serve(listener, app)
             .await
             .expect("test server should run");

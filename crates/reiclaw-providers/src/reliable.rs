@@ -2005,7 +2005,7 @@ impl ModelProvider for ReliableModelProvider {
             );
             let (tx, rx) = tokio::sync::mpsc::channel::<StreamResult<StreamEvent>>(100);
 
-            let handle = ::reiclaw_spawn::spawn!(async move {
+            let handle = ::reiclaw_log::spawn!(async move {
                 let mut stream = stream;
                 while let Some(event) = stream.next().await {
                     if let Err(ref e) = event {
@@ -2080,7 +2080,7 @@ impl ModelProvider for ReliableModelProvider {
             // Use a channel to bridge the stream with logging
             let (tx, rx) = tokio::sync::mpsc::channel::<StreamResult<StreamChunk>>(100);
 
-            let handle = ::reiclaw_spawn::spawn!(async move {
+            let handle = ::reiclaw_log::spawn!(async move {
                 let mut stream = stream;
                 while let Some(chunk) = stream.next().await {
                     if let Err(ref e) = chunk {
@@ -2153,7 +2153,7 @@ impl ModelProvider for ReliableModelProvider {
 
             let (tx, rx) = tokio::sync::mpsc::channel::<StreamResult<StreamChunk>>(100);
 
-            let handle = ::reiclaw_spawn::spawn!(async move {
+            let handle = ::reiclaw_log::spawn!(async move {
                 let mut stream = stream;
                 while let Some(chunk) = stream.next().await {
                     if let Err(ref e) = chunk {

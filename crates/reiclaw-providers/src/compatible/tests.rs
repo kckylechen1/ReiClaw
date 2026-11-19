@@ -418,7 +418,7 @@ async fn open_sse_response(body: &'static str) -> (reqwest::Response, tokio::tas
         .await
         .expect("bind SSE test server");
     let addr = listener.local_addr().expect("SSE test server address");
-    let server = ::reiclaw_spawn::spawn!(async move {
+    let server = ::reiclaw_log::spawn!(async move {
         axum::serve(listener, app).await.expect("serve SSE test");
     });
     let response = reqwest::Client::new()
@@ -3824,7 +3824,7 @@ async fn stream_chat_with_tools_sends_typed_tools_in_streaming_body() {
 
     let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
     let addr = listener.local_addr().unwrap();
-    let server_handle = ::reiclaw_spawn::spawn!(async move {
+    let server_handle = ::reiclaw_log::spawn!(async move {
         axum::serve(listener, app).await.unwrap();
     });
 
@@ -3904,7 +3904,7 @@ async fn chat_with_tools_forwards_raw_specs_without_validation_or_sanitizing() {
 
     let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
     let addr = listener.local_addr().unwrap();
-    let server_handle = ::reiclaw_spawn::spawn!(async move {
+    let server_handle = ::reiclaw_log::spawn!(async move {
         axum::serve(listener, app).await.unwrap();
     });
 
@@ -4004,7 +4004,7 @@ async fn dropping_stream_aborts_forwarder_and_closes_upstream_socket() {
 
     let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
     let addr = listener.local_addr().unwrap();
-    let server = ::reiclaw_spawn::spawn!(async move {
+    let server = ::reiclaw_log::spawn!(async move {
         axum::serve(listener, app).await.unwrap();
     });
 

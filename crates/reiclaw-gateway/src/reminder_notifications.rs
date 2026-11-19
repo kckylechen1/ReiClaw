@@ -178,7 +178,7 @@ pub(crate) fn start(
     mut shutdown: tokio::sync::watch::Receiver<bool>,
 ) -> ReminderNotificationTask {
     let data_dir: PathBuf = config.read().data_dir.clone();
-    let task = ::reiclaw_spawn::spawn!(async move {
+    let task = ::reiclaw_log::spawn!(async move {
         let mut interval = tokio::time::interval(CHECK_INTERVAL);
         interval.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Skip);
         loop {

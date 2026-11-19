@@ -337,13 +337,13 @@ mod tests {
         let bridge_a = Arc::clone(&bridge);
         let bridge_b = Arc::clone(&bridge);
         let (ra, rb) = tokio::join!(
-            reiclaw_spawn::spawn!(async move {
+            reiclaw_log::spawn!(async move {
                 bridge_a
                     .request_approval_attributed("user-A", &req())
                     .await
                     .unwrap()
             }),
-            reiclaw_spawn::spawn!(async move {
+            reiclaw_log::spawn!(async move {
                 bridge_b
                     .request_approval_attributed("user-B", &req())
                     .await

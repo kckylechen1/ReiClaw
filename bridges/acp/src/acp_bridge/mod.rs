@@ -469,7 +469,7 @@ pub(super) async fn run() -> Result<()> {
                         let (config, out, session) = (cfg.clone(), output.clone(), name.clone());
                         let admission = Arc::new(Admission::default());
                         let actor_admission = admission.clone();
-                        let task = reiclaw_spawn::spawn!(async move {
+                        let task = reiclaw_log::spawn!(async move {
                             session_loop(config, out, session, socket, epoch, rx, actor_admission)
                                 .await;
                         });

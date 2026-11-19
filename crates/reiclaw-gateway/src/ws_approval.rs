@@ -354,7 +354,7 @@ mod tests {
         let (tx, mut events) = mpsc::channel(8);
         let pending = new_pending_approvals();
         let channel = WsApprovalChannel::new(tx, pending.clone(), Duration::from_secs(30));
-        let task = reiclaw_spawn::spawn!(async move {
+        let task = reiclaw_log::spawn!(async move {
             channel
                 .request_approval_attributed("operator", &approval_request())
                 .await

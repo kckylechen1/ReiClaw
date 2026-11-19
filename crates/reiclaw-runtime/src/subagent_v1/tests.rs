@@ -1251,7 +1251,7 @@ async fn advisor_call_outside_a_turn_scope_is_refused() {
     super::scope_advisor_turn(async {
         let tool = Arc::clone(&tool);
         let args = args.clone();
-        let spawned = reiclaw_spawn::spawn!(async move { tool.execute(args).await });
+        let spawned = reiclaw_log::spawn!(async move { tool.execute(args).await });
         let result = spawned.await.unwrap().unwrap();
         assert!(!result.success, "a spawned call must not escape the cap");
     })

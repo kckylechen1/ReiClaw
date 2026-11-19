@@ -9,7 +9,6 @@ publish = false
 [dependencies]
 reiclaw-log.workspace = true
 reiclaw-api.workspace = true
-reiclaw-spawn.workspace = true
 anyhow = "1.0"
 jiff.workspace = true
 parking_lot = "0.12"

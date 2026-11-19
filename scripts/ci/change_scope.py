@@ -42,7 +42,6 @@ DOC_BUILD_PREFIXES = (
     "xtask/",
     "docs/book/theme/",
     "docs/book/po/",
-    "crates/reiclaw-schema-markdown/",
     "crates/reiclaw-config/",
     "scripts/ci/docs",
     "scripts/ci/test_docs_",

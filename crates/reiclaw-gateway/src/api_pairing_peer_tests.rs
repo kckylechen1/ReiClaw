@@ -224,7 +224,7 @@ async fn real_http_peer_cannot_rotate_untrusted_forwarded_headers() {
     let state = state(false, 100);
     let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
     let addr = listener.local_addr().unwrap();
-    let server = reiclaw_spawn::spawn!(async move {
+    let server = reiclaw_log::spawn!(async move {
         axum::serve(
             listener,
             router(state).into_make_service_with_connect_info::<SocketAddr>(),

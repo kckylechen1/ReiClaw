@@ -3,7 +3,16 @@ use serde::{Deserialize, Serialize};
 use std::{fmt, str::FromStr};
 use tokio_util::sync::CancellationToken;
 
-use crate::media::MediaAttachment;
+/// A single media attachment on an inbound message.
+#[derive(Debug, Clone)]
+pub struct MediaAttachment {
+    /// Original file name (e.g. `voice.ogg`, `photo.jpg`).
+    pub file_name: String,
+    /// Raw bytes of the attachment.
+    pub data: Vec<u8>,
+    /// MIME type if known (e.g. `audio/ogg`, `image/jpeg`).
+    pub mime_type: Option<String>,
+}
 
 // ── Channel approval types ──────────────────────────────────────
 

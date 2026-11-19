@@ -69,7 +69,7 @@ async fn server(state: AppState) -> (Server, SocketAddr) {
             post(crate::api_soul::post_resolve_proposal),
         )
         .with_state(state);
-    let handle = reiclaw_spawn::spawn!(async move {
+    let handle = reiclaw_log::spawn!(async move {
         axum::serve(
             listener,
             app.into_make_service_with_connect_info::<SocketAddr>(),

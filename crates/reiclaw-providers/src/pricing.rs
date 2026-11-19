@@ -174,7 +174,7 @@ pub fn spawn_refresher(config: Arc<RwLock<Config>>) {
         return; // already running
     }
 
-    ::reiclaw_spawn::spawn!(async {
+    ::reiclaw_log::spawn!(async {
         loop {
             // Re-resolve the handle (re-bound across daemon reloads), then
             // clone the config under the lock and build/poll without holding

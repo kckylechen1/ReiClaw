@@ -1905,7 +1905,7 @@ async fn production_gateway_shutdown_retires_idle_and_handshake_sockets() {
     let controls = reiclaw_runtime::daemon::GatewayReloadControls {
         shutdown_tx: shutdown_tx.clone(), reload_tx,
     };
-    let server = reiclaw_spawn::spawn!(async move {
+    let server = reiclaw_log::spawn!(async move {
         crate::run_gateway("127.0.0.1", address.port(), config, None, Some(controls), None).await
     });
     tokio::time::timeout(LIMIT, async {

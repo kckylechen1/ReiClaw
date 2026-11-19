@@ -463,7 +463,7 @@ mod tests {
             .route("/ws/bridge", axum::routing::get(handle_ws_bridge))
             .route("/ws/chat", axum::routing::get(crate::ws::handle_ws_chat))
             .with_state(state);
-        reiclaw_spawn::spawn!(async move {
+        reiclaw_log::spawn!(async move {
             axum::serve(
                 listener,
                 app.into_make_service_with_connect_info::<SocketAddr>(),
@@ -521,8 +521,7 @@ mod tests {
         );
         let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
         let addr = listener.local_addr().unwrap();
-        let server =
-            reiclaw_spawn::spawn!(async move { axum::serve(listener, app).await.unwrap() });
+        let server = reiclaw_log::spawn!(async move { axum::serve(listener, app).await.unwrap() });
         let mut stream = tokio::net::TcpStream::connect(addr).await.unwrap();
         stream.write_all(format!("GET / HTTP/1.1\r\nHost: {addr}\r\nConnection: Upgrade\r\nUpgrade: websocket\r\nSec-WebSocket-Version: 13\r\nSec-WebSocket-Key: dGhlIHNhbXBsZSBub25jZQ==\r\n\r\n").as_bytes()).await.unwrap();
         let (stale, accepted, active) = tokio::time::timeout(WAIT, rx.recv())

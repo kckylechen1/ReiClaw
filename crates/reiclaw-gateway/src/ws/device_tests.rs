@@ -241,7 +241,7 @@ impl DeviceFixture {
         let provider_app = axum::Router::new()
             .route("/v1/chat/completions", axum::routing::post(device_provider))
             .with_state(Arc::clone(&seen));
-        let provider_task = ::reiclaw_spawn::spawn!(async move {
+        let provider_task = ::reiclaw_log::spawn!(async move {
             axum::serve(provider_listener, provider_app).await.unwrap();
         });
         let mut state = crate::tests::admin_paircode_state(&tmp, require_pairing, false);
@@ -336,7 +336,7 @@ impl DeviceFixture {
             .merge(crate::api_attachments::routes(state.clone(), 5));
         let listener = tokio::net::TcpListener::bind(address).await.unwrap();
         let address = listener.local_addr().unwrap();
-        let gateway_task = ::reiclaw_spawn::spawn!(async move {
+        let gateway_task = ::reiclaw_log::spawn!(async move {
             axum::serve(listener, app).await.unwrap();
         });
         Self {

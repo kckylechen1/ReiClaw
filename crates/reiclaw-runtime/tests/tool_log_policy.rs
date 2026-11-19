@@ -7,7 +7,6 @@ use reiclaw_api::attribution::{Attributable, Role};
 use reiclaw_api::channel::{
     Channel, ChannelApprovalRequest, ChannelApprovalResponse, ChannelMessage, SendMessage,
 };
-use reiclaw_api::hook::{HookHandler, HookResult};
 use reiclaw_api::ingress::IngressContext;
 use reiclaw_api::model_provider::{ChatRequest, ProviderCapabilities};
 use reiclaw_api::tool::{Tool, ToolOutput, ToolResult};
@@ -19,7 +18,7 @@ use reiclaw_runtime::agent::loop_::{
 };
 use reiclaw_runtime::agent::tool_receipts::ReceiptGenerator;
 use reiclaw_runtime::approval::ApprovalManager;
-use reiclaw_runtime::hooks::HookRunner;
+use reiclaw_runtime::hooks::{HookHandler, HookResult, HookRunner};
 use reiclaw_runtime::observability::NoopObserver;
 use serde_json::{Value, json};
 use std::sync::{Arc, Mutex};

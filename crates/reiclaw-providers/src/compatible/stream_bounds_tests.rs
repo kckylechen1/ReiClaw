@@ -255,7 +255,7 @@ async fn provider_http_stream_surfaces_the_index_limit() {
     );
     let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
     let addr = listener.local_addr().unwrap();
-    let server = reiclaw_spawn::spawn!(async move { axum::serve(listener, app).await.unwrap() });
+    let server = reiclaw_log::spawn!(async move { axum::serve(listener, app).await.unwrap() });
     let _server_guard = AbortOnDrop::new(server.abort_handle());
     let provider = OpenAiCompatibleModelProvider::builder("fixture")
         .display_name("fixture")

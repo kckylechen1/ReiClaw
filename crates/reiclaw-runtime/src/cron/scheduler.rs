@@ -87,7 +87,7 @@ where
     // authorized nested cron_run must stay in this daemon generation's join
     // barrier even when its direct parent is cancelled first.
     let tracked = children.track_future(CRON_CHILDREN.scope(children.clone(), future));
-    AbortOnDropHandle::new(reiclaw_spawn::spawn!(tracked))
+    AbortOnDropHandle::new(reiclaw_log::spawn!(tracked))
 }
 
 /// A deadline aborts and joins the child before cleanup or lock release can

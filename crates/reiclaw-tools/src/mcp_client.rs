@@ -635,7 +635,7 @@ impl Drop for ExtensionHandleGuard {
             return;
         }
         let inner = Arc::clone(&self.inner);
-        reiclaw_spawn::spawn!(async move {
+        reiclaw_log::spawn!(async move {
             inner.lock().await.tasks.discard(&handle);
         });
     }
@@ -958,7 +958,7 @@ impl McpServer {
         operation: String,
     ) -> tokio::task::JoinHandle<Result<()>> {
         let server = self.clone();
-        reiclaw_spawn::spawn!(async move {
+        reiclaw_log::spawn!(async move {
             let result = server.reestablish(observed_epoch).await;
             if let Err(error) = &result {
                 ::reiclaw_log::record!(

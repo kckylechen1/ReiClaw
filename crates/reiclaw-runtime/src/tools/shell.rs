@@ -421,7 +421,7 @@ where
 {
     let output = Arc::new(std::sync::Mutex::new(DrainOutput::default()));
     let shared = Arc::clone(&output);
-    let task = reiclaw_spawn::spawn!(async move {
+    let task = reiclaw_log::spawn!(async move {
         drain_capped_into(reader, cap, shared).await;
     });
     DrainHandle { task, output }
@@ -1390,7 +1390,7 @@ mod tests {
             });
             // The descendant publishes its own PID, then becomes the sleep, so
             // the PID file proves it is running and names the process to check.
-            let task = reiclaw_spawn::spawn!(async move {
+            let task = reiclaw_log::spawn!(async move {
                 tool.execute(json!({
                     "command": "sh -c 'echo $$ > pid.tmp && mv pid.tmp descendant.pid && exec sleep 30' & wait"
                 }))

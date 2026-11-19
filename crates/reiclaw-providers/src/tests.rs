@@ -434,7 +434,7 @@ async fn routed_alias_uses_call_model_instead_of_configured_pin() {
     let app = Router::new()
         .route("/v1/chat/completions", post(capture_chat_request))
         .with_state(capture.clone());
-    let server = ::reiclaw_spawn::spawn!(async move {
+    let server = ::reiclaw_log::spawn!(async move {
         axum::serve(listener, app).await.expect("serve test server");
     });
 
@@ -713,7 +713,7 @@ async fn ollama_private_remote_cloud_request_omits_auth_and_preserves_model() {
     let app = Router::new()
         .route("/v1/chat/completions", post(capture_chat_request))
         .with_state(capture.clone());
-    let server = ::reiclaw_spawn::spawn!(async move {
+    let server = ::reiclaw_log::spawn!(async move {
         axum::serve(listener, app).await.expect("serve test server");
     });
 
@@ -766,7 +766,7 @@ async fn ollama_private_remote_lists_models_without_auth() {
     let app = Router::new()
         .route("/v1/models", get(capture_models_request))
         .with_state(capture.clone());
-    let server = ::reiclaw_spawn::spawn!(async move {
+    let server = ::reiclaw_log::spawn!(async move {
         axum::serve(listener, app).await.expect("serve test server");
     });
 
@@ -1203,7 +1203,7 @@ async fn aliases_sharing_uri_keep_distinct_system_message_modes() {
     let app = Router::new()
         .route("/v1/chat/completions", post(capture_chat_request))
         .with_state(capture.clone());
-    let server = ::reiclaw_spawn::spawn!(async move {
+    let server = ::reiclaw_log::spawn!(async move {
         axum::serve(listener, app).await.expect("serve test server");
     });
 

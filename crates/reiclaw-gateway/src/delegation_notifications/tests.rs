@@ -1711,7 +1711,7 @@ async fn wake_notify_triggers_immediate_sweep_pass() {
             }
         }),
     );
-    let srv = ::reiclaw_spawn::spawn!(async move {
+    let srv = ::reiclaw_log::spawn!(async move {
         let _ = axum::serve(listener, app).await;
     });
     config.tachi.endpoint = format!("http://{addr}/mcp");

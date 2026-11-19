@@ -842,7 +842,7 @@ mod tests {
             )
             .unwrap();
             let (sent, seen) = tokio::sync::oneshot::channel();
-            let server = reiclaw_spawn::spawn!(async move {
+            let server = reiclaw_log::spawn!(async move {
                 let (mut socket, _) = listener.accept().await.unwrap();
                 let mut headers = Vec::new();
                 while !headers.windows(4).any(|part| part == b"\r\n\r\n") {
@@ -1254,7 +1254,7 @@ api_token = "{encrypted}"
         let port = listener.local_addr().unwrap().port();
         let (seen_tx, seen_rx) = tokio::sync::oneshot::channel();
 
-        let server_handle = reiclaw_spawn::spawn!(async move {
+        let server_handle = reiclaw_log::spawn!(async move {
             if let Ok((mut stream, _)) = listener.accept().await {
                 use tokio::io::{AsyncReadExt, AsyncWriteExt};
 
@@ -1515,7 +1515,7 @@ api_token = "Bearer from-secret"
         ] {
             let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
             let address = listener.local_addr().unwrap();
-            let server = reiclaw_spawn::spawn!(async move {
+            let server = reiclaw_log::spawn!(async move {
                 let (mut socket, _) = listener.accept().await.unwrap();
                 let mut request = [0; 4096];
                 let mut headers = Vec::new();
@@ -1563,7 +1563,7 @@ api_token = "Bearer from-secret"
         let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
         let addr = listener.local_addr().unwrap();
         let body = body.to_vec();
-        reiclaw_spawn::spawn!(async move {
+        reiclaw_log::spawn!(async move {
             let (mut socket, _) = listener.accept().await.unwrap();
             let mut buffer = [0; 4096];
             let mut headers = Vec::new();
@@ -2124,7 +2124,7 @@ api_token = "Bearer from-secret"
         let port = listener.local_addr().unwrap().port();
 
         // Spawn a minimal HTTP server that responds with a known body.
-        let server_handle = reiclaw_spawn::spawn!(async move {
+        let server_handle = reiclaw_log::spawn!(async move {
             if let Ok((mut stream, _)) = listener.accept().await {
                 use tokio::io::AsyncWriteExt;
                 let response = b"HTTP/1.1 200 OK\r\nContent-Length: 16\r\nContent-Type: text/plain\r\nConnection: close\r\n\r\nhello from ipv6!";

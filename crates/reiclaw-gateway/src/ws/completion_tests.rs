@@ -21,7 +21,7 @@ async fn done_reports_vision_request_route_without_changing_next_turn() {
     }));
     let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
     let address = listener.local_addr().unwrap();
-    let server = reiclaw_spawn::spawn!(async move { axum::serve(listener, app).await.unwrap() });
+    let server = reiclaw_log::spawn!(async move { axum::serve(listener, app).await.unwrap() });
 
     let mut chat = SharedChat::new();
     let mut config = reiclaw_config::schema::Config {

@@ -414,7 +414,7 @@ async fn cancellation_before_write_does_not_reset_or_replay() {
     });
     let server = server_with_transport("pre-write", transport, 5);
     let call_server = server.clone();
-    let call = reiclaw_spawn::spawn!(async move { call_server.call_tool("test", json!({})).await });
+    let call = reiclaw_log::spawn!(async move { call_server.call_tool("test", json!({})).await });
     entered.notified().await;
     call.abort();
     assert!(
@@ -506,7 +506,7 @@ async fn cancellation_during_recovery_does_not_abandon_rehandshake() {
 
     let call_server = server.clone();
     let call =
-        reiclaw_spawn::spawn!(async move { call_server.call_tool("side_effect", json!({})).await });
+        reiclaw_log::spawn!(async move { call_server.call_tool("side_effect", json!({})).await });
     handshake_entered.notified().await;
     call.abort();
     assert!(
@@ -733,9 +733,7 @@ async fn queued_write_waits_for_recovery_after_outcome_unknown() {
     // First call writes, marks outcome-unknown, then hangs; cancel it.
     let first_server = server.clone();
     let first =
-        reiclaw_spawn::spawn!(
-            async move { first_server.call_tool("side_effect", json!({})).await }
-        );
+        reiclaw_log::spawn!(async move { first_server.call_tool("side_effect", json!({})).await });
     first_entered.notified().await;
     first.abort();
     let _ = first.await;
@@ -811,9 +809,7 @@ async fn failed_rehandshake_fails_closed_for_later_calls() {
 
     let first_server = server.clone();
     let first =
-        reiclaw_spawn::spawn!(
-            async move { first_server.call_tool("side_effect", json!({})).await }
-        );
+        reiclaw_log::spawn!(async move { first_server.call_tool("side_effect", json!({})).await });
     first_entered.notified().await;
     first.abort();
     let _ = first.await;
@@ -1174,11 +1170,10 @@ done
     .await
     .expect("connect");
     let first_server = server.clone();
-    let first = reiclaw_spawn::spawn!(async move { first_server.call_tool("A", json!({})).await });
+    let first = reiclaw_log::spawn!(async move { first_server.call_tool("A", json!({})).await });
     assert_eq!(read_fifo(&first_received).await.trim(), "ready");
     let second_server = server.clone();
-    let second =
-        reiclaw_spawn::spawn!(async move { second_server.call_tool("B", json!({})).await });
+    let second = reiclaw_log::spawn!(async move { second_server.call_tool("B", json!({})).await });
 
     let (first_result, second_result) = tokio::time::timeout(Duration::from_secs(5), async {
         tokio::join!(first, second)
@@ -1259,7 +1254,7 @@ done
     .expect("connect");
     let call_server = server.clone();
     let call =
-        reiclaw_spawn::spawn!(async move { call_server.call_tool("side_effect", json!({})).await });
+        reiclaw_log::spawn!(async move { call_server.call_tool("side_effect", json!({})).await });
     assert_eq!(read_fifo(&effect_ready).await.trim(), "ready");
     call.abort();
     assert!(
@@ -1357,9 +1352,7 @@ done
     // locked and the request outcome is unknown.
     let first_server = server.clone();
     let first =
-        reiclaw_spawn::spawn!(
-            async move { first_server.call_tool("side_effect", json!({})).await }
-        );
+        reiclaw_log::spawn!(async move { first_server.call_tool("side_effect", json!({})).await });
     timeout(Duration::from_secs(3), hook.wait_for_payload_pause())
         .await
         .expect("first stdio write did not reach the post-payload pause");
@@ -1368,7 +1361,7 @@ done
     // transport, where it is queued on the same stdio state lock.
     let second_server = server.clone();
     let second =
-        reiclaw_spawn::spawn!(async move { second_server.call_tool("probe", json!({})).await });
+        reiclaw_log::spawn!(async move { second_server.call_tool("probe", json!({})).await });
     timeout(Duration::from_secs(3), hook.wait_for_attempts(2))
         .await
         .expect("second stdio writer did not queue on transport state");
@@ -3898,7 +3891,7 @@ async fn modern_task_cancel_discards_handle() {
         .await
         .expect("modern connect");
     let call_server = mcp.clone();
-    let call = reiclaw_spawn::spawn!(async move { call_server.call_tool("echo", json!({})).await });
+    let call = reiclaw_log::spawn!(async move { call_server.call_tool("echo", json!({})).await });
     timeout(Duration::from_secs(3), async {
         loop {
             let received = server.received_requests().await.expect("requests");

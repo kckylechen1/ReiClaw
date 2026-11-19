@@ -1284,7 +1284,7 @@ pub(crate) fn start_with_resolver(
     let wake_for_task = Arc::clone(&wake);
     let stop = tokio_util::sync::CancellationToken::new();
     let stop_on_drop = stop.clone().drop_guard();
-    let handle = ::reiclaw_spawn::spawn!(async move {
+    let handle = ::reiclaw_log::spawn!(async move {
         let mut interval = tokio::time::interval(CHECK_INTERVAL);
         interval.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Skip);
         // Consume the t=0 immediate tick so the initial pass runs once and then

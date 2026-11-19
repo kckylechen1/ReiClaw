@@ -6,11 +6,11 @@ use std::sync::atomic::{AtomicUsize, Ordering};
 use serde::{Deserialize, Serialize};
 
 use reiclaw_api::config_metadata::{
-    ChannelConfig, ChannelInfo, ConfigTab, CredentialSurfaceClass, NestedOptionEntry,
-    PropFieldSpec, PropKind, SecretFieldInfo,
+    ChannelInfo, ConfigTab, CredentialSurfaceClass, NestedOptionEntry, PropFieldSpec, PropKind,
+    SecretFieldInfo,
 };
 use reiclaw_config::schema::{Config, TelegramConfig};
-use reiclaw_config::traits::{AliasSource, PropFieldInfo};
+use reiclaw_config::traits::{AliasSource, ChannelConfig, PropFieldInfo};
 use reiclaw_macros::Configurable;
 
 // Configurable's generated paths resolve through the consuming crate's shims.

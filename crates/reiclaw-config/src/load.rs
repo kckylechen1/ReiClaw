@@ -9,11 +9,18 @@ use crate::schema::{
 };
 use anyhow::{Context, Result};
 use directories::UserDirs;
-use reiclaw_api::runtime_status::RuntimeConfigKind;
-use serde::Deserialize;
+use serde::{Deserialize, Serialize};
 use std::path::{Path, PathBuf};
 use std::sync::OnceLock;
 use tokio::fs;
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum RuntimeConfigKind {
+    Default,
+    Custom,
+    Temporary,
+}
 
 /// Read the persisted `[proxy]` section using the same install-directory
 /// resolution as [`Config::load_or_init`], for the pre-runtime startup

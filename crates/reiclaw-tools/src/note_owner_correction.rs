@@ -282,7 +282,7 @@ mod tests {
         OWNER_CORRECTION_CONTEXT
             .scope(resolver, async {
                 assert!(
-                    ::reiclaw_spawn::spawn!(async {
+                    ::reiclaw_log::spawn!(async {
                         OWNER_CORRECTION_CONTEXT.try_with(|_| ()).is_err()
                     })
                     .await

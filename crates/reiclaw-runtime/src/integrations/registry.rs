@@ -106,9 +106,9 @@ pub fn all_integrations(config: &Config) -> Vec<IntegrationEntry> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use reiclaw_api::config_metadata::ChannelConfig;
     use reiclaw_config::schema::Config;
     use reiclaw_config::schema::{StreamMode, TelegramConfig};
+    use reiclaw_config::traits::ChannelConfig;
 
     #[test]
     fn all_categories_represented() {

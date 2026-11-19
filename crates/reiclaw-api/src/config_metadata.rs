@@ -212,14 +212,6 @@ pub struct ChannelInfo {
     pub retired: bool,
 }
 
-/// The trait for describing a channel
-pub trait ChannelConfig {
-    /// human-readable name
-    fn name() -> &'static str;
-    /// short description
-    fn desc() -> &'static str;
-}
-
 #[cfg(test)]
 mod tests {
     use super::ConfigTab;

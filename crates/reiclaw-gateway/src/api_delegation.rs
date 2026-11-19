@@ -301,7 +301,7 @@ async fn control(
     // a client inspects the same request ID instead of issuing another start.
     let mut shutdown = state.shutdown_tx.subscribe();
     let control_timeout = context.timeout;
-    let submitted = reiclaw_spawn::spawn!(async move {
+    let submitted = reiclaw_log::spawn!(async move {
         let _permit = permit;
         reiclaw_api::TOOL_LOOP_THREAD_ID.scope(Some(format!("delegation:{agent}")), async {
             tokio::select! {

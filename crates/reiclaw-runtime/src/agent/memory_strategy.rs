@@ -1,4 +1,4 @@
-use reiclaw_api::memory_traits::{Memory, MemoryStrategy};
+use reiclaw_api::memory_traits::Memory;
 use reiclaw_api::model_provider::ModelProvider;
 use std::sync::Arc;
 
@@ -31,11 +31,9 @@ impl DefaultMemoryStrategy {
     ) -> Self {
         Self::new(memory, memory_config, workspace_dir)
     }
-}
 
-#[async_trait::async_trait]
-impl MemoryStrategy for DefaultMemoryStrategy {
-    async fn consolidate_turn(
+    /// Consolidate a conversation turn into long-term memory.
+    pub async fn consolidate_turn(
         &self,
         user_message: &str,
         assistant_response: &str,
@@ -77,7 +75,8 @@ impl MemoryStrategy for DefaultMemoryStrategy {
         Ok(())
     }
 
-    async fn run_governance(&self) -> anyhow::Result<()> {
+    /// Run memory governance (cleanup, archiving, background consolidation).
+    pub async fn run_governance(&self) -> anyhow::Result<()> {
         // Delegate to the existing hygiene routine.
         // Phase 1: `hygiene::run_if_due` returns `Result<()>`.
         // A structured report will be wired in a follow-up when hygiene

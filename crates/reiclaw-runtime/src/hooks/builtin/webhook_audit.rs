@@ -320,7 +320,7 @@ impl HookHandler for WebhookAuditHook {
         let url = self.config.url.clone();
 
         // Fire-and-forget — never block the agent loop.
-        reiclaw_spawn::spawn!(async move {
+        reiclaw_log::spawn!(async move {
             match client.post(&url).json(&payload).send().await {
                 Ok(resp) => {
                     if !resp.status().is_success() {

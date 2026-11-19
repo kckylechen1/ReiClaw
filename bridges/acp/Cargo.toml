@@ -17,7 +17,6 @@ path = "src/main.rs"
 # The bridge has no runtime, provider, memory, tools or gateway dependency.
 reiclaw-config = { workspace = true, features = ["i18n"] }
 reiclaw-log.workspace = true
-reiclaw-spawn.workspace = true
 futures-util = { version = "0.3", default-features = false, features = ["sink"] }
 serde = { version = "1.0", default-features = false, features = ["derive", "std"] }
 serde_json = { version = "1.0", default-features = false, features = ["std"] }

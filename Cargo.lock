@@ -2689,8 +2689,6 @@ dependencies = [
  "reiclaw-policy",
  "reiclaw-providers",
  "reiclaw-runtime",
- "reiclaw-schema-markdown",
- "reiclaw-spawn",
  "reiclaw-tools",
  "reqwest",
  "rusqlite",
@@ -2739,7 +2737,6 @@ dependencies = [
  "libc",
  "reiclaw-config",
  "reiclaw-log",
- "reiclaw-spawn",
  "serde",
  "serde_json",
  "tempfile",
@@ -2759,7 +2756,6 @@ dependencies = [
  "futures-util",
  "reiclaw-gateway-client",
  "reiclaw-log",
- "reiclaw-spawn",
  "reqwest",
  "serde",
  "serde_json",
@@ -2793,21 +2789,6 @@ dependencies = [
  "toml",
  "toml_edit",
  "url",
- "uuid",
-]
-
-[[package]]
-name = "reiclaw-cost"
-version = "0.8.3"
-dependencies = [
- "anyhow",
- "jiff",
- "parking_lot",
- "reiclaw-api",
- "reiclaw-config",
- "reiclaw-log",
- "serde_json",
- "tempfile",
  "uuid",
 ]
 
@@ -2859,7 +2840,6 @@ dependencies = [
  "reiclaw-policy",
  "reiclaw-providers",
  "reiclaw-runtime",
- "reiclaw-spawn",
  "reiclaw-tools",
  "ring",
  "rusqlite",
@@ -2917,7 +2897,6 @@ dependencies = [
  "portable-atomic",
  "reiclaw-api",
  "reiclaw-log",
- "reiclaw-spawn",
  "rusqlite",
  "serde",
  "serde_json",
@@ -2972,7 +2951,6 @@ dependencies = [
  "reiclaw-infra",
  "reiclaw-log",
  "reiclaw-provider-dispatch",
- "reiclaw-spawn",
  "reqwest",
  "rusqlite",
  "serde",
@@ -2982,19 +2960,6 @@ dependencies = [
  "tokio",
  "toml",
  "uuid",
-]
-
-[[package]]
-name = "reiclaw-platform"
-version = "0.8.3"
-dependencies = [
- "anyhow",
- "directories",
- "reiclaw-api",
- "reiclaw-config",
- "tempfile",
- "tokio",
- "toml",
 ]
 
 [[package]]
@@ -3047,7 +3012,6 @@ dependencies = [
  "reiclaw-http",
  "reiclaw-log",
  "reiclaw-provider-dispatch",
- "reiclaw-spawn",
  "reqwest",
  "scopeguard",
  "serde",
@@ -3090,16 +3054,13 @@ dependencies = [
  "regex",
  "reiclaw-api",
  "reiclaw-config",
- "reiclaw-cost",
  "reiclaw-http",
  "reiclaw-infra",
  "reiclaw-log",
  "reiclaw-macros",
  "reiclaw-memory",
- "reiclaw-platform",
  "reiclaw-policy",
  "reiclaw-providers",
- "reiclaw-spawn",
  "reiclaw-tool-call-parser",
  "reiclaw-tools",
  "reqwest",
@@ -3126,26 +3087,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "reiclaw-schema-markdown"
-version = "0.8.3"
-dependencies = [
- "reiclaw-config",
- "schemars",
- "serde_json",
-]
-
-[[package]]
-name = "reiclaw-spawn"
-version = "0.8.3"
-dependencies = [
- "reiclaw-log",
- "serde_json",
- "tokio",
- "tracing",
- "tracing-subscriber",
-]
-
-[[package]]
 name = "reiclaw-tool-call-parser"
 version = "0.8.3"
 dependencies = [
@@ -3161,6 +3102,7 @@ version = "0.8.3"
 dependencies = [
  "anyhow",
  "async-trait",
+ "axum",
  "base64 0.22.1",
  "directories",
  "fluent",
@@ -3180,7 +3122,6 @@ dependencies = [
  "reiclaw-memory",
  "reiclaw-policy",
  "reiclaw-providers",
- "reiclaw-spawn",
  "reqwest",
  "rusqlite",
  "rustix",
@@ -4757,7 +4698,6 @@ dependencies = [
  "reiclaw-api",
  "reiclaw-config",
  "reiclaw-providers",
- "reiclaw-schema-markdown",
  "reqwest",
  "schemars",
  "serde",

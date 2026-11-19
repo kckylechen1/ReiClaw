@@ -522,7 +522,7 @@ async fn spawn_lazy_harness(
             axum::routing::post(mock_lazy_provider),
         )
         .with_state(Arc::clone(&seen));
-    let provider_task = reiclaw_spawn::spawn!(async move {
+    let provider_task = reiclaw_log::spawn!(async move {
         axum::serve(provider_listener, provider_app).await.unwrap();
     });
 
@@ -583,7 +583,7 @@ async fn spawn_lazy_harness(
         .with_state(state.clone());
     let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
     let address = listener.local_addr().unwrap();
-    let server = reiclaw_spawn::spawn!(async move {
+    let server = reiclaw_log::spawn!(async move {
         axum::serve(listener, app.into_make_service())
             .await
             .unwrap();
@@ -814,7 +814,7 @@ async fn assert_shutdown_during_stamp_holds_lifecycle_against_delete(target_alia
     let delete_done = Arc::new(AtomicBool::new(false));
     let delete_done_flag = Arc::clone(&delete_done);
     let delete_addr = harness.address;
-    let delete_task = reiclaw_spawn::spawn!(async move {
+    let delete_task = reiclaw_log::spawn!(async move {
         let status = http_delete_session(delete_addr, "cancel-race").await;
         delete_done_flag.store(true, Ordering::SeqCst);
         status

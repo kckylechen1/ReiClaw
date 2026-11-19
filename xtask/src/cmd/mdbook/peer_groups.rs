@@ -152,7 +152,7 @@ fn expand_directives(
             "{{#model-provider-fields" => render_model_provider_fields(),
             "{{#channel-streaming-matrix" => {
                 let schema = schemars::schema_for!(reiclaw_config::schema::Config);
-                reiclaw_schema_markdown::channel_streaming_matrix(&schema.to_value())
+                reiclaw_config::schema_markdown::channel_streaming_matrix(&schema.to_value())
             }
             "{{#env-var-bridge" => render_env_var_bridge(env_vars)?,
             "{{#env-var-name " => render_env_var_name(arg)?,
@@ -202,7 +202,7 @@ Open [`/config/{route}`](http://127.0.0.1:42617/config/{route}) in the web dashb
 fn render_config_fields(arg: &str) -> anyhow::Result<String> {
     let path = arg.trim();
     let schema = schemars::schema_for!(reiclaw_config::schema::Config);
-    reiclaw_schema_markdown::field_table_for_path(&schema.to_value(), path, false, None)
+    reiclaw_config::schema_markdown::field_table_for_path(&schema.to_value(), path, false, None)
         .map_err(anyhow::Error::msg)
 }
 
@@ -665,7 +665,7 @@ fn render_model_provider_fields() -> String {
     let base: std::collections::BTreeSet<String> = providers
         .iter()
         .map(|p| {
-            reiclaw_schema_markdown::section_field_names(
+            reiclaw_config::schema_markdown::section_field_names(
                 &schema,
                 &format!("providers.models.{}", p.name),
             )
@@ -679,7 +679,7 @@ fn render_model_provider_fields() -> String {
     // empty set keeps the full base, and the base fields are identical across
     // slots so the choice of slot does not matter.
     if let Some(first) = providers.first() {
-        let base_table = reiclaw_schema_markdown::field_table_for_path(
+        let base_table = reiclaw_config::schema_markdown::field_table_for_path(
             &schema,
             &format!("providers.models.{}", first.name),
             false,
@@ -687,13 +687,13 @@ fn render_model_provider_fields() -> String {
         )
         .unwrap_or_default();
         // Trim base_table to only the shared fields by excluding everything else.
-        let extras_of_first = reiclaw_schema_markdown::section_field_names(
+        let extras_of_first = reiclaw_config::schema_markdown::section_field_names(
             &schema,
             &format!("providers.models.{}", first.name),
         );
         let non_base: std::collections::BTreeSet<String> =
             extras_of_first.difference(&base).cloned().collect();
-        let base_only = reiclaw_schema_markdown::field_table_for_path_excluding(
+        let base_only = reiclaw_config::schema_markdown::field_table_for_path_excluding(
             &schema,
             &format!("providers.models.{}", first.name),
             false,
@@ -725,7 +725,7 @@ fn render_model_provider_fields() -> String {
                 .unwrap_or_else(|| "no fixed default".to_string());
             let local = if p.local { " · local" } else { "" };
             let path = format!("providers.models.{}", p.name);
-            let extras = reiclaw_schema_markdown::field_table_for_path_excluding(
+            let extras = reiclaw_config::schema_markdown::field_table_for_path_excluding(
                 &schema,
                 &path,
                 false,
