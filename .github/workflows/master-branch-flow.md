@@ -26,7 +26,7 @@ This fork is maintained by `kckylechen1`; review routing is in [CODEOWNERS](../C
 | `ci.yml` | `pull_request` → any base; `push` → `master`; `merge_group` (reserved) | Scope classification, docs validation, selected Rust/build checks, and the aggregate result; trusted code pushes also warm Rust caches. The reserved trigger does not enable a queue. |
 | `release-stable-manual.yml` | `workflow_dispatch`, tag push `v*` | Stable release (manual, version-gated) |
 | `cross-platform-build-manual.yml` | `workflow_dispatch` | Full platform build matrix (manual smoke check) |
-| `cross-platform-clippy.yml` | `pull_request` when runtime, infra, or this workflow changes; `workflow_dispatch`; weekly schedule | Advisory full-workspace macOS/Windows Clippy, including test targets; outside the required PR gate |
+| `cross-platform-clippy.yml` | `pull_request` when runtime, infra, or this workflow changes; `workflow_dispatch`; weekly schedule | Advisory full-workspace macOS Clippy, including test targets; outside the required PR gate |
 | `docs-deploy.yml` | `push` → `master` (book, `xtask/`, `locales.toml` paths); tag push `v*`; nightly schedule; `workflow_dispatch` | Build and publish the versioned mdBook + rustdoc site to `gh-pages` |
 | `pr-path-labeler.yml` | `pull_request` lifecycle | Automatic path-based PR labeling |
 
@@ -61,8 +61,8 @@ tag push.
      ci-all -- -D warnings`, plus the provider dispatch gate and the Fluent
      catalog syntax gate (`cargo fluent check`). This is the only
      all-features compile in the gate (benches included).
-   - `build`: matrix across `x86_64-unknown-linux-gnu`,
-     `aarch64-apple-darwin`, `x86_64-pc-windows-msvc`.
+   - `build`: matrix across `x86_64-unknown-linux-gnu` and
+     `aarch64-apple-darwin`. Windows is not a supported platform.
    - `check`: two jobs, each checking two graphs back to back: no default features plus the 32-bit target, and slim control plus the minimal companion feature set.
    - `test`: `cargo nextest run --locked` per phase of
      `dev/ci/test-partition.json`, one parallel job each: the main run of
@@ -74,8 +74,6 @@ tag push.
    - `installer-drift`: `cargo generate installers --check` (PRs: only when
      manifests, `xtask/`, or generated install surfaces change; `changes`
      selects it).
-   - `windows-clippy-tools`: targeted Windows Clippy (PRs: only when
-     `reiclaw-tools` or the Clippy workflows change; `changes` selects it).
    - `CI Required Gate`: stable aggregate for the classified result. Verify the actual required contexts rather than assuming cloud protection already uses this single job.
 4. Review the final diff/head and check actual required CI and review policy. Carry out an already-authorized merge task without another yes/no exchange, keep monitoring pending checks, and squash with a final-head precondition. Verify GitHub's resulting state and merge SHA.
 
@@ -115,7 +113,7 @@ for the full procedure. In summary:
 | `aarch64-apple-darwin` | ✓ | ✓ | ✓ |
 | `aarch64-linux-android` | | ✓ | ✓ (experimental) |
 | `x86_64-apple-darwin` | | ✓ | ✓ |
-| `x86_64-pc-windows-msvc` | ✓ | ✓ | ✓ |
+| `x86_64-pc-windows-msvc` | | ✓ | ✓ |
 
 ---
 
@@ -128,9 +126,9 @@ flowchart TD
   A["Code PR opened or updated"] --> B["ci.yml: code checks"]
   B --> L["lint\nfmt · clippy"]
   L --> T["test\nnextest per partition leg"]
-  L --> BLD["build\nLinux · macOS · Windows"]
+  L --> BLD["build\nLinux · macOS"]
   L --> CHK["check\nno default features"]
-  L --> SEC["security\ncargo deny check"]
+  L --> SEC["policy\ncargo deny · web · Nix"]
   T & BLD & CHK & SEC --> G["CI Required Gate"]
   G -->|red| D["PR stays open"]
   G -->|green| R["Final head and review policy → squash to master"]

@@ -10,7 +10,7 @@ import sys
 
 FULL_JOBS = {"lint", "build", "check", "test", "policy"}
 # Full-lane jobs that run only when the named `changes` output selects them.
-TARGETED_JOBS = {"windows-clippy-tools": "windows_clippy", "installer-drift": "installer"}
+TARGETED_JOBS = {"installer-drift": "installer"}
 ALL_JOBS = FULL_JOBS | set(TARGETED_JOBS) | {"changes", "docs-style", "docs-build"}
 
 
