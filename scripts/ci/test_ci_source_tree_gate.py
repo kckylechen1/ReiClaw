@@ -25,8 +25,11 @@ def paths(violations, check):
 class OrphanTests(unittest.TestCase):
     def test_follows_rustc_module_resolution(self):
         root = workspace({
-            "Cargo.toml": '[workspace]\nmembers = ["crates/a"]\n\n' + PACKAGE.format(name="root"),
+            "Cargo.toml": '[workspace]\nmembers = ["crates/a", "crates/b"]\n\n'
+            + PACKAGE.format(name="root"),
             # A crate root resolves children beside itself whatever its name.
+            # Literals and comments never count as code, and a comment still
+            # separates tokens.
             "src/main.rs": """
                 mod cli;
                 #[cfg(feature = "extra")]
@@ -34,10 +37,21 @@ class OrphanTests(unittest.TestCase):
                 mod outer {
                     const OPEN: char = '{';
                     const TEXT: &str = "}; mod ghost;";
+                    const SNIPPET: &str = r##"include!("ghost.rs")"##;
                     mod inner;
                 }
+                #[path = r"raw_impl.rs"]
+                mod raw;
+                #[path = "impls"]
+                mod api {
+                    mod child;
+                }
+                mod/* note */spliced;
                 // mod commented;
             """,
+            "src/raw_impl.rs": "",
+            "src/impls/child.rs": "",
+            "src/spliced.rs": "",
             # A non-mod-rs file's children live in a directory named after it;
             # a top-level #[path] is relative to the file's own directory.
             "src/cli.rs": '#[path = "shared_impl.rs"]\nmod shared;\nmod nested;\n',
@@ -50,7 +64,7 @@ class OrphanTests(unittest.TestCase):
             "src/ghost.rs": "",
             "src/commented.rs": "",
             "tests/suite.rs": "mod helpers;\n",
-            "tests/helpers/mod.rs": 'include!("cases.rs");\n',
+            "tests/helpers/mod.rs": 'include!(r"cases.rs");\n',
             "tests/helpers/cases.rs": "",
             "crates/a/Cargo.toml": PACKAGE.format(name="a"),
             # An inline module shadows the file of the same name.
@@ -60,10 +74,23 @@ class OrphanTests(unittest.TestCase):
             "crates/a/src/b.rs": 'mod inl {\n    #[path = "x.rs"]\n    mod y;\n}\n',
             "crates/a/src/b/inl/x.rs": "",
             "crates/a/src/shadowed.rs": "",
+            # Cargo's target settings decide the roots: an overridden lib path
+            # retires src/lib.rs, and autotests = false retires tests/*.rs.
+            "crates/b/Cargo.toml": '[package]\nname = "b"\nautotests = false\n\n'
+            '[lib]\npath = "src/actual.rs"\n',
+            "crates/b/src/actual.rs": "",
+            "crates/b/src/lib.rs": "",
+            "crates/b/tests/stale.rs": "",
         })
         self.assertEqual(
             paths(gate.Workspace(root).orphans(), "orphans"),
-            ["crates/a/src/shadowed.rs", "src/commented.rs", "src/ghost.rs"],
+            [
+                "crates/a/src/shadowed.rs",
+                "crates/b/src/lib.rs",
+                "crates/b/tests/stale.rs",
+                "src/commented.rs",
+                "src/ghost.rs",
+            ],
         )
 
 
@@ -77,17 +104,34 @@ class SilencingTests(unittest.TestCase):
                 #[allow(unused_imports)]
                 mod legacy;
                 mod item;
+                mod nested;
+                mod tests;
                 mod clean;
             """,
-            "src/inner.rs": "#![cfg_attr(test, allow(unused))]\n",
+            "src/inner.rs": "#![cfg_attr(test, allow(non_snake_case), allow(unused))]\n",
             "src/legacy.rs": "",
-            "src/item.rs": "#[allow(dead_code)]\nstruct Scoped;\n",
+            "src/nested.rs": "#![cfg_attr(test, cfg_attr(unix, expect(dead_code)))]\n",
+            "src/tests.rs": "mod cases {\n    #![allow(unused_variables)]\n}\n",
+            # Item-level allows, function-scoped inner attributes and text in
+            # literals are not module-wide.
+            "src/item.rs": """
+                #[allow(dead_code)]
+                struct Scoped;
+                const TEXT: &str = "#![allow(dead_code)]";
+                fn local() {
+                    #![allow(dead_code)]
+                    struct Local;
+                }
+            """,
             "src/clean.rs": "",
         })
         exceptions = {"src/clean.rs": "fixture"}
         with mock.patch.object(gate, "SILENCING_EXCEPTIONS", exceptions):
             found = paths(gate.Workspace(root).silencing(), "silencing")
-        self.assertEqual(found, ["src/clean.rs", "src/inner.rs", "src/lib.rs"])
+        self.assertEqual(
+            found,
+            ["src/clean.rs", "src/inner.rs", "src/lib.rs", "src/nested.rs", "src/tests.rs"],
+        )
 
 
 class CrateTests(unittest.TestCase):
