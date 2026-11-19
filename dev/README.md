@@ -1,6 +1,6 @@
 # ZeroClaw Development Environment
 
-Build and run ZeroClaw natively using the [platform setup guides](../docs/book/src/setup/index.md). The product container development environment has been retired; see the [migration guide](../docs/book/src/setup/container.md) for preserving existing state.
+Build and run ZeroClaw natively using the [platform setup guides](../docs/book/src/setup/index.md). The product container development environment has been retired.
 
 ## Local CI in Docker
 

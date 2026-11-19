@@ -140,10 +140,7 @@ Per release, `scripts/release/refresh-translations.sh` publishes changed catalog
 
 ## Release translation workflow
 
-The release-time refresh, validation, tagging, push, and gitlink-pin procedure
-is part of [Step 2 in the Release Runbook](release-runbook.md#refresh-and-pin-translations).
-This page documents the translation system; use the runbook as the operational
-source of truth when preparing a release.
+ReiClaw publishes no releases, so there is no release-time translation refresh.
 
 ## Model quality notes
 

@@ -1,6 +1,6 @@
 # Claude Code Skills
 
-The repo ships a set of [Claude Code skills](https://docs.claude.com/en/docs/agents/skills) under `.claude/skills/` that automate filing issues, opening PRs, squash-merging, and changelog generation.
+The repo ships a set of [Claude Code skills](https://docs.claude.com/en/docs/agents/skills) under `.claude/skills/` that automate filing issues, opening PRs, and squash-merging.
 
 Each skill lives in its own directory with a `SKILL.md` file. Claude Code loads them automatically when you open the repo; invoke them by describing what you want in plain language, or by explicit reference (e.g. `/squash-merge 1234`).
 
@@ -11,7 +11,6 @@ Each skill lives in its own directory with a `SKILL.md` file. Claude Code loads 
 | `github-issue` | Filing a structured issue (bug report or feature request) |
 | `github-pr` | Opening or updating a PR with a fully-populated template body |
 | `squash-merge` | Landing an authorized, ready PR into `master` by squash, with final-head matching and verified CI/review policy |
-| `changelog-generation` | Preparing `CHANGELOG-next.md` for a release: summarises merges since the last tag |
 | `skill-creator` | Creating, editing, or benchmarking the skills themselves |
 | `zeroclaw` | Operating the running ZeroClaw instance (CLI + gateway API) |
 
@@ -52,10 +51,6 @@ or explicit:
 ```
 
 The skill prepares the concrete merge result before acting. If the user already authorized the bounded review/repair/merge task, it proceeds without another ritual yes. A read-only request, new target/scope, permission change, or material risk exception needs its own decision; actual GitHub protections and substantive review requirements always remain in force.
-
-## Changelog generation
-
-`changelog-generation` builds `CHANGELOG-next.md` for a release by querying `gh` for merged PRs since the last tag, grouping them by conventional-commits prefix, and formatting them into the house changelog style. Use it as part of the release runbook, before dispatching `release-stable-manual.yml`.
 
 ## Editing the skills
 

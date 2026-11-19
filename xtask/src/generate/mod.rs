@@ -3,9 +3,7 @@
 //! install.sh@HEAD is the behavioral reference. The spec is the single source
 //! of truth; surfaces are derived and drift-checked. Surfaces are registered in
 
-pub mod flake;
 pub mod install_sh;
-pub mod packaging;
 pub mod spec;
 
 use spec::Selection as Sel;
@@ -30,16 +28,6 @@ fn registry() -> Vec<Surface> {
             name: "install-sh",
             file: "install.sh",
             render: |root, cur| install_sh::render_file(root, cur),
-        },
-        Surface {
-            name: "pkgbuild",
-            file: "dist/aur/PKGBUILD",
-            render: |root, cur| packaging::render_pkgbuild(root, cur),
-        },
-        Surface {
-            name: "flake",
-            file: "flake.nix",
-            render: |root, cur| flake::render_file(root, cur),
         },
     ]
 }

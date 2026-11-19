@@ -119,4 +119,3 @@ Mount validation is fail closed. The workspace must exist and resolve to a canon
 - [Skills](./skills.md)
 - [Autonomy levels](../security/autonomy.md)
 - [Sandboxing](../security/sandboxing.md)
-- [Migrating from a product container](../setup/container.md)

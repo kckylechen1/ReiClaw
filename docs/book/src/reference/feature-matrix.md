@@ -23,7 +23,6 @@ The generated **ZeroClaw** sections below each reflect a specific source: the cu
 | Daemon / OS service | ✅ | [Service](../ops/service.md) |
 | Gateway HTTP + web dashboard | ✅ | [Gateway HTTP API](../gateway/api.md), [Web dashboard](../gateway/web-dashboard.md) |
 | Linux / macOS | ✅ | [Linux](../setup/linux.md), [macOS](../setup/macos.md) |
-| FreeBSD / NixOS | ✅ | [FreeBSD](../setup/freebsd.md), [NixOS](../setup/nixos.md) |
 | SBC / edge (Raspberry Pi class) | ✅ | [Network deployment](../ops/network-deployment.md) |
 | VPS / cloud VM | ✅ | [Network deployment](../ops/network-deployment.md) |
 
