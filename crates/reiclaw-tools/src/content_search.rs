@@ -307,9 +307,9 @@ impl Tool for ContentSearchTool {
                 };
                 if limited {
                     formatted.push_str("\n\n");
-                    formatted.push_str(&crate::i18n::get_required_tool_string(
-                        "tool-content-search-capture-limit",
-                    ));
+                    formatted.push_str(
+                        "[Search stopped at the capture limit; results may be incomplete]",
+                    );
                 }
                 formatted
             }
@@ -520,10 +520,7 @@ struct SearchControl<'a> {
 impl SearchControl<'_> {
     fn check(&self) -> anyhow::Result<()> {
         if self.cancelled.load(Ordering::Acquire) {
-            anyhow::bail!(
-                "{}",
-                crate::i18n::get_required_tool_string("tool-content-search-cancelled")
-            );
+            anyhow::bail!("Search cancelled.");
         }
         if Instant::now() >= self.deadline {
             anyhow::bail!("Search timed out after {TIMEOUT_SECS} seconds.");
@@ -603,13 +600,10 @@ fn run_internal_search_with_deadline(
     );
     if output.limited {
         if output.results == 0 {
-            formatted =
-                crate::i18n::get_required_tool_string("tool-content-search-no-scanned-matches");
+            formatted = "No matches found in scanned content.".to_string();
         }
         formatted.push_str("\n\n");
-        formatted.push_str(&crate::i18n::get_required_tool_string(
-            "tool-content-search-resource-limit",
-        ));
+        formatted.push_str("[Search stopped at a resource limit; results may be incomplete]");
     }
     Ok(formatted)
 }

@@ -8,47 +8,14 @@ use reiclaw_config::alias_refs::{
 };
 use reiclaw_config::schema::Config;
 
-/// Resolve a `cli-*` Fluent key for alias-CRUD CLI output. Under `agent-runtime`
-/// (default + what CI/release build) this routes through Fluent; without it the
-/// runtime i18n crate is absent, so the English `fallback` is used.
-#[allow(unused_variables)]
-fn mt(key: &str, fallback: &str) -> String {
-    #[cfg(feature = "agent-runtime")]
-    {
-        reiclaw_runtime::i18n::get_required_cli_string(key)
-    }
-    #[cfg(not(feature = "agent-runtime"))]
-    {
-        fallback.to_string() // i18n-exempt: English fallback when Fluent (agent-runtime) is disabled
-    }
-}
-
-/// `mt` with `{$name}` arguments.
-#[allow(unused_variables)]
-fn mta(key: &str, args: &[(&str, &str)], fallback: &str) -> String {
-    #[cfg(feature = "agent-runtime")]
-    {
-        reiclaw_runtime::i18n::get_required_cli_string_with_args(key, args)
-    }
-    #[cfg(not(feature = "agent-runtime"))]
-    {
-        fallback.to_string() // i18n-exempt: English fallback when Fluent (agent-runtime) is disabled
-    }
-}
-
 fn parse_provider_category(category: &str) -> Result<ProviderCategory> {
     match category {
         "models" => Ok(ProviderCategory::Models),
         "tts" => Ok(ProviderCategory::Tts),
         "transcription" => Ok(ProviderCategory::Transcription),
-        other => bail!(
-            "{}",
-            mta(
-                "cli-alias-unknown-provider-category",
-                &[("category", other)],
-                "unknown provider category `{$category}` (expected models | tts | transcription)"
-            )
-        ),
+        other => {
+            bail!("unknown provider category `{other}` (expected models | tts | transcription)")
+        }
     }
 }
 
@@ -74,28 +41,14 @@ fn list_section(config: &Config, section: &str) -> Result<()> {
         Some(mut keys) => {
             keys.sort();
             if keys.is_empty() {
-                println!(
-                    "{}",
-                    mta(
-                        "cli-alias-list-empty",
-                        &[("section", section)],
-                        "(no entries under {$section})"
-                    )
-                );
+                println!("(no entries under {section})");
             } else {
                 for k in keys {
                     println!("{k}");
                 }
             }
         }
-        None => bail!(
-            "{}",
-            mta(
-                "cli-alias-no-such-section",
-                &[("section", section)],
-                "no such config section: {$section}"
-            )
-        ),
+        None => bail!("no such config section: {section}"),
     }
     Ok(())
 }
@@ -107,34 +60,16 @@ fn create_entry(config: &mut Config, section: &str, alias: &str) -> Result<bool>
     // below; Invalid (unknown section) keeps its pre-existing bare error.
     let created = match alias_refs::create_map_key_checked(config, section, alias) {
         Ok(created) => created,
-        Err(alias_refs::CreateError::Reserved(_)) => bail!(
-            "{}",
-            mt(
-                "cli-alias-create-reserved-default",
-                "the `default` agent is reserved and cannot be created"
-            )
-        ),
+        Err(alias_refs::CreateError::Reserved(_)) => {
+            bail!("the `default` agent is reserved and cannot be created")
+        }
         Err(alias_refs::CreateError::Invalid(msg)) => return Err(anyhow::Error::msg(msg)),
     };
     if created {
         config.mark_dirty(&format!("{section}.{alias}"));
-        println!(
-            "{}",
-            mta(
-                "cli-alias-created",
-                &[("section", section), ("alias", alias)],
-                "created {$section}.{$alias}"
-            )
-        );
+        println!("created {section}.{alias}");
     } else {
-        println!(
-            "{}",
-            mta(
-                "cli-alias-exists",
-                &[("section", section), ("alias", alias)],
-                "{$section}.{$alias} already exists (no change)"
-            )
-        );
+        println!("{section}.{alias} already exists (no change)");
     }
     Ok(created)
 }
@@ -146,51 +81,23 @@ fn print_impact(kind: &AliasKind, alias: &str, config: &Config) {
     if report.blockers.is_empty() {
         let count = report.scrubs.len().to_string();
         println!(
-            "{}",
-            mta(
-                "cli-alias-impact-scrub-header",
-                &[
-                    ("section", section.as_str()),
-                    ("alias", alias),
-                    ("count", count.as_str())
-                ],
-                "deleting {$section}.{$alias} would scrub {$count} reference(s):"
-            )
+            "deleting {section}.{alias} would scrub {count} reference(s):",
+            count = count.as_str(),
+            section = section.as_str()
         );
     } else {
         let count = report.blockers.len().to_string();
         println!(
-            "{}",
-            mta(
-                "cli-alias-impact-blocked-header",
-                &[
-                    ("section", section.as_str()),
-                    ("alias", alias),
-                    ("count", count.as_str())
-                ],
-                "deleting {$section}.{$alias} is BLOCKED by {$count} hard reference(s):"
-            )
+            "deleting {section}.{alias} is BLOCKED by {count} hard reference(s):",
+            count = count.as_str(),
+            section = section.as_str()
         );
         for b in &report.blockers {
-            println!(
-                "  {}",
-                mta(
-                    "cli-alias-impact-blocker",
-                    &[("path", b.path.as_str())],
-                    "✗ {$path} (hard reference)"
-                )
-            );
+            println!("  ✗ {path} (hard reference)", path = b.path.as_str());
         }
     }
     for s in &report.scrubs {
-        println!(
-            "  {}",
-            mta(
-                "cli-alias-impact-scrub",
-                &[("path", s.path.as_str())],
-                "• {$path} (would be scrubbed)"
-            )
-        );
+        println!("  • {path} (would be scrubbed)", path = s.path.as_str());
     }
 }
 
@@ -209,13 +116,7 @@ fn delete_config(
     }
     if !yes {
         print_impact(kind, alias, config);
-        println!(
-            "\n{}",
-            mt(
-                "cli-alias-no-changes",
-                "No changes made. Re-run with --yes to apply (or --dry-run to preview)."
-            )
-        );
+        println!("\nNo changes made. Re-run with --yes to apply (or --dry-run to preview).");
         return Ok(());
     }
     apply_delete(config, kind, alias)
@@ -232,58 +133,29 @@ fn apply_delete(config: &mut Config, kind: &AliasKind, alias: &str) -> Result<()
             }
             let count = report.applied.len().to_string();
             println!(
-                "{}",
-                mta(
-                    "cli-alias-deleted",
-                    &[
-                        ("section", section.as_str()),
-                        ("alias", alias),
-                        ("count", count.as_str())
-                    ],
-                    "deleted {$section}.{$alias} (scrubbed {$count} reference(s))"
-                )
+                "deleted {section}.{alias} (scrubbed {count} reference(s))",
+                count = count.as_str(),
+                section = section.as_str()
             );
             Ok(())
         }
         Err(CascadeError::Refused(report)) => {
             let count = report.blockers.len().to_string();
             println!(
-                "{}",
-                mta(
-                    "cli-alias-delete-refused-header",
-                    &[("count", count.as_str())],
-                    "refused: {$count} hard reference(s) block the delete:"
-                )
+                "refused: {count} hard reference(s) block the delete:",
+                count = count.as_str()
             );
             for b in &report.blockers {
                 println!("  ✗ {}", b.path);
             }
-            bail!(
-                "{}",
-                mt(
-                    "cli-alias-delete-refused-hint",
-                    "delete refused — resolve the hard references first"
-                )
-            );
+            bail!("delete refused — resolve the hard references first");
         }
-        Err(CascadeError::NotFound(p)) => bail!(
-            "{}",
-            mta(
-                "cli-alias-not-configured",
-                &[("path", p.as_str())],
-                "{$path} is not configured"
-            )
-        ),
+        Err(CascadeError::NotFound(p)) => {
+            bail!("{path} is not configured", path = p.as_str())
+        }
         Err(e) => {
             let es = e.to_string();
-            bail!(
-                "{}",
-                mta(
-                    "cli-alias-delete-failed",
-                    &[("error", es.as_str())],
-                    "delete failed: {$error}"
-                )
-            )
+            bail!("delete failed: {error}", error = es.as_str())
         }
     }
 }
@@ -302,41 +174,25 @@ fn print_renamed(kind: &AliasKind, from: &str, to: &str, dirty_paths: usize) {
     let section = section_path(kind);
     let count = dirty_paths.to_string();
     println!(
-        "{}",
-        mta(
-            "cli-alias-renamed",
-            &[
-                ("section", section.as_str()),
-                ("from", from),
-                ("to", to),
-                ("count", count.as_str())
-            ],
-            "renamed {$section}.{$from} → {$section}.{$to} (rewrote {$count} reference path(s))"
-        )
+        "renamed {section}.{from} → {section}.{to} (rewrote {count} reference path(s))",
+        count = count.as_str(),
+        section = section.as_str()
     );
 }
 
 fn rename_error(error: RenameError) -> anyhow::Error {
     let message = match error {
-        RenameError::NotFound(path) => mta(
-            "cli-alias-not-configured",
-            &[("path", path.as_str())],
-            "{$path} is not configured",
+        RenameError::NotFound(path) => format!("{path} is not configured", path = path.as_str()),
+        RenameError::InvalidName(message) => {
+            format!("invalid new alias: {message}", message = message.as_str())
+        }
+        RenameError::Reserved(alias) => format!(
+            "alias `{alias}` is reserved and cannot be renamed",
+            alias = alias.as_str()
         ),
-        RenameError::InvalidName(message) => mta(
-            "cli-alias-rename-invalid",
-            &[("message", message.as_str())],
-            "invalid new alias: {$message}",
-        ),
-        RenameError::Reserved(alias) => mta(
-            "cli-alias-rename-reserved",
-            &[("alias", alias.as_str())],
-            "alias `{$alias}` is reserved and cannot be renamed",
-        ),
-        RenameError::PostCondition(message) => mta(
-            "cli-alias-rename-postcondition",
-            &[("message", message.as_str())],
-            "rename cascade post-condition failed: {$message}",
+        RenameError::PostCondition(message) => format!(
+            "rename cascade post-condition failed: {message}",
+            message = message.as_str()
         ),
     };
     anyhow::Error::msg(message)
@@ -383,13 +239,7 @@ pub async fn handle_agents(cmd: AgentsCommands, config: &mut Config) -> Result<(
             yes,
         } => {
             if alias_refs::is_reserved_agent_alias(&alias) {
-                bail!(
-                    "{}",
-                    mt(
-                        "cli-alias-delete-reserved-default",
-                        "the `default` agent is reserved and cannot be deleted"
-                    )
-                );
+                bail!("the `default` agent is reserved and cannot be deleted");
             }
             if dry_run {
                 print_impact(&AliasKind::Agent, &alias, config);
@@ -398,11 +248,7 @@ pub async fn handle_agents(cmd: AgentsCommands, config: &mut Config) -> Result<(
             if !yes {
                 print_impact(&AliasKind::Agent, &alias, config);
                 println!(
-                    "\n{}",
-                    mt(
-                        "cli-alias-no-changes",
-                        "No changes made. Re-run with --yes to apply (or --dry-run to preview)."
-                    )
+                    "\nNo changes made. Re-run with --yes to apply (or --dry-run to preview)."
                 );
                 return Ok(());
             }
@@ -460,12 +306,8 @@ fn agent_delete_precheck(config: &Config, alias: &str) -> Result<()> {
     if live > 0 {
         let count = live.to_string();
         bail!(
-            "{}",
-            mta(
-                "cli-alias-live-acp-sessions",
-                &[("count", count.as_str()), ("alias", alias)],
-                "{$count} live ACP session(s) for `{$alias}` — end them first"
-            )
+            "{count} live ACP session(s) for `{alias}` — end them first",
+            count = count.as_str()
         );
     }
     Ok(())
@@ -498,12 +340,8 @@ async fn agent_delete_owned_state(
     {
         let es = e.to_string();
         eprintln!(
-            "{}",
-            mta(
-                "cli-alias-warn-workspace-archive",
-                &[("error", es.as_str())],
-                "warning: workspace archive failed: {$error}"
-            )
+            "warning: workspace archive failed: {error}",
+            error = es.as_str()
         );
     }
     let report = crate::gateway::agent_owned_state::cascade_owned_state(
@@ -520,28 +358,15 @@ async fn agent_delete_owned_state(
     let sessions = report.sessions_cleared.to_string();
     let archive = archive_dir.display().to_string();
     println!(
-        "{}",
-        mta(
-            "cli-alias-owned-cascaded",
-            &[
-                ("memory", memory.as_str()),
-                ("cron", cron.as_str()),
-                ("acp", acp.as_str()),
-                ("sessions", sessions.as_str()),
-                ("archive", archive.as_str())
-            ],
-            "owned-state cascaded: memory {$memory} · cron {$cron} · acp {$acp} · sessions {$sessions} → {$archive}"
-        )
+        "owned-state cascaded: memory {memory} · cron {cron} · acp {acp} · sessions {sessions} → {archive}",
+        acp = acp.as_str(),
+        archive = archive.as_str(),
+        cron = cron.as_str(),
+        memory = memory.as_str(),
+        sessions = sessions.as_str()
     );
     for w in &report.warnings {
-        eprintln!(
-            "{}",
-            mta(
-                "cli-alias-warn",
-                &[("warning", w.as_str())],
-                "warning: {$warning}"
-            )
-        );
+        eprintln!("warning: {warning}", warning = w.as_str());
     }
     Ok(())
 }
@@ -596,27 +421,14 @@ async fn rename_agent(config: &mut Config, from: &str, to: &str) -> Result<()> {
     let acp = report.owned.acp_sessions.to_string();
     let sessions = report.owned.sessions_repointed.to_string();
     println!(
-        "{}",
-        mta(
-            "cli-alias-owned-repointed",
-            &[
-                ("memory", memory.as_str()),
-                ("cron", cron.as_str()),
-                ("acp", acp.as_str()),
-                ("sessions", sessions.as_str())
-            ],
-            "owned-state re-pointed: memory {$memory} · cron {$cron} · acp {$acp} · sessions {$sessions}"
-        )
+        "owned-state re-pointed: memory {memory} · cron {cron} · acp {acp} · sessions {sessions}",
+        acp = acp.as_str(),
+        cron = cron.as_str(),
+        memory = memory.as_str(),
+        sessions = sessions.as_str()
     );
     for warning in &report.owned.warnings {
-        eprintln!(
-            "{}",
-            mta(
-                "cli-alias-warn",
-                &[("warning", warning.as_str())],
-                "warning: {$warning}"
-            )
-        );
+        eprintln!("warning: {warning}", warning = warning.as_str());
     }
     Ok(())
 }
@@ -638,13 +450,7 @@ async fn rename_agent(config: &mut Config, from: &str, to: &str) -> Result<()> {
 #[cfg(not(all(feature = "gateway", feature = "agent-runtime")))]
 fn warn_agent_owned_state() {
     eprintln!(
-        "{}",
-        mt(
-            "cli-alias-owned-state-unavailable",
-            "note: config references were updated, but the agent's owned state \
-             (memory rows, workspace dir, cron/acp/session rows) was NOT cascaded \
-             by this CLI yet — use the gateway API for the full owned-state cascade."
-        )
+        "note: config references were updated, but the agent's owned state (memory rows, workspace dir, cron/acp/session rows) was NOT cascaded by this CLI yet — use the gateway API for the full owned-state cascade."
     );
 }
 

@@ -814,14 +814,6 @@ fn flag_disagreements(reports: &mut [TargetReport]) -> Vec<Disagreement> {
     found
 }
 
-fn text(key: &str) -> String {
-    crate::i18n::get_required_cli_string(key)
-}
-
-fn text_with(key: &str, args: &[(&str, &str)]) -> String {
-    crate::i18n::get_required_cli_string_with_args(key, args)
-}
-
 fn signed(delta: i8) -> String {
     match delta {
         0 => "0".to_string(),
@@ -849,21 +841,19 @@ impl SoulCheckReport {
     #[must_use]
     pub fn render_table(&self) -> String {
         let headers = [
-            text("soul-check-col-scenario"),
-            text("soul-check-col-check"),
-            text("soul-check-col-expected"),
-            text("soul-check-col-result"),
-            text("soul-check-col-delta"),
-            text("soul-check-col-flags"),
+            "SCENARIO".to_string(),
+            "CHECK".to_string(),
+            "EXPECTED".to_string(),
+            "RESULT".to_string(),
+            "DELTA".to_string(),
+            "FLAGS".to_string(),
         ];
         let mut out = String::new();
         let _ = writeln!(
             out,
-            "\n{}",
-            text_with(
-                "soul-check-title",
-                &[("agent", &self.agent), ("judge", &self.judge)]
-            )
+            "\nSoul check for agent {agent} (judge: {judge})",
+            agent = self.agent,
+            judge = self.judge
         );
         for report in &self.targets {
             let cells: Vec<[String; 6]> = report.rows.iter().map(row_cells).collect();
@@ -873,11 +863,7 @@ impl SoulCheckReport {
                     *width = (*width).max(cell.chars().count());
                 }
             }
-            let _ = writeln!(
-                out,
-                "\n{}",
-                text_with("soul-check-target", &[("target", &report.target)])
-            );
+            let _ = writeln!(out, "\nTarget {target}", target = report.target);
             let line = |cells: &[String; 6]| {
                 let mut line = String::from("  ");
                 for (i, cell) in cells.iter().enumerate() {
@@ -904,7 +890,7 @@ impl SoulCheckReport {
             }
         }
         if !self.disagreements.is_empty() {
-            let _ = writeln!(out, "\n{}", text("soul-check-disagree-title"));
+            let _ = writeln!(out, "\n{}", "Targets two or more levels apart".to_string());
             for item in &self.disagreements {
                 let levels = item
                     .levels
@@ -918,21 +904,21 @@ impl SoulCheckReport {
         let s = &self.summary;
         let _ = writeln!(
             out,
-            "\n{}",
-            text_with(
-                "soul-check-summary",
-                &[
-                    ("targets", &s.targets.to_string()),
-                    ("scenarios", &s.scenarios.to_string()),
-                    ("calls", &s.model_calls.to_string()),
-                    ("off_by_two", &s.off_by_two.to_string()),
-                    ("floor_failed", &s.floor_failed.to_string()),
-                    ("disagree", &s.providers_disagree.to_string()),
-                    ("errors", &s.errors.to_string()),
-                ]
-            )
+            "\nSummary: {targets} targets, {scenarios} scenarios, {calls} model calls; {off_by_two} off by two, {floor_failed} floors failed, {disagree} providers disagree, {errors} errors.",
+            calls = s.model_calls.to_string(),
+            disagree = s.providers_disagree.to_string(),
+            errors = s.errors.to_string(),
+            floor_failed = s.floor_failed.to_string(),
+            off_by_two = s.off_by_two.to_string(),
+            scenarios = s.scenarios.to_string(),
+            targets = s.targets.to_string()
         );
-        let _ = writeln!(out, "{}", text("soul-check-caveat"));
+        let _ = writeln!(
+            out,
+            "{}",
+            "The judge is a model: treat these results as a signal, not proof. Nothing is stored."
+                .to_string()
+        );
         out
     }
 }

@@ -435,24 +435,19 @@ pub fn lookup_registry_skill_tier(registry_dir: &Path, name: &str) -> (SkillTier
     (tier_from_tags(&entry.tags), entry.version)
 }
 
-fn install_tier_banner_key(tier: SkillTier) -> &'static str {
-    match tier {
-        SkillTier::Official => "cli-skills-install-tier-official",
-        SkillTier::Community | SkillTier::Featured | SkillTier::Unknown => {
-            "cli-skills-install-tier-community"
-        }
-    }
-}
-
 pub fn build_install_tier_banner(name: &str, version: Option<&str>, tier: SkillTier) -> String {
-    let version_label = version.unwrap_or("?");
-    let args = [("name", name), ("version", version_label)];
-    let key = install_tier_banner_key(tier);
-    let mut banner = crate::i18n::get_required_cli_string_with_args(key, &args);
-    if !banner.ends_with('\n') {
-        banner.push('\n');
+    let version = version.unwrap_or("?");
+    match tier {
+        SkillTier::Official => {
+            format!("Installing {name} v{version} — Official (zeroclaw-labs maintained)\n")
+        }
+        SkillTier::Community | SkillTier::Featured | SkillTier::Unknown => format!(
+            "Installing {name} v{version} — Community submission\n\
+             This skill is not audited by ReiClaw. Review the skill content\n\
+             and run `rei skills audit {name}` before granting any\n\
+             permissions or running it in production.\n"
+        ),
     }
-    banner
 }
 
 /// Print the install-time tier banner to stdout.
@@ -2341,39 +2336,25 @@ pub fn install_git_catalog_skill_source(
     workspace_dir: &Path,
 ) -> Result<(PathBuf, usize)> {
     if !is_registry_source(skill_name) {
-        anyhow::bail!(crate::i18n::get_required_cli_string_with_args(
-            "cli-skills-install-invalid-skill-name",
-            &[("skill", skill_name)]
+        anyhow::bail!(format!(
+            "invalid --skill name '{skill_name}': use a bare skill name (letters, digits, '-', '_')"
         ));
     }
 
-    std::fs::create_dir_all(workspace_dir).with_context(|| {
-        crate::i18n::get_required_cli_string_with_args(
-            "cli-skills-install-catalog-clone-failed",
-            &[("url", url)],
-        )
-    })?;
+    std::fs::create_dir_all(workspace_dir)
+        .with_context(|| format!("failed to clone skill catalog {url}"))?;
     let clone_tempdir = tempfile::Builder::new()
         .prefix(".skill-catalog-")
         .tempdir_in(workspace_dir)
-        .with_context(|| {
-            crate::i18n::get_required_cli_string_with_args(
-                "cli-skills-install-catalog-clone-failed",
-                &[("url", url)],
-            )
-        })?;
+        .with_context(|| format!("failed to clone skill catalog {url}"))?;
     let clone_dir = clone_tempdir.path();
 
     // A transient catalog has no sync lifecycle, so clone it without writing
     // the persistent registry marker into the untrusted checkout. Besides
     // avoiding unnecessary state, this prevents a catalog-committed marker
     // symlink from redirecting that write to an arbitrary host file.
-    clone_skills_repository(clone_dir, url).with_context(|| {
-        crate::i18n::get_required_cli_string_with_args(
-            "cli-skills-install-catalog-clone-failed",
-            &[("url", url)],
-        )
-    })?;
+    clone_skills_repository(clone_dir, url)
+        .with_context(|| format!("failed to clone skill catalog {url}"))?;
 
     (|| {
         // Establish the catalog trust boundary before looking up a selected
@@ -2390,9 +2371,8 @@ pub fn install_git_catalog_skill_source(
         let skills_meta = match std::fs::symlink_metadata(&skills_dir) {
             Ok(metadata) => metadata,
             Err(err) if err.kind() == std::io::ErrorKind::NotFound => {
-                anyhow::bail!(crate::i18n::get_required_cli_string_with_args(
-                    "cli-skills-install-skill-not-in-catalog-empty",
-                    &[("skill", skill_name), ("url", url)]
+                anyhow::bail!(format!(
+                    "skill '{skill_name}' not found in {url}: no skills/ directory, or it is empty"
                 ));
             }
             Err(err) => {
@@ -2405,9 +2385,8 @@ pub fn install_git_catalog_skill_source(
             }
         };
         if skills_meta.file_type().is_symlink() {
-            anyhow::bail!(crate::i18n::get_required_cli_string_with_args(
-                "cli-skills-install-catalog-root-symlink",
-                &[("url", url)]
+            anyhow::bail!(format!(
+                "skill catalog {url} has a symlinked skills/ directory; refusing to inspect it"
             ));
         }
         let skills_root = skills_dir.canonicalize().with_context(|| {
@@ -2417,15 +2396,13 @@ pub fn install_git_catalog_skill_source(
             )
         })?;
         if !skills_root.starts_with(&clone_root) {
-            anyhow::bail!(crate::i18n::get_required_cli_string_with_args(
-                "cli-skills-install-catalog-root-escapes",
-                &[("url", url)]
+            anyhow::bail!(format!(
+                "skill catalog {url} has a skills/ directory that resolves outside the cloned catalog; refusing to inspect it"
             ));
         }
         if !skills_root.is_dir() {
-            anyhow::bail!(crate::i18n::get_required_cli_string_with_args(
-                "cli-skills-install-skill-not-in-catalog-empty",
-                &[("skill", skill_name), ("url", url)]
+            anyhow::bail!(format!(
+                "skill '{skill_name}' not found in {url}: no skills/ directory, or it is empty"
             ));
         }
 
@@ -2435,18 +2412,14 @@ pub fn install_git_catalog_skill_source(
             Err(err) if err.kind() == std::io::ErrorKind::NotFound => {
                 let available = list_contained_catalog_skill_names(&skills_root);
                 if available.is_empty() {
-                    anyhow::bail!(crate::i18n::get_required_cli_string_with_args(
-                        "cli-skills-install-skill-not-in-catalog-empty",
-                        &[("skill", skill_name), ("url", url)]
+                    anyhow::bail!(format!(
+                        "skill '{skill_name}' not found in {url}: no skills/ directory, or it is empty"
                     ));
                 }
-                anyhow::bail!(crate::i18n::get_required_cli_string_with_args(
-                    "cli-skills-install-skill-not-in-catalog",
-                    &[
-                        ("skill", skill_name),
-                        ("url", url),
-                        ("available", &available.join(", ")),
-                    ]
+                anyhow::bail!(format!(
+                    "skill '{skill_name}' not found in {url}.\n\
+                    Available skills: {available}",
+                    available = available.join(", ")
                 ));
             }
             Err(err) => {
@@ -2459,9 +2432,8 @@ pub fn install_git_catalog_skill_source(
             }
         };
         if entry_meta.file_type().is_symlink() {
-            anyhow::bail!(crate::i18n::get_required_cli_string_with_args(
-                "cli-skills-install-catalog-skill-symlink",
-                &[("skill", skill_name), ("url", url)]
+            anyhow::bail!(format!(
+                "skill '{skill_name}' in {url} is a symlink; catalog skills must be real directories inside the repository"
             ));
         }
         let selected = skill_dir.canonicalize().with_context(|| {
@@ -2471,29 +2443,23 @@ pub fn install_git_catalog_skill_source(
             )
         })?;
         if !selected.starts_with(&skills_root) {
-            anyhow::bail!(crate::i18n::get_required_cli_string_with_args(
-                "cli-skills-install-catalog-skill-escapes",
-                &[("skill", skill_name), ("url", url)]
+            anyhow::bail!(format!(
+                "skill '{skill_name}' in {url} resolves outside the cloned catalog; refusing to install"
             ));
         }
         if !selected.is_dir() {
             let available = list_contained_catalog_skill_names(&skills_root);
             if available.is_empty() {
-                anyhow::bail!(crate::i18n::get_required_cli_string_with_args(
-                    "cli-skills-install-skill-not-in-catalog-empty",
-                    &[("skill", skill_name), ("url", url)]
+                anyhow::bail!(format!(
+                    "skill '{skill_name}' not found in {url}: no skills/ directory, or it is empty"
                 ));
             }
-            anyhow::bail!(crate::i18n::get_required_cli_string_with_args(
-                "cli-skills-install-skill-not-in-catalog",
-                &[
-                    ("skill", skill_name),
-                    ("url", url),
-                    ("available", &available.join(", ")),
-                ]
+            anyhow::bail!(format!(
+                "skill '{skill_name}' not found in {url}.\n\
+                Available skills: {available}",
+                available = available.join(", ")
             ));
         }
-        // i18n-exempt: internal invariant — the clone path is our own ASCII
         // `.skill-catalog-*` scratch dir, so this only fires on a broken
         // host filesystem; it is a developer diagnostic, not normal CLI output.
         let skill_dir_str = selected

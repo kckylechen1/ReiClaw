@@ -43,7 +43,7 @@ Project facts (type placement, divergences from upstream, known gaps) are in [`d
    - New external surfaces default closed.
    - Production paths propagate errors instead of `unwrap()`/`expect()`.
    - Remove unused code rather than silencing it.
-8. **User-facing text** uses Fluent `fl!()` keys; logs stay English.
+8. **User-facing text and logs** are plain English literals.
 9. **Git.** Work on a non-`master` branch. Independent PRs target `master`; a dependent PR may temporarily target its parent branch with an explicit `Depends on #N`. Slices of one campaign that edit the same tests, registries or manifests are dependent: stack them, never open them in parallel from `master`. After the parent is squash-merged, replay only the child's increment onto current `master`, retarget, and inspect the final diff before landing.
    - PR titles are conventional commits with a scope, `type(scope): summary`; CI rejects others.
    - Use the PR template.

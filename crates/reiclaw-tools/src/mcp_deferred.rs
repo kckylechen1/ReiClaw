@@ -382,9 +382,7 @@ pub fn build_deferred_tools_section_excluding(
     }
     let mut out = String::new();
     out.push_str("## Deferred Tools\n\n");
-    out.push_str(&crate::i18n::get_required_tool_string(
-        "tool-mcp-deferred-instructions",
-    ));
+    out.push_str("The tools below are available but their full schemas are not yet loaded. Use tool_search with \"select:name1,name2\" or keywords when you need a schema. An exact listed name can also be called directly with known arguments; the runtime activates it after the usual hooks and approval checks. Discovery never grants access to an unlisted or denied tool.");
     out.push_str("\n\n");
     out.push_str("<available-deferred-tools>\n");
     let mut count = 0;

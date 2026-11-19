@@ -78,6 +78,13 @@ use std::sync::Arc;
 use std::time::Instant;
 use tokio_util::sync::CancellationToken;
 
+/// Why history was trimmed to fit the context token budget.
+pub(crate) const CONTEXT_BUDGET_TRIM_REASON: &str = "context token budget exceeded";
+
+/// Tool result recorded for a call the user cancelled before it finished.
+const TOOL_INTERRUPTED_BEFORE_RESULT: &str =
+    "[interrupted by user before this tool produced a result]";
+
 /// Maximum malformed internal tool-protocol retries before returning a safe fallback.
 pub(crate) const MAX_MALFORMED_TOOL_PROTOCOL_RETRIES: usize = 2;
 
@@ -158,7 +165,7 @@ async fn enforce_reported_budget(
                 .send(TurnEvent::HistoryTrimmed {
                     dropped_messages: result.dropped_messages,
                     kept_turns: result.kept_turns,
-                    reason: crate::i18n::get_required_cli_string("history-trim-reason-budget"),
+                    reason: CONTEXT_BUDGET_TRIM_REASON.to_string(),
                 })
                 .await;
         }
@@ -166,7 +173,7 @@ async fn enforce_reported_budget(
             &reiclaw_api::observability_traits::ObserverEvent::HistoryTrimmed {
                 dropped_messages: result.dropped_messages,
                 kept_turns: result.kept_turns,
-                reason: crate::i18n::get_required_cli_string("history-trim-reason-budget"),
+                reason: CONTEXT_BUDGET_TRIM_REASON.to_string(),
                 channel: None,
                 agent_alias: None,
                 turn_id: None,
@@ -618,9 +625,7 @@ async fn run_tool_call_loop_turn(
                         .send(TurnEvent::HistoryTrimmed {
                             dropped_messages: result.dropped_messages,
                             kept_turns: result.kept_turns,
-                            reason: crate::i18n::get_required_cli_string(
-                                "history-trim-reason-budget",
-                            ),
+                            reason: CONTEXT_BUDGET_TRIM_REASON.to_string(),
                         })
                         .await;
                 }
@@ -628,7 +633,7 @@ async fn run_tool_call_loop_turn(
                     &reiclaw_api::observability_traits::ObserverEvent::HistoryTrimmed {
                         dropped_messages: result.dropped_messages,
                         kept_turns: result.kept_turns,
-                        reason: crate::i18n::get_required_cli_string("history-trim-reason-budget"),
+                        reason: CONTEXT_BUDGET_TRIM_REASON.to_string(),
                         channel: None,
                         agent_alias: None,
                         turn_id: None,
@@ -839,7 +844,7 @@ async fn run_tool_call_loop_turn(
                     let msg = ChatMessage::assistant(format!(
                         "{}\n\n{}",
                         interrupted.partial_text,
-                        crate::i18n::get_required_cli_string("turn-stream-interrupted")
+                        crate::agent::STREAM_INTERRUPTED_MARKER
                     ));
                     turn_state.push_dual(msg);
                 }
@@ -852,7 +857,7 @@ async fn run_tool_call_loop_turn(
                     let msg = ChatMessage::assistant(format!(
                         "{}\n\n{}",
                         cancelled.partial_text,
-                        crate::i18n::get_required_cli_string("turn-interrupted-by-user")
+                        crate::agent::INTERRUPTED_BY_USER_MARKER
                     ));
                     turn_state.push_dual(msg);
                 }
@@ -916,7 +921,7 @@ async fn run_tool_call_loop_turn(
             }
 
             let fallback =
-                crate::i18n::get_required_cli_string("channel-runtime-malformed-tool-output");
+                "I generated an internal tool-call format error and could not complete this request. Please try again.".to_string();
             accumulated_display_text.push_str(&fallback);
             if let Some(ref tx) = on_delta {
                 let _ = tx.send(StreamDelta::Text(fallback.to_string())).await;
@@ -1062,9 +1067,7 @@ async fn run_tool_call_loop_turn(
                         });
                 if recovery && recovery_admitted {
                     let outcome = crate::agent::tool_execution::ToolExecutionOutcome {
-                        output: crate::i18n::get_required_cli_string(
-                            "turn-repeated-failure-retry-skipped",
-                        ),
+                        output: "Skipped an additional identical call in this recovery batch. Only one recovery retry is available.".to_string(),
                         success: false,
                         error_reason: None,
                         duration: std::time::Duration::ZERO,
@@ -1183,9 +1186,7 @@ async fn run_tool_call_loop_turn(
                         call.name.clone(),
                         call.tool_call_id.clone(),
                         crate::agent::tool_execution::ToolExecutionOutcome {
-                            output: crate::i18n::get_required_cli_string(
-                                "turn-tool-interrupted-before-result",
-                            ),
+                            output: TOOL_INTERRUPTED_BEFORE_RESULT.to_string(),
                             success: false,
                             error_reason: None,
                             duration: std::time::Duration::ZERO,
@@ -1207,9 +1208,7 @@ async fn run_tool_call_loop_turn(
                     }
                     let call_id = events::resolve_tool_call_id(call);
                     let interrupted = crate::agent::tool_execution::ToolExecutionOutcome {
-                        output: crate::i18n::get_required_cli_string(
-                            "turn-tool-interrupted-before-result",
-                        ),
+                        output: TOOL_INTERRUPTED_BEFORE_RESULT.to_string(),
                         success: false,
                         error_reason: None,
                         duration: std::time::Duration::ZERO,
@@ -1275,14 +1274,13 @@ async fn run_tool_call_loop_turn(
             return Err(ToolLoopCancelled.into());
         }
 
-        if let Some(key) = repetition_disposition.message_key {
+        if let Some(reason) = repetition_disposition.message {
             if cancellation_token
                 .as_ref()
                 .is_some_and(CancellationToken::is_cancelled)
             {
                 return Err(ToolLoopCancelled.into());
             }
-            let reason = crate::i18n::get_required_cli_string(key);
             let visible_reason = format!("{reason}\n\n");
             events::emit_posthoc_turn_chunk(event_tx.as_ref(), &visible_reason).await;
             if let Some(ref tx) = on_delta {

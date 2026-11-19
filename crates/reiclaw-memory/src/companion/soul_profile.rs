@@ -898,6 +898,30 @@ pub enum SoulProfileError {
 }
 
 impl SoulProfileError {
+    /// Owner-facing text for a [`Self::ToneValidation`] reason code. An
+    /// unknown code is returned unchanged.
+    #[must_use]
+    pub fn tone_validation_text(key: &'static str) -> &'static str {
+        match key {
+            "soul-tone-unavailable" => "Current configured Tone is unavailable.",
+            "soul-tone-step-limit" => "Tone proposals may move a dial by at most one level.",
+            "soul-tone-challenge-up-only" => {
+                "The challenge dial may only be proposed upward; only your owner can lower it."
+            }
+            "soul-tone-exemplars-too-many" => "A Tone can hold at most four exemplars.",
+            "soul-tone-exemplar-empty" => {
+                "Each exemplar needs a situation, your line, and the agent's line."
+            }
+            "soul-tone-exemplar-single-line" => {
+                "An exemplar field must be a single line of text without line breaks or control characters."
+            }
+            "soul-tone-exemplar-too-long" => {
+                "An exemplar field is over its limit: situation 80 bytes, your line 160 bytes, the agent's line 320 bytes."
+            }
+            other => other,
+        }
+    }
+
     fn invalid(field: &'static str, reason: &str) -> Self {
         Self::Invalid {
             field,

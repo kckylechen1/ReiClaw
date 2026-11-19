@@ -79,7 +79,6 @@ pub use config::Config;
 #[derive(Subcommand, Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 pub enum GatewayCommands {
     /// Start the gateway server (default if no subcommand specified)
-    // i18n-exempt: clap derive help — framework requires a compile-time literal
     #[command(long_about = "\
 Start the gateway server (webhooks, websockets).
 
@@ -108,7 +107,6 @@ Examples:
         allow_degraded_security: bool,
     },
     /// Restart the gateway server
-    // i18n-exempt: clap derive help — framework requires a compile-time literal
     #[command(long_about = "\
 Restart the gateway server.
 
@@ -134,7 +132,6 @@ Examples:
         allow_degraded_security: bool,
     },
     /// Show or generate the pairing code without restarting
-    // i18n-exempt: clap derive help — framework requires a compile-time literal
     #[command(long_about = "\
 Show or generate the gateway pairing code.
 
@@ -181,7 +178,6 @@ Examples:
         host: Option<String>,
     },
     /// Manage channel bridge tokens ([gateway.bridges.<name>])
-    // i18n-exempt: clap derive help — framework requires a compile-time literal
     #[command(long_about = "\
 Manage channel bridges ([gateway.bridges.<name>]).
 
@@ -262,12 +258,11 @@ pub enum ServiceCommands {
 pub enum ChannelCommands {
     /// List all configured channels
     List,
-    /// Start all configured channels (handled in main.rs for async)
+    #[command(about = "Start all configured channels")]
     Start,
-    /// Run health checks for configured channels (handled in main.rs for async)
+    #[command(about = "Run health checks for configured channels")]
     Doctor,
     /// Add a new channel configuration
-    // i18n-exempt: clap derive help — framework requires a compile-time literal
     #[command(long_about = "\
 Add a new channel configuration.
 
@@ -290,7 +285,6 @@ Examples:
         name: String,
     },
     /// Bind a Telegram identity (username or numeric user ID) into allowlist
-    // i18n-exempt: clap derive help — framework requires a compile-time literal
     #[command(long_about = "\
 Bind a Telegram identity into the allowlist.
 
@@ -315,8 +309,6 @@ Examples:
         #[arg(long, default_value = "default")]
         alias: String,
     },
-    /// Send a message to a configured channel
-    // i18n-exempt: clap derive help — framework requires a compile-time literal
     #[command(long_about = "\
 Send a one-off message to a configured channel.
 
@@ -330,6 +322,7 @@ platform-specific destination (e.g. a Telegram chat ID).
 
 Examples:
   rei channel send 'Someone is near your device.' --channel-id telegram --recipient 123456789")]
+    #[command(about = "Send a one-off message to a configured channel")]
     Send {
         /// Message text to send
         message: String,
@@ -460,7 +453,6 @@ pub enum SkillCommands {
         bundle: Option<String>,
     },
     /// Scaffold a new skill from scratch (canonical SKILL.md + optional subdirs)
-    // i18n-exempt: clap derive help — framework requires a compile-time literal
     #[command(long_about = "\
 Scaffold a new skill under a skill bundle. Writes `<bundle.directory>`/`<name>`/SKILL.md \
 plus the canonical optional subdirs (scripts/, references/, assets/). \
@@ -599,7 +591,7 @@ pub enum SkillBundleCommands {
 /// Migration subcommands
 #[derive(Subcommand, Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 pub enum MigrateCommands {
-    /// Import memory from an `OpenClaw` workspace into this `ReiClaw` workspace
+    #[command(about = "Import memory from an OpenClaw workspace into this ReiClaw workspace")]
     Openclaw {
         /// Optional path to `OpenClaw` workspace (defaults to ~/.openclaw/workspace)
         #[arg(long)]
@@ -620,8 +612,6 @@ pub enum MigrateCommands {
 pub enum CronCommands {
     /// List all scheduled tasks
     List,
-    /// Add a new scheduled task
-    // i18n-exempt: clap derive help — framework requires a compile-time literal
     #[command(long_about = "\
 Add a new recurring scheduled task.
 
@@ -633,6 +623,7 @@ Examples:
   rei cron add '0 9 * * 1-5' 'Good morning' --tz America/New_York --agent
   rei cron add '*/30 * * * *' 'Check system health' --agent
   rei cron add '*/5 * * * *' 'echo ok'")]
+    #[command(about = "Add a new recurring scheduled task")]
     Add {
         /// Cron expression
         expression: String,
@@ -656,8 +647,6 @@ Examples:
         /// Command (shell) or prompt (when --prompt) to run
         command: String,
     },
-    /// Add a one-shot scheduled task at an RFC3339 timestamp with explicit Z or offset
-    // i18n-exempt: clap derive help — framework requires a compile-time literal
     #[command(long_about = "\
 Add a one-shot task that fires at a specific RFC3339 timestamp with explicit Z or offset.
 
@@ -667,6 +656,7 @@ The timestamp must include an explicit Z or numeric offset \
 Examples:
   rei cron add-at --agent morning-shift 2025-01-15T14:00:00Z 'Send reminder'
   rei cron add-at --agent morning-shift --prompt 2025-12-31T23:59:00Z 'Happy New Year!'")]
+    #[command(about = "Add a one-shot task that fires at a specific UTC timestamp")]
     AddAt {
         /// One-shot RFC3339 timestamp with explicit Z or offset
         at: String,
@@ -685,8 +675,6 @@ Examples:
         /// Command (shell) or prompt (when --prompt) to run
         command: String,
     },
-    /// Add a fixed-interval scheduled task
-    // i18n-exempt: clap derive help — framework requires a compile-time literal
     #[command(long_about = "\
 Add a task that repeats at a fixed interval.
 
@@ -695,6 +683,7 @@ Interval is specified in milliseconds. For example, 60000 = 1 minute.
 Examples:
   rei cron add-every --agent triage 60000 'Ping heartbeat'
   rei cron add-every --agent triage 3600000 'Hourly report'")]
+    #[command(about = "Add a task that repeats at a fixed interval")]
     AddEvery {
         /// Interval in milliseconds
         every_ms: u64,
@@ -713,8 +702,6 @@ Examples:
         /// Command (shell) or prompt (when --prompt) to run
         command: String,
     },
-    /// Add a one-shot delayed task (e.g. "30m", "2h", "1d")
-    // i18n-exempt: clap derive help — framework requires a compile-time literal
     #[command(long_about = "\
 Add a one-shot task that fires after a delay from now.
 
@@ -724,6 +711,7 @@ h (hours), d (days).
 Examples:
   rei cron once --agent ops-bot 30m 'Run backup in 30 minutes'
   rei cron once --agent researcher --prompt 2h 'Follow up on deployment'")]
+    #[command(about = "Add a one-shot task that fires after a delay from now")]
     Once {
         /// Delay duration
         delay: String,
@@ -747,8 +735,6 @@ Examples:
         /// Task ID
         id: String,
     },
-    /// Update a scheduled task
-    // i18n-exempt: clap derive help — framework requires a compile-time literal
     #[command(long_about = "\
 Update one or more fields of an existing scheduled task.
 
@@ -758,6 +744,7 @@ Examples:
   rei cron update TASK_ID --expression '0 8 * * *'
   rei cron update TASK_ID --tz Europe/London --name 'Morning check'
   rei cron update TASK_ID --command 'Updated message'")]
+    #[command(about = "Update one or more fields of an existing scheduled task")]
     Update {
         /// Task ID
         id: String,

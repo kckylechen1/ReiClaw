@@ -98,9 +98,8 @@ impl Sandbox for UnavailableSandbox {
 }
 
 fn unavailable_backend_description(requested_backend: &str) -> String {
-    crate::i18n::get_required_cli_string_with_args(
-        "cli-security-sandbox-backend-unavailable",
-        &[("backend", requested_backend)],
+    format!(
+        "Requested sandbox backend `{requested_backend}` is unavailable; command execution is blocked."
     )
 }
 

@@ -182,5 +182,5 @@ pub(super) fn connect_matches(frame: &serde_json::Value, agent: &str, session: &
 
 pub(super) fn refusal(code: &str) -> serde_json::Value {
     serde_json::json!({"type":"error", "code":code,
-        "message":reiclaw_runtime::i18n::get_required_cli_string("gateway-bridge-access-denied")})
+        "message":"This bridge is not authorized for the requested binding or operation."})
 }

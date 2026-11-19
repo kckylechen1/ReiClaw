@@ -7,6 +7,10 @@ use std::collections::HashSet;
 use std::hash::{Hash, Hasher};
 use std::sync::LazyLock;
 
+const SUCCESS_ADVISORY: &str = "The same tool call returned the same successful result repeatedly. Reconsider whether another call will help. Polling may continue when needed.";
+const FAILURE_RECOVERY: &str = "The same tool call failed with the same result repeatedly. Change the approach or explain the blocker. One further identical retry is available before this turn stops.";
+const FAILURE_EXHAUSTED: &str = "The recovery retry failed with the same result, so this turn has stopped. Completed tool results have been preserved. You can retry in a new turn.";
+
 #[derive(Default)]
 pub(crate) struct RepetitionGuard {
     last: Option<(Signature, bool)>,
@@ -18,7 +22,7 @@ pub(crate) struct RepetitionGuard {
 
 #[derive(Default)]
 pub(super) struct RepetitionDisposition {
-    pub(super) message_key: Option<&'static str>,
+    pub(super) message: Option<&'static str>,
     pub(super) close: bool,
 }
 
@@ -65,7 +69,7 @@ impl RepetitionGuard {
             } else if evidence.iter().any(|&(hash, _)| hash == warned) {
                 self.exhausted = true;
                 return RepetitionDisposition {
-                    message_key: Some("turn-repeated-failure-exhausted"),
+                    message: Some(FAILURE_EXHAUSTED),
                     close: true,
                 };
             }
@@ -86,18 +90,16 @@ impl RepetitionGuard {
             if success {
                 if !self.success_advised {
                     self.success_advised = true;
-                    disposition.message_key = Some("turn-repeated-success-advisory");
+                    disposition.message = Some(SUCCESS_ADVISORY);
                 }
             } else if self.warned_failure != Some(hash) {
                 self.warned_failure = Some(hash);
-                disposition.message_key = Some("turn-repeated-failure-recovery");
+                disposition.message = Some(FAILURE_RECOVERY);
             }
         }
         // A changed call later in the warning batch invalidates that warning.
-        if disposition.message_key == Some("turn-repeated-failure-recovery")
-            && self.warned_failure.is_none()
-        {
-            disposition.message_key = None;
+        if disposition.message == Some(FAILURE_RECOVERY) && self.warned_failure.is_none() {
+            disposition.message = None;
         }
         disposition
     }
@@ -279,12 +281,9 @@ mod tests {
                 1,
             )
         };
-        assert!(observe(&mut guard, false).message_key.is_none());
-        assert_eq!(
-            observe(&mut guard, true).message_key,
-            Some("turn-repeated-failure-recovery")
-        );
-        assert!(observe(&mut guard, false).message_key.is_none());
+        assert!(observe(&mut guard, false).message.is_none());
+        assert_eq!(observe(&mut guard, true).message, Some(FAILURE_RECOVERY));
+        assert!(observe(&mut guard, false).message.is_none());
         assert!(!guard.is_exhausted());
         assert!(observe(&mut guard, true).close);
     }

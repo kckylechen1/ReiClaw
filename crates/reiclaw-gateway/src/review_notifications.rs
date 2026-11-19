@@ -83,13 +83,8 @@ pub(crate) fn reconcile(
             }
             let soul_count = receipt.proposals_created.to_string();
             let user_count = receipt.user_model_candidates_created.to_string();
-            let content = reiclaw_runtime::i18n::get_required_cli_string_with_args(
-                "soul-weekly-review-notice",
-                &[
-                    ("soul_count", &soul_count),
-                    ("user_count", &user_count),
-                    ("review_path", &review_path),
-                ],
+            let content = format!(
+                "Weekly reflection created {soul_count} Soul proposals and {user_count} User Model candidates. Review: {review_path}"
             );
             if !enqueue_notice(
                 config,
@@ -111,15 +106,12 @@ pub(crate) fn reconcile(
             .unwrap_or_default();
         let drift = store.drift(&agent, configured, now)?;
         for event_id in drift_event_ids(&drift, now) {
-            let content = reiclaw_runtime::i18n::get_required_cli_string_with_args(
-                "soul-drift-notice",
-                &[
-                    ("dials_moved", &moved_dials(&drift).to_string()),
-                    ("max_steps", &drift.max_abs_steps().to_string()),
-                    ("story_added", &drift.story_added.to_string()),
-                    ("story_retired", &drift.story_retired.to_string()),
-                    ("review_path", &review_path),
-                ],
+            let content = format!(
+                "Soul drift report: {dials_moved} Tone dials moved from your anchor (largest move: {max_steps} steps); {story_added} Story entries added, {story_retired} retired. Keep it or roll back: {review_path}",
+                dials_moved = moved_dials(&drift).to_string(),
+                max_steps = drift.max_abs_steps().to_string(),
+                story_added = drift.story_added.to_string(),
+                story_retired = drift.story_retired.to_string()
             );
             if !enqueue_notice(
                 config, data_dir, stop, &agent, &content, SOUL_DRIFT, &event_id,

@@ -6,7 +6,6 @@ use reiclaw_runtime::agent::soul_check::{
 };
 
 use crate::config::Config;
-use crate::gateway_helpers::ta;
 
 /// Output format for the Soul check report.
 #[derive(Copy, Clone, Debug, PartialEq, Eq, clap::ValueEnum)]
@@ -42,17 +41,10 @@ pub async fn check(
 fn print_cost_notice(agent: &str, targets: usize) {
     let replies = targets * SCENARIOS.len();
     eprintln!(
-        "{}",
-        ta(
-            "soul-check-notice",
-            &[
-                ("agent", agent),
-                ("calls", &planned_model_calls(targets).to_string()),
-                ("replies", &replies.to_string()),
-                ("judgements", &replies.to_string()),
-            ],
-            "Soul check: this makes real model calls.",
-        )
+        "Soul check for agent {agent}: this makes real model calls, up to {calls} ({replies} scenario replies plus {judgements} judge calls). Each selected target receives the agent's real Soul projection as its system prompt — only choose targets you want to send it to. Results are printed and not stored (a data directory without a seeded Soul gets one, same as the first chat turn).",
+        calls = planned_model_calls(targets),
+        judgements = replies,
+        replies = replies
     );
 }
 

@@ -287,9 +287,8 @@ impl HttpRequestTool {
                 .iter()
                 .any(|host| host.eq_ignore_ascii_case(destination_host))
         {
-            anyhow::bail!(crate::i18n::get_required_tool_string_with_args(
-                "tool-http-request-error-secret-host",
-                &[("name", secret_name), ("host", destination_host)]
+            anyhow::bail!(format!(
+                "auth_secret '{secret_name}' is not allowed for destination host '{destination_host}'"
             ));
         }
 

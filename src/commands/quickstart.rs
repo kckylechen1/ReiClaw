@@ -1,22 +1,6 @@
 //! `rei quickstart` CLI. Extracted from main.rs.
 
 use crate::config::Config;
-use crate::gateway_helpers::{t, ta};
-
-#[cfg(feature = "agent-runtime")]
-fn qta(key: &str, args: &[(&str, &str)]) -> String {
-    reiclaw_runtime::i18n::get_required_cli_string_with_args(key, args)
-}
-
-#[cfg(feature = "agent-runtime")]
-fn quickstart_row(key: &str, glyph: &str, summary: &str) -> String {
-    qta(key, &[("glyph", glyph), ("summary", summary)])
-}
-
-#[cfg(feature = "agent-runtime")]
-fn quickstart_step_label(step: reiclaw_runtime::quickstart::QuickstartStep) -> String {
-    t(step.label_key(), step.label())
-}
 
 #[cfg(feature = "agent-runtime")]
 pub(crate) fn quickstart_runtime_profile_for_provider(
@@ -77,13 +61,7 @@ pub async fn run_quickstart_cli(
         || !std::io::IsTerminal::is_terminal(&std::io::stderr())
     {
         anyhow::bail!(
-            "{}",
-            t(
-                "cli-quickstart-needs-tty",
-                "Quickstart is interactive and needs a terminal on stdin and stderr. \
-                 Run it from an interactive shell, or use \
-                 `rei config set <path> <value>` for headless configuration."
-            )
+            "Quickstart is interactive and needs a terminal on stdin and stderr. Run it from an interactive shell, or use `rei config set <path> <value>` for headless configuration."
         );
     }
 
@@ -242,59 +220,44 @@ pub async fn run_quickstart_cli(
     }
 
     println!();
-    println!(
-        "{}",
-        t(
-            "cli-quickstart-title",
-            "Quickstart — create one working agent end-to-end."
-        )
-    );
+    println!("Quickstart — create one working agent end-to-end.");
     println!();
 
     loop {
         // Render selector list with current status / summary.
         let glyph = |ok: bool| if ok { "[✓]" } else { "[ ]" };
         let provider_summary = match &form.provider {
-            None => t("cli-quickstart-summary-not-yet-chosen", "not yet chosen"),
+            None => "not yet chosen".to_string(),
             Some(ProviderChoice::Fresh {
                 display_name,
                 alias,
                 model,
                 ..
-            }) => qta(
-                "cli-quickstart-summary-provider-fresh",
-                &[("name", display_name), ("alias", alias), ("model", model)],
-            ),
-            Some(ProviderChoice::Existing { alias_ref }) => qta(
-                "cli-quickstart-summary-use-existing",
-                &[("reference", alias_ref)],
-            ),
+            }) => format!("{display_name} (alias: {alias}, model: {model})"),
+            Some(ProviderChoice::Existing { alias_ref }) => format!("use existing {alias_ref}"),
         };
         let preset_summary = |p: &Option<PresetChoice>| -> String {
             match p {
-                None => t("cli-quickstart-summary-not-yet-chosen", "not yet chosen"),
+                None => "not yet chosen".to_string(),
                 Some(PresetChoice::Fresh(name)) => {
-                    qta("cli-quickstart-summary-preset-fresh", &[("name", name)])
+                    format!("preset: {name}")
                 }
                 Some(PresetChoice::Existing(a)) => {
-                    qta("cli-quickstart-summary-use-existing", &[("reference", a)])
+                    format!("use existing {a}")
                 }
             }
         };
         let memory_summary = match &form.memory {
-            None => t("cli-quickstart-summary-not-yet-chosen", "not yet chosen"),
+            None => "not yet chosen".to_string(),
             Some(kind) => serde_json::to_value(kind)
                 .ok()
                 .and_then(|v| v.as_str().map(str::to_string))
                 .unwrap_or_else(|| format!("{kind:?}").to_lowercase()),
         };
         let channels_summary = if !form.channels_visited {
-            t("cli-quickstart-summary-not-yet-visited", "not yet visited")
+            "not yet visited".to_string()
         } else if form.channels.is_empty() {
-            t(
-                "cli-quickstart-summary-channels-none",
-                "none (chat via `rei agent` only)",
-            )
+            "none (chat via `rei agent` only)".to_string()
         } else {
             form.channels
                 .iter()
@@ -306,21 +269,16 @@ pub async fn run_quickstart_cli(
                 .join(", ")
         };
         let agent_summary = match &form.agent {
-            None => t("cli-quickstart-summary-not-yet-named", "not yet named"),
-            Some(a) => qta(
-                "cli-quickstart-summary-agent",
-                &[
-                    ("alias", &a.name),
-                    ("chars", &a.system_prompt.len().to_string()),
-                    ("files", &a.personality_files.len().to_string()),
-                ],
+            None => "not yet named".to_string(),
+            Some(a) => format!(
+                "alias: {alias}, system prompt: {chars} chars, {files} personality file(s)",
+                alias = a.name,
+                chars = a.system_prompt.len(),
+                files = a.personality_files.len()
             ),
         };
         let peer_groups_summary = if form.peer_groups.is_empty() {
-            t(
-                "cli-quickstart-summary-peer-groups-none",
-                "none — channels accept no peers",
-            )
+            "none — channels accept no peers".to_string()
         } else {
             form.peer_groups
                 .iter()
@@ -331,45 +289,36 @@ pub async fn run_quickstart_cli(
 
         let risk_summary = preset_summary(&form.risk);
         let mut labels: Vec<String> = vec![
-            quickstart_row(
-                "cli-quickstart-row-model-provider",
-                glyph(form.provider_done()),
-                &provider_summary,
+            format!(
+                "{glyph} Model provider     — {provider_summary}",
+                glyph = glyph(form.provider_done())
             ),
-            quickstart_row(
-                "cli-quickstart-row-risk-profile",
-                glyph(form.risk_done()),
-                &risk_summary,
+            format!(
+                "{glyph} Risk profile       — {risk_summary}",
+                glyph = glyph(form.risk_done())
             ),
-            quickstart_row(
-                "cli-quickstart-row-memory",
-                glyph(form.memory_done()),
-                &memory_summary,
+            format!(
+                "{glyph} Memory             — {memory_summary}",
+                glyph = glyph(form.memory_done())
             ),
-            quickstart_row(
-                "cli-quickstart-row-channels",
-                glyph(form.channels_done()),
-                &channels_summary,
+            format!(
+                "{glyph} Channels (0..N)    — {channels_summary}",
+                glyph = glyph(form.channels_done())
             ),
-            quickstart_row(
-                "cli-quickstart-row-peer-groups",
-                glyph(form.peer_groups_done()),
-                &peer_groups_summary,
+            format!(
+                "{glyph} Peer groups        — {peer_groups_summary}",
+                glyph = glyph(form.peer_groups_done())
             ),
-            quickstart_row(
-                "cli-quickstart-row-agent-identity",
-                glyph(form.agent_done()),
-                &agent_summary,
+            format!(
+                "{glyph} Agent identity     — {agent_summary}",
+                glyph = glyph(form.agent_done())
             ),
         ];
         let create_enabled = form.all_done();
         labels.push(if create_enabled {
-            t("cli-quickstart-create-agent", "── Create agent")
+            "── Create agent".to_string()
         } else {
-            t(
-                "cli-quickstart-create-agent-locked",
-                "── Create agent (locked — fill every selector first)",
-            )
+            "── Create agent (locked — fill every selector first)".to_string()
         });
 
         let actions = [
@@ -383,10 +332,7 @@ pub async fn run_quickstart_cli(
         ];
 
         let pick = FuzzySelect::new()
-            .with_prompt(t(
-                "cli-quickstart-open-selector-prompt",
-                "Open a selector (Enter), or pick Create. Esc to quit.",
-            ))
+            .with_prompt("Open a selector (Enter), or pick Create. Esc to quit.".to_string())
             .items(&labels)
             .default(0)
             .max_length(labels.len())
@@ -398,24 +344,12 @@ pub async fn run_quickstart_cli(
 
         match action {
             Action::Quit => {
-                println!(
-                    "{}",
-                    t(
-                        "cli-quickstart-cancelled",
-                        "Quickstart cancelled. No config written."
-                    )
-                );
+                println!("Quickstart cancelled. No config written.");
                 return Ok(());
             }
             Action::Create => {
                 if !create_enabled {
-                    println!(
-                        "{}",
-                        t(
-                            "cli-quickstart-incomplete",
-                            "  Not all selectors are filled yet."
-                        )
-                    );
+                    println!("  Not all selectors are filled yet.");
                     continue;
                 }
                 break;
@@ -426,16 +360,16 @@ pub async fn run_quickstart_cli(
                 let mut mode_labels: Vec<String> = Vec::new();
                 let mut mode_kinds: Vec<&str> = Vec::new();
                 if !state.model_providers.is_empty() {
-                    mode_labels.push(t("cli-quickstart-use-existing", "Use existing"));
+                    mode_labels.push("Use existing".to_string());
                     mode_kinds.push("existing");
                 }
-                mode_labels.push(t("cli-quickstart-create-new", "Create new"));
+                mode_labels.push("Create new".to_string());
                 mode_kinds.push("fresh");
                 let mode = if mode_labels.len() == 1 {
                     Some(0)
                 } else {
                     FuzzySelect::new()
-                        .with_prompt(t("cli-quickstart-model-provider-prompt", "Model provider"))
+                        .with_prompt("Model provider".to_string())
                         .items(&mode_labels)
                         .default(0)
                         .max_length(mode_labels.len())
@@ -445,10 +379,7 @@ pub async fn run_quickstart_cli(
                 if mode_kinds[mi] == "existing" {
                     let labels: Vec<String> = state.model_providers.clone();
                     let Some(i) = FuzzySelect::new()
-                        .with_prompt(t(
-                            "cli-quickstart-pick-configured-provider",
-                            "Pick a configured provider",
-                        ))
+                        .with_prompt("Pick a configured provider".to_string())
                         .items(&labels)
                         .default(0)
                         .max_length(labels.len().max(1))
@@ -466,17 +397,14 @@ pub async fn run_quickstart_cli(
                     .iter()
                     .map(|p| {
                         if p.local {
-                            qta(
-                                "cli-quickstart-provider-local-label",
-                                &[("name", &p.display_name)],
-                            )
+                            format!("{name} (local)", name = p.display_name)
                         } else {
                             p.display_name.clone()
                         }
                     })
                     .collect();
                 let Some(pi) = FuzzySelect::new()
-                    .with_prompt(t("cli-quickstart-provider-type-prompt", "Provider type"))
+                    .with_prompt("Provider type".to_string())
                     .items(&prov_labels)
                     .default(0)
                     .max_length(prov_labels.len().max(1))
@@ -486,10 +414,7 @@ pub async fn run_quickstart_cli(
                 };
                 let chosen = &providers[pi];
                 let Ok(alias) = Input::<String>::new()
-                    .with_prompt(qta(
-                        "cli-quickstart-alias-for",
-                        &[("name", &chosen.display_name)],
-                    ))
+                    .with_prompt(format!("Alias for {name}", name = chosen.display_name))
                     .default("default".to_string())
                     .allow_empty(false)
                     .validate_with(|input: &String| {
@@ -562,17 +487,11 @@ pub async fn run_quickstart_cli(
                 }
                 if model.is_empty() {
                     eprintln!(
-                        "{}",
-                        qta(
-                            "cli-quickstart-model-field-missing-warning",
-                            &[("provider", &chosen.kind)],
-                        )
+                        "WARN: schema produced no `model` field for `{provider}` — falling back to manual entry. Please report this.",
+                        provider = chosen.kind
                     );
                     let Ok(m) = Input::<String>::new()
-                        .with_prompt(qta(
-                            "cli-quickstart-model-id-for",
-                            &[("name", &chosen.display_name)],
-                        ))
+                        .with_prompt(format!("Model id for {name}", name = chosen.display_name))
                         .allow_empty(false)
                         .interact_text()
                     else {
@@ -590,7 +509,7 @@ pub async fn run_quickstart_cli(
             }
             Action::Risk => {
                 let chosen = pick_preset(
-                    &t("cli-quickstart-risk-profile-prompt", "Risk profile"),
+                    "Risk profile",
                     RISK_PRESETS
                         .iter()
                         .map(|p| (p.preset_name, p.label, p.help))
@@ -633,7 +552,7 @@ pub async fn run_quickstart_cli(
                     })
                     .collect();
                 let Some(i) = FuzzySelect::new()
-                    .with_prompt(t("cli-quickstart-memory-backend-prompt", "Memory backend"))
+                    .with_prompt("Memory backend".to_string())
                     .items(&labels)
                     .default(0)
                     .max_length(labels.len().max(1))
@@ -650,26 +569,18 @@ pub async fn run_quickstart_cli(
                         .channels
                         .iter()
                         .map(|c| match c {
-                            ChannelChoice::Fresh { kind, alias, .. } => qta(
-                                "cli-quickstart-channel-remove-row",
-                                &[("reference", &format!("{kind}.{alias}"))],
-                            ),
-                            ChannelChoice::Existing { alias_ref } => qta(
-                                "cli-quickstart-channel-remove-row",
-                                &[("reference", alias_ref)],
-                            ),
+                            ChannelChoice::Fresh { kind, alias, .. } => {
+                                format!("  {kind}.{alias} (remove)")
+                            }
+                            ChannelChoice::Existing { alias_ref } => {
+                                format!("  {alias_ref} (remove)")
+                            }
                         })
                         .collect();
-                    items.push(t("cli-quickstart-add-channel", "+ Add a channel"));
-                    items.push(t(
-                        "cli-quickstart-channels-done",
-                        "Done (channels selector counts as visited)",
-                    ));
+                    items.push("+ Add a channel".to_string());
+                    items.push("Done (channels selector counts as visited)".to_string());
                     let Some(i) = FuzzySelect::new()
-                        .with_prompt(t(
-                            "cli-quickstart-channels-prompt",
-                            "Channels (optional, 0..N)",
-                        ))
+                        .with_prompt("Channels (optional, 0..N)".to_string())
                         .items(&items)
                         .default(items.len().saturating_sub(2))
                         .max_length(items.len())
@@ -686,19 +597,16 @@ pub async fn run_quickstart_cli(
                         let mut mode_labels: Vec<String> = Vec::new();
                         let mut mode_kinds: Vec<&str> = Vec::new();
                         if !state.unassigned_channels.is_empty() {
-                            mode_labels.push(t("cli-quickstart-use-existing", "Use existing"));
+                            mode_labels.push("Use existing".to_string());
                             mode_kinds.push("existing");
                         }
-                        mode_labels.push(t("cli-quickstart-create-new", "Create new"));
+                        mode_labels.push("Create new".to_string());
                         mode_kinds.push("fresh");
                         let mode = if mode_labels.len() == 1 {
                             Some(0)
                         } else {
                             FuzzySelect::new()
-                                .with_prompt(t(
-                                    "cli-quickstart-channel-source-prompt",
-                                    "Channel source",
-                                ))
+                                .with_prompt("Channel source".to_string())
                                 .items(&mode_labels)
                                 .default(0)
                                 .max_length(mode_labels.len())
@@ -709,19 +617,12 @@ pub async fn run_quickstart_cli(
                             let labels: Vec<String> = state.unassigned_channels.clone();
                             if labels.is_empty() {
                                 println!(
-                                    "{}",
-                                    t(
-                                        "cli-quickstart-all-channels-bound",
-                                        "  Every configured channel is already bound to an agent. Free one with `rei config set agents.<alias>.channels ...` before reusing it here.",
-                                    )
+                                    "  Every configured channel is already bound to an agent. Free one with `rei config set agents.<alias>.channels ...` before reusing it here."
                                 );
                                 continue;
                             }
                             let Some(ei) = FuzzySelect::new()
-                                .with_prompt(t(
-                                    "cli-quickstart-pick-configured-channel",
-                                    "Pick a configured channel",
-                                ))
+                                .with_prompt("Pick a configured channel".to_string())
                                 .items(&labels)
                                 .default(0)
                                 .max_length(labels.len().max(1))
@@ -735,13 +636,7 @@ pub async fn run_quickstart_cli(
                             continue;
                         }
                         if channel_types.is_empty() {
-                            println!(
-                                "{}",
-                                t(
-                                    "cli-no-channels-compiled",
-                                    "  No channel types are compiled into this binary."
-                                )
-                            );
+                            println!("  No channel types are compiled into this binary.");
                             continue;
                         }
                         let labels: Vec<String> = channel_types
@@ -749,7 +644,7 @@ pub async fn run_quickstart_cli(
                             .map(|c| c.display_name.clone())
                             .collect();
                         let Some(ci) = FuzzySelect::new()
-                            .with_prompt(t("cli-quickstart-channel-type-prompt", "Channel type"))
+                            .with_prompt("Channel type".to_string())
                             .items(&labels)
                             .default(0)
                             .max_length(labels.len().max(1))
@@ -759,10 +654,7 @@ pub async fn run_quickstart_cli(
                         };
                         let chosen = &channel_types[ci];
                         let Ok(alias) = Input::<String>::new()
-                            .with_prompt(qta(
-                                "cli-quickstart-alias-for",
-                                &[("name", &chosen.display_name)],
-                            ))
+                            .with_prompt(format!("Alias for {name}", name = chosen.display_name))
                             .default(chosen.kind.clone())
                             .allow_empty(false)
                             .interact_text()
@@ -827,26 +719,23 @@ pub async fn run_quickstart_cli(
                         .peer_groups
                         .iter()
                         .map(|pg| {
-                            qta(
-                                "cli-quickstart-peer-group-row",
-                                &[
-                                    ("channel", &pg.channel),
-                                    ("name", &pg.name),
-                                    ("count", &pg.external_peers.len().to_string()),
-                                ],
+                            format!(
+                                "{channel} → {name} ({count} peers)",
+                                channel = pg.channel,
+                                count = pg.external_peers.len(),
+                                name = pg.name
                             )
                         })
                         .collect();
                     let drafts = items.len();
                     if !available.is_empty() {
-                        items.push(t("cli-quickstart-add-peer-group", "+ Add peer group"));
+                        items.push("+ Add peer group".to_string());
                     }
-                    items.push(t("cli-quickstart-done", "Done"));
+                    items.push("Done".to_string());
                     let Some(pick) = FuzzySelect::new()
-                        .with_prompt(t(
-                            "cli-quickstart-peer-groups-prompt",
-                            "Peer groups (Enter on a row to remove, + Add to create)",
-                        ))
+                        .with_prompt(
+                            "Peer groups (Enter on a row to remove, + Add to create)".to_string(),
+                        )
                         .items(&items)
                         .default(items.len() - 1)
                         .max_length(items.len())
@@ -860,10 +749,7 @@ pub async fn run_quickstart_cli(
                     }
                     if pick == drafts && !available.is_empty() {
                         let Some(ch_idx) = FuzzySelect::new()
-                            .with_prompt(t(
-                                "cli-quickstart-channel-to-authorize-prompt",
-                                "Channel to authorize",
-                            ))
+                            .with_prompt("Channel to authorize".to_string())
                             .items(&available)
                             .default(0)
                             .max_length(available.len())
@@ -878,10 +764,10 @@ pub async fn run_quickstart_cli(
                         };
                         let name = format!("{ch_type}_{ch_alias}_default");
                         let Ok(peers_raw) = Input::<String>::new()
-                            .with_prompt(t(
-                                "cli-quickstart-external-peers-prompt",
-                                "External peers (comma- or newline-separated, blank for none)",
-                            ))
+                            .with_prompt(
+                                "External peers (comma- or newline-separated, blank for none)"
+                                    .to_string(),
+                            )
                             .allow_empty(true)
                             .interact_text()
                         else {
@@ -921,7 +807,7 @@ pub async fn run_quickstart_cli(
                     .map(|a| a.name.clone())
                     .unwrap_or_default();
                 let mut input = Input::<String>::new()
-                    .with_prompt(t("cli-quickstart-agent-alias-prompt", "Agent alias"))
+                    .with_prompt("Agent alias".to_string())
                     .allow_empty(false)
                     .validate_with(|input: &String| {
                         reiclaw_config::helpers::validate_alias_key(input)
@@ -938,10 +824,7 @@ pub async fn run_quickstart_cli(
                     .map(|a| a.system_prompt.clone())
                     .unwrap_or_default();
                 let edit = Confirm::new()
-                    .with_prompt(t(
-                        "cli-quickstart-edit-system-prompt",
-                        "Edit system prompt in $EDITOR? (blank if you skip)",
-                    ))
+                    .with_prompt("Edit system prompt in $EDITOR? (blank if you skip)".to_string())
                     .default(false)
                     .interact_opt()?;
                 if let Some(true) = edit
@@ -990,24 +873,17 @@ pub async fn run_quickstart_cli(
                 impl PersonalityAction {
                     fn label(self, has_staged: bool) -> String {
                         match self {
-                            Self::StartWithTemplate => t(
-                                "cli-quickstart-personality-start-template",
-                                "Start with template (open in $EDITOR)",
-                            ),
+                            Self::StartWithTemplate => {
+                                "Start with template (open in $EDITOR)".to_string()
+                            }
                             Self::StartFromScratch => {
                                 if has_staged {
-                                    t(
-                                        "cli-quickstart-personality-start-current",
-                                        "Start from current content (open in $EDITOR)",
-                                    )
+                                    "Start from current content (open in $EDITOR)".to_string()
                                 } else {
-                                    t(
-                                        "cli-quickstart-personality-start-scratch",
-                                        "Start from scratch (open in $EDITOR)",
-                                    )
+                                    "Start from scratch (open in $EDITOR)".to_string()
                                 }
                             }
-                            Self::Skip => t("cli-quickstart-personality-skip", "Skip"),
+                            Self::Skip => "Skip".to_string(),
                         }
                     }
                 }
@@ -1041,21 +917,11 @@ pub async fn run_quickstart_cli(
                         String::new()
                     };
                     let back_hint = if idx > 0 {
-                        t("cli-quickstart-esc-go-back", " (Esc to go back)")
+                        " (Esc to go back)".to_string()
                     } else {
-                        t(
-                            "cli-quickstart-esc-return-checklist",
-                            " (Esc to return to checklist)",
-                        )
+                        " (Esc to return to checklist)".to_string()
                     };
-                    let label = qta(
-                        "cli-quickstart-personality-file-prompt",
-                        &[
-                            ("filename", filename),
-                            ("position", &position),
-                            ("back_hint", &back_hint),
-                        ],
-                    );
+                    let label = format!("{filename}{position} — what next?{back_hint}");
                     let Some(pick) = FuzzySelect::new()
                         .with_prompt(label)
                         .items(&choices)
@@ -1208,12 +1074,8 @@ pub async fn run_quickstart_cli(
         Ok(applied) => {
             println!();
             println!(
-                "{}",
-                ta(
-                    "cli-quickstart-complete",
-                    &[("alias", &applied.alias)],
-                    "Quickstart complete."
-                )
+                "Quickstart complete. Created agent `{alias}`.",
+                alias = applied.alias
             );
             if let Some(auth) = inline_auth {
                 Box::pin(crate::commands::auth::run_inline_provider_auth(
@@ -1222,43 +1084,27 @@ pub async fn run_quickstart_cli(
                 .await;
             }
             println!();
-            println!("{}", t("cli-next-steps", "Next steps:"));
+            println!("Next steps:");
             println!(
-                "{}",
-                qta(
-                    "cli-quickstart-next-agent-command",
-                    &[("alias", &applied.alias)]
-                )
+                "  rei agent -a {alias}  # chat with this agent in your terminal",
+                alias = applied.alias
             );
             Ok(())
         }
         Err(errs) => {
             eprintln!();
+            eprintln!("Your agent was not created — and nothing on disk was changed.");
             eprintln!(
-                "{}",
-                t(
-                    "cli-agent-not-created",
-                    "Your agent was not created — and nothing on disk was changed."
-                )
-            );
-            eprintln!(
-                "{}",
-                t(
-                    "cli-quickstart-fix-and-rerun",
-                    "Your existing config is untouched. Fix the following and run quickstart again:",
-                )
+                "Your existing config is untouched. Fix the following and run quickstart again:"
             );
             eprintln!();
             for e in &errs {
-                eprintln!("  • {}: {}", quickstart_step_label(e.step), e.message);
+                eprintln!("  • {}: {}", e.step.label(), e.message);
             }
             eprintln!();
             anyhow::bail!(
-                "{}",
-                qta(
-                    "cli-quickstart-could-not-finish",
-                    &[("count", &errs.len().to_string())],
-                )
+                "quickstart could not finish: {count} problem(s) to fix",
+                count = errs.len()
             )
         }
     }
@@ -1356,10 +1202,10 @@ fn pick_preset(
     let mut mode_labels: Vec<String> = Vec::new();
     let mut mode_kinds: Vec<&str> = Vec::new();
     if !existing.is_empty() {
-        mode_labels.push(t("cli-quickstart-use-existing", "Use existing"));
+        mode_labels.push("Use existing".to_string());
         mode_kinds.push("existing");
     }
-    mode_labels.push(t("cli-quickstart-pick-preset", "Pick a preset"));
+    mode_labels.push("Pick a preset".to_string());
     mode_kinds.push("preset");
     let mode = if mode_labels.len() == 1 {
         Some(0)
@@ -1374,10 +1220,7 @@ fn pick_preset(
     let Some(mi) = mode else { return Ok(None) };
     if mode_kinds[mi] == "existing" {
         let Some(i) = FuzzySelect::new()
-            .with_prompt(qta(
-                "cli-quickstart-pick-existing-prompt",
-                &[("prompt", prompt)],
-            ))
+            .with_prompt(format!("Pick an existing {prompt}"))
             .items(existing)
             .default(0)
             .max_length(existing.len().max(1))
@@ -1392,10 +1235,7 @@ fn pick_preset(
         .map(|(_, label, help)| format!("{label}  —  {help}"))
         .collect();
     let Some(i) = FuzzySelect::new()
-        .with_prompt(qta(
-            "cli-quickstart-pick-preset-prompt",
-            &[("prompt", prompt)],
-        ))
+        .with_prompt(format!("Pick a {prompt} preset"))
         .items(&labels)
         .default(0)
         .max_length(labels.len().max(1))

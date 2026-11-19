@@ -3,14 +3,14 @@ use pulldown_cmark::{Event, Options, Parser, Tag, TagEnd};
 
 /// Preserve text and order while removing Markdown presentation and raw UI HTML.
 /// Links keep their labels; images keep their alternative text. Tables become
-/// rows of separated cells. No model or paraphrase; status labels use the configured UI locale.
+/// rows of separated cells. No model or paraphrase.
 #[must_use]
 pub fn render(markdown: &str) -> String {
     // Deliberately conservative, binary policy over original bytes only.
     if markdown.as_bytes().windows(2).any(|pair| {
         pair[0] == b'<' && (pair[1].is_ascii_alphabetic() || matches!(pair[1], b'/' | b'!'))
     }) {
-        return crate::i18n::get_required_cli_string("voice-html-omitted");
+        return "This reply contains markup and has been skipped for speech.".to_string();
     }
     let mut out = String::new();
     let options =
@@ -19,15 +19,11 @@ pub fn render(markdown: &str) -> String {
         match event {
             Event::Text(text) | Event::Code(text) => out.push_str(&text),
             Event::TaskListMarker(checked) => {
-                out.push_str(&crate::i18n::get_required_cli_string(if checked {
-                    "spoken-task-complete"
-                } else {
-                    "spoken-task-pending"
-                }));
+                out.push_str(if checked { "Completed:" } else { "Pending:" });
                 out.push(' ');
             }
             Event::Start(Tag::Strikethrough) => {
-                out.push_str(&crate::i18n::get_required_cli_string("spoken-deleted"));
+                out.push_str("Deleted text:");
                 out.push(' ');
             }
             Event::End(TagEnd::Strikethrough) => out.push_str("; "),
@@ -87,9 +83,9 @@ mod preservation_tests {
     use super::*;
     #[test]
     fn task_and_strike_status_are_not_silently_erased() {
-        let complete = crate::i18n::get_required_cli_string("spoken-task-complete");
-        let pending = crate::i18n::get_required_cli_string("spoken-task-pending");
-        let deleted = crate::i18n::get_required_cli_string("spoken-deleted");
+        let complete = "Completed:".to_string();
+        let pending = "Pending:".to_string();
+        let deleted = "Deleted text:".to_string();
         assert_ne!(complete, pending);
         assert_eq!(
             render("- [x] Paid\n- [ ] Paid"),
@@ -108,7 +104,7 @@ mod binary_policy_tests {
 
     #[test]
     fn original_markup_always_replaces_the_entire_reply() {
-        let placeholder = crate::i18n::get_required_cli_string("voice-html-omitted");
+        let placeholder = "This reply contains markup and has been skipped for speech.".to_string();
         assert!(!placeholder.is_empty());
         for input in [
             "<div>Do not pay 12.</div>",

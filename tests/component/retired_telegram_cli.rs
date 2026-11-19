@@ -1,12 +1,12 @@
 //! Exercise the legacy CLI against the filesystem: its removed listener cannot
-//! consume skip markers, so the command must fail with a localized migration.
+//! consume skip markers, so the command must fail with a migration message.
 
 use std::time::Duration;
 use tokio::process::Command;
 
 #[tokio::test]
-async fn retired_skip_update_rejects_without_writing_markers_in_both_locales() {
-    for (locale, diagnostic) in [("en", "are retired"), ("zh-CN", "已退役")] {
+async fn retired_skip_update_rejects_without_writing_markers() {
+    for (locale, diagnostic) in [("en", "are retired")] {
         let config = tempfile::tempdir().expect("config directory");
         std::fs::write(
             config.path().join("config.toml"),

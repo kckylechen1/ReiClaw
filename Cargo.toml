@@ -28,7 +28,6 @@ reiclaw-gateway-client = { path = "crates/reiclaw-gateway-client", version = "0.
 reiclaw-tool-call-parser = { path = "crates/reiclaw-tool-call-parser", version = "0.8.3" }
 reiclaw-macros = { path = "crates/reiclaw-macros", version = "0.8.3" }
 directories = "6.0"
-sys-locale = "0.3"
 reiclaw-policy = { path = "crates/reiclaw-policy", version = "0.8.3" }
 
 # Lint levels every workspace package inherits through `[lints] workspace = true`
@@ -73,7 +72,6 @@ include = [
   "/LICENSE*",
   "/README.md",
   "/web/dist/**/*",
-  "/locales/**/*",
 ]
 
 [[bin]]
@@ -118,7 +116,6 @@ serde_json = { version = "1.0", default-features = false, features = ["std"] }
 # Config
 directories = "6.0"
 toml = "1.0"
-sys-locale = { workspace = true, optional = true }
 
 # JSON Schema generation for config export
 schemars = "1.2"
@@ -206,7 +203,6 @@ agent-runtime = [
     "dep:rusqlite",
     "dep:tokio-tungstenite",
     "dep:rustls",
-    "dep:sys-locale",
 ]
 
 # Lean channel bundle included in `default`. These channels cover local/editor

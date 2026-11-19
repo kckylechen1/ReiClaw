@@ -2625,8 +2625,8 @@ mod tests {
             let before = crate::operator_auth::require_operator(&state, &paired);
             let guard = Arc::clone(&state.config_write_lock).lock_owned().await;
             let mut changed = state.config.read().clone();
-            changed.locale = Some("zh-CN".into());
-            changed.mark_dirty("locale");
+            changed.gateway.port = 42618;
+            changed.mark_dirty("gateway.port");
             let error = persist_and_swap(&state, changed, &guard, None)
                 .await
                 .unwrap_err();

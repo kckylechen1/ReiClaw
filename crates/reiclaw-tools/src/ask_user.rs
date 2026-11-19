@@ -193,16 +193,12 @@ impl Tool for AskUserTool {
                 Ok(None) => ToolResult {
                     success: false,
                     output: ToolOutput::default(),
-                    error: Some(crate::i18n::get_required_tool_string(
-                        "tool-ask-user-unanswered",
-                    )),
+                    error: Some("The question expired or no client could answer it. Retry ask_user if needed.".to_string()),
                 },
                 Err(_) => ToolResult {
                     success: false,
                     output: ToolOutput::default(),
-                    error: Some(crate::i18n::get_required_tool_string(
-                        "tool-ask-user-question-failed",
-                    )),
+                    error: Some("The question could not be delivered. Check its size, choices and timeout (1–300 seconds).".to_string()),
                 },
             });
         }

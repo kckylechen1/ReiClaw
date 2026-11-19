@@ -12,7 +12,6 @@ use tokio::io::{AsyncBufReadExt, BufReader};
 
 use crate::commands::self_test::{resolve_gateway_bearer_token, resolve_probe_host};
 use crate::config::Config;
-use crate::gateway_helpers::ta;
 
 /// This machine's gateway as a WebSocket base URL.
 fn local_gateway_url(config: &Config) -> String {
@@ -96,16 +95,12 @@ pub async fn run(
             );
             // A refusal (unknown agent, bad token) needs a different fix
             // than an unreachable gateway.
-            let key = if e.downcast_ref::<Rejected>().is_some() {
-                "cli-chat-connect-refused"
-            } else {
-                "cli-chat-connect-failed"
-            };
-            anyhow::bail!(ta(
-                key,
-                &[("gateway", &gateway), ("error", &format!("{e:#}"))],
-                "Could not attach to the gateway",
-            ));
+            if e.downcast_ref::<Rejected>().is_some() {
+                anyhow::bail!("The gateway at {gateway} refused the chat: {e:#}");
+            }
+            anyhow::bail!(
+                "Could not attach to the gateway at {gateway}: {e:#}. Start it with `rei daemon` or `rei gateway start`, or pass --gateway."
+            );
         }
     };
 
@@ -118,16 +113,7 @@ pub async fn run(
         let history = client.session().message_count.to_string();
         let session_id = client.session().session_id.clone();
         println!(
-            "{}",
-            ta(
-                "cli-chat-attached",
-                &[
-                    ("session", &session_id),
-                    ("agent", &agent),
-                    ("history", &history)
-                ],
-                "Attached",
-            )
+            "Session {session_id} with {agent}, {history} earlier messages. /quit leaves, /cancel or Ctrl+C stops a running turn."
         );
     }
     chat_loop(&mut client, BufReader::new(tokio::io::stdin()), one_shot).await?;
@@ -160,7 +146,7 @@ async fn chat_loop<R: tokio::io::AsyncBufRead + Unpin>(
                         continue;
                     }
                     Input::InvalidAnswer => {
-                        println!("{}", ta("cli-chat-answer-usage", &[], "answer"));
+                        println!("Usage: /answer <request_id> <text or choice number>");
                         continue;
                     }
                     _ => {}
@@ -180,7 +166,7 @@ async fn chat_loop<R: tokio::io::AsyncBufRead + Unpin>(
             }
             frame = client.next_frame() => {
                 let Some(frame) = frame? else {
-                    println!("{}", ta("cli-chat-closed", &[], "Connection closed"));
+                    println!("The gateway closed the connection.");
                     return Ok(());
                 };
                 if let Frame::ApprovalRequest { request_id, .. } = &frame {
@@ -211,11 +197,7 @@ fn usage_line(
         None => format!("{}k", used / 1000),
     };
     let cost = cost_usd.map(|usd| format!("${usd:.4}")).unwrap_or_default();
-    Some(ta(
-        "cli-chat-usage",
-        &[("context", &context), ("cost", &cost)],
-        "usage",
-    ))
+    Some(format!("[context {context}] {cost}"))
 }
 
 /// Print one frame for the terminal.
@@ -231,51 +213,27 @@ fn render(frame: &Frame) {
             for (n, choice) in choices.iter().enumerate() {
                 println!("{}. {choice}", n + 1);
             }
-            println!(
-                "{}",
-                ta("cli-chat-question", &[("id", request_id)], "answer")
-            );
+            println!("Answer using /answer {request_id} <text or choice number>");
         }
         Frame::AnswerAck { request_id, status } => {
-            println!(
-                "{}",
-                ta(
-                    "cli-chat-answer-ack",
-                    &[("id", request_id), ("status", status)],
-                    "answer"
-                )
-            );
+            println!("Answer {request_id}: {status}");
         }
         Frame::QuestionClosed { request_id } => {
-            println!(
-                "{}",
-                ta(
-                    "cli-chat-question-closed",
-                    &[("id", request_id)],
-                    "question closed"
-                )
-            );
+            println!("Question {request_id} is closed.");
         }
         Frame::Chunk { content } => {
             print!("{content}");
             let _ = std::io::stdout().flush();
         }
         Frame::ToolCall { name, .. } => {
-            println!("\n{}", ta("cli-chat-tool-call", &[("tool", name)], "tool"));
+            println!("\n→ {name}");
         }
         Frame::ApprovalRequest {
             tool,
             arguments_summary,
             ..
         } => {
-            print!(
-                "\n{} ",
-                ta(
-                    "cli-chat-approval-prompt",
-                    &[("tool", tool), ("summary", arguments_summary)],
-                    "Allow?",
-                )
-            );
+            print!("\nAllow {tool}? {arguments_summary} [y]es / [a]lways / [N]o: ");
             let _ = std::io::stdout().flush();
         }
         Frame::Done {
@@ -289,12 +247,9 @@ fn render(frame: &Frame) {
                 println!("{line}");
             }
         }
-        Frame::Aborted { .. } => println!("\n{}", ta("cli-chat-aborted", &[], "cancelled")),
+        Frame::Aborted { .. } => println!("\n(turn cancelled)"),
         Frame::Error { message, .. } => {
-            eprintln!(
-                "\n{}",
-                ta("cli-chat-error", &[("message", message)], "error")
-            );
+            eprintln!("\nError: {message}");
         }
         Frame::Ack {
             status,
@@ -304,12 +259,9 @@ fn render(frame: &Frame) {
         } => {
             if status == "duplicate" {
                 let state = state.as_deref().unwrap_or("unknown");
-                println!(
-                    "{}",
-                    ta("cli-chat-duplicate", &[("state", state)], "duplicate")
-                );
+                println!("Already handled ({state}).");
             } else if turn.as_deref() == Some("steered") {
-                println!("{}", ta("cli-chat-steered", &[], "steered"));
+                println!("(added to the running turn)");
             }
         }
         Frame::Other(value) => {
@@ -322,10 +274,7 @@ fn render(frame: &Frame) {
             if let Some(text) = text
                 && !matches!(kind, "agent_start" | "agent_end" | "history_trimmed")
             {
-                println!(
-                    "\n{}",
-                    ta("cli-chat-event", &[("kind", kind), ("text", text)], "event")
-                );
+                println!("\n[{kind}] {text}");
             }
         }
         Frame::Thinking { .. } | Frame::ToolResult { .. } => {}

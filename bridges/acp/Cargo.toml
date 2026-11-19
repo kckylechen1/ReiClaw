@@ -13,9 +13,7 @@ name = "rei-acp-bridge"
 path = "src/main.rs"
 
 [dependencies]
-# Locale discovery and Fluent formatting share the config implementation.
 # The bridge has no runtime, provider, memory, tools or gateway dependency.
-reiclaw-config = { workspace = true, features = ["i18n"] }
 reiclaw-log.workspace = true
 futures-util = { version = "0.3", default-features = false, features = ["sink"] }
 serde = { version = "1.0", default-features = false, features = ["derive", "std"] }

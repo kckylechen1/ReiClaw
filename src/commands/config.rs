@@ -5,7 +5,6 @@ use dialoguer::Select;
 use reiclaw_config::api_error::{ConfigApiCode, ConfigApiError};
 
 use crate::config::Config;
-use crate::gateway_helpers::{t, ta};
 
 /// Decorate the value at `path` in `config.toml` with a leading `# {comment}`
 /// line, preserving any non-comment whitespace. Mirrors the gateway's
@@ -278,13 +277,7 @@ pub async fn handle(config_command: crate::ConfigCommands, config: &mut Config) 
         }
         crate::ConfigCommands::List { filter, secrets } => {
             let entries = config.prop_fields();
-            println!(
-                "{}",
-                t(
-                    "cli-config-legend",
-                    "Legend: \u{1f489} env-overridden  \u{1f512} secret"
-                )
-            );
+            println!("Legend: 💉 env-overridden  🔒 secret");
             println!();
             let mut current_category = "";
             for entry in &entries {
@@ -335,23 +328,9 @@ pub async fn handle(config_command: crate::ConfigCommands, config: &mut Config) 
                         }))?
                     );
                 } else if populated {
-                    println!(
-                        "{}",
-                        ta(
-                            "cli-config-secret-set",
-                            &[("path", &path)],
-                            "is set (encrypted secret, value not displayed)"
-                        )
-                    );
+                    println!("{path} is set (encrypted secret — value not displayed)");
                 } else {
-                    println!(
-                        "{}",
-                        ta(
-                            "cli-config-secret-unset",
-                            &[("path", &path)],
-                            "is not set (encrypted secret)"
-                        )
-                    );
+                    println!("{path} is not set (encrypted secret)");
                 }
             } else {
                 match config.get_prop(&path) {
@@ -541,10 +520,7 @@ pub async fn handle(config_command: crate::ConfigCommands, config: &mut Config) 
                 };
                 println!("{}", serde_json::to_string_pretty(&envelope)?);
             } else {
-                println!(
-                    "{}",
-                    ta("cli-config-updated", &[("path", &path)], "updated")
-                );
+                println!("{path} updated.");
             }
             Ok(())
         }
@@ -574,13 +550,7 @@ pub async fn handle(config_command: crate::ConfigCommands, config: &mut Config) 
                 let envelope = serde_json::json!({"initialized": initialized});
                 println!("{}", serde_json::to_string_pretty(&envelope)?);
             } else if initialized.is_empty() {
-                println!(
-                    "{}",
-                    t(
-                        "cli-config-all-configured",
-                        "All sections already configured."
-                    )
-                );
+                println!("All sections already configured.");
             } else {
                 println!(
                     "Initialized {} section(s) with defaults:",
@@ -589,13 +559,7 @@ pub async fn handle(config_command: crate::ConfigCommands, config: &mut Config) 
                 for name in &initialized {
                     println!("  {name}");
                 }
-                println!(
-                    "\n{}",
-                    t(
-                        "cli-config-review-hint",
-                        "Run `rei config list` to review, then set required fields."
-                    )
-                );
+                println!("\nRun `rei config list` to review, then set required fields.");
             }
             Ok(())
         }
@@ -612,7 +576,7 @@ pub async fn handle(config_command: crate::ConfigCommands, config: &mut Config) 
                 });
                 println!("{}", serde_json::to_string_pretty(&envelope)?);
             } else if validation.is_ok() {
-                println!("{}", t("cli-config-valid", "Config is valid."));
+                println!("Config is valid.");
             }
             validation
         }
@@ -936,14 +900,7 @@ pub async fn handle(config_command: crate::ConfigCommands, config: &mut Config) 
                 let body = serde_json::json!({"saved": true, "results": results});
                 println!("{}", serde_json::to_string_pretty(&body)?);
             } else {
-                println!(
-                    "{}",
-                    ta(
-                        "cli-config-applied-ops",
-                        &[("count", &results.len().to_string())],
-                        "Applied operations"
-                    )
-                );
+                println!("Applied {count} operation(s):", count = results.len());
                 for entry in &results {
                     let op = entry.get("op").and_then(|v| v.as_str()).unwrap_or("?");
                     let path = entry.get("path").and_then(|v| v.as_str()).unwrap_or("?");

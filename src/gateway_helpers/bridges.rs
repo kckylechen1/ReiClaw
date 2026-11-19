@@ -4,7 +4,6 @@
 
 use anyhow::{Result, bail};
 
-use super::{t, ta};
 use crate::BridgeCommands;
 use crate::config::Config;
 use reiclaw_config::schema::GatewayBridgeConfig;
@@ -49,22 +48,18 @@ async fn add(
     rotate: bool,
 ) -> Result<()> {
     if !valid_name(name) {
-        bail!(ta(
-            "cli-bridge-invalid-name",
-            &[("name", name)],
-            "invalid name"
+        bail!(format!(
+            "Invalid bridge name \"{name}\": use letters, digits, '-' and '_'."
         ));
     }
     let existing = config.gateway.bridges.get(name).cloned();
     if existing.is_some() && !rotate {
-        bail!(ta("cli-bridge-exists", &[("name", name)], "bridge exists"));
+        bail!(format!(
+            "Bridge \"{name}\" already exists; pass --rotate to replace its token."
+        ));
     }
     if existing.is_none() && rotate {
-        bail!(ta(
-            "cli-bridge-unknown",
-            &[("name", name)],
-            "unknown bridge"
-        ));
+        bail!(format!("No bridge named \"{name}\" is configured."));
     }
     crate::config::current::ensure_disk_at_current_version(&config.config_path)?;
 
@@ -84,48 +79,37 @@ async fn add(
     }
     Box::pin(config.save_dirty()).await?;
 
-    println!(
-        "{}",
-        ta("cli-bridge-added", &[("name", name)], "bridge added")
-    );
+    println!("Bridge \"{name}\" saved in [gateway.bridges.{name}].");
     println!();
-    println!("{}", t("cli-bridge-token-once", "bridge token"));
+    println!("Bridge token (shown only once; give it to the bridge, e.g. as REI_GATEWAY_TOKEN):");
     println!("  {token}");
     println!();
     if scope.is_empty() {
-        println!("{}", t("cli-bridge-scope-none", "no chat sessions"));
-    } else {
         println!(
-            "{}",
-            ta("cli-bridge-scope", &[("scope", &scope)], "sessions")
+            "This token may open no chat session; add --session or --session-prefix to allow some."
         );
+    } else {
+        println!("Chat sessions this token may open: {scope}");
     }
-    println!("{}", t("cli-bridge-apply", "restart the gateway"));
+    println!("Restart the gateway (or POST /admin/reload) to apply.");
     Ok(())
 }
 
 async fn remove(config: &mut Config, name: &str) -> Result<()> {
     if config.gateway.bridges.remove(name).is_none() {
-        bail!(ta(
-            "cli-bridge-unknown",
-            &[("name", name)],
-            "unknown bridge"
-        ));
+        bail!(format!("No bridge named \"{name}\" is configured."));
     }
     crate::config::current::ensure_disk_at_current_version(&config.config_path)?;
     config.mark_dirty(&format!("gateway.bridges.{name}"));
     Box::pin(config.save_dirty()).await?;
-    println!(
-        "{}",
-        ta("cli-bridge-removed", &[("name", name)], "bridge removed")
-    );
-    println!("{}", t("cli-bridge-apply", "restart the gateway"));
+    println!("Bridge \"{name}\" removed; its token no longer works.");
+    println!("Restart the gateway (or POST /admin/reload) to apply.");
     Ok(())
 }
 
 fn list(config: &Config) {
     if config.gateway.bridges.is_empty() {
-        println!("{}", t("cli-bridge-list-empty", "no bridges"));
+        println!("No bridges configured. Add one with: rei gateway bridge add <name>");
         return;
     }
     let mut names: Vec<&String> = config.gateway.bridges.keys().collect();
@@ -133,18 +117,11 @@ fn list(config: &Config) {
     for name in names {
         let scope = scope_text(&config.gateway.bridges[name]);
         let scope = if scope.is_empty() {
-            t("cli-bridge-list-no-sessions", "none")
+            "(none)".to_string()
         } else {
             scope
         };
-        println!(
-            "{}",
-            ta(
-                "cli-bridge-list-row",
-                &[("name", name), ("scope", &scope)],
-                "bridge"
-            )
-        );
+        println!("{name}: sessions {scope}");
     }
 }
 

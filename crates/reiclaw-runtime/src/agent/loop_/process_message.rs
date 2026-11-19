@@ -222,14 +222,6 @@ pub async fn process_message_with_task_identity(
                 &provider_runtime_options,
             )?;
 
-        // ── Initialize locale-aware tool descriptions ──────────────────
-        let _i18n_locale = config
-            .locale
-            .as_deref()
-            .filter(|s| !s.is_empty())
-            .map(ToString::to_string)
-            .unwrap_or_else(crate::i18n::detect_locale);
-
         let mut tool_descs: Vec<(&str, &str)> = vec![
             ("shell", "Execute terminal commands."),
             ("file_read", "Read file contents."),

@@ -11,7 +11,7 @@ reiclaw-policy.workspace = true
 reiclaw-http.workspace = true
 reiclaw-api.workspace = true
 reiclaw-infra.workspace = true
-reiclaw-config = { workspace = true, features = ["i18n"] }
+reiclaw-config.workspace = true
 reiclaw-log.workspace = true
 reiclaw-providers.workspace = true
 reiclaw-memory.workspace = true
@@ -90,7 +90,6 @@ sandbox-bubblewrap = []
 heavy-tests = []
 
 [dev-dependencies]
-reiclaw-config = { workspace = true, features = ["test-helpers"] }
 axum = { version = "0.8", default-features = false, features = ["http1", "json", "tokio"] }
 rcgen = "0.13"
 tempfile = "3.26"

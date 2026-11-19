@@ -2,9 +2,8 @@
 
 use crate::load::default_path_under_config_dir;
 pub use crate::load::{
-    FTL_CATALOGS, RuntimeConfigKind, classify_runtime_config_kind, ensure_bootstrap_files,
-    ftl_locale_dir, read_persisted_proxy_for_boot, resolve_config_dir_for_data,
-    resolve_runtime_dirs,
+    RuntimeConfigKind, classify_runtime_config_kind, ensure_bootstrap_files,
+    read_persisted_proxy_for_boot, resolve_config_dir_for_data, resolve_runtime_dirs,
 };
 
 pub(crate) use crate::save::lookup_prop_value_in_table;
@@ -498,17 +497,6 @@ pub struct Config {
     #[serde(default)]
     #[nested]
     pub file_download: FileDownloadConfig,
-
-    /// Locale for tool descriptions (e.g. `"en"`, `"zh-CN"`).
-    ///
-    /// When set, tool descriptions shown in system prompts are loaded from
-    /// Fluent `.ftl` locale files. Falls back to embedded English, then to
-    /// hardcoded descriptions.
-    ///
-    /// If omitted or empty, the locale is auto-detected from the host
-    /// system's locale (defaulting to `"en"` if that can't be determined).
-    #[serde(default)]
-    pub locale: Option<String>,
 
     /// Verifiable Intent (VI) credential issuance and constraint checking
     /// (`[verifiable_intent]`). No credential chain verifier exists yet, so the
@@ -9221,7 +9209,6 @@ impl Default for Config {
             file_upload: FileUploadConfig::default(),
             file_upload_bundle: FileUploadBundleConfig::default(),
             file_download: FileDownloadConfig::default(),
-            locale: None,
             verifiable_intent: VerifiableIntentConfig::default(),
             sop: HashMap::new(),
             shell_tool: ShellToolConfig::default(),

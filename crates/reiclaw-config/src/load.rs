@@ -97,21 +97,6 @@ fn default_config_dir() -> Result<PathBuf> {
     Ok(default_home_config_dir(&home))
 }
 
-/// Canonical on-disk directory for a locale's runtime FTL catalogues:
-/// `<config_dir>/data/ftl/<locale>/`. This is where `rei locales fetch`
-/// restores bundled translations and where the runtime i18n loader reads them.
-/// `<config_dir>` honors `REI_CONFIG_DIR` and `REICLAW_CONFIG_DIR`, and
-/// otherwise defaults to `~/.rei`.
-pub fn ftl_locale_dir(locale: &str) -> Result<PathBuf> {
-    Ok(default_config_dir()?.join("data").join("ftl").join(locale))
-}
-
-/// The FTL catalogues that `rei locales fetch` can restore from the
-/// current build, as `(name, output-filename)`. This is the single
-/// source of truth — a caller supplies only a catalog *name* matched against
-/// this table, never a path.
-pub const FTL_CATALOGS: &[(&str, &str)] = &[("cli", "cli.ftl"), ("tools", "tools.ftl")];
-
 /// Build a default path string by joining `relative` onto the resolved
 /// platform config dir. The form sees the resolved absolute path
 /// (`/home/<user>/.rei/<relative>` on Linux,
@@ -503,8 +488,9 @@ pub(crate) struct ExtraNestedModelProviderTable {
 impl Config {
     /// Return top-level TOML keys in `raw_toml` that Config does not recognise.
     ///
-    /// Keys present in `Config::default()` serialization pass immediately.
-    /// Remaining keys are probed: the key is deserialized in isolation and
+    /// Keys present in `Config::default()` serialization pass immediately, and
+    /// so do retired root fields, which their tombstone warning reports
+    /// instead. Remaining keys are probed: the key is deserialized in isolation and
     /// the result compared to the default — a changed output means serde
     /// consumed it (covers `Option<T>` fields and `#[serde(alias)]` names).
     pub fn unknown_keys(raw_toml: &str) -> Vec<String> {
@@ -521,7 +507,11 @@ impl Config {
         });
         raw.keys()
             .filter(|key| {
-                if defaults.contains_key(key.as_str()) {
+                if defaults.contains_key(key.as_str())
+                    || crate::validation_warnings::RETIRED_CONFIG_FIELDS
+                        .iter()
+                        .any(|(path, _)| path == key)
+                {
                     return false;
                 }
                 let mut t = toml::Table::new();

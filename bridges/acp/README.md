@@ -31,7 +31,5 @@ gateway owner grant, once-only permission choices, exact-turn cancellation and
 bounded S2 reconnect behavior. It does not execute client filesystem, terminal
 or MCP commands. Protocol output goes to stdout; diagnostics go to stderr.
 
-Permission labels use `reiclaw-config`'s optional `i18n` module, sharing the
-runtime's locale detection, embedded English and Chinese catalogs, disk
-overrides and fallback behavior. The bridge does not depend on the runtime,
-providers, memory, tools or gateway server crates.
+The bridge does not depend on the config, runtime, providers, memory, tools or
+gateway server crates.

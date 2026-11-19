@@ -84,7 +84,7 @@ async fn incomplete_cron_shutdown_blocks_reload_instead_of_clearing_live_claims(
     .await;
     assert_eq!(
         result.unwrap_err().to_string(),
-        crate::i18n::get_required_cli_string("daemon-cron-shutdown-incomplete"),
+        "Cron tasks did not stop before the shutdown deadline. Reload is stopped to prevent overlapping scheduled jobs; restart the daemon process.".to_string(),
     );
     assert!(
         !children.is_empty(),

@@ -3318,7 +3318,7 @@ async fn run_tool_call_loop_parallel_cancel_no_double_terminal_for_completed_cal
     );
     assert_eq!(
         cancel_results[0],
-        crate::i18n::get_required_cli_string("turn-tool-interrupted-before-result")
+        "[interrupted by user before this tool produced a result]".to_string()
     );
 }
 
@@ -4820,7 +4820,7 @@ async fn run_tool_call_loop_falls_back_after_repeated_malformed_tool_protocol() 
 
     assert_eq!(
         result,
-        crate::i18n::get_required_cli_string("channel-runtime-malformed-tool-output")
+        "I generated an internal tool-call format error and could not complete this request. Please try again.".to_string()
     );
     assert!(!result.contains("toolcalls"));
     assert_eq!(

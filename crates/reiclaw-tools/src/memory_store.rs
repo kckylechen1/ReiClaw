@@ -106,9 +106,7 @@ impl Tool for MemoryStoreTool {
                 return Ok(ToolResult {
                     success: false,
                     output: ToolOutput::default(),
-                    error: Some(crate::i18n::get_required_tool_string(
-                        "memory-store-conversation-scope-required",
-                    )),
+                    error: Some("Conversation memory requires a current session and a backend that preserves its scope.".to_string()),
                 });
             }
             session

@@ -6,8 +6,8 @@ use reiclaw_config::schema::{FirecrawlConfig, ProxyConfig, ProxyScope};
 use reiclaw_policy::SecurityPolicy;
 use serde_json::json;
 use std::net::{SocketAddr, ToSocketAddrs};
+use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
-use std::sync::{Arc, OnceLock};
 use std::time::Duration;
 
 /// Minimum body length to consider a standard fetch successful.
@@ -164,9 +164,9 @@ impl WebFetchTool {
             while !text.is_char_boundary(end) {
                 end -= 1;
             }
-            crate::i18n::get_required_tool_string_with_args(
-                "tool-web-fetch-response-truncated",
-                &[("body", &text[..end])],
+            format!(
+                "{body}\n\n... [Response truncated due to size limit] ...",
+                body = &text[..end]
             )
         } else {
             text.to_string()
@@ -302,12 +302,9 @@ impl WebFetchTool {
             return Ok(ToolResult {
                 success: false,
                 output: ToolOutput::default(),
-                error: Some(crate::i18n::get_required_tool_string_with_args(
-                    "tool-web-fetch-firecrawl-error-status",
-                    &[
-                        ("status", &status.as_u16().to_string()),
-                        ("body", &error_body),
-                    ],
+                error: Some(format!(
+                    "Firecrawl API error: HTTP {status} - {error_body}",
+                    status = status.as_u16()
                 )),
             });
         }
@@ -319,18 +316,18 @@ impl WebFetchTool {
             reiclaw_http::read_bounded_body(response, limit.map(|cap| cap.saturating_add(1)))
                 .await
                 .map_err(|error| {
-                    anyhow::Error::msg(crate::i18n::get_required_tool_string_with_args(
-                        "tool-web-fetch-firecrawl-error-read",
-                        &[("err", &error.to_string())],
+                    anyhow::Error::msg(format!(
+                        "Failed to read bounded Firecrawl response: {err}",
+                        err = error
                     ))
                 })?;
         if truncated || limit.is_some_and(|cap| bytes.len() > cap) {
             return Ok(ToolResult {
                 success: false,
                 output: ToolOutput::default(),
-                error: Some(crate::i18n::get_required_tool_string_with_args(
-                    "tool-web-fetch-firecrawl-error-size",
-                    &[("limit", &limit.unwrap_or(usize::MAX).to_string())],
+                error: Some(format!(
+                    "Firecrawl response exceeds the JSON body limit of {limit} bytes",
+                    limit = limit.unwrap_or(usize::MAX)
                 )),
             });
         }
@@ -457,10 +454,7 @@ impl Tool for WebFetchTool {
     }
 
     fn description(&self) -> &str {
-        static DESCRIPTION: OnceLock<String> = OnceLock::new();
-        DESCRIPTION.get_or_init(|| {
-            crate::i18n::get_required_tool_string("tool-web-fetch-pinned-description")
-        })
+        "Fetch a web page and return its content as clean plain text. HTML pages are converted to readable text; JSON and plain text are returned as-is. Only GET requests; follows same-host redirects using the validated destination addresses and blocks cross-host redirects. Falls back to Firecrawl for JS-heavy/bot-blocked sites if enabled, except after redirect policy rejection. Subject to configured domain and private-host policy."
     }
 
     fn parameters_schema(&self) -> serde_json::Value {
@@ -603,13 +597,22 @@ struct ResolvedWebFetchTarget {
 }
 
 fn pinning_error(key: &str) -> anyhow::Error {
+    let message = match key {
+        "tool-web-fetch-error-proxy" => {
+            "web_fetch cannot use a configured proxy while enforcing validated destination addresses. Disable the proxy for tool.web_fetch to use this tool."
+        }
+        "tool-web-fetch-error-cross-host" => {
+            "Cross-host redirects are blocked so DNS validation remains pinned."
+        }
+        _ => "Unable to resolve and validate the web_fetch destination.",
+    };
     ::reiclaw_log::record!(
         WARN,
         ::reiclaw_log::Event::new(module_path!(), ::reiclaw_log::Action::Reject)
             .with_attrs(json!({"error_key": key})),
         "web_fetch: pinned transport rejected"
     );
-    anyhow::Error::msg(crate::i18n::get_required_tool_string(key))
+    anyhow::Error::msg(message)
 }
 
 fn pin_resolved_host(

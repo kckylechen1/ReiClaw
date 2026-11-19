@@ -33,7 +33,7 @@ pub(crate) struct Scheduling {
 
 fn failure(id: Option<&str>, code: &str) -> Reply {
     let mut reply = json!({"type":"error", "code":code,
-        "message":reiclaw_runtime::i18n::get_required_cli_string("gateway-intake-unavailable")});
+        "message":"The input could not be safely resumed. Reconnect to check its durable receipt before sending it again."});
     stamp_request_id(&mut reply, id);
     (Some(reply), None)
 }
@@ -163,12 +163,15 @@ pub(super) fn resume(
         "cursor":snapshot.cursor,"unknown":unknown,"receipts":receipts});
     if frame["control_version"].as_u64() == Some(1) {
         let mut control = conversation.enable_turn_controls();
-        control["idle_message"] =
-            reiclaw_runtime::i18n::get_required_cli_string("gateway-cancel-idle").into();
+        control["idle_message"] = "No running turn was observed; no stop was sent."
+            .to_string()
+            .into();
         control["unknown_message"] =
-            reiclaw_runtime::i18n::get_required_cli_string("gateway-cancel-unknown").into();
+            "The stop outcome is unknown. It will not be sent again automatically."
+                .to_string()
+                .into();
         control["not_sent_message"] =
-            reiclaw_runtime::i18n::get_required_cli_string("gateway-cancel-not-sent").into();
+            "The stop was not sent. Reconnect or wait for pending stop outcomes before trying again.".to_string().into();
         ready["control"] = control;
     }
     (Some(ready), start)

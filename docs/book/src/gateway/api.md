@@ -682,9 +682,8 @@ Build the `rei-acp-bridge` binary from the independent
 scripts/dev/cargo-local.sh build --release --locked -p reiclaw-bridge-acp --bin rei-acp-bridge
 ```
 
-The bridge uses JSON-RPC and gateway transport, with shared locale discovery
-and Fluent strings from `reiclaw-config`. It does not compile the runtime,
-providers, memory, tools or gateway crates, and never constructs an Agent or
+The bridge uses JSON-RPC and gateway transport. It does not compile the config,
+runtime, providers, memory, tools or gateway crates, and never constructs an Agent or
 ACP database. The source installer and Nix package also install this binary
 when the selected root features enable `agent-runtime`, including indirectly.
 Point Zed's custom

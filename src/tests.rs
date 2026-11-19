@@ -204,7 +204,7 @@ fn ensure_map_key_ignores_non_map_paths() {
     use crate::config::schema::Config;
     let mut config = Config::default();
     config.ensure_map_key_for_path("gateway.port");
-    config.ensure_map_key_for_path("locale");
+    config.ensure_map_key_for_path("schema_version");
 }
 
 #[test]
@@ -1502,7 +1502,7 @@ async fn paircode_owner_secret_rejects_nonlocal_authority_before_reading_token()
             .unwrap();
         assert_eq!(
             err.to_string(),
-            gateway_helpers::t("cli-paircode-local-only", "")
+            "Pairing-code requests must target loopback. Run this on the gateway host with --host 127.0.0.1.".to_string()
         );
     }
     assert!(

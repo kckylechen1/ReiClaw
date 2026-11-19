@@ -36,6 +36,12 @@ pub mod turn_context;
 
 pub use turn::context::TurnMeta;
 
+/// Committed in place of, or after, a reply the user interrupted.
+pub const INTERRUPTED_BY_USER_MARKER: &str = "[interrupted by user]";
+
+/// Committed when the provider stream broke off before the reply finished.
+pub const STREAM_INTERRUPTED_MARKER: &str = "[stream interrupted]";
+
 pub(crate) fn is_runtime_approved_arg_tool(tool_name: &str) -> bool {
     matches!(
         tool_name,

@@ -256,9 +256,10 @@ pub fn estimate_system_floor_tokens(history: &[ChatMessage]) -> usize {
 pub fn context_floor_remediation(system_floor: usize, budget: usize) -> String {
     let floor_s = system_floor.to_string();
     let budget_s = budget.to_string();
-    crate::i18n::get_required_cli_string_with_args(
-        "history-trim-floor-exceeds-budget",
-        &[("floor", floor_s.as_str()), ("budget", budget_s.as_str())],
+    format!(
+        "system prompt and tool definitions ({floor} tokens) alone meet or exceed the context budget ({budget} tokens); raise [runtime_profiles.<name>] max_context_tokens or reduce the tool surface by disabling unused integrations",
+        budget = budget_s.as_str(),
+        floor = floor_s.as_str()
     )
 }
 

@@ -788,7 +788,6 @@ mod tests {
 
         const UNGROUPED: &[&str] = &[
             "escalation",
-            "locale",
             "file_upload",
             "file_upload_bundle",
             "file_download",

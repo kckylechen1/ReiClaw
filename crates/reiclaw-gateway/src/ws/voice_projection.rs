@@ -53,7 +53,7 @@ impl Error {
 
     pub(super) fn frame(self) -> serde_json::Value {
         serde_json::json!({"type":"error", "code": self.code(),
-            "message": reiclaw_runtime::i18n::get_required_cli_string("gateway-voice-projection-unavailable")})
+            "message": "Voice could not start. Check the carrier provider and the owner's governed identity, then reconnect."})
     }
 
     pub(super) fn response(self) -> Response {

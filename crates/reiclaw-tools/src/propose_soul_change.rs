@@ -236,17 +236,12 @@ impl Tool for ProposeSoulChangeTool {
                  Nothing was recorded; wait until they are reviewed."
             )),
             Ok(Err(SoulProfileError::ToneValidation { key, .. })) => {
-                Self::failure(crate::i18n::get_required_tool_string(key))
+                Self::failure(SoulProfileError::tone_validation_text(key).to_string())
             }
-            Ok(Err(SoulProfileError::ToneDialCooldown { key, .. })) => {
-                Self::failure(crate::i18n::get_required_tool_string_with_args(
-                    "soul-tone-dial-cooldown",
-                    &[
-                        ("dial", &key),
-                        ("days", &SOUL_TONE_DIAL_COOLDOWN_DAYS.to_string()),
-                    ],
-                ))
-            }
+            Ok(Err(SoulProfileError::ToneDialCooldown { key, .. })) => Self::failure(format!(
+                "The {key} dial was changed by an approved proposal less than {days} days ago, so it cannot be proposed again yet.",
+                days = SOUL_TONE_DIAL_COOLDOWN_DAYS
+            )),
             Ok(Err(err @ SoulProfileError::Invalid { .. })) => Self::failure(err.to_string()),
             Ok(Err(err)) => Self::failure(format!("Could not record the proposal: {err}")),
             Err(_) => Self::failure("Could not record the proposal: store task failed".into()),
@@ -334,9 +329,7 @@ mod tests {
         assert!(!rejected.success);
         assert_eq!(
             rejected.error,
-            Some(crate::i18n::get_required_tool_string(
-                "soul-tone-step-limit"
-            ))
+            Some("Tone proposals may move a dial by at most one level.".to_string())
         );
         assert!(tool.execute(proposal("low")).await.unwrap().success);
         let store = SoulProfileStore::shared(dir.path()).unwrap();
@@ -442,9 +435,10 @@ mod tests {
             assert!(!lowered.success, "{level}");
             assert_eq!(
                 lowered.error,
-                Some(crate::i18n::get_required_tool_string(
-                    "soul-tone-challenge-up-only"
-                ))
+                Some(
+                    "The challenge dial may only be proposed upward; only your owner can lower it."
+                        .to_string()
+                )
             );
         }
         let raised = tool.execute(challenge("high")).await.unwrap();

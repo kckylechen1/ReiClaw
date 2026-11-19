@@ -1,7 +1,7 @@
 //! Session-bound User Model proposals. Owner review is the only promotion path.
 
 use std::path::PathBuf;
-use std::sync::{Arc, OnceLock};
+use std::sync::Arc;
 
 use async_trait::async_trait;
 use reiclaw_api::companion::{
@@ -42,15 +42,11 @@ struct Correction {
     semantic_key: String,
 }
 
-fn text(key: &str) -> String {
-    crate::i18n::get_required_tool_string(key)
-}
-
-fn denied(key: &str) -> ToolResult {
+fn denied(message: &str) -> ToolResult {
     ToolResult {
         success: false,
         output: ToolOutput::default(),
-        error: Some(text(key)),
+        error: Some(message.to_string()),
     }
 }
 
@@ -61,8 +57,7 @@ impl Tool for NoteOwnerCorrectionTool {
     }
 
     fn description(&self) -> &str {
-        static DESCRIPTION: OnceLock<String> = OnceLock::new();
-        DESCRIPTION.get_or_init(|| text("tool-note-owner-correction"))
+        "Record a lasting correction from the owner's current message as a User Model candidate for review. It applies only to this session after owner acceptance. This changes no active User Model or Soul state. Evidence is supplied by the runtime; do not infer sensitive personal data or propose execution permissions."
     }
 
     fn parameters_schema(&self) -> serde_json::Value {
@@ -70,8 +65,8 @@ impl Tool for NoteOwnerCorrectionTool {
             "type": "object", "additionalProperties": false,
             "properties": {
                 "kind": {"type": "string", "enum": ["value", "goal", "preference", "habit", "constraint"]},
-                "statement": {"type": "string", "description": text("tool-owner-correction-statement")},
-                "semantic_key": {"type": "string", "description": text("tool-owner-correction-key")}
+                "statement": {"type": "string", "description": "One corrected value, goal, preference, habit or constraint, on one line of at most 240 bytes."},
+                "semantic_key": {"type": "string", "description": "Stable semantic key, at most 64 ASCII letters, digits, dots, underscores or hyphens."}
             },
             "required": ["kind", "statement", "semantic_key"]
         })
@@ -79,7 +74,9 @@ impl Tool for NoteOwnerCorrectionTool {
 
     async fn execute(&self, args: serde_json::Value) -> anyhow::Result<ToolResult> {
         let Ok(correction) = serde_json::from_value::<Correction>(args) else {
-            return Ok(denied("tool-owner-correction-invalid"));
+            return Ok(denied(
+                "Supply only kind, statement and semantic_key. Owner identity, evidence and scope are runtime-owned.",
+            ));
         };
         let context = OWNER_CORRECTION_CONTEXT
             .try_with(|resolve| resolve())
@@ -94,10 +91,14 @@ impl Tool for NoteOwnerCorrectionTool {
                 && !c.session_key.trim().is_empty()
                 && session.as_deref() == Some(c.session_key.as_str())
         }) else {
-            return Ok(denied("tool-owner-correction-denied"));
+            return Ok(denied(
+                "A current authenticated owner message and matching session are required to record a correction.",
+            ));
         };
         let Some((owner, data_dir)) = (self.resolve)() else {
-            return Ok(denied("tool-owner-correction-denied"));
+            return Ok(denied(
+                "A current authenticated owner message and matching session are required to record a correction.",
+            ));
         };
         let admitted = match &context.ingress.source {
             UserMessageSource::Operator => true,
@@ -109,12 +110,16 @@ impl Tool for NoteOwnerCorrectionTool {
             }
         };
         if !admitted || !data_dir.is_dir() {
-            return Ok(denied("tool-owner-correction-denied"));
+            return Ok(denied(
+                "A current authenticated owner message and matching session are required to record a correction.",
+            ));
         }
         let Some(owner_text) =
             reiclaw_memory::companion::reflection::owner_text(&context.ingress.text)
         else {
-            return Ok(denied("tool-owner-correction-denied"));
+            return Ok(denied(
+                "A current authenticated owner message and matching session are required to record a correction.",
+            ));
         };
         let now = std::time::SystemTime::now()
             .duration_since(std::time::UNIX_EPOCH)
@@ -139,11 +144,11 @@ impl Tool for NoteOwnerCorrectionTool {
         Ok(match result {
             Ok(Some(_)) => ToolResult {
                 success: true,
-                output: text("tool-owner-correction-recorded").into(),
+                output: "Correction recorded in the review inbox for this session. Nothing has changed until the owner accepts it.".to_string().into(),
                 error: None,
             },
-            Ok(None) => denied("tool-owner-correction-pending"),
-            Err(_) => denied("tool-owner-correction-store-error"),
+            Ok(None) => denied("No new candidate was recorded: this correction is already pending or the review queue is full."),
+            Err(_) => denied("Could not record the correction. Check the statement and semantic key, then try again."),
         })
     }
 }

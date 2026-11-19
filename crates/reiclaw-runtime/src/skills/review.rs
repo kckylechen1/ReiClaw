@@ -145,13 +145,7 @@ pub async fn maybe_run_skill_review(
             let summary =
                 summarize_actions(&receipts, &review_history[fork_start_len..], &final_text);
             if !summary.is_empty() {
-                println!(
-                    "{}",
-                    crate::i18n::get_required_cli_string_with_args(
-                        "cli-skills-review-summary",
-                        &[("summary", &summary)],
-                    )
-                );
+                println!("  💾 Skill review: {summary}");
             }
         }
         Err(e) => {

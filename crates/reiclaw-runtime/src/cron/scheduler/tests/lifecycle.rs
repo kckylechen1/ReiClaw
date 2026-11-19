@@ -77,7 +77,7 @@ async fn noisy_shell_finishes_with_bounded_stdout_and_stderr() {
     assert!(config.data_dir.join("completed").exists());
     assert!(output.contains("stdout-start:"));
     assert!(output.contains("stderr-start:"));
-    let marker = crate::i18n::get_required_cli_string("cron-shell-output-truncated");
+    let marker = "...[output truncated]".to_string();
     assert_eq!(output.matches(&marker).count(), 2);
     assert!(output.len() < 2 * crate::cron::store::MAX_CRON_OUTPUT_BYTES + 256);
 }

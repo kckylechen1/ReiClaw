@@ -1689,7 +1689,8 @@ async fn run_job_command_with_timeout(
         // Drain mode does not currently return OutputLimit. Keep any future
         // interruption non-retryable instead of replaying a partial command.
         ProcessOutcome::OutputLimit => ShellJobOutcome::Interrupted(
-            crate::i18n::get_required_cli_string("cron-shell-output-limit"),
+            "Shell job stopped at its output limit; it will not be retried automatically."
+                .to_string(),
         ),
     }
 }
@@ -1698,9 +1699,7 @@ fn format_shell_capture(bytes: &[u8], truncated: bool) -> String {
     let mut text = String::from_utf8_lossy(bytes).trim().to_string();
     if truncated {
         text.push('\n');
-        text.push_str(&crate::i18n::get_required_cli_string(
-            "cron-shell-output-truncated",
-        ));
+        text.push_str("...[output truncated]");
     }
     text
 }

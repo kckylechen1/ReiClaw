@@ -9,15 +9,11 @@ use reiclaw_api::tool::{Tool, ToolOutput, ToolResult};
 use reiclaw_memory::Memory;
 use serde_json::json;
 use std::fmt::Write;
-use std::sync::{Arc, OnceLock};
+use std::sync::Arc;
 
 const DEFAULT_EPISODE_LIMIT: usize = 5;
 const MAX_EPISODE_LIMIT: usize = 25;
 const MAX_DAILY_DIGEST_LIMIT: usize = 5;
-
-fn tool_text(key: &str) -> String {
-    crate::i18n::get_required_tool_string(key)
-}
 
 fn source_kind_label(kind: EpisodeSourceKind) -> &'static str {
     match kind {
@@ -100,8 +96,7 @@ impl Tool for EpisodeReadTool {
     }
 
     fn description(&self) -> &str {
-        static DESCRIPTION: OnceLock<String> = OnceLock::new();
-        DESCRIPTION.get_or_init(|| tool_text("tool-episode-read"))
+        "Read non-superseded sleep memory episodes for this agent within an optional RFC 3339 time window or session, optionally including recent daily digests. Superseded episodes are excluded; inspect newer turns before treating early attempts as settled outcomes."
     }
 
     fn parameters_schema(&self) -> serde_json::Value {
@@ -110,23 +105,23 @@ impl Tool for EpisodeReadTool {
             "properties": {
                 "since": {
                     "type": "string",
-                    "description": tool_text("tool-episode-read-param-since")
+                    "description": "Optional RFC 3339 lower bound on episode ended_at."
                 },
                 "until": {
                     "type": "string",
-                    "description": tool_text("tool-episode-read-param-until")
+                    "description": "Optional RFC 3339 upper bound on episode ended_at."
                 },
                 "session_id": {
                     "type": "string",
-                    "description": tool_text("tool-episode-read-param-session-id")
+                    "description": "Optional session key filter."
                 },
                 "limit": {
                     "type": "integer",
-                    "description": tool_text("tool-episode-read-param-limit")
+                    "description": "Max episodes to return (default: 5, max: 25)."
                 },
                 "include_daily_digests": {
                     "type": "boolean",
-                    "description": tool_text("tool-episode-read-param-include-daily-digests")
+                    "description": "Set true to also include recent daily digest summaries."
                 }
             }
         })

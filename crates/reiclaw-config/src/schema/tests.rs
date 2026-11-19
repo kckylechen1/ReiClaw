@@ -1886,7 +1886,6 @@ async fn config_toml_roundtrip() {
         file_upload: FileUploadConfig::default(),
         file_upload_bundle: FileUploadBundleConfig::default(),
         file_download: FileDownloadConfig::default(),
-        locale: None,
         verifiable_intent: VerifiableIntentConfig::default(),
         sop: HashMap::new(),
         shell_tool: ShellToolConfig::default(),
@@ -2516,8 +2515,8 @@ async fn config_save_keeps_operator_set_non_default_fields() {
         data_dir: dir.join("data"),
         ..Default::default()
     };
-    // Operator picked a non-default locale + provider entry.
-    config.locale = Some("ja-JP".into());
+    // Operator picked a non-default gateway port + provider entry.
+    config.gateway.port = 42618;
     config.providers.models.anthropic.insert(
         "claude_default".into(),
         AnthropicModelProviderConfig {
@@ -2531,8 +2530,8 @@ async fn config_save_keeps_operator_set_non_default_fields() {
     let raw = fs::read_to_string(&config.config_path).await.unwrap();
 
     assert!(
-        raw.contains("ja-JP"),
-        "operator-set locale must survive pruning; got:\n{raw}",
+        raw.contains("42618"),
+        "operator-set gateway port must survive pruning; got:\n{raw}",
     );
     assert!(
         raw.contains("claude_default"),
@@ -2630,7 +2629,6 @@ async fn config_save_and_load_tmpdir() {
         file_upload: FileUploadConfig::default(),
         file_upload_bundle: FileUploadBundleConfig::default(),
         file_download: FileDownloadConfig::default(),
-        locale: None,
         verifiable_intent: VerifiableIntentConfig::default(),
         sop: HashMap::new(),
         shell_tool: ShellToolConfig::default(),
@@ -3861,10 +3859,6 @@ async fn config_dir_env_precedence_prefers_rei_over_reiclaw_and_ignores_zeroclaw
         let (cfg, data) = resolve_runtime_dirs().await.unwrap();
         assert_eq!(cfg, rei_dir);
         assert_eq!(data, rei_dir.join("data"));
-        assert_eq!(
-            ftl_locale_dir("en").unwrap(),
-            rei_dir.join("data").join("ftl").join("en")
-        );
     }
 
     // Blank REI_CONFIG_DIR falls back cleanly to REICLAW_CONFIG_DIR.
@@ -3889,10 +3883,6 @@ async fn default_config_dir_uses_rei_without_zeroclaw_fallback() {
     let (cfg, data) = resolve_runtime_dirs().await.unwrap();
     assert_eq!(cfg, temp_home.join(".rei"));
     assert_eq!(data, temp_home.join(".rei").join("data"));
-    assert_eq!(
-        ftl_locale_dir("en").unwrap(),
-        temp_home.join(".rei").join("data").join("ftl").join("en")
-    );
 
     // Even if ~/.zeroclaw exists, ReiClaw stays purely on ~/.rei.
     fs::create_dir_all(temp_home.join(".zeroclaw"))
@@ -3901,14 +3891,6 @@ async fn default_config_dir_uses_rei_without_zeroclaw_fallback() {
     let (cfg, data) = resolve_runtime_dirs().await.unwrap();
     assert_eq!(cfg, temp_home.join(".rei"));
     assert_eq!(data, temp_home.join(".rei").join("data"));
-    assert_eq!(
-        ftl_locale_dir("zh-CN").unwrap(),
-        temp_home
-            .join(".rei")
-            .join("data")
-            .join("ftl")
-            .join("zh-CN")
-    );
 
     let _ = fs::remove_dir_all(&temp_home).await;
 }
@@ -4917,6 +4899,56 @@ async fn load_or_init_marks_whole_config_degraded_for_unparseable_file() {
         // SAFETY: test-only, single-threaded test runner.
         unsafe { std::env::remove_var("HOME") };
     }
+    let _ = fs::remove_dir_all(temp_home).await;
+}
+
+#[test]
+#[allow(clippy::large_futures)]
+async fn load_or_init_ignores_retired_ui_locale() {
+    // The always-on daemon's config may still carry the retired UI `locale`
+    // key. It must keep loading and saving: the key is reported by its
+    // tombstone, not as an unknown key, and degrades nothing.
+    let _env_guard = env_override_lock().await;
+    let temp_home =
+        std::env::temp_dir().join(format!("zeroclaw_test_home_{}", uuid::Uuid::new_v4()));
+    let workspace_dir = temp_home.join("profile-a");
+    let config_path = workspace_dir.join("config.toml");
+    let raw = "schema_version = 3\nlocale = \"zh-CN\"\n\n[gateway]\nport = 42618\n";
+    fs::create_dir_all(&workspace_dir).await.unwrap();
+    fs::write(&config_path, raw).await.unwrap();
+    let _home = EnvValueGuard::set("HOME", &temp_home);
+    let _rei_config = EnvValueGuard::remove("REI_CONFIG_DIR");
+    let _reiclaw_config = EnvValueGuard::remove("REICLAW_CONFIG_DIR");
+    let _data = EnvValueGuard::remove("REI_DATA_DIR");
+    let _workspace = EnvValueGuard::set("REI_WORKSPACE", &workspace_dir);
+
+    let mut config = Box::pin(Config::load_or_init()).await.unwrap();
+
+    assert_eq!(config.gateway.port, 42618);
+    assert!(Config::unknown_keys(raw).is_empty());
+    assert!(
+        config.degraded_sections.is_empty(),
+        "{:?}",
+        config.degraded_sections
+    );
+    assert!(
+        config.degraded_security.is_empty(),
+        "{:?}",
+        config.degraded_security
+    );
+    let locale: Vec<_> = config
+        .retired_surface_warnings
+        .iter()
+        .filter(|warning| warning.path == "locale")
+        .collect();
+    assert_eq!(locale.len(), 1, "{:?}", config.retired_surface_warnings);
+    assert_eq!(locale[0].code, "ui_locale_removed");
+
+    config.set_prop_persistent("gateway.port", "42619").unwrap();
+    config.save().await.unwrap();
+    let saved = fs::read_to_string(&config_path).await.unwrap();
+    assert!(saved.contains("42619"), "{saved}");
+
     let _ = fs::remove_dir_all(temp_home).await;
 }
 
@@ -10450,7 +10482,7 @@ async fn ensure_map_key_for_path_materializes_typed_provider_maps() {
 async fn ensure_map_key_for_path_ignores_plain_fields() {
     let mut config = Config::default();
     config.ensure_map_key_for_path("gateway.port");
-    config.ensure_map_key_for_path("locale");
+    config.ensure_map_key_for_path("schema_version");
     assert!(config.set_prop("gateway.port", "8080").is_ok());
 }
 

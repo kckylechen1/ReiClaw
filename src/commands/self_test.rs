@@ -1,7 +1,6 @@
 //! `zeroclaw self-test` — quick and full diagnostic checks.
 
 use anyhow::Result;
-use reiclaw_runtime::i18n::get_required_cli_string_with_args;
 use std::path::Path;
 
 /// Result of a single diagnostic check.
@@ -96,23 +95,12 @@ pub fn print_results(results: &[CheckResult]) {
     }
     println!();
     if failed == 0 {
-        println!(
-            "  \x1b[32m{}\x1b[0m",
-            get_required_cli_string_with_args(
-                "cli-selftest-all-passed",
-                &[("total", &total.to_string())]
-            )
-        );
+        println!("  \x1b[32mAll {total} checks passed.\x1b[0m", total = total);
     } else {
         println!(
-            "  \x1b[31m{}\x1b[0m",
-            get_required_cli_string_with_args(
-                "cli-selftest-some-failed",
-                &[
-                    ("failed", &failed.to_string()),
-                    ("total", &total.to_string())
-                ],
-            )
+            "  \x1b[31m{failed}/{total} checks failed.\x1b[0m",
+            failed = failed,
+            total = total
         );
     }
     println!();
@@ -267,13 +255,10 @@ fn channel_config_uncompiled_detail(
 ) -> String {
     let compiled = compiled.to_string();
     let configured = compiled_configured.to_string();
-    get_required_cli_string_with_args(
-        "cli-selftest-channel-config-uncompiled",
-        &[
-            ("compiled", compiled.as_str()),
-            ("configured", configured.as_str()),
-            ("names", names),
-        ],
+    format!(
+        "{compiled} compiled channel types, {configured} compiled/configured; configured but not compiled: {names}. Build from source with `./install.sh --source --preset full`, `--features channels-full`, or the specific `channel-*` feature.",
+        compiled = compiled.as_str(),
+        configured = configured.as_str()
     )
 }
 
@@ -284,13 +269,10 @@ fn channel_config_retired_detail(
 ) -> String {
     let compiled = compiled.to_string();
     let configured = compiled_configured.to_string();
-    get_required_cli_string_with_args(
-        "cli-selftest-channel-config-retired",
-        &[
-            ("compiled", compiled.as_str()),
-            ("configured", configured.as_str()),
-            ("names", names),
-        ],
+    format!(
+        "{compiled} channel types, {configured} configured; configured sections of retired transports (nothing runs): {names}. Remove those [channels.*] sections; live surfaces are the Telegram bridge and webhook ingress.",
+        compiled = compiled.as_str(),
+        configured = configured.as_str()
     )
 }
 
@@ -330,56 +312,29 @@ fn check_version() -> CheckResult {
 }
 
 fn check_web_dist_dir(config: &crate::config::Config) -> CheckResult {
-    let name = web_dist_dir_check_name();
+    let name = "web_dist_dir";
     match config.gateway.web_dist_dir.as_deref() {
-        None => CheckResult::pass(
-            name,
-            reiclaw_runtime::i18n::get_required_cli_string("cli-self-test-web-dist-dir-pass-unset"),
-        ),
-        Some(value) => match web_dist_dir_expansion_reason_key(value) {
-            None => CheckResult::pass(
+        None => CheckResult::pass(name, "not set (using auto-detect)".to_string()),
+        Some(value) => match web_dist_dir_expansion_reason(value) {
+            None => CheckResult::pass(name, format!("{value} (literal path)")),
+            Some(reason) => CheckResult::fail(
                 name,
-                reiclaw_runtime::i18n::get_required_cli_string_with_args(
-                    "cli-self-test-web-dist-dir-pass-literal",
-                    &[("path", value)],
+                format!(
+                    "WARNING: {value} — {reason}; gateway.web_dist_dir is read verbatim, so expand the value yourself (e.g. an absolute path)"
                 ),
             ),
-            Some(reason_key) => {
-                let reason = reiclaw_runtime::i18n::get_required_cli_string(reason_key);
-                CheckResult::fail(
-                    name,
-                    reiclaw_runtime::i18n::get_required_cli_string_with_args(
-                        "cli-self-test-web-dist-dir-fail-expansion",
-                        &[("path", value), ("reason", reason.as_str())],
-                    ),
-                )
-            }
         },
     }
 }
 
-/// Resolve the localized check name once and cache it as a `&'static str`
-/// (CheckResult::name is `&'static str` to stay copyable across the table
-/// renderer). Falls back to the bare identifier if the Fluent string is
-/// missing (mirrors the `missing_cli_string` warn-log behavior).
-fn web_dist_dir_check_name() -> &'static str {
-    use std::sync::OnceLock;
-    static CACHED: OnceLock<&'static str> = OnceLock::new();
-    CACHED.get_or_init(|| {
-        let resolved =
-            reiclaw_runtime::i18n::get_required_cli_string("cli-self-test-web-dist-dir-name");
-        Box::leak(resolved.into_boxed_str())
-    })
-}
-
-/// Return the Fluent reason key when `value` looks like it expects
-/// shell expansion the gateway will not perform. `None` means the value
-/// is a literal path that the gateway can resolve as-is.
-fn web_dist_dir_expansion_reason_key(value: &str) -> Option<&'static str> {
+/// Explain why `value` looks like it expects shell expansion the gateway
+/// will not perform. `None` means the value is a literal path that the
+/// gateway can resolve as-is.
+fn web_dist_dir_expansion_reason(value: &str) -> Option<&'static str> {
     if value.starts_with('~') {
-        Some("cli-web-dist-dir-reason-tilde")
+        Some("starts with `~` which is not expanded")
     } else if value.contains('$') {
-        Some("cli-web-dist-dir-reason-dollar")
+        Some("contains `$` which is not expanded")
     } else {
         None
     }
@@ -566,7 +521,7 @@ pub(crate) fn resolve_gateway_bearer_token(config: &crate::config::Config) -> Op
 mod tests {
     #[cfg(feature = "gateway")]
     use super::{build_websocket_probe_url, resolve_gateway_bearer_token};
-    use super::{format_probe_url, resolve_probe_host, web_dist_dir_expansion_reason_key};
+    use super::{format_probe_url, resolve_probe_host, web_dist_dir_expansion_reason};
     use reiclaw_config::schema::Config;
     use tempfile::TempDir;
 
@@ -602,37 +557,36 @@ mod tests {
     }
 
     #[test]
-    fn web_dist_dir_with_tilde_resolves_to_tilde_reason_key() {
+    fn web_dist_dir_with_tilde_resolves_to_tilde_reason() {
         // `~/web-dist` is read verbatim and silently fails.
-        // The predicate returns a Fluent key, not a bare phrase.
         assert_eq!(
-            web_dist_dir_expansion_reason_key("~/web-dist"),
-            Some("cli-web-dist-dir-reason-tilde")
+            web_dist_dir_expansion_reason("~/web-dist"),
+            Some("starts with `~` which is not expanded")
         );
         assert_eq!(
-            web_dist_dir_expansion_reason_key("~"),
-            Some("cli-web-dist-dir-reason-tilde")
+            web_dist_dir_expansion_reason("~"),
+            Some("starts with `~` which is not expanded")
         );
     }
 
     #[test]
-    fn web_dist_dir_with_env_var_resolves_to_dollar_reason_key() {
+    fn web_dist_dir_with_env_var_resolves_to_dollar_reason() {
         // `$HOME/web-dist` and `${HOME}/web-dist` are read verbatim.
         assert_eq!(
-            web_dist_dir_expansion_reason_key("$HOME/web-dist"),
-            Some("cli-web-dist-dir-reason-dollar")
+            web_dist_dir_expansion_reason("$HOME/web-dist"),
+            Some("contains `$` which is not expanded")
         );
         assert_eq!(
-            web_dist_dir_expansion_reason_key("${HOME}/web-dist"),
-            Some("cli-web-dist-dir-reason-dollar")
+            web_dist_dir_expansion_reason("${HOME}/web-dist"),
+            Some("contains `$` which is not expanded")
         );
         assert_eq!(
-            web_dist_dir_expansion_reason_key("/srv/$USER/dist"),
-            Some("cli-web-dist-dir-reason-dollar")
+            web_dist_dir_expansion_reason("/srv/$USER/dist"),
+            Some("contains `$` which is not expanded")
         );
         // Absolute and relative literal paths must NOT be flagged.
-        assert!(web_dist_dir_expansion_reason_key("/srv/reiclaw/web-dist").is_none());
-        assert!(web_dist_dir_expansion_reason_key("./dist").is_none());
+        assert!(web_dist_dir_expansion_reason("/srv/reiclaw/web-dist").is_none());
+        assert!(web_dist_dir_expansion_reason("./dist").is_none());
     }
 
     #[test]
@@ -646,16 +600,15 @@ mod tests {
         let result = super::check_web_dist_dir(&config);
         assert!(!result.passed, "tilde path must fail the check");
 
-        let expected_reason =
-            reiclaw_runtime::i18n::get_required_cli_string("cli-web-dist-dir-reason-tilde");
-        let expected_detail = reiclaw_runtime::i18n::get_required_cli_string_with_args(
-            "cli-self-test-web-dist-dir-fail-expansion",
-            &[("path", "~/web-dist"), ("reason", expected_reason.as_str())],
+        let expected_reason = "starts with `~` which is not expanded".to_string();
+        let expected_detail = format!(
+            "WARNING: {path} — {reason}; gateway.web_dist_dir is read verbatim, so expand the value yourself (e.g. an absolute path)",
+            path = "~/web-dist",
+            reason = expected_reason.as_str()
         );
         assert_eq!(result.detail, expected_detail);
 
-        let expected_name =
-            reiclaw_runtime::i18n::get_required_cli_string("cli-self-test-web-dist-dir-name");
+        let expected_name = "web_dist_dir".to_string();
         assert_eq!(result.name, expected_name.as_str());
     }
 
@@ -667,10 +620,7 @@ mod tests {
         let result = super::check_web_dist_dir(&config);
         assert!(result.passed);
 
-        let expected_detail = reiclaw_runtime::i18n::get_required_cli_string_with_args(
-            "cli-self-test-web-dist-dir-pass-literal",
-            &[("path", "/srv/reiclaw/web-dist")],
-        );
+        let expected_detail = format!("{path} (literal path)", path = "/srv/reiclaw/web-dist");
         assert_eq!(result.detail, expected_detail);
     }
 
@@ -680,8 +630,7 @@ mod tests {
         let result = super::check_web_dist_dir(&config);
         assert!(result.passed);
 
-        let expected_detail =
-            reiclaw_runtime::i18n::get_required_cli_string("cli-self-test-web-dist-dir-pass-unset");
+        let expected_detail = "not set (using auto-detect)".to_string();
         assert_eq!(result.detail, expected_detail);
     }
 

@@ -90,7 +90,6 @@ use reiclaw_policy::SecurityPolicy;
 use reiclaw_providers::{self, ModelProvider};
 use reiclaw_runtime::agent::memory_strategy::DefaultMemoryStrategy;
 use reiclaw_runtime::cost::CostTracker;
-use reiclaw_runtime::i18n;
 use reiclaw_runtime::platform;
 use reiclaw_runtime::security::pairing::{
     GATEWAY_ADMIN_TOKEN_HEADER, PairingGuard, constant_time_eq, gateway_admin_token_path,
@@ -2193,7 +2192,8 @@ fn is_needs_quickstart_err(e: &anyhow::Error) -> bool {
 }
 
 fn needs_quickstart_channel_reply() -> String {
-    i18n::get_required_cli_string("channel-needs-quickstart-reply")
+    "This agent isn't fully set up yet. The operator needs to run Quickstart before I can reply."
+        .to_string()
 }
 
 pub(crate) async fn run_gateway_chat_with_tools(

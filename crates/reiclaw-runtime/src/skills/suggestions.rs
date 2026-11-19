@@ -29,19 +29,15 @@ struct InstallSuggestion {
 
 impl InstallSuggestion {
     pub fn render_user_message(&self) -> String {
-        let (message_key, install_command) = match self.install_kind {
-            InstallKind::Skill => (
-                "cli-skills-install-suggestion",
-                format!("rei skills install {}", self.source),
-            ),
+        let install_command = match self.install_kind {
+            InstallKind::Skill => format!("rei skills install {}", self.source),
         };
-        crate::i18n::get_required_cli_string_with_args(
-            message_key,
-            &[
-                ("name", &self.name),
-                ("matched", &self.matched),
-                ("install_command", &install_command),
-            ],
+        format!(
+            "It looks like this request needs the `{name}` skill, but it is not installed.\n\n\
+             Matched capability: {matched}\n\
+             Next: Run `{install_command}` to install it.",
+            name = self.name,
+            matched = self.matched,
         )
     }
 }
