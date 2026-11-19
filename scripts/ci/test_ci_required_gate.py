@@ -1,14 +1,15 @@
 import unittest
 
-from required_gate import ALL_JOBS, FULL_JOBS, TARGETED_JOBS, validate
+from required_gate import ALL_JOBS, FULL_JOBS, FULL_SELECTION_OUTPUTS, TARGETED_JOBS, validate
 
 
-def result_set(full=False, docs_build=False, installer=False):
+def result_set(full=False, docs_build=False, installer=False, web=False):
     needs = {job: {"result": "skipped", "outputs": {}} for job in ALL_JOBS}
     needs["changes"] = {"result": "success", "outputs": {
         "full": str(full).lower(),
         "docs_build": str(docs_build).lower(),
         "installer": str(installer).lower(),
+        "web": str(web).lower(),
     }}
     needs["docs-style"]["result"] = "success"
     if full:
@@ -66,11 +67,23 @@ class GateTests(unittest.TestCase):
                 self.assertTrue(validate(needs, "pull_request"))
 
     def test_targeted_selection_output_is_required_for_full_lane(self):
-        for output in TARGETED_JOBS.values():
-            with self.subTest(output=output):
+        for output in (*TARGETED_JOBS.values(), *FULL_SELECTION_OUTPUTS):
+            with self.subTest(output=output, case="missing"):
                 needs = result_set(full=True)
                 del needs["changes"]["outputs"][output]
                 self.assertTrue(validate(needs, "pull_request"))
+            for bad in (None, "", "True", True, "yes"):
+                with self.subTest(output=output, case=bad):
+                    needs = result_set(full=True)
+                    needs["changes"]["outputs"][output] = bad
+                    self.assertTrue(validate(needs, "pull_request"))
+
+    def test_web_output_accepted_when_true_or_false_on_full_lane(self):
+        for web in (False, True):
+            for event in ("pull_request", "push", "merge_group"):
+                with self.subTest(web=web, event=event):
+                    needs = result_set(full=True, web=web)
+                    self.assertEqual(validate(needs, event), [])
 
     def test_missing_or_added_dependencies_cannot_silently_pass(self):
         for job in ALL_JOBS:

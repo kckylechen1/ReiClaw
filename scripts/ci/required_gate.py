@@ -11,6 +11,8 @@ import sys
 FULL_JOBS = {"lint", "build", "check", "test", "policy"}
 # Full-lane jobs that run only when the named `changes` output selects them.
 TARGETED_JOBS = {"installer-drift": "installer"}
+# Full-lane selection outputs consumed by conditional steps inside `policy`.
+FULL_SELECTION_OUTPUTS = ("web",)
 ALL_JOBS = FULL_JOBS | set(TARGETED_JOBS) | {"changes", "docs-style", "docs-build"}
 
 
@@ -36,6 +38,9 @@ def validate(needs: dict, event_name: str) -> list[str]:
             job for job, output in TARGETED_JOBS.items()
             if full and boolean_output(changes, output)
         }
+        if full:
+            for output in FULL_SELECTION_OUTPUTS:
+                boolean_output(changes, output)
     except (TypeError, ValueError) as error:
         return [str(error)]
     expected = {job: "skipped" for job in ALL_JOBS}

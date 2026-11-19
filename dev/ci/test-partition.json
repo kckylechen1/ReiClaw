@@ -1,7 +1,8 @@
 {
   "legs": {
     "runtime": [
-      "reiclaw-runtime"
+      "reiclaw-runtime",
+      "reiclaw-eval"
     ],
     "channels": [
       "reiclaw-gateway"
@@ -9,9 +10,6 @@
     "app": [
       "reiclaw",
       "reiclaw-config"
-    ],
-    "eval": [
-      "reiclaw-eval"
     ],
     "tail": [
       "fill-translations",
@@ -48,9 +46,6 @@
     "app": [
       "reiclaw/nodes"
     ],
-    "eval": [
-      "reiclaw-memory/memorycore"
-    ],
     "tail": [
       "reiclaw-memory/memorycore"
     ]
@@ -59,6 +54,9 @@
     "runtime": [
       {
         "name": "landlock",
+        "packages": [
+          "reiclaw-runtime"
+        ],
         "features": [
           "reiclaw-runtime/sandbox-landlock"
         ],

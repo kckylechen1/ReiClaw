@@ -70,13 +70,25 @@ check_phases() {
   local problems
   problems="$(jq -r '
     (.legs | keys) as $legs
+    | . as $root
     | ((.features // {}) | keys[] | select(. as $k | $legs | index($k) | not)
         | "features names unknown leg \(.)"),
       ((.extra_runs // {}) | keys[] | select(. as $k | $legs | index($k) | not)
         | "extra_runs names unknown leg \(.)"),
       ((.extra_runs // {}) | to_entries[] | .key as $leg | [.value[].name]
         | (.[] | select(. == "main") | "\($leg): an extra run may not be named main"),
-          (group_by(.)[] | select(length > 1) | "\($leg): duplicate extra run \(.[0])"))
+          (group_by(.)[] | select(length > 1) | "\($leg): duplicate extra run \(.[0])")),
+      ((.extra_runs // {}) | to_entries[] | .key as $leg
+        | ($root.legs[$leg] // []) as $leg_pkgs
+        | .value[] | select(has("packages")) | .name as $name | .packages as $pkgs
+        | if ($pkgs | type) != "array" then
+            "\($leg)/\($name): extra run packages must be an array"
+          elif ($pkgs | length) == 0 then
+            "\($leg)/\($name): extra run packages must be non-empty"
+          else
+            ($pkgs[] as $pkg | select(($pkg | type) != "string" or (($leg_pkgs | index($pkg)) | not))
+              | "\($leg)/\($name): package \($pkg) is not in leg \($leg)")
+          end)
   ' "$PARTITION")"
   if [[ -n "$problems" ]]; then
     die "test-partition.json phases: $problems"
@@ -160,6 +172,7 @@ if [[ -n "$phase" && "$phase" != main ]] \
   die "unknown phase '$phase' for leg '$leg' (known: main$(jq -r --arg leg "$leg" \
     '(.extra_runs[$leg] // [])[] | ", " + .name' "$PARTITION" | tr -d '\n'))"
 fi
+check_phases
 
 mapfile -t pkg_args < <(jq -r --arg leg "$leg" '.legs[$leg][] | "-p", .' "$PARTITION")
 features="$(jq -r --arg leg "$leg" '.features[$leg] // [] | join(",")' "$PARTITION")"
@@ -195,8 +208,12 @@ fi
 while IFS= read -r extra_run; do
   name="$(jq -r '.name' <<<"$extra_run")"
   [[ -z "$phase" || "$phase" == "$name" ]] || continue
+  mapfile -t extra_pkg_args < <(jq -r 'if has("packages") then .packages[] else empty end | "-p", .' <<<"$extra_run")
+  if [[ "${#extra_pkg_args[@]}" -eq 0 ]]; then
+    extra_pkg_args=("${pkg_args[@]}")
+  fi
   extra="$(jq -r '.features | join(",")' <<<"$extra_run")"
   filter="$(jq -r '.filter' <<<"$extra_run")"
   echo "--- extra run: $name"
-  run "${run_cmd[@]}" "${pkg_args[@]}" --features "${features:+$features,}$extra" -- "$filter"
+  run "${run_cmd[@]}" "${extra_pkg_args[@]}" --features "${features:+$features,}$extra" -- "$filter"
 done < <(jq -c --arg leg "$leg" '.extra_runs[$leg] // [] | .[]' "$PARTITION")

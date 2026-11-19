@@ -43,7 +43,7 @@ check() {
   diff -u "$fixture/expected" "$TEST_LEG_TRACE"
 }
 
-runtime='-p reiclaw-runtime --features reiclaw-runtime/heavy-tests\,reiclaw-runtime/memory-core'
+runtime='-p reiclaw-runtime -p reiclaw-eval --features reiclaw-runtime/heavy-tests\,reiclaw-runtime/memory-core'
 landlock='-p reiclaw-runtime --features reiclaw-runtime/heavy-tests\,reiclaw-runtime/memory-core\,reiclaw-runtime/sandbox-landlock -- landlock'
 for LEG_RUNNER in test nextest; do
   prefix=test
@@ -148,7 +148,10 @@ for broken in \
   '.features.ghost = ["x"]' \
   '.extra_runs.ghost = []' \
   '.extra_runs.runtime += [{"name":"main","features":["x"],"filter":"x"}]' \
-  '.extra_runs.runtime += [{"name":"landlock","features":["x"],"filter":"x"}]'; do
+  '.extra_runs.runtime += [{"name":"landlock","features":["x"],"filter":"x"}]' \
+  '.extra_runs.runtime[0].packages = []' \
+  '.extra_runs.runtime[0].packages = ["reiclaw-api"]' \
+  '.extra_runs.runtime[0].packages = "reiclaw-runtime"'; do
   jq "$broken" "$fixture/partition.orig" > dev/ci/test-partition.json
   run bash scripts/dev/leg.sh --matrix
   if [[ "$status" -eq 0 ]]; then
@@ -165,7 +168,7 @@ jq '.extra_runs.runtime += [{"name":"following","features":["following"],"filter
 mv "$fixture/partition.json" dev/ci/test-partition.json
 main="nextest run --locked $runtime"
 extra="nextest run --locked $landlock"
-following='nextest run --locked -p reiclaw-runtime --features reiclaw-runtime/heavy-tests\,reiclaw-runtime/memory-core\,following -- following'
+following='nextest run --locked -p reiclaw-runtime -p reiclaw-eval --features reiclaw-runtime/heavy-tests\,reiclaw-runtime/memory-core\,following -- following'
 run bash scripts/dev/leg.sh runtime
 check 0 "$main" "$extra" "$following"
 TEST_LEG_FAIL_EVENT="$extra" run bash scripts/dev/leg.sh runtime
