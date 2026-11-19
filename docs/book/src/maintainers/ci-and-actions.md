@@ -108,10 +108,6 @@ Dependabot has separate label configuration in `.github/dependabot.yml` for its 
 
 Runs on every PR open/edit/synchronize. Runs the validator unit tests (`scripts/check-pr-title.test.sh`) and checks the PR title against Conventional Commits (`scripts/check-pr-title.sh`).
 
-### Deploy mdBook docs to Pages (`docs-deploy.yml`)
-
-Triggered on tag push, on `master` pushes that touch `docs/book/`, `xtask/`, `locales.toml`, or the deploy workflow itself, nightly (to refresh code-derived pages such as rustdoc), and on `workflow_dispatch`; builds and publishes versioned docs to the `gh-pages` branch. The PR's read-only `Docs Build` job is separate from this publisher.
-
 ## Manual and Advisory Workflows
 
 ### Monthly Outdated Scan (`monthly-outdated.yml`)
@@ -169,8 +165,8 @@ All third-party refs are pinned to a full commit SHA with a trailing version com
 | `actions/checkout` (`v6.0.2`) | Most workflows | Repository checkout |
 | `actions/setup-node` (`v6.4.0`) | `ci.yml` | Node toolchain for the web-dashboard build |
 | `actions/upload-artifact` (`v7.0.1`) | `monthly-outdated.yml` | Upload build artifacts and monthly dependency scan reports |
-| `dtolnay/rust-toolchain` (`stable`) | `ci.yml`, `cross-platform-clippy.yml`, `daily-audit.yml`, `docs-deploy.yml` | Install Rust toolchain |
-| `Swatinem/rust-cache` (`v2.9.1`) | `ci.yml`, `cross-platform-clippy.yml`, `docs-deploy.yml` | Cargo build/dependency caching |
+| `dtolnay/rust-toolchain` (`stable`) | `ci.yml`, `cross-platform-clippy.yml`, `daily-audit.yml` | Install Rust toolchain |
+| `Swatinem/rust-cache` (`v2.9.1`) | `ci.yml`, `cross-platform-clippy.yml` | Cargo build/dependency caching |
 | `github/codeql-action/init` (`v3`) | `ci-code-analysis.yml` | Initialize CodeQL Rust analysis |
 | `github/codeql-action/analyze` (`v3`) | `ci-code-analysis.yml` | Upload CodeQL SARIF to the Security tab |
 

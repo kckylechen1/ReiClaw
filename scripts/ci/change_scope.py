@@ -19,7 +19,6 @@ DOC_BUILD_FILES = {
     "Cargo.lock",
     ".cargo/config.toml",
     ".github/workflows/ci.yml",
-    ".github/workflows/docs-deploy.yml",
     "docs/book/book.toml",
     "docs/book/src/SUMMARY.md",
     "locales.toml",
