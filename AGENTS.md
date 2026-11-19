@@ -60,6 +60,22 @@ Fork-specific facts (type placement, upstream divergences, known gaps) are in [`
 
 These fork rules and [PR Workflow](docs/book/src/maintainers/pr-workflow.md) govern repository binding, authorization, stack handling, and validation when older examples in contribution guides or skills disagree. Their substantive review, privacy, and security requirements still apply. The documented target for required checks must be verified against live GitHub settings; editing these files does not change cloud protection settings.
 
+## Landing
+
+- **Experiment off `master`.** Prototype in a branch or worktree without a PR; open one when the change is a keeper.
+- **Land through a PR.** Everything reaches `master` through a PR with a green `CI Required Gate`. Never push to `master` directly: several agents land there concurrently, and the always-on body runs it.
+- **Review by risk.** One independent read-only review of the final head is required only for:
+  - the Protected surfaces above;
+  - persistent data and migrations;
+  - secrets and credentials;
+  - changes that could let a failing check pass the required gate.
+
+  Everything else (features, refactors, deletions, docs, CI helpers) merges on green CI plus the author's own targeted checks.
+- **Bound the review.** A finding blocks only with a failing scenario this repository can actually reach, and the next round re-checks only the repair. Stop and ask the owner when the same blocker survives two rounds.
+- **Keep the PR body to the template's three lines**, adding a conditional line only when it applies.
+
+This section sets review depth and PR-body content; where [PR Workflow](docs/book/src/maintainers/pr-workflow.md) asks for more, this section wins.
+
 ## Validation
 
 Use `scripts/dev/cargo-local.sh` for host-side Cargo checks across linked worktrees; it shares the main checkout target and defaults to non-incremental compilation. Serialize checks sharing that target. At delivery closeout, measure retained targets and retire unused workspace artifacts only after confirming no live users; see the testing guide.
