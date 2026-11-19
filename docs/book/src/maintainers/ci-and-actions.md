@@ -110,7 +110,7 @@ Runs on every PR open/edit/synchronize. Runs the validator unit tests (`scripts/
 
 ### Deploy mdBook docs to Pages (`docs-deploy.yml`)
 
-Triggered on tag push, on `master` pushes that touch `docs/book/`, `xtask/`, `locales.toml`, or the deploy workflow itself, nightly (to refresh code-derived pages such as rustdoc), and on `workflow_dispatch`; builds and publishes versioned docs to the `gh-pages` branch. The PR's read-only `Docs Build` job is separate from this publisher. See [Release Runbook → Versioned documentation deployment](./release-runbook.md#step-7-versioned-documentation-deployment) for the version-floor and bootstrap rules.
+Triggered on tag push, on `master` pushes that touch `docs/book/`, `xtask/`, `locales.toml`, or the deploy workflow itself, nightly (to refresh code-derived pages such as rustdoc), and on `workflow_dispatch`; builds and publishes versioned docs to the `gh-pages` branch. The PR's read-only `Docs Build` job is separate from this publisher.
 
 ## Manual and Advisory Workflows
 
@@ -124,36 +124,17 @@ Every scan retains `outdated-output.txt` as a workflow artifact, including clean
 
 First triage step for a new issue: check if the reported outdated crates have semver-incompatible bumps and whether the consuming crate's API changed. If the bump is trivial (patch/minor), create a short dep-only PR. If the upgrade is blocked by semver breaks, close the issue with a note and the blocking crate name.
 
-### Cross-Platform Build (`cross-platform-build-manual.yml`)
-
-Manual trigger for building release binaries across the full target matrix: Linux x86_64/aarch64 GNU plus armv7 and arm hard-float, macOS Intel/ARM, and `aarch64-linux-android` (built with the NDK). Use this to verify a branch compiles cleanly on non-Linux targets before tagging.
-
 ### Cross-Platform Clippy (`cross-platform-clippy.yml`)
 
 Runs on PRs changing `crates/reiclaw-runtime/`, `crates/reiclaw-infra/`, or this workflow, as well as manual dispatch and the weekly schedule. Each selected run checks the workspace's targets on macOS aarch64 with `ci-all` and `-D warnings`. This catches test-only imports and conditional-compilation errors that a normal platform `cargo check` does not cover.
 
 Ordinary prose PRs do not trigger this workflow. It remains separate advisory coverage outside `CI Required Gate`; inspect its current-head results when the changed surface needs it. The Linux i686 and minimal-companion checks remain in the main workflow.
 
-### Release Stable (`release-stable-manual.yml`)
-
-Manual trigger for the full release pipeline. Builds all targets, creates the GitHub Release, and triggers the website redeploy. Homebrew Core detects new releases through its own autobump service. The workflow declares the `github-releases` environment; its required reviewers and other protection settings must be verified in the target repository.
-
-See the [Release Runbook](./release-runbook.md) for the full procedure.
-
-Homebrew Core's
-[official autobump service](https://docs.brew.sh/Autobump) discovers stable
-GitHub releases and opens formula bumps independently. Do not restore a
-project-owned Homebrew publisher or fork token; that duplicates Homebrew's
-authoritative automation.
-
 ## Required secrets
 
 | Secret | Used by |
 |---|---|
-| `WEBSITE_REPO_PAT` | `release-stable-manual.yml` (triggers the website repo redeploy) |
 | `GITHUB_TOKEN` (automatic) | Workflows that push commits or open PRs |
-
-The release pipeline does not publish to crates.io, so no `CARGO_REGISTRY_TOKEN` is required.
 
 ## Build cache behavior
 
@@ -186,18 +167,12 @@ All third-party refs are pinned to a full commit SHA with a trailing version com
 | Action | Used in | Purpose |
 |---|---|---|
 | `actions/checkout` (`v6.0.2`) | Most workflows | Repository checkout |
-| `actions/setup-node` (`v6.4.0`) | `release-stable-manual.yml`, `cross-platform-build-manual.yml` | Node toolchain for the web-dashboard build |
-| `actions/upload-artifact` (`v7.0.1`) | `release-stable-manual.yml`, `cross-platform-build-manual.yml`, `monthly-outdated.yml` | Upload build artifacts and monthly dependency scan reports |
-| `actions/download-artifact` (`v8.0.1`) | `release-stable-manual.yml`, `cross-platform-build-manual.yml` | Download build artifacts |
-| `dtolnay/rust-toolchain` (`stable`) | `ci.yml`, `release-stable-manual.yml`, `cross-platform-build-manual.yml`, `cross-platform-clippy.yml`, `daily-audit.yml`, `docs-deploy.yml` | Install Rust toolchain |
-| `Swatinem/rust-cache` (`v2.9.1`) | `ci.yml`, `release-stable-manual.yml`, `cross-platform-build-manual.yml`, `cross-platform-clippy.yml`, `docs-deploy.yml` | Cargo build/dependency caching |
-| `sigstore/cosign-installer` (`v3.8.1`) | `release-stable-manual.yml` | Install cosign for keyless signing of release assets |
-| `anchore/sbom-action` (`v0.17.9`) | `release-stable-manual.yml` | Generate SPDX + CycloneDX SBOMs for each release |
-| `slsa-framework/slsa-github-generator` (`v2.1.0`) | `release-stable-manual.yml` | Reusable workflow that produces SLSA L2 provenance for release artifacts |
+| `actions/setup-node` (`v6.4.0`) | `ci.yml` | Node toolchain for the web-dashboard build |
+| `actions/upload-artifact` (`v7.0.1`) | `monthly-outdated.yml` | Upload build artifacts and monthly dependency scan reports |
+| `dtolnay/rust-toolchain` (`stable`) | `ci.yml`, `cross-platform-clippy.yml`, `daily-audit.yml`, `docs-deploy.yml` | Install Rust toolchain |
+| `Swatinem/rust-cache` (`v2.9.1`) | `ci.yml`, `cross-platform-clippy.yml`, `docs-deploy.yml` | Cargo build/dependency caching |
 | `github/codeql-action/init` (`v3`) | `ci-code-analysis.yml` | Initialize CodeQL Rust analysis |
 | `github/codeql-action/analyze` (`v3`) | `ci-code-analysis.yml` | Upload CodeQL SARIF to the Security tab |
-
-The GitHub Release itself is created with `gh release create` inside the `publish` job, not a release action.
 
 Candidate allowlist patterns for that source inventory, when `selected` mode is the approved policy:
 

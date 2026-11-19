@@ -969,59 +969,6 @@ mod tests {
     }
 
     #[test]
-    fn release_workflows_delegate_target_policy_to_generator() {
-        let meta = cargo_metadata::MetadataCommand::new()
-            .manifest_path(root().join("Cargo.toml"))
-            .no_deps()
-            .exec()
-            .unwrap();
-        let exclusions = dist_target_exclusions(workspace_root_package(&meta).unwrap()).unwrap();
-        let release =
-            std::fs::read_to_string(root().join(".github/workflows/release-stable-manual.yml"))
-                .unwrap();
-        assert!(release.contains("features --selection dist --target \"${{ matrix.target }}\""));
-        assert!(!release.contains("excluded_features"));
-
-        let manual = std::fs::read_to_string(
-            root().join(".github/workflows/cross-platform-build-manual.yml"),
-        )
-        .unwrap();
-        assert!(manual.contains("distribution:"));
-        assert!(
-            manual.contains(
-                "default: dist\n        options:\n          - dist\n          - dist-broad"
-            )
-        );
-        assert!(
-            manual.contains(
-                "timeout-minutes: ${{ inputs.distribution == 'dist-broad' && 90 || 40 }}"
-            )
-        );
-        assert!(manual.contains("--selection \"${{ inputs.distribution }}\""));
-        assert!(manual.contains("echo \"- Binary bytes: $bytes\""));
-        assert!(manual.contains("echo \"- Resolved features: \\`$FEATURES\\`\""));
-        assert!(!manual.contains("excluded_features"));
-
-        let target_env = manual.find("- name: Configure target environment").unwrap();
-        let release_step = manual.find("- name: Build release").unwrap();
-        let reiclaw_upload = manual
-            .find("name: reiclaw-manual-${{ inputs.distribution }}-${{ matrix.target }}")
-            .unwrap();
-        assert!(target_env < release_step && release_step < reiclaw_upload);
-        assert!(
-            manual[target_env..release_step]
-                .contains("echo \"${{ matrix.linker_env }}=${{ matrix.linker }}\"")
-        );
-        assert!(manual[target_env..release_step].contains(">> \"$GITHUB_ENV\""));
-        assert!(!manual[release_step..].contains("matrix.linker_env"));
-
-        for feature in exclusions.values().flatten() {
-            assert!(!release.contains(feature));
-            assert!(!manual.contains(feature));
-        }
-    }
-
-    #[test]
     fn source_plan_builds_before_finishing_path_setup() {
         let p = Plan::build(&root(), Platform::Unix, &Selection::Full).unwrap();
         let source: Vec<_> = p.source.iter().map(|s| s.id).collect();

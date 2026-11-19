@@ -6,6 +6,4 @@ a PR; translation is never a CI operation.
 
 Use [Docs & Translations](docs/book/src/maintainers/docs-and-translations.md) for
 the contributor workflow, provider configuration, coverage checks, batch tuning,
-and failure handling. During a release, follow the
-[Release Runbook](docs/book/src/maintainers/release-runbook.md#refresh-and-pin-translations)
-for the ordered refresh, validation, publication, and pinning steps.
+and failure handling. ReiClaw publishes no releases.

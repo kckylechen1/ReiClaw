@@ -37,7 +37,7 @@ jobs:
   # with more jobs than that queues against itself. Cheap checks therefore
   # share jobs: this one also selects the targeted jobs and checks Rust
   # formatting before the runtime matrix, and `policy` groups the light
-  # policy, Nix and web checks.
+  # policy and web checks.
   changes:
     name: Change Scope and Format
     runs-on: ubuntu-latest
@@ -103,7 +103,7 @@ jobs:
           }
           # The installer generator derives every install surface from Cargo
           # manifests (features), xtask, and the surfaces themselves.
-          pick '(^|/)Cargo\.toml$|^Cargo\.lock$|^xtask/|^dev/ci/|^dist/|^scripts/ci/install|^install\.sh$|^flake\.nix$|^\.cargo/config\.toml$|^\.github/workflows/ci\.yml$' installer
+          pick '(^|/)Cargo\.toml$|^Cargo\.lock$|^xtask/|^dev/ci/|^scripts/ci/install|^install\.sh$|^\.cargo/config\.toml$|^\.github/workflows/ci\.yml$' installer
       # Fail Rust formatting before the runtime matrix starts.
       - uses: dtolnay/rust-toolchain@e97e2d8cc328f1b50210efc529dca0028893a2d9 # v1
         if: steps.scope.outputs.full == 'true'
@@ -434,14 +434,14 @@ jobs:
         run: |
           bash scripts/dev/leg.sh --no-fail-fast --phase "$PHASE" "$LEG"
 
-  # ── Policy, Nix and web checks ────────────────────────────────────────────
+  # ── Policy and web checks ─────────────────────────────────────────────────
   # Light checks share one job (see the concurrency note on `changes`). Every
   # step runs even after an earlier one fails, so each check still reports.
-  # Repository structure and Nix steps are PR-only: nothing there writes a
+  # Repository structure steps are PR-only: nothing there writes a
   # cache, and the PR run already proved them.
 
   policy:
-    name: Policy, Nix and Web
+    name: Policy and Web
     needs: [changes]
     if: needs.changes.outputs.full == 'true'
     runs-on: ubuntu-latest
@@ -483,40 +483,6 @@ jobs:
       - name: Test translation release submodule handling
         if: ${{ !cancelled() && github.event_name != 'push' }}
         run: scripts/release/refresh-translations.test.sh
-      - name: Validate nix/hashes.json matches Cargo.lock git deps
-        if: ${{ !cancelled() && github.event_name != 'push' }}
-        run: |
-          set -euo pipefail
-          if [[ ! -f Cargo.lock ]]; then
-            echo "Cargo.lock not found; nothing to check."
-            exit 0
-          fi
-          # Extract git-dep keys from Cargo.lock using the same Python
-          # logic as refresh-nix-hashes.sh.
-          python3 scripts/ci/list_git_dep_keys.py > /tmp/lock_keys.json
-          LOCK_COUNT=$(jq length /tmp/lock_keys.json)
-          echo "Found $LOCK_COUNT git-sourced package(s) in Cargo.lock."
-          if [[ "$LOCK_COUNT" -eq 0 ]]; then
-            echo "No git deps; nothing to check."
-            exit 0
-          fi
-          if [[ ! -f nix/hashes.json ]]; then
-            echo "error: nix/hashes.json not found — git deps present but no hashes file."
-            exit 1
-          fi
-          HASH_KEYS=$(jq 'keys' nix/hashes.json)
-          MISSING=$(jq -n --argjson lock "$(cat /tmp/lock_keys.json)" \
-            --argjson hash "$HASH_KEYS" \
-            '$lock - $hash')
-          MISSING_COUNT=$(echo "$MISSING" | jq length)
-          if [[ "$MISSING_COUNT" -gt 0 ]]; then
-            echo "error: $MISSING_COUNT git-dep hash(es) missing from nix/hashes.json:"
-            echo "$MISSING" | jq -r '.[]'
-            echo ""
-            echo "Run scripts/dev/refresh-nix-hashes.sh and commit the result."
-            exit 1
-          fi
-          echo "All git deps have hashes in nix/hashes.json."
       - uses: actions/setup-node@48b55a011bda9f5d6aeb4c2d9c7362e8dae4041e # v6.4.0
         if: ${{ !cancelled() }}
         with:
@@ -602,21 +568,6 @@ jobs:
       - name: Run cargo audit (RustSec advisory database)
         if: ${{ !cancelled() }}
         run: cargo audit
-      - name: Install Nix
-        if: ${{ !cancelled() && github.event_name != 'push' }}
-        run: bash scripts/ci/apt_install.sh nix-bin nix-setup-systemd
-      - name: Verify Nix
-        if: ${{ !cancelled() && github.event_name != 'push' }}
-        run: sudo nix --version
-      - name: Evaluate Nix module assertions
-        if: ${{ !cancelled() && github.event_name != 'push' }}
-        run: sudo nix --extra-experimental-features "nix-command flakes" build .#checks.x86_64-linux.nixos-module-eval --no-link
-      - name: Evaluate package feature overrides
-        if: ${{ !cancelled() && github.event_name != 'push' }}
-        run: |
-          sudo nix --extra-experimental-features "nix-command flakes" \
-            eval --json .#packages.x86_64-linux.reiclaw \
-            --apply "$(cat nix/package-eval.nix)"
 
   docs-style:
     name: Docs Style
