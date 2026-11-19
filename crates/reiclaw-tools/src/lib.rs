@@ -40,7 +40,6 @@ pub mod memory_forget;
 pub mod memory_purge;
 pub mod memory_recall;
 pub mod memory_store;
-pub mod node_capabilities;
 pub mod note_owner_correction;
 pub mod pipeline;
 pub mod propose_soul_change;

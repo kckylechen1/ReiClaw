@@ -37,7 +37,6 @@ use crate::broadcast::current_broadcast_hook;
 use crate::config::{LlmRequestPayloadPolicy, LogConfig, ResolvedPolicy, StoragePolicy};
 use crate::event::LogEvent;
 use crate::migrate;
-use crate::observer_bridge;
 use anyhow::{Context, Result};
 use serde_json::Value;
 
@@ -503,8 +502,6 @@ pub fn record_event(event: LogEvent) {
             return;
         }
     };
-
-    observer_bridge::forward(&event);
 
     if let Some(hook) = current_broadcast_hook() {
         let mut broadcast_value = value.clone();

@@ -13,7 +13,6 @@ pub mod agent_scoped;
 pub mod agent_scoped_markdown;
 pub mod audit;
 pub mod backend;
-pub mod chunker;
 pub mod companion;
 pub mod conflict;
 pub mod decay;
