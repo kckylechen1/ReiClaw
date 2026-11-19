@@ -171,7 +171,7 @@ mod tests {
 
     #[tokio::test]
     async fn tool_retention_preserves_each_parallel_prompt_result_from_real_dispatcher() {
-        use crate::agent::dispatcher::{ToolDispatcher, ToolExecutionResult, XmlToolDispatcher};
+        use crate::agent::dispatcher::{ToolDispatcher, XmlToolDispatcher};
         use reiclaw_providers::{ConversationMessage, ToolResultMessage};
 
         let names = ["alpha", "beta", "gamma"];
@@ -179,18 +179,17 @@ mod tests {
             .iter()
             .map(|name| format!("HEAD-{name}\n{}\nRECEIPT-{name}", "text ".repeat(2_000)))
             .collect();
-        let named_results = XmlToolDispatcher.format_results(
-            &names
+        let named_results = ConversationMessage::Chat(ChatMessage::user(format!(
+            "[Tool results]\n{}",
+            names
                 .iter()
                 .zip(&outputs)
-                .map(|(name, output)| ToolExecutionResult {
-                    name: (*name).into(),
-                    output: output.clone(),
-                    success: *name != "gamma",
-                    tool_call_id: Some(format!("call-{name}")),
-                })
-                .collect::<Vec<_>>(),
-        );
+                .map(|(name, output)| format!(
+                    "<tool_result name=\"{name}\" status=\"{}\">\n{output}\n</tool_result>\n",
+                    if *name != "gamma" { "ok" } else { "error" }
+                ))
+                .collect::<String>()
+        )));
         let structured_results = ConversationMessage::ToolResults(
             names
                 .iter()

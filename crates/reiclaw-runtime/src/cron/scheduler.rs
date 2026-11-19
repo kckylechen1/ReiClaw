@@ -1092,11 +1092,22 @@ async fn run_agent_job_with_timeout(
     timeout: Duration,
     task_identity: Option<TaskIdentity>,
 ) -> (bool, String) {
-    let subagent_ctx = match crate::subagent::SubAgentSpawn::for_agent(config, agent_alias)
-        .and_then(|spawn| spawn.build(crate::subagent::SubAgentOverrides::default()))
-    {
-        Ok(ctx) => ctx,
-        Err(e) => return (false, format!("subagent spawn failed: {e:#}")),
+    if !config.agents.contains_key(agent_alias) {
+        return (
+            false,
+            format!("subagent spawn failed: no agent configured under alias {agent_alias:?}"),
+        );
+    }
+    let agent_policy = match SecurityPolicy::for_agent(config, agent_alias) {
+        Ok(policy) => policy,
+        Err(e) => {
+            return (
+                false,
+                format!(
+                    "subagent spawn failed: could not resolve security policy for agent {agent_alias:?}: {e:#}"
+                ),
+            );
+        }
     };
 
     if !security.can_act() {
@@ -1144,7 +1155,7 @@ async fn run_agent_job_with_timeout(
         spawn_site = "cron",
     );
 
-    let run_security = cron_agent_run_security_policy(subagent_ctx.policy.as_ref(), job);
+    let run_security = cron_agent_run_security_policy(&agent_policy, job);
     let run_overrides = crate::agent::loop_::AgentRunOverrides {
         task_identity,
         security: Some(Arc::new(run_security)),

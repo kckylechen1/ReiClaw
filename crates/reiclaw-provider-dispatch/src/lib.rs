@@ -1,8 +1,6 @@
 //! `ProviderDispatch` — single source of truth for `attribution_span!`
 //! on the [`ModelProvider`] surface.
 
-use std::sync::Arc;
-
 use futures_util::stream::{self, StreamExt as _};
 use reiclaw_api::model_provider::{
     ChatMessage, ChatRequest, ChatResponse, ModelInfo, ModelProvider, StreamEvent, StreamOptions,
@@ -12,183 +10,18 @@ use reiclaw_api::model_provider::{
 /// Wraps a model provider so every call opens the correct
 /// `attribution_span!` automatically. See the module docs for the
 /// rationale and the CI gate that enforces routing through this type.
-pub struct ProviderDispatch {
-    inner: Arc<dyn ModelProvider>,
-}
+pub struct ProviderDispatch;
 
 pub struct ProviderDispatchRef<'a> {
     inner: &'a dyn ModelProvider,
 }
 
 impl ProviderDispatch {
-    /// Wrap an `Arc<dyn ModelProvider>` so its method calls open
-    /// `attribution_span!(&*inner)` automatically.
-    #[must_use]
-    pub fn new(inner: Arc<dyn ModelProvider>) -> Self {
-        Self { inner }
-    }
-
     /// Wrap a borrowed `&dyn ModelProvider`. Returns a
-    /// [`ProviderDispatchRef`] for ergonomic chaining at call sites
-    /// that don't hold an `Arc`.
+    /// [`ProviderDispatchRef`] for ergonomic chaining at call sites.
     #[must_use]
     pub fn from_ref(inner: &dyn ModelProvider) -> ProviderDispatchRef<'_> {
         ProviderDispatchRef { inner }
-    }
-
-    /// Open `attribution_span!(&*self.inner)` + `scope!(model: model)`
-    /// around the inner provider's `chat` call.
-    pub async fn chat(
-        &self,
-        request: ChatRequest<'_>,
-        model: &str,
-        temperature: Option<f64>,
-    ) -> anyhow::Result<ChatResponse> {
-        use reiclaw_log::Instrument;
-        let span = reiclaw_log::attribution_span!(&*self.inner);
-        async move {
-            reiclaw_log::scope!(
-                model: model,
-                => self.inner.chat(request, model, temperature)
-            )
-            .await
-        }
-        .instrument(span)
-        .await
-    }
-
-    pub fn stream_chat(
-        &self,
-        request: ChatRequest<'_>,
-        model: &str,
-        temperature: Option<f64>,
-        options: StreamOptions,
-    ) -> stream::BoxStream<'static, StreamResult<StreamEvent>> {
-        let attribution = reiclaw_log::attribution_span!(&*self.inner);
-        // Enter the attribution span synchronously so the model_scope
-        // info_span! constructs with attribution as its parent. Drop
-        // the guard before returning; the attribution span lives on
-        // via model_scope's parent pointer.
-        let _attribution_enter = attribution.enter();
-        let model_scope = reiclaw_log::info_span!(
-            target: "zeroclaw_log_internal_scope",
-            "zeroclaw_scope",
-            model = %model,
-        );
-        let inner_stream = self.inner.stream_chat(request, model, temperature, options);
-        drop(_attribution_enter);
-        let mut inner_stream = inner_stream;
-        stream::poll_fn(move |cx| {
-            let _enter = model_scope.enter();
-            inner_stream.as_mut().poll_next(cx)
-        })
-        .boxed()
-    }
-
-    pub async fn simple_chat(
-        &self,
-        message: &str,
-        model: &str,
-        temperature: Option<f64>,
-    ) -> anyhow::Result<String> {
-        use reiclaw_log::Instrument;
-        let span = reiclaw_log::attribution_span!(&*self.inner);
-        async move {
-            reiclaw_log::scope!(
-                model: model,
-                => (*self.inner).simple_chat(message, model, temperature)
-            )
-            .await
-        }
-        .instrument(span)
-        .await
-    }
-
-    /// Wrap the inner provider's `chat_with_system`.
-    pub async fn chat_with_system(
-        &self,
-        system_prompt: Option<&str>,
-        message: &str,
-        model: &str,
-        temperature: Option<f64>,
-    ) -> anyhow::Result<String> {
-        use reiclaw_log::Instrument;
-        let span = reiclaw_log::attribution_span!(&*self.inner);
-        async move {
-            reiclaw_log::scope!(
-                model: model,
-                => self.inner.chat_with_system(system_prompt, message, model, temperature)
-            )
-            .await
-        }
-        .instrument(span)
-        .await
-    }
-
-    /// Wrap the inner provider's `chat_with_history`.
-    pub async fn chat_with_history(
-        &self,
-        messages: &[ChatMessage],
-        model: &str,
-        temperature: Option<f64>,
-    ) -> anyhow::Result<String> {
-        use reiclaw_log::Instrument;
-        let span = reiclaw_log::attribution_span!(&*self.inner);
-        async move {
-            reiclaw_log::scope!(
-                model: model,
-                => self.inner.chat_with_history(messages, model, temperature)
-            )
-            .await
-        }
-        .instrument(span)
-        .await
-    }
-
-    /// Wrap the inner provider's `chat_with_tools`.
-    pub async fn chat_with_tools(
-        &self,
-        messages: &[ChatMessage],
-        tools: &[serde_json::Value],
-        model: &str,
-        temperature: Option<f64>,
-    ) -> anyhow::Result<ChatResponse> {
-        use reiclaw_log::Instrument;
-        let span = reiclaw_log::attribution_span!(&*self.inner);
-        async move {
-            reiclaw_log::scope!(
-                model: model,
-                => self.inner.chat_with_tools(messages, tools, model, temperature)
-            )
-            .await
-        }
-        .instrument(span)
-        .await
-    }
-
-    pub async fn list_models(&self) -> anyhow::Result<Vec<String>> {
-        use reiclaw_log::Instrument;
-        let span = reiclaw_log::attribution_span!(&*self.inner);
-        (*self.inner).list_models().instrument(span).await
-    }
-
-    /// Wrap the inner provider's `list_models_with_pricing`. Same
-    /// `&*self.inner` rationale as `list_models`.
-    pub async fn list_models_with_pricing(&self) -> anyhow::Result<Vec<ModelInfo>> {
-        use reiclaw_log::Instrument;
-        let span = reiclaw_log::attribution_span!(&*self.inner);
-        (*self.inner)
-            .list_models_with_pricing()
-            .instrument(span)
-            .await
-    }
-
-    /// Wrap the inner provider's `warmup`. No `model` parameter, so
-    /// attribution only.
-    pub async fn warmup(&self) -> anyhow::Result<()> {
-        use reiclaw_log::Instrument;
-        let span = reiclaw_log::attribution_span!(&*self.inner);
-        self.inner.warmup().instrument(span).await
     }
 }
 
@@ -361,7 +194,6 @@ mod tests {
         ChatRequest, ChatResponse, ModelProvider, StreamChunk, StreamEvent, StreamOptions,
         StreamResult,
     };
-    use std::sync::Arc;
 
     struct FakeAnthropic {
         alias: String,
@@ -416,10 +248,10 @@ mod tests {
         let mut rx = reiclaw_log::subscribe_or_install();
         while rx.try_recv().is_ok() {}
 
-        let fake: Arc<dyn ModelProvider> = Arc::new(FakeAnthropic {
+        let fake = FakeAnthropic {
             alias: "test-alias".into(),
-        });
-        let dispatch = ProviderDispatch::new(fake);
+        };
+        let dispatch = ProviderDispatch::from_ref(&fake);
         let request = ChatRequest {
             messages: &[],
             tools: None,
@@ -528,10 +360,10 @@ mod tests {
         let mut rx = reiclaw_log::subscribe_or_install();
         while rx.try_recv().is_ok() {}
 
-        let fake: Arc<dyn ModelProvider> = Arc::new(StreamingFake {
+        let fake = StreamingFake {
             alias: "stream-alias".into(),
-        });
-        let dispatch = ProviderDispatch::new(fake);
+        };
+        let dispatch = ProviderDispatch::from_ref(&fake);
         let request = ChatRequest {
             messages: &[],
             tools: None,

@@ -715,7 +715,7 @@ fn parse_jsonrpc_response_with_error_result() {
     assert_eq!(resp.error.unwrap().code, -32601);
 }
 
-// ── create_transport factory ──────────────────────────────────────────────
+// ── create_shared_transport factory ───────────────────────────────────────
 
 #[test]
 fn create_transport_stdio_fails_without_valid_command() {
@@ -726,7 +726,7 @@ fn create_transport_stdio_fails_without_valid_command() {
         command: "/usr/bin/zeroclaw_nonexistent_binary_abc123".into(),
         ..Default::default()
     };
-    let result = create_transport(&config);
+    let result = create_shared_transport(&config);
     assert!(result.is_err());
 }
 
@@ -737,7 +737,7 @@ fn create_transport_http_without_url_fails() {
         transport: McpTransport::Http,
         ..Default::default()
     };
-    assert!(create_transport(&config).is_err());
+    assert!(create_shared_transport(&config).is_err());
 }
 
 #[test]
@@ -747,7 +747,7 @@ fn create_transport_sse_without_url_fails() {
         transport: McpTransport::Sse,
         ..Default::default()
     };
-    assert!(create_transport(&config).is_err());
+    assert!(create_shared_transport(&config).is_err());
 }
 
 #[test]
@@ -759,7 +759,7 @@ fn create_transport_http_with_url_succeeds() {
         ..Default::default()
     };
     // Build should succeed even if server isn't running
-    assert!(create_transport(&config).is_ok());
+    assert!(create_shared_transport(&config).is_ok());
 }
 
 #[test]
@@ -770,7 +770,7 @@ fn create_transport_sse_with_url_succeeds() {
         url: Some("http://localhost:9999/sse".into()),
         ..Default::default()
     };
-    assert!(create_transport(&config).is_ok());
+    assert!(create_shared_transport(&config).is_ok());
 }
 
 // ── HTTP session id whitespace handling ───────────────────────────────────
