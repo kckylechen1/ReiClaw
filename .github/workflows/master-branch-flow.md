@@ -56,7 +56,7 @@ tag push.
 1. Contributor opens or updates a PR with an explicit scope and dependency, if any. The final landing target is `master`.
 2. Use `scripts/ci/change_scope.py` as the canonical diff classifier and `scripts/ci/required_gate.py` as the expected-result policy, wired by `ci.yml`. Ordinary README/book prose receives the Markdown, source/navigation, and local-link checks. Code, workflow, policy, build, configuration, executable, and unknown paths retain full coverage; missing or uncertain diff evidence does too. Navigation, renderer, generator, and preprocessor-input changes also run the real docs build. The aggregate always reports and rejects failed, cancelled, or unexpected missing/skipped work.
 3. The code path includes:
-   - `changes` (Change Scope and Format): classifies the diff, selects the targeted jobs below, and runs `cargo fmt --all -- --check`. Every other job waits on it. The hosted runners allow 20 concurrent jobs per account, so light checks share jobs rather than each taking a runner.
+   - `changes` (Change Scope and Format): classifies the diff, selects the targeted jobs below, and runs `cargo fmt --all -- --check` and `scripts/ci/source_tree_gate.py` (orphaned sources, module-wide dead-code silencing, the approved crate list). Every other job waits on it. The hosted runners allow 20 concurrent jobs per account, so light checks share jobs rather than each taking a runner.
    - `lint`: `cargo clippy --workspace --all-targets --locked --features
      ci-all -- -D warnings`, plus the provider dispatch gate and the Fluent
      catalog syntax gate (`cargo fluent check`). This is the only

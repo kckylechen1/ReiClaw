@@ -48,6 +48,7 @@ Fork-specific facts (type placement, upstream divergences, known gaps) are in [`
    - PR titles are conventional commits with a scope, `type(scope): summary`; CI rejects others.
    - Use the PR template.
    - Do not add bot or AI attribution footers.
+10. **Turn repeated review findings into checks.** When review catches the same class of mistake a second time, the fix PR also adds a mechanical check: a level in `[workspace.lints]`, a ban in `clippy.toml` or `deny.toml`, a rule in `scripts/ci/source_tree_gate.py`, or a test in `tests/architecture/`. The failure message names the fix, because agents follow it. Judgment calls stay with review.
 
 ## Fork workflow and authorization
 
@@ -82,6 +83,7 @@ scripts/dev/cargo-local.sh test -p <crate> [--lib <filter> | --test <name>]
 scripts/dev/cargo-local.sh fmt --all -- --check
 scripts/dev/leg.sh <leg>                # each leg that owns a crate you touched or tests what you changed — never all legs by default
 bash scripts/ci/provider_dispatch_gate.sh   # model calls go through ProviderDispatch
+python3 scripts/ci/source_tree_gate.py      # orphaned files, dead-code silencing, crate list
 BASE_SHA="${PR_BASE_SHA:?resolve the actual PR base SHA}" bash scripts/ci/docs_quality_gate.sh
 BASE_SHA="${PR_BASE_SHA:?resolve the actual PR base SHA}" bash scripts/ci/docs_links_gate.sh
 (cd web && npm ci && npm run build)     # gateway routes or web/ changed

@@ -1,5 +1,13 @@
 //! Unified log emission surface for the ZeroClaw workspace.
 
+// This crate is the log pipeline: the `record!` macro it exports replaces the
+// `tracing`/`log` macros that clippy.toml bans everywhere else, so its own
+// implementation calls them directly.
+#![allow(
+    clippy::disallowed_macros,
+    reason = "reiclaw-log implements the pipeline the ban routes to"
+)]
+
 pub mod broadcast;
 pub mod chain;
 pub mod config;
