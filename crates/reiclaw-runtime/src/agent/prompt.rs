@@ -298,47 +298,6 @@ impl PromptSection for ToneSection {
     }
 }
 
-/// Prompt-guided tool lists describe these tools with this text instead of
-/// their spec description; every other tool uses its spec description.
-pub(crate) fn prompt_tool_description(name: &str) -> Option<&'static str> {
-    let description = match name {
-        "cron_add" => {
-            "Create a scheduled cron job (shell or agent) with cron/at/every schedules. Use job_type='agent' with a prompt to run the AI agent on schedule. To deliver output to a channel (Telegram, or a configured gateway bridge), set delivery={\"mode\":\"announce\",\"channel\":\"telegram\",\"to\":\"<channel_id_or_chat_id>\"}. This is the preferred tool for sending scheduled/delayed messages to users via live channel surfaces."
-        }
-        "cron_remove" => "Remove a cron job by id",
-        "cron_update" => {
-            "Patch an existing cron job (schedule, command, prompt, enabled, delivery, model, etc.)"
-        }
-        "episode_read" => {
-            "Read non-superseded sleep memory episodes for this agent within an optional RFC 3339 time window or session, optionally including recent daily digests. Superseded episodes are excluded; inspect newer turns before treating early attempts as settled outcomes."
-        }
-        "file_write" => "Write contents to a file in the workspace",
-        "git_operations" => {
-            "Perform structured Git operations (status, diff, log, branch, commit, add, checkout, stash). Provides parsed JSON output and integrates with security policy for autonomy controls."
-        }
-        "http_request" => {
-            "Make HTTP requests to external APIs. Supports GET, POST, PUT, DELETE, PATCH, HEAD, OPTIONS methods. Security constraints: allowlist-only domains, no local/private hosts, configurable timeout and response size limits."
-        }
-        "image_info" => {
-            "Read image file metadata (format, dimensions, size) and optionally return base64-encoded data."
-        }
-        "memory_recall" => {
-            "Search long-term memory for relevant facts, preferences, or context. Returns scored results ranked by relevance. Omit the query or pass bare * to return recent memories."
-        }
-        "schedule" => {
-            "Manage scheduled shell-only tasks. Actions: create/add/once/list/get/cancel/remove/pause/resume. WARNING: This tool creates shell jobs whose output is only logged, NOT delivered to any channel. To send a scheduled message to Telegram or a gateway bridge, use the cron_add tool with job_type='agent' and a delivery config like {\"mode\":\"announce\",\"channel\":\"telegram\",\"to\":\"<channel_id>\"}."
-        }
-        "session_search" => {
-            "Search this agent's own persisted session transcripts by keyword. Returns matching snippets with message_id, timestamp, and chronology warnings when newer turns exist so you verify final outcomes instead of intermediate attempts."
-        }
-        "web_fetch" => {
-            "Fetch a web page and return its content as clean plain text. HTML pages are automatically converted to readable text. JSON and plain text responses are returned as-is. Only GET requests; follows redirects. Security: allowlist-only domains, no local/private hosts."
-        }
-        _ => return None,
-    };
-    Some(description)
-}
-
 impl PromptSection for ToolsSection {
     fn name(&self) -> &str {
         "tools"
@@ -354,7 +313,7 @@ impl PromptSection for ToolsSection {
 
         let mut out = String::from("## Tools\n\n");
         for tool in ctx.tools {
-            let desc = prompt_tool_description(tool.name()).unwrap_or_else(|| tool.description());
+            let desc = tool.description();
             let _ = writeln!(
                 out,
                 "- **{}**: {}\n  Parameters: `{}`",

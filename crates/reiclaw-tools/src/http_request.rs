@@ -472,7 +472,7 @@ impl Tool for HttpRequestTool {
 
     fn description(&self) -> &str {
         "Make HTTP requests to external APIs. Supports GET, POST, PUT, DELETE, PATCH, HEAD, OPTIONS methods. \
-        Security constraints: allowlist-only domains, local/private hosts blocked unless explicitly configured, configurable timeout and response size limits."
+        Security constraints: hosts must match the configured domain allowlist (all public hosts by default), local/private hosts blocked unless explicitly configured, configurable timeout and response size limits."
     }
 
     fn parameters_schema(&self) -> serde_json::Value {
