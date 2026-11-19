@@ -13,17 +13,6 @@ use reiclaw_config::schema::{Config, TelegramConfig};
 use reiclaw_config::traits::{AliasSource, ChannelConfig, PropFieldInfo};
 use reiclaw_macros::Configurable;
 
-// Configurable's generated paths resolve through the consuming crate's shims.
-mod config {
-    pub use reiclaw_config::config::*;
-}
-mod security {
-    pub use reiclaw_config::secrets::SecretStore;
-}
-mod traits {
-    pub use reiclaw_config::traits::*;
-}
-
 fn assert_same_schema(mut core: Vec<PropFieldSpec>, display: Vec<PropFieldInfo>) {
     let mut displayed: Vec<_> = display.iter().map(PropFieldInfo::spec).collect();
     core.sort_by(|a, b| a.name.cmp(&b.name));

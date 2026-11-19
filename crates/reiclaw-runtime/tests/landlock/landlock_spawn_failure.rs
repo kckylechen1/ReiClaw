@@ -10,8 +10,6 @@
 //! nextest runs each test in a separate process, so exhausting all 16
 //! Landlock layers in this test does not affect other tests.
 
-#![cfg(all(feature = "sandbox-landlock", target_os = "linux"))]
-
 use landlock::{AccessFs, PathBeneath, PathFd, Ruleset, RulesetAttr, RulesetCreatedAttr};
 use reiclaw_runtime::security::landlock::LandlockSandbox;
 use reiclaw_runtime::security::traits::Sandbox;
