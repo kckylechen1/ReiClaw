@@ -389,7 +389,7 @@ pub async fn run(
     ));
         tool_descs.push((
         "image_info",
-        "Read image file metadata (format, dimensions, size) and optionally base64-encode it. Use when: inspecting images, preparing visual data for analysis.",
+        "Read image file metadata (format, dimensions, size); the image is also made available to vision-capable models via an inline image marker. Use when: inspecting images, preparing visual data for analysis.",
     ));
         tool_descs.push((
         "schedule",
