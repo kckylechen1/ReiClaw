@@ -2,7 +2,7 @@
 id: ADR-019
 title: One body, many hands - when to split a crate or process, and how messaging platforms and devices attach
 date: 2026-10-30
-status: proposed
+status: accepted
 relates-to:
   - ADR-002
   - ADR-005
@@ -21,11 +21,9 @@ relates-to:
 
 The legacy Yonbo N3B1 crate has been retired from ZeroClaw source; its complete 11-file snapshot is preserved in the [Zeroclaw-Robotic archive](https://github.com/kckylechen1/Zeroclaw-Robotic/tree/main/integration/zeroclaw/source/crates/zeroclaw-yonbo-node). Future device engineering belongs there. This changes neither running devices and keys nor Gateway Node v2, and does not establish a replacement or physical acceptance.
 
-Proposed on 2026-10-30. Not accepted until the owner approves it.
+Proposed on 2026-10-30; accepted by the owner on 2026-11-19 alongside [ADR-026](./ADR-026-headless-rust-kernel-external-workbenches-and-complexity-budget.md).
 
-Merging this proposed record makes it available for review; it does not accept
-the architecture, activate an implementation slice, or change a protected
-contract. #374 remains the sole execution index.
+Acceptance establishes the crate, process, trait, and edge-attachment boundaries in this record; each implementation or extraction slice remains separately reviewed under `#374`, and no protected contract changes without its own slice.
 
 Amended on 2026-11-10 with the device evidence reported in #626 and the contract design in #630: the Node path carries intents and events, not control loops (§4); the vendor preset actions cannot supply the first body-language set (§6, §9, slices 4 and 5); the motor safety floor is still unproven and a reboot moves the robot (§6). Evidence from #626 that the reviewer has not accepted is marked as reported.
 
