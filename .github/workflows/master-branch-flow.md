@@ -13,7 +13,7 @@ Last reviewed: **November 2026** for `kckylechen1/zeroclaw`. This page describes
 
 ## Branching Model
 
-ZeroClaw uses one default branch, `master`, with no permanent `dev` or promotion branch. Independent PRs target `master`. A dependent PR can temporarily target its parent branch; after the parent squash, replay only the child increment, retarget to current `master`, and inspect/validate the final result under [Stacked PRs](../../docs/book/src/maintainers/pr-workflow.md#stacked-prs).
+ZeroClaw uses one default branch, `master`, with no permanent `dev` or promotion branch. Independent PRs target `master`. A dependent PR can temporarily target its parent branch; after the parent squash, replay only the child increment, retarget to current `master`, and inspect/validate the final result (AGENTS.md rule 9).
 
 This fork is maintained by `kckylechen1`; review routing is in [CODEOWNERS](../CODEOWNERS). Actual GitHub permissions and review requirements determine who can merge. Upstream maintainers are not automatic reviewers or milestone owners for this fork.
 
@@ -28,7 +28,6 @@ This fork is maintained by `kckylechen1`; review routing is in [CODEOWNERS](../C
 | `cross-platform-build-manual.yml` | `workflow_dispatch` | Full platform build matrix (manual smoke check) |
 | `cross-platform-clippy.yml` | `pull_request` when runtime, infra, or this workflow changes; `workflow_dispatch`; weekly schedule | Advisory full-workspace macOS Clippy, including test targets; outside the required PR gate |
 | `docs-deploy.yml` | `push` → `master` (book, `xtask/`, `locales.toml` paths); tag push `v*`; nightly schedule; `workflow_dispatch` | Build and publish the versioned mdBook + rustdoc site to `gh-pages` |
-| `pr-path-labeler.yml` | `pull_request` lifecycle | Automatic path-based PR labeling |
 
 ---
 

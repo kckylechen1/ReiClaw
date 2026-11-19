@@ -317,7 +317,7 @@ fork-specific.
 
 ## License
 
-Dual-licensed: [MIT](LICENSE-MIT) OR [Apache 2.0](LICENSE-APACHE). You may choose either. Contributors automatically grant rights under both; see [CLA](docs/book/src/contributing/cla.md). The **ZeroClaw** name and logo are trademarks of ZeroClaw Labs.
+Dual-licensed: [MIT](LICENSE-MIT) OR [Apache 2.0](LICENSE-APACHE). You may choose either. The **ZeroClaw** name and logo are trademarks of ZeroClaw Labs.
 
 Tachi is AGPL-3.0-only. Calling it over MCP as a separate process leaves this
 project's license unchanged. The optional `memory-core` feature links the shared portable kernel

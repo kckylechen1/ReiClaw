@@ -292,7 +292,7 @@ Because application crates share a unified version, the team needs a product-lev
 
 ##### Stability tiers
 
-The product version answers *"what release is this?"* A stability tier answers *"how much can I rely on this component?"* Every component, kernel, gateway, plugin crate, and WIT interface carries one of three tiers. Component-local `AGENTS.md` files and plugin registry manifests are the target ownership model. Until that migration is complete, the canonical current assignments live in [Coding agent guidelines](../contributing/agent-guidelines.md#current-stability-assignments).
+The product version answers *"what release is this?"* A stability tier answers *"how much can I rely on this component?"* Every component, kernel, gateway, plugin crate, and WIT interface carries one of three tiers. Component-local `AGENTS.md` files and plugin registry manifests are the target ownership model.
 
 | Tier | Meaning | Implication |
 |---|---|---|

@@ -389,7 +389,7 @@ journalctl --user -u zeroclaw --since "1 hour ago" > zeroclaw-log.txt
 
 </div>
 
-Sanitise `zeroclaw-log.txt` (redact channel tokens if any slipped through, they shouldn't) and attach it to the issue. See [Contributing → Communication](../contributing/communication.md) for where.
+Sanitise `zeroclaw-log.txt` (redact channel tokens if any slipped through, they shouldn't) and attach it to the issue.
 
 ## See also
 

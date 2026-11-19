@@ -29,5 +29,3 @@ Source:
 - Upstream: <https://github.com/zeroclaw-labs/zeroclaw>
 - Issues, discussions, and RFCs: [GitHub issues](https://github.com/zeroclaw-labs/zeroclaw/issues)
 - Real-time chat: Discord (invite link in the repo README)
-
-See [Contributing → Communication](./contributing/communication.md) for the full list of places to reach the project.
