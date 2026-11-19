@@ -136,14 +136,13 @@ class BookSources:
         if in_book and url.path.startswith("/"):
             raise DocsError(f"Unknown site-absolute link: {source} -> {target}")
         path = ((self.repo if url.path.startswith("/") else source.parent) / unquote(url.path).lstrip("/")).resolve()
-        boundary = self.source if in_book else self.repo
-        if not path.is_relative_to(boundary):
-            # Adapted from upstream #9581 (49ef92a6): a source-tree file outside
-            # mdBook is not a page that the deployed book can link to.
-            raise DocsError(f"Relative link escapes {'published book' if in_book else 'repository'}: {source} -> {target}")
+        # The docs are read in the repository (there is no deployed site), so a
+        # book page may link to any repository file, such as source code.
+        if not path.is_relative_to(self.repo):
+            raise DocsError(f"Relative link escapes repository: {source} -> {target}")
         if in_book and (url.path.endswith("/") or path.is_dir()):
             path = path / "index.html"
-        if in_book and path.suffix in {".md", ".mdx"}:
+        if in_book and path.suffix in {".md", ".mdx"} and path.is_relative_to(self.source):
             if path not in self.published:
                 raise DocsError(f"Linked Markdown is not a SUMMARY.md chapter: {source} -> {target}")
         elif in_book and path.suffix == ".html" and path in self.outputs:

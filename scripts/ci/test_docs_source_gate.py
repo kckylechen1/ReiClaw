@@ -75,14 +75,13 @@ class SourceGateTests(BookFixture):
         with self.assertRaisesRegex(DocsError, "not a SUMMARY.md chapter"):
             self.validate()
 
-    def test_book_link_to_existing_repository_readme_must_not_escape_site(self):
+    def test_book_may_link_repository_files_but_not_escape_the_repository(self):
         self.write("crates/edge/README.md", "# Edge\n")
         self.write("docs/book/src/intro.md", "[Edge](../../../crates/edge/README.md)\n")
-        with self.assertRaisesRegex(DocsError, "escapes published book"):
+        self.validate()
+        self.write("docs/book/src/intro.md", "[Outside](../../../../outside.md)\n")
+        with self.assertRaisesRegex(DocsError, "escapes repository"):
             self.validate()
-        # The same source-relative link is valid in the repository README.
-        readme = self.write("README.md", "[Edge](crates/edge/README.md)\n")
-        BookSources(self.repo).check_document(readme, in_book=False)
 
     def test_mdbook_directives_are_rejected_outside_code(self):
         for directive in ("{{#include absent.md}}", "{{ #config-fields agents}}", "- item\n  {{#peer-group telegram}}"):

@@ -141,32 +141,16 @@ name = "windows_aarch64_gnullvm"
 version = "=0.48.5"
 
 [[bans.skip]]
-name = "windows_aarch64_gnullvm"
-version = "=0.52.6"
-
-[[bans.skip]]
 name = "windows_aarch64_msvc"
 version = "=0.48.5"
-
-[[bans.skip]]
-name = "windows_aarch64_msvc"
-version = "=0.52.6"
 
 [[bans.skip]]
 name = "windows_i686_gnu"
 version = "=0.48.5"
 
 [[bans.skip]]
-name = "windows_i686_gnu"
-version = "=0.52.6"
-
-[[bans.skip]]
 name = "windows_i686_msvc"
 version = "=0.48.5"
-
-[[bans.skip]]
-name = "windows_i686_msvc"
-version = "=0.52.6"
 
 [[bans.skip]]
 name = "windows-link"
@@ -185,32 +169,16 @@ name = "windows-targets"
 version = "=0.48.5"
 
 [[bans.skip]]
-name = "windows-targets"
-version = "=0.52.6"
-
-[[bans.skip]]
 name = "windows_x86_64_gnu"
 version = "=0.48.5"
-
-[[bans.skip]]
-name = "windows_x86_64_gnu"
-version = "=0.52.6"
 
 [[bans.skip]]
 name = "windows_x86_64_gnullvm"
 version = "=0.48.5"
 
 [[bans.skip]]
-name = "windows_x86_64_gnullvm"
-version = "=0.52.6"
-
-[[bans.skip]]
 name = "windows_x86_64_msvc"
 version = "=0.48.5"
-
-[[bans.skip]]
-name = "windows_x86_64_msvc"
-version = "=0.52.6"
 
 [sources]
 unknown-registry = "deny"
