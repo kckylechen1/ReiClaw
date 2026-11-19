@@ -5,6 +5,8 @@ import subprocess
 import tempfile
 import unittest
 
+from unittest import mock
+
 from change_scope import classify, event_base, parse_changes, prose_path
 
 
@@ -44,9 +46,38 @@ class ScopeTests(unittest.TestCase):
         self.write("README.md", "updated\n")
         self.write("docs/book/src/architecture/decisions/ADR-fixture.md", "proposal\n")
         self.commit()
-        for event in ("pull_request", "push", "merge_group"):
+        expected = {
+            "pull_request": {"full": "false", "docs_build": "false", "base_sha": self.base, "installer": "false", "web": "false"},
+            "push": {"full": "false", "docs_build": "false", "base_sha": self.base, "installer": "true", "web": "true"},
+            "merge_group": {"full": "false", "docs_build": "false", "base_sha": self.base, "installer": "true", "web": "true"},
+        }
+        for event, want in expected.items():
             with self.subTest(event=event):
-                self.assertEqual(self.scope(event), {"full": "false", "docs_build": "false", "base_sha": self.base})
+                self.assertEqual(self.scope(event), want)
+
+    def test_root_prose_files_skip_code_across_events_while_symlinks_keep_full(self):
+        for path in ("AGENTS.md", "CLAUDE.md", ".github/pull_request_template.md"):
+            with self.subTest(path=path):
+                base = self.git("rev-parse", "HEAD")
+                self.write(path, "prose update\n")
+                self.commit()
+                for event in ("pull_request", "push", "merge_group"):
+                    scope = self.scope(event, base=base)
+                    self.assertEqual(scope["full"], "false")
+                    self.assertEqual(scope["docs_build"], "false")
+                    if event == "pull_request":
+                        self.assertEqual(scope["installer"], "false")
+                        self.assertEqual(scope["web"], "false")
+                sym_base = self.git("rev-parse", "HEAD")
+                target = self.root / path
+                target.unlink()
+                target.symlink_to("src/lib.rs")
+                self.commit()
+                for event in ("pull_request", "push", "merge_group"):
+                    self.assertEqual(
+                        self.scope(event, base=sym_base),
+                        {"full": "true", "docs_build": "true", "base_sha": "", "installer": "true", "web": "true"},
+                    )
 
     def test_summary_requires_render_without_unrelated_runtime_matrix(self):
         self.write("docs/book/src/SUMMARY.md", "# Summary\n")
@@ -81,7 +112,15 @@ class ScopeTests(unittest.TestCase):
                 self.assertEqual(self.scope(base=directive_commit)["docs_build"], "true")
 
     def test_runtime_markdown_and_unknown_paths_are_not_prose(self):
-        for path in ("crates/reiclaw-runtime/src/skills/review_prompt.md", "crates/reiclaw-runtime/src/agent/personality_templates/SOUL.md", "AGENTS.md", ".github/CODEOWNERS", "unknown.md", "../README.md"):
+        for path in (
+            "crates/reiclaw-runtime/src/skills/review_prompt.md",
+            "crates/reiclaw-runtime/src/agent/personality_templates/SOUL.md",
+            "crates/reiclaw-runtime/AGENTS.md",
+            ".github/CODEOWNERS",
+            ".github/workflows/ci.yml",
+            "unknown.md",
+            "../README.md",
+        ):
             with self.subTest(path=path):
                 self.assertFalse(prose_path(path))
 
@@ -105,8 +144,75 @@ class ScopeTests(unittest.TestCase):
 
     def test_unavailable_zero_invalid_or_empty_diff_keeps_every_check(self):
         for base in ("0" * 40, "1" * 40, "--help", "", self.base):
-            with self.subTest(base=base):
-                self.assertEqual(self.scope(base=base), {"full": "true", "docs_build": "true", "base_sha": ""})
+            for event in ("pull_request", "merge_group", "push"):
+                with self.subTest(base=base, event=event):
+                    self.assertEqual(
+                        self.scope(event, base=base),
+                        {"full": "true", "docs_build": "true", "base_sha": "", "installer": "true", "web": "true"},
+                    )
+
+    def test_targeted_selection_on_pull_request_push_and_merge_group(self):
+        cases = [
+            ("crates/reiclaw-runtime/src/lib.rs", "false", "false"),
+            ("crates/reiclaw-runtime/Cargo.toml", "true", "false"),
+            ("Cargo.lock", "true", "false"),
+            ("xtask/src/main.rs", "true", "false"),
+            ("dev/ci/test-partition.json", "true", "false"),
+            ("scripts/ci/install_source_smoke.sh", "true", "false"),
+            ("install.sh", "true", "false"),
+            (".cargo/config.toml", "true", "false"),
+            ("web/src/App.tsx", "false", "true"),
+            (".nvmrc", "false", "true"),
+            ("package.json", "false", "true"),
+            ("package-lock.json", "false", "true"),
+            ("npm-shrinkwrap.json", "false", "true"),
+            ("pnpm-lock.yaml", "false", "true"),
+            ("yarn.lock", "false", "true"),
+            (".npmrc", "false", "true"),
+            ("crates/reiclaw-gateway/src/lib.rs", "false", "true"),
+            (".github/workflows/ci.yml", "true", "true"),
+        ]
+        for path, installer, web in cases:
+            with self.subTest(path=path):
+                base = self.git("rev-parse", "HEAD")
+                self.write(path, f"change {path}\n")
+                self.commit()
+                pr = self.scope("pull_request", base=base)
+                self.assertEqual((pr["installer"], pr["web"]), (installer, web))
+                push = self.scope("push", base=base)
+                self.assertEqual((push["installer"], push["web"]), ("true", "true"))
+                mg = self.scope("merge_group", base=base)
+                self.assertEqual((mg["installer"], mg["web"]), ("true", "true"))
+
+    def test_rename_inside_crate_and_delete_plus_add_fail_closed(self):
+        self.write("crates/reiclaw-eval/tests/cli.rs", "fn cli_test() {}\n")
+        base_mv = self.commit()
+        self.git("mv", "crates/reiclaw-eval/tests/cli.rs", "crates/reiclaw-eval/tests/replay_cli.rs")
+        self.commit()
+        self.assertEqual(
+            self.scope("pull_request", base=base_mv),
+            {"full": "true", "docs_build": "true", "base_sha": "", "installer": "true", "web": "true"},
+        )
+
+        # Dissimilar deletion + addition (even across unrelated paths) also fails closed.
+        base_da = self.git("rev-parse", "HEAD")
+        (self.root / "crates/reiclaw-eval/tests/replay_cli.rs").unlink()
+        self.write("docs/book/src/brand_new.md", "# Brand new unrelated prose\n")
+        self.commit()
+        self.assertEqual(
+            self.scope("pull_request", base=base_da),
+            {"full": "true", "docs_build": "true", "base_sha": "", "installer": "true", "web": "true"},
+        )
+
+    def test_unsafe_path_in_diff_fails_closed(self):
+        self.write("crates/reiclaw-runtime/src/lib.rs", "fn safe() {}\n")
+        self.commit()
+        with mock.patch("change_scope.parse_change_records", return_value=[("../outside.rs", "100644", "100644", "M")]):
+            for event in ("pull_request", "push", "merge_group"):
+                self.assertEqual(
+                    self.scope(event),
+                    {"full": "true", "docs_build": "true", "base_sha": "", "installer": "true", "web": "true"},
+                )
 
     def test_symlink_or_executable_markdown_is_not_exempt(self):
         target = self.root / "README.md"

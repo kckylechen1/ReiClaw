@@ -47,7 +47,8 @@ jobs:
       docs_build: ${{ steps.scope.outputs.docs_build }}
       base_sha: ${{ steps.scope.outputs.base_sha }}
       test_matrix: ${{ steps.test-matrix.outputs.matrix }}
-      installer: ${{ steps.targeted.outputs.installer }}
+      installer: ${{ steps.scope.outputs.installer }}
+      web: ${{ steps.scope.outputs.web }}
     steps:
       - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
         with:
@@ -71,45 +72,40 @@ jobs:
       # run), derived from dev/ci/test-partition.json so a new leg or extra
       # run cannot be left out of the matrix. A malformed partition fails
       # here, and the required gate rejects a failed classification.
-      - name: Derive the test matrix
-        id: test-matrix
+      - name: Derive the full test matrix
+        id: full-matrix
         shell: bash
         run: |
           matrix="$(bash scripts/dev/leg.sh --matrix)"
           jq -e 'type == "array" and length > 0' <<<"$matrix" >/dev/null
           echo "matrix=$matrix" >> "$GITHUB_OUTPUT"
-          jq -r '.[] | "  Test (\(.name))"' <<<"$matrix"
-      # A targeted job a PR's diff cannot affect stays skipped. Pushes and
-      # merge groups always run it, which keeps its Rust cache warm.
-      - name: Select the targeted installer-drift job
-        id: targeted
-        shell: bash
-        env:
-          EVENT_NAME: ${{ github.event_name }}
-          PR_BASE_SHA: ${{ github.event.pull_request.base.sha }}
-        run: |
-          set -euo pipefail
-          if [ "$EVENT_NAME" != "pull_request" ]; then
-            echo "installer=true" >> "$GITHUB_OUTPUT"
-            exit 0
-          fi
-          changed="$(git diff --name-only "$PR_BASE_SHA" HEAD)"
-          pick() {
-            if grep -Eq "$1" <<<"$changed"; then
-              echo "$2=true" >> "$GITHUB_OUTPUT"
-            else
-              echo "$2=false" >> "$GITHUB_OUTPUT"
-            fi
-          }
-          # The installer generator derives every install surface from Cargo
-          # manifests (features), xtask, and the surfaces themselves.
-          pick '(^|/)Cargo\.toml$|^Cargo\.lock$|^xtask/|^dev/ci/|^scripts/ci/install|^install\.sh$|^\.cargo/config\.toml$|^\.github/workflows/ci\.yml$' installer
       # Fail Rust formatting before the runtime matrix starts.
       - uses: dtolnay/rust-toolchain@e97e2d8cc328f1b50210efc529dca0028893a2d9 # v1
         if: steps.scope.outputs.full == 'true'
         with:
           toolchain: 1.96.1
           components: rustfmt
+      - name: Select the test matrix
+        id: test-matrix
+        shell: bash
+        env:
+          FULL: ${{ steps.scope.outputs.full }}
+          EVENT_NAME: ${{ github.event_name }}
+          BASE_SHA: ${{ steps.scope.outputs.base_sha }}
+          ALL_MATRIX: ${{ steps.full-matrix.outputs.matrix }}
+        run: |
+          if [ "$FULL" = "true" ]; then
+            matrix="$(python3 scripts/ci/select_test_matrix.py \
+              --event "$EVENT_NAME" \
+              --base-sha "$BASE_SHA" \
+              --partition dev/ci/test-partition.json \
+              --all-matrix "$ALL_MATRIX")"
+          else
+            matrix="$ALL_MATRIX"
+          fi
+          jq -e 'type == "array" and length > 0' <<<"$matrix" >/dev/null
+          echo "matrix=$matrix" >> "$GITHUB_OUTPUT"
+          jq -r '.[] | "  Test (\(.name))"' <<<"$matrix"
       - name: Toolchain pin guard (self-test + active check)
         if: steps.scope.outputs.full == 'true'
         run: |
@@ -484,33 +480,33 @@ jobs:
         if: ${{ !cancelled() && github.event_name != 'push' }}
         run: scripts/release/refresh-translations.test.sh
       - uses: actions/setup-node@48b55a011bda9f5d6aeb4c2d9c7362e8dae4041e # v6.4.0
-        if: ${{ !cancelled() }}
+        if: ${{ !cancelled() && needs.changes.outputs.web == 'true' }}
         with:
           node-version-file: '.nvmrc'
           cache: npm
           cache-dependency-path: web/package-lock.json
       - name: Install web dependencies
-        if: ${{ !cancelled() }}
+        if: ${{ !cancelled() && needs.changes.outputs.web == 'true' }}
         working-directory: web
         run: npm ci
       - name: Run permission and catalog regressions
-        if: ${{ !cancelled() }}
+        if: ${{ !cancelled() && needs.changes.outputs.web == 'true' }}
         working-directory: web
         run: npm run test:permissions
       - name: Run owner review regressions
-        if: ${{ !cancelled() }}
+        if: ${{ !cancelled() && needs.changes.outputs.web == 'true' }}
         working-directory: web
         run: npm run test:review
       - name: Run chat surface regressions
-        if: ${{ !cancelled() }}
+        if: ${{ !cancelled() && needs.changes.outputs.web == 'true' }}
         working-directory: web
         run: npm run test:chat
       - name: Run monitor component regressions
-        if: ${{ !cancelled() }}
+        if: ${{ !cancelled() && needs.changes.outputs.web == 'true' }}
         working-directory: web
         run: npm run test:monitor
       - name: Typecheck and build web client
-        if: ${{ !cancelled() }}
+        if: ${{ !cancelled() && needs.changes.outputs.web == 'true' }}
         working-directory: web
         run: npm run build
       - uses: dtolnay/rust-toolchain@e97e2d8cc328f1b50210efc529dca0028893a2d9 # v1
