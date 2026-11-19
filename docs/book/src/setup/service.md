@@ -1,6 +1,6 @@
 # Service Management
 
-ZeroClaw ships with first-class service integration for systemd (Linux), launchctl (macOS), and Task Scheduler (Windows). All three are driven by one CLI surface:
+ZeroClaw ships with first-class service integration for systemd (Linux) and launchctl (macOS). Both are driven by one CLI surface:
 
 <div class="os-tabs-src">
 
@@ -165,46 +165,6 @@ brew services info zeroclaw
 
 Don't mix `zeroclaw service` CLI commands with `brew services`, pick one. Both end up writing a plist; having both around confuses `launchctl`.
 
-## Windows: Task Scheduler
-
-`zeroclaw service install` creates a per-user scheduled task named **ZeroClaw Daemon**:
-
-- Trigger: at logon (`/SC ONLOGON`)
-- Run level: `LIMITED` (runs as the current user, not elevated)
-- Action: runs the install wrapper `zeroclaw-daemon.cmd`, which launches `zeroclaw daemon`
-
-Verify in Task Scheduler GUI (`taskschd.msc`) under Task Scheduler Library → ZeroClaw Daemon.
-
-Logs go to `<config-dir>\logs\` as `daemon.stdout.log` and `daemon.stderr.log` (for a default install, `%USERPROFILE%\.zeroclaw\logs\`):
-
-<div class="os-tabs-src">
-
-#### cmd
-
-```cmd
-type %USERPROFILE%\.zeroclaw\logs\daemon.stdout.log
-```
-
-</div>
-
-### Manual control (Task Scheduler)
-
-The task is driven through `zeroclaw service start|stop|status`, which wrap `schtasks /Run`, `/End`, and `/Query` against the **ZeroClaw Daemon** task. You can also manage it directly:
-
-<div class="os-tabs-src">
-
-#### cmd
-
-```cmd
-schtasks /Run /TN "ZeroClaw Daemon"
-schtasks /End /TN "ZeroClaw Daemon"
-schtasks /Query /TN "ZeroClaw Daemon" /FO LIST
-```
-
-</div>
-
-The CLI installs only a per-user ONLOGON task; it does not register a `LocalSystem` Windows Service. For a true system service, wrap the binary with a third-party supervisor (e.g. NSSM) yourself.
-
 ## Config path resolution
 
 The service reads config from whichever directory resolved at install time. Precedence (first match wins):
@@ -213,7 +173,7 @@ The service reads config from whichever directory resolved at install time. Prec
 2. `$ZEROCLAW_DATA_DIR`
 3. `$ZEROCLAW_WORKSPACE` (**deprecated**, prefer `ZEROCLAW_DATA_DIR`; resolves either `$ZEROCLAW_WORKSPACE` or the legacy sibling `.zeroclaw/`)
 4. On macOS only, the Homebrew config dir (`$HOMEBREW_PREFIX/var/zeroclaw/`) when installed via Homebrew
-5. Default `~/.zeroclaw/` (Linux/macOS) or `%USERPROFILE%\.zeroclaw\` (Windows)
+5. Default `~/.zeroclaw/`
 
 `ZEROCLAW_CONFIG_DIR` overrides everything; setting it alongside `ZEROCLAW_DATA_DIR` or `ZEROCLAW_WORKSPACE` logs a warning and ignores the others.
 
@@ -237,6 +197,6 @@ The service does **not** auto-update. That's deliberate; you pick when to take n
 
 ## See also
 
-- [Linux setup](./linux.md), [macOS setup](./macos.md), [Windows setup](./windows.md)
+- [Linux setup](./linux.md), [macOS setup](./macos.md)
 - [Operations → Logs & observability](../ops/observability.md)
 - [Operations → Troubleshooting](../ops/troubleshooting.md)

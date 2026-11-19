@@ -14,7 +14,6 @@ Sandbox settings live on a risk profile. Each agent points at a risk profile via
 |---|---|
 | Linux | Landlock (kernel 5.13+) → Bubblewrap → Firejail → Docker → none |
 | macOS | Seatbelt (`sandbox-exec`, native) → Docker → none |
-| Windows | AppContainer (experimental) → Docker → none |
 | Any | Docker (if daemon reachable) → none |
 
 To force a specific backend, set `sandbox_backend` to one of the literal values listed above.
@@ -65,7 +64,7 @@ shell = "bash"      # resolves through PATH, or use an absolute path
 
 The shell is called as `<shell> -c "<command>"`, so any POSIX-compatible shell works. The value must be either a bare command name found on `PATH` (e.g. `"bash"`) or an absolute path to an executable (e.g. `"/bin/bash"`); relative paths with separators (e.g. `"./sh"`, `"bin/sh"`) are rejected. It is validated when the runtime starts, so an empty, missing, non-executable, or malformed shell fails fast with a clear error instead of breaking the first command. Defaults to `"sh"` when unset.
 
-Only applies to the native runtime kind. Docker uses its container's shell, and Windows (always `cmd.exe`) and Android (always `/system/bin/sh`) ignore the setting and do not validate it.
+Only applies to the native runtime kind. Docker uses its container's shell, and Android (always `/system/bin/sh`) ignores the setting and does not validate it.
 
 ## Per-backend notes
 

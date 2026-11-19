@@ -46,7 +46,6 @@ When a sandbox backend is available, tool invocations run inside it:
 |---|---|
 | Linux | Landlock (kernel) / Bubblewrap / Firejail / Docker, auto-detected |
 | macOS | Seatbelt (native) |
-| Windows | AppContainer (experimental) |
 | Any | Docker (if the daemon is reachable) |
 
 The sandbox confines filesystem access to the workspace, drops network reachability except what the tool explicitly needs, and removes access to the parent process's secrets.

@@ -46,12 +46,6 @@ systemctl --user is-active zeroclaw
 launchctl list | grep -c com.zeroclaw.daemon
 ```
 
-#### Windows
-
-```cmd
-schtasks /Query /TN "ZeroClaw Daemon" /FO LIST | findstr Status
-```
-
 </div>
 
 If it's dying repeatedly, check [Troubleshooting → Daemon keeps restarting](./troubleshooting.md).
