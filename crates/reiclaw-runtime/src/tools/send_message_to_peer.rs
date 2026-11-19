@@ -206,14 +206,14 @@ impl Tool for SendMessageToPeerTool {
             let body = message.clone();
             // Build the recipient's cost-tracking context from `&cfg` before
             // `cfg` moves into `process_message` below — a detached
-            // `reiclaw_spawn::spawn!` task does not inherit the caller's
+            // `reiclaw_log::spawn!` task does not inherit the caller's
             // task-locals, so the recipient's turn would otherwise run with
             // no cost context and its spend would go unrecorded.
             let cost_ctx = tool_loop_cost_tracking_context_for_agent(&cfg, &recipient_alias);
             let turn_usage = cost_ctx
                 .as_ref()
                 .map(|_| Arc::new(Mutex::new(TurnUsage::default())));
-            reiclaw_spawn::spawn!(async move {
+            reiclaw_log::spawn!(async move {
                 let turn = crate::agent::loop_::process_message_with_task_identity(
                     cfg,
                     &recipient_alias,
@@ -796,7 +796,7 @@ mod tests {
         let app = Router::new()
             .route("/v1/chat/completions", post(chat))
             .with_state((revision.clone(), requests_tx));
-        let server = reiclaw_spawn::spawn!(async move {
+        let server = reiclaw_log::spawn!(async move {
             axum::serve(listener, app).await.unwrap();
         });
         let workspace = tempfile::TempDir::new().unwrap();
@@ -1212,7 +1212,7 @@ mod tests {
         let app = Router::new()
             .route("/v1/chat/completions", post(capture_chat))
             .with_state(request_count.clone());
-        let server = reiclaw_spawn::spawn!(async move {
+        let server = reiclaw_log::spawn!(async move {
             axum::serve(listener, app)
                 .await
                 .expect("mock provider server should run");
@@ -1302,7 +1302,7 @@ mod tests {
         let tracker = CostTracker::get_or_init_global(config.cost.clone(), &config.data_dir)
             .expect("execute() must have resolved a process-global cost tracker for an enabled cost config");
 
-        // The recipient's turn runs inside a detached `reiclaw_spawn::spawn!`
+        // The recipient's turn runs inside a detached `reiclaw_log::spawn!`
         // task that `execute()` does not join. Poll for its completion with a
         // bounded, sleep-free yield loop (the same pattern already used for
         // detached-task synchronization in `rpc/dispatch.rs`), never a fixed

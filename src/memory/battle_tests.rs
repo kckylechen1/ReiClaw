@@ -631,7 +631,7 @@ mod tests {
         let mut handles = Vec::new();
         for i in 0..10 {
             let a = audited.clone();
-            handles.push(reiclaw_spawn::spawn!(async move {
+            handles.push(reiclaw_log::spawn!(async move {
                 a.store(
                     &format!("k{i}"),
                     &format!("v{i}"),

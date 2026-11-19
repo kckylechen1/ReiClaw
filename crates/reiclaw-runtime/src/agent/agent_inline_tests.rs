@@ -2371,7 +2371,7 @@ async fn from_config_passes_extra_headers_to_custom_provider() {
 
     let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
     let mock_addr = listener.local_addr().unwrap();
-    let server_handle = reiclaw_spawn::spawn!(async move {
+    let server_handle = reiclaw_log::spawn!(async move {
         axum::serve(listener, app).await.unwrap();
     });
 
@@ -4985,7 +4985,7 @@ async fn turn_streamed_with_steering_commits_streamed_output_before_continuing()
 
     let (event_tx, mut event_rx) = tokio::sync::mpsc::channel::<TurnEvent>(64);
     let (steering_tx, mut steering_rx) = tokio::sync::mpsc::channel::<String>(4);
-    let handle = reiclaw_spawn::spawn!(async move {
+    let handle = reiclaw_log::spawn!(async move {
         agent
             .turn_streamed_with_steering_state("first", event_tx, None, Some(&mut steering_rx))
             .await
@@ -5083,7 +5083,7 @@ async fn turn_streamed_with_steering_error_returns_committed_partial_output() {
 
     let (event_tx, mut event_rx) = tokio::sync::mpsc::channel::<TurnEvent>(64);
     let (steering_tx, mut steering_rx) = tokio::sync::mpsc::channel::<String>(4);
-    let handle = reiclaw_spawn::spawn!(async move {
+    let handle = reiclaw_log::spawn!(async move {
         agent
             .turn_streamed_with_steering_state("first", event_tx, None, Some(&mut steering_rx))
             .await
@@ -5153,7 +5153,7 @@ async fn turn_streamed_error_before_visible_output_falls_back_to_chat() {
         .expect("agent builder should succeed with valid config");
 
     let (event_tx, _event_rx) = tokio::sync::mpsc::channel::<TurnEvent>(64);
-    let handle = reiclaw_spawn::spawn!(async move {
+    let handle = reiclaw_log::spawn!(async move {
         agent
             .turn_streamed_with_steering_state("first", event_tx, None, None)
             .await
@@ -5218,7 +5218,7 @@ async fn turn_streamed_error_after_delta_preserves_visible_partial() {
         .expect("agent builder should succeed with valid config");
 
     let (event_tx, mut event_rx) = tokio::sync::mpsc::channel::<TurnEvent>(64);
-    let handle = reiclaw_spawn::spawn!(async move {
+    let handle = reiclaw_log::spawn!(async move {
         agent
             .turn_streamed_with_steering_state("first", event_tx, None, None)
             .await
@@ -5292,7 +5292,7 @@ async fn turn_streamed_error_before_visible_output_fallback_can_be_cancelled() {
     let (event_tx, _event_rx) = tokio::sync::mpsc::channel::<TurnEvent>(64);
     let cancel_token = tokio_util::sync::CancellationToken::new();
     let cancel_for_task = cancel_token.clone();
-    let handle = reiclaw_spawn::spawn!(async move {
+    let handle = reiclaw_log::spawn!(async move {
         agent
             .turn_streamed_with_steering_state("first", event_tx, Some(cancel_for_task), None)
             .await
@@ -5516,7 +5516,7 @@ async fn turn_streamed_cancel_during_stream_emits_llm_response_failure() {
     let cancel_token = tokio_util::sync::CancellationToken::new();
     let cancel_for_task = cancel_token.clone();
 
-    let canceller = reiclaw_spawn::spawn!(async move {
+    let canceller = reiclaw_log::spawn!(async move {
         while let Some(event) = event_rx.recv().await {
             if matches!(event, TurnEvent::Chunk { ref delta } if delta == "draft") {
                 cancel_for_task.cancel();
@@ -6259,7 +6259,7 @@ async fn turn_streamed_cancel_during_tool_execution_emits_agent_end_with_tokens(
     let (event_tx, mut event_rx) = tokio::sync::mpsc::channel::<TurnEvent>(64);
     let cancel_token = tokio_util::sync::CancellationToken::new();
     let cancel_for_task = cancel_token.clone();
-    let handle = reiclaw_spawn::spawn!(async move {
+    let handle = reiclaw_log::spawn!(async move {
         agent
             .turn_streamed_with_steering_state("use echo", event_tx, Some(cancel_for_task), None)
             .await

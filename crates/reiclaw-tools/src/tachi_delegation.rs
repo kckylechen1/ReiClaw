@@ -914,7 +914,7 @@ pub enum TaskBriefError {
     ProtectedIdentityMarker { marker: &'static str },
     /// Existing `TaskIntent` / `tachi_admission` text guard refused the text.
     #[error("forbidden outbound task content: {0}")]
-    Admission(#[from] reiclaw_api::delegation_admission::ForbiddenCategory),
+    Admission(#[from] crate::tachi_admission::ForbiddenCategory),
 }
 
 /// Compose an outbound delegated task, optionally prepending a bounded

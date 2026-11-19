@@ -45,7 +45,7 @@ async fn cancelling_execute_removes_owned_partial_and_preserves_existing_files()
     let other_partial = workspace.path().join(".other.part-fixture");
     std::fs::write(&other_partial, "another owner").unwrap();
     let tool = tool(workspace.path(), &server.url, 30);
-    let task = ::reiclaw_spawn::spawn!(async move {
+    let task = ::reiclaw_log::spawn!(async move {
         tool.execute(json!({"document_id":"fixture", "dest_path":"out.bin"}))
             .await
     });

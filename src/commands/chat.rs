@@ -358,7 +358,7 @@ mod tests {
         use tokio_tungstenite::tungstenite::Message;
         let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
         let addr = listener.local_addr().unwrap();
-        let server = reiclaw_spawn::spawn!(async move {
+        let server = reiclaw_log::spawn!(async move {
             let (stream, _) = listener.accept().await.unwrap();
             let mut ws = tokio_tungstenite::accept_hdr_async(stream, |_req: &tokio_tungstenite::tungstenite::handshake::server::Request, mut response: tokio_tungstenite::tungstenite::handshake::server::Response| {
                 response.headers_mut().insert("sec-websocket-protocol", "reiclaw.v1".parse().unwrap());

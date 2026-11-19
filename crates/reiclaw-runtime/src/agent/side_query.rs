@@ -506,7 +506,7 @@ mod tests {
         let side_query = agent.side_query_handle();
 
         let entered_waiter = main_entered.notified();
-        let main_turn = ::reiclaw_spawn::spawn!(async move {
+        let main_turn = ::reiclaw_log::spawn!(async move {
             let reply = agent.turn("run the tool and summarize").await?;
             Ok::<(String, Vec<ConversationMessage>), anyhow::Error>((
                 reply,
@@ -627,7 +627,7 @@ mod tests {
             let app = Router::new()
                 .route("/v1/chat/completions", post(capture))
                 .with_state(endpoint);
-            let server = ::reiclaw_spawn::spawn!(async move {
+            let server = ::reiclaw_log::spawn!(async move {
                 axum::serve(listener, app).await.unwrap();
             });
             (format!("http://{address}/v1"), server)
@@ -699,7 +699,7 @@ vision_model_provider = "custom.vision"
             .save(&image_path)
             .unwrap();
         let prompt = format!("inspect [IMAGE:{}]", image_path.display());
-        let main_turn = ::reiclaw_spawn::spawn!(async move {
+        let main_turn = ::reiclaw_log::spawn!(async move {
             let answer = agent.turn(&prompt).await?;
             Ok::<_, anyhow::Error>((agent, answer))
         });

@@ -1322,7 +1322,7 @@ impl ModelProvider for OpenAiResponsesModelProvider {
         let alias = ::reiclaw_log::debug_enabled().then(|| self.alias.clone());
 
         let (tx, rx) = tokio::sync::mpsc::channel::<StreamResult<StreamEvent>>(100);
-        let handle = ::reiclaw_spawn::spawn!(async move {
+        let handle = ::reiclaw_log::spawn!(async move {
             let (instructions, input) = build_responses_input(&messages_owned);
             let instructions = if instructions.is_empty() {
                 None
@@ -1453,7 +1453,7 @@ mod tests {
             .await
             .expect("bind Responses SSE test server");
         let addr = listener.local_addr().expect("Responses SSE test address");
-        let server = ::reiclaw_spawn::spawn!(async move {
+        let server = ::reiclaw_log::spawn!(async move {
             axum::serve(listener, app)
                 .await
                 .expect("serve Responses SSE test");
@@ -1504,7 +1504,7 @@ mod tests {
         );
         let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
         let addr = listener.local_addr().unwrap();
-        let server_handle = reiclaw_spawn::spawn!(async move {
+        let server_handle = reiclaw_log::spawn!(async move {
             axum::serve(listener, app).await.unwrap();
         });
         let provider = OpenAiResponsesModelProvider::builder("test")

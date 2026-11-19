@@ -387,8 +387,7 @@ impl Tool for EscalateToHumanTool {
             let timeout = std::time::Duration::from_secs(timeout_secs);
 
             let listen_channel = Arc::clone(&channel);
-            let listen_handle =
-                reiclaw_spawn::spawn!(async move { listen_channel.listen(tx).await });
+            let listen_handle = reiclaw_log::spawn!(async move { listen_channel.listen(tx).await });
 
             let response = tokio::time::timeout(timeout, rx.recv()).await;
             listen_handle.abort();

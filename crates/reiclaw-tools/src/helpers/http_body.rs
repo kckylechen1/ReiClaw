@@ -67,7 +67,7 @@ pub(crate) mod test_support {
             |len| format!("Content-Length: {len}\r\n"),
         );
         let head = format!("HTTP/1.1 {status}\r\n{framing}Connection: close\r\n\r\n");
-        let task = ::reiclaw_spawn::spawn!(async move {
+        let task = ::reiclaw_log::spawn!(async move {
             let (mut stream, _) = listener.accept().await.unwrap();
             let mut request = Vec::new();
             let mut buf = [0u8; 1024];

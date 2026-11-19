@@ -330,8 +330,8 @@ async fn supervise_launchd_child(
         .context("daemon stderr pipe unavailable")?;
     let stdout_sink = writers.stdout.clone();
     let stderr_sink = writers.stderr.clone();
-    let stdout_task = reiclaw_spawn::spawn!(drain_launchd_pipe(stdout, stdout_sink));
-    let stderr_task = reiclaw_spawn::spawn!(drain_launchd_pipe(stderr, stderr_sink));
+    let stdout_task = reiclaw_log::spawn!(drain_launchd_pipe(stdout, stdout_sink));
+    let stderr_task = reiclaw_log::spawn!(drain_launchd_pipe(stderr, stderr_sink));
 
     #[cfg(any(target_os = "macos", all(test, unix)))]
     let outcome = wait_for_launchd_child(&mut child, &mut signals).await;

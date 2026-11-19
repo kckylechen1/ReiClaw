@@ -427,7 +427,7 @@ pub trait Memory: Send + Sync + crate::attribution::Attributable {
     /// stale archival). Default is a no-op.
     ///
     /// Invoked from the memory factory's hygiene cadence (when due) and from
-    /// [`MemoryStrategy::run_governance`]. Backends that own a live store
+    /// `DefaultMemoryStrategy::run_governance`. Backends that own a live store
     /// handle (e.g. tachi/memcore) override this; they must not open a second
     /// database connection.
     fn run_light_sleep_governance(&self) -> anyhow::Result<()> {
@@ -437,7 +437,7 @@ pub trait Memory: Send + Sync + crate::attribution::Attributable {
     /// Optional LLM enrichment of raw memories (summary / keywords / entities).
     ///
     /// Default is a no-op returning `0`. The provider is supplied per call
-    /// (mirrors [`MemoryStrategy::consolidate_turn`]) — backends must not store
+    /// (mirrors `DefaultMemoryStrategy::consolidate_turn`) — backends must not store
     /// a `ModelProvider` handle. Cadence is owned by the caller (typically
     /// `DefaultMemoryStrategy::consolidate_turn` via a 12h state-file gate).
     async fn run_llm_enrichment(
@@ -894,24 +894,6 @@ fn apply_recall_filter(
             .collect(),
         None => entries.into_iter().take(limit).collect(),
     }
-}
-
-/// High-level memory lifecycle policy.
-/// Implemented by strategy objects that wrap one or more `Memory` backends.
-#[async_trait]
-pub trait MemoryStrategy: Send + Sync {
-    /// Consolidate a conversation turn into long-term memory.
-    async fn consolidate_turn(
-        &self,
-        user_message: &str,
-        assistant_response: &str,
-        provider: &dyn crate::model_provider::ModelProvider,
-        model: &str,
-        temperature: Option<f64>,
-    ) -> anyhow::Result<()>;
-
-    /// Run memory governance (cleanup, archiving, background consolidation).
-    async fn run_governance(&self) -> anyhow::Result<()>;
 }
 
 #[cfg(test)]

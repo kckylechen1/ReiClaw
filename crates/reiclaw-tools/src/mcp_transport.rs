@@ -550,7 +550,7 @@ impl StdioTransport {
         alive.store(true, Ordering::Release);
         child_exited.store(false, Ordering::Release);
         let server_name = config.name.clone();
-        let reader = reiclaw_spawn::spawn!(stdio_read_loop(
+        let reader = reiclaw_log::spawn!(stdio_read_loop(
             server_name,
             generation,
             stdout,
@@ -563,7 +563,7 @@ impl StdioTransport {
         let watcher_child = Arc::clone(&child);
         let watcher_flag = Arc::clone(&child_exited);
         let exit_watcher =
-            reiclaw_spawn::spawn!(stdio_child_exit_watcher(watcher_child, watcher_flag,));
+            reiclaw_log::spawn!(stdio_child_exit_watcher(watcher_child, watcher_flag,));
 
         Ok(StdioConn {
             generation,
@@ -1299,7 +1299,7 @@ impl SseTransport {
         let sse_url = self.sse_url.clone();
         let server_name = self.server_name.clone();
 
-        conn.reader_task = Some(reiclaw_spawn::spawn!(async move {
+        conn.reader_task = Some(reiclaw_log::spawn!(async move {
             let stream = resp
                 .bytes_stream()
                 .map(|item| item.map_err(std::io::Error::other));

@@ -37,6 +37,8 @@ pub mod providers;
 mod save;
 pub mod scattered_types;
 pub mod schema;
+#[cfg(feature = "schema-export")]
+pub mod schema_markdown;
 pub mod secrets;
 pub mod sections;
 pub mod skill_bundles;

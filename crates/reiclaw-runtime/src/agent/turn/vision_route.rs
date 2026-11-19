@@ -494,7 +494,7 @@ vision = false
         let app = Router::new()
             .route("/v1/chat/completions", post(capture_model))
             .with_state(model_tx);
-        let server = reiclaw_spawn::spawn!(async move {
+        let server = reiclaw_log::spawn!(async move {
             axum::serve(listener, app)
                 .await
                 .expect("test provider serves");

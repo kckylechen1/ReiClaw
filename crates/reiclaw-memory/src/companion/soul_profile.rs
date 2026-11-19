@@ -500,6 +500,20 @@ fn checked_exemplar_field(
     Ok(value.to_string())
 }
 
+/// Derived provenance of an effective Tone dial; no independent stored state.
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize)]
+#[serde(tag = "kind", rename_all = "snake_case")]
+pub enum ToneProvenance {
+    Builtin,
+    Persona {
+        persona: String,
+        card: Option<String>,
+    },
+    Stored {
+        revision: u64,
+    },
+}
+
 /// Resolve effective values and per-key provenance from the canonical config
 /// selection and immutable stored Tone head. The result is never persisted.
 pub fn resolve_effective_tone(
@@ -508,9 +522,8 @@ pub fn resolve_effective_tone(
     profile: Option<&SoulProfile>,
 ) -> (
     reiclaw_config::persona::PersonaKnobs,
-    std::collections::BTreeMap<String, reiclaw_api::tone::ToneProvenance>,
+    std::collections::BTreeMap<String, ToneProvenance>,
 ) {
-    use reiclaw_api::tone::ToneProvenance;
     let selection = config.persona_selection_for_agent(agent);
     let base = selection.map_or_else(Default::default, |(knobs, _, _)| *knobs);
     let base_source = selection.map_or(ToneProvenance::Builtin, |(_, persona, card)| {

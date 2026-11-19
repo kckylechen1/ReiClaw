@@ -1,6 +1,8 @@
+#![cfg(feature = "schema-export")]
+
 //! The real config schema rendered through the public presentation boundary.
 
-use reiclaw_schema_markdown::{field_table_for_path, generate};
+use reiclaw_config::schema_markdown::{field_table_for_path, generate};
 
 #[test]
 fn index_links_each_section_to_its_anchor() {

@@ -17,16 +17,16 @@ use axum::{
 };
 use futures_util::{SinkExt, StreamExt};
 use reiclaw_api::channel::ChannelApprovalResponse;
-use reiclaw_api::chat_surface::ChatSurface;
 use reiclaw_infra::session_backend::RequestReceipt;
 use serde::Deserialize;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use std::time::Duration;
+use surface::ChatSurface;
 
 mod device;
 pub(crate) mod intake;
-mod surface;
+pub(crate) mod surface;
 pub(crate) mod turn_control;
 #[cfg(feature = "voice-surface")]
 mod voice_projection;
@@ -1150,7 +1150,7 @@ async fn build_ws_session(
         .register_channel(WS_CHANNEL_KEY, approval_channel);
     // Ends when the agent, and with it the approval channel, is dropped.
     let approval_leak_detection = state.config.read().security.leak_detection.clone();
-    reiclaw_spawn::spawn!(relay_approval_requests(
+    reiclaw_log::spawn!(relay_approval_requests(
         approval_event_rx,
         frames,
         pending_approvals,
@@ -1896,7 +1896,7 @@ pub(super) fn spawn_ws_btw_query(
             reiclaw_runtime::agent::cost::TurnUsage::default(),
         ))
     });
-    reiclaw_spawn::spawn!(async move {
+    reiclaw_log::spawn!(async move {
         let _retention = retention;
         let _permit = permit;
         let query_result = reiclaw_runtime::agent::cost::TOOL_LOOP_TURN_USAGE
@@ -2026,7 +2026,7 @@ fn start_ws_turns(
         scope.clone(),
         claim,
     );
-    reiclaw_spawn::spawn!(turns);
+    reiclaw_log::spawn!(turns);
 }
 
 /// Run a claimed turn to completion. Only legacy admissions may turn unread
@@ -2811,7 +2811,7 @@ async fn process_chat_message(
                     let alias = turn_alias.clone();
                     let key = session_key.to_string();
                     let budget = usize::try_from(max_context_tokens).unwrap_or(usize::MAX);
-                    reiclaw_spawn::spawn!(async move {
+                    reiclaw_log::spawn!(async move {
                         let config = live_config.read().clone();
                         if let Err(e) =
                             reiclaw_runtime::agent::sleep_compactor::maybe_compact_ws_turn(
@@ -3898,7 +3898,7 @@ mod tests {
             frames: a.conversation.frame_sink(),
             config: chat.state.config.clone(),
         };
-        let task = reiclaw_spawn::spawn!(async move {
+        let task = reiclaw_log::spawn!(async move {
             port.ask("Name?", &[], Duration::from_secs(5))
                 .await
                 .unwrap()

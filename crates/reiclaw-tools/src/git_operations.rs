@@ -1370,7 +1370,7 @@ mod tests {
             .run_git_command(&["rev-parse", "HEAD"], tmp.path())
             .await
             .unwrap();
-        let task = reiclaw_spawn::spawn!(async move {
+        let task = reiclaw_log::spawn!(async move {
             tool.execute(json!({"operation": "commit", "message": "fixture"}))
                 .await
         });

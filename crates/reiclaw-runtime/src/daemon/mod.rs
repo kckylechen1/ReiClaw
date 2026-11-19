@@ -540,7 +540,7 @@ fn record_daemon_started(config: &Config, host: &str, port: u16) {
 }
 
 fn spawn_state_writer(config: Config) -> JoinHandle<()> {
-    reiclaw_spawn::spawn!(async move {
+    reiclaw_log::spawn!(async move {
         let path = state_file_path(&config);
         if let Some(parent) = path.parent() {
             let _ = tokio::fs::create_dir_all(parent).await;
@@ -573,7 +573,7 @@ where
     F: FnMut() -> Fut + Send + 'static,
     Fut: Future<Output = Result<()>> + Send + 'static,
 {
-    reiclaw_spawn::spawn!(async move {
+    reiclaw_log::spawn!(async move {
         let mut backoff = initial_backoff_secs.max(1);
         let max_backoff = max_backoff_secs.max(backoff);
 
@@ -1163,7 +1163,7 @@ async fn run_heartbeat_worker(config: Config, task_identities: TaskIdentity) -> 
     if let Some((channel, target)) = deadman_delivery {
         let dm_metrics = Arc::clone(&metrics);
         let dm_config = config.clone();
-        reiclaw_spawn::spawn!(async move {
+        reiclaw_log::spawn!(async move {
             let check_interval = Duration::from_secs(60);
             let timeout = jiff::SignedDuration::from_mins(i64::from(deadman_timeout));
             loop {

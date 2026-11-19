@@ -1,6 +1,6 @@
 use reiclaw_api::cost::{BudgetCheck, CostRecord, CostSummary, UsagePeriod};
 use reiclaw_config::schema::CostConfig;
-use reiclaw_cost::{CostTracker, calculate_token_usage};
+use reiclaw_runtime::cost::{CostTracker, calculate_token_usage};
 use std::fs;
 
 #[test]

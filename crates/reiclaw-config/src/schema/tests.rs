@@ -236,10 +236,10 @@ async fn retired_sop_run_config_keys_fail_parse_loudly() {
 /// with an actionable message, never silently no-op.
 use super::*;
 use crate::load::{
-    ConfigResolutionSource, ExtraNestedModelProviderTable, config_dir_creation_error,
-    expand_tilde_path, resolve_runtime_config_dirs, try_resolve_macos_homebrew_config_dir,
+    ConfigResolutionSource, ExtraNestedModelProviderTable, RuntimeConfigKind,
+    config_dir_creation_error, expand_tilde_path, resolve_runtime_config_dirs,
+    try_resolve_macos_homebrew_config_dir,
 };
-use reiclaw_api::runtime_status::RuntimeConfigKind;
 use std::ffi::OsString;
 #[cfg(unix)]
 use std::os::unix::fs::PermissionsExt;

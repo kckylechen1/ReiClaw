@@ -682,7 +682,7 @@ async fn sighup_does_not_shut_down_daemon() {
     use tokio::time::{Duration, timeout};
 
     let (_reload_tx, reload_rx) = tokio::sync::watch::channel(false);
-    let handle = reiclaw_spawn::spawn!(wait_for_exit_signal(reload_rx));
+    let handle = reiclaw_log::spawn!(wait_for_exit_signal(reload_rx));
 
     // Give the signal handler time to register
     tokio::time::sleep(Duration::from_millis(50)).await;
@@ -703,7 +703,7 @@ async fn reload_channel_returns_reload() {
     use tokio::time::{Duration, timeout};
 
     let (reload_tx, reload_rx) = tokio::sync::watch::channel(false);
-    let handle = reiclaw_spawn::spawn!(wait_for_exit_signal(reload_rx));
+    let handle = reiclaw_log::spawn!(wait_for_exit_signal(reload_rx));
     tokio::time::sleep(Duration::from_millis(50)).await;
     reload_tx.send(true).expect("send reload");
 
@@ -906,7 +906,7 @@ async fn spawn_mock_gateway(response: Vec<u8>) -> (u16, tokio::sync::oneshot::Se
         .expect("bind mock listener");
     let port = listener.local_addr().expect("mock local addr").port();
     let (release_tx, release_rx) = tokio::sync::oneshot::channel::<()>();
-    reiclaw_spawn::spawn!(async move {
+    reiclaw_log::spawn!(async move {
         if let Ok((mut stream, _)) = listener.accept().await {
             let mut buf = [0_u8; 1024];
             let _ = stream.read(&mut buf).await;

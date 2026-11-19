@@ -1674,7 +1674,7 @@ fn sse_bytes_to_chunks(
 ) -> stream::BoxStream<'static, StreamResult<StreamChunk>> {
     let (tx, rx) = tokio::sync::mpsc::channel::<StreamResult<StreamChunk>>(100);
 
-    let handle = ::reiclaw_spawn::spawn!(async move {
+    let handle = ::reiclaw_log::spawn!(async move {
         let mut lines = SseLineBuffer::default();
 
         match response.error_for_status_ref() {
@@ -1755,7 +1755,7 @@ fn sse_bytes_to_events_for_contract(
 ) -> stream::BoxStream<'static, StreamResult<StreamEvent>> {
     let (tx, rx) = tokio::sync::mpsc::channel::<StreamResult<StreamEvent>>(100);
 
-    let handle = ::reiclaw_spawn::spawn!(async move {
+    let handle = ::reiclaw_log::spawn!(async move {
         let mut lines = SseLineBuffer::default();
         let mut tool_calls: Vec<StreamToolCallAccumulator> = Vec::new();
         let mut tool_call_bytes = 0_usize;
@@ -3223,7 +3223,7 @@ impl ModelProvider for OpenAiCompatibleModelProvider {
 
         let (tx, rx) = tokio::sync::mpsc::channel::<StreamResult<StreamEvent>>(100);
 
-        let handle = ::reiclaw_spawn::spawn!(async move {
+        let handle = ::reiclaw_log::spawn!(async move {
             let normalized = match Self::normalize_messages_for_upstream(&messages_owned).await {
                 Ok(n) => n,
                 Err(err) => {
@@ -3385,7 +3385,7 @@ impl ModelProvider for OpenAiCompatibleModelProvider {
         // Use a channel to bridge the async HTTP response to the stream
         let (tx, rx) = tokio::sync::mpsc::channel::<StreamResult<StreamChunk>>(100);
 
-        let handle = ::reiclaw_spawn::spawn!(async move {
+        let handle = ::reiclaw_log::spawn!(async move {
             // Normalize image markers in the user-supplied message before
             // forwarding upstream — seefor the OpenAI-compatible
             // remote-vs-local file path problem.
@@ -3529,7 +3529,7 @@ impl ModelProvider for OpenAiCompatibleModelProvider {
 
         let (tx, rx) = tokio::sync::mpsc::channel::<StreamResult<StreamChunk>>(100);
 
-        let handle = ::reiclaw_spawn::spawn!(async move {
+        let handle = ::reiclaw_log::spawn!(async move {
             let normalized = match Self::normalize_messages_for_upstream(&messages_owned).await {
                 Ok(n) => n,
                 Err(err) => {

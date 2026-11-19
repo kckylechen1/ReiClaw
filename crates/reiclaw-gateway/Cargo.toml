@@ -10,7 +10,6 @@ publish = false
 reiclaw-policy.workspace = true
 # Internal workspace crates
 reiclaw-api.workspace = true
-reiclaw-spawn.workspace = true
 reiclaw-config.workspace = true
 reiclaw-infra.workspace = true
 reiclaw-log.workspace = true

@@ -1578,7 +1578,10 @@ async fn async_main(command: clap::Command) -> Result<()> {
             #[cfg(feature = "schema-export")]
             {
                 let schema = schemars::schema_for!(config::Config);
-                print!("{}", reiclaw_schema_markdown::generate(&schema.to_value()));
+                print!(
+                    "{}",
+                    reiclaw_config::schema_markdown::generate(&schema.to_value())
+                );
                 return Ok(());
             }
             #[cfg(not(feature = "schema-export"))]
@@ -2972,7 +2975,7 @@ fn gate_security_posture(
         );
     }
     let config_path = config.config_path.display().to_string();
-    let handle = ::reiclaw_spawn::spawn!(async move {
+    let handle = ::reiclaw_log::spawn!(async move {
         let mut ticker = tokio::time::interval(std::time::Duration::from_secs(30));
         loop {
             ticker.tick().await;
@@ -3046,7 +3049,7 @@ fn spawn_companion_outbox_observer(
     store: Option<std::sync::Arc<reiclaw_memory::CompanionStore>>,
 ) -> Option<tokio::task::JoinHandle<()>> {
     let store = store?;
-    Some(::reiclaw_spawn::spawn!(async move {
+    Some(::reiclaw_log::spawn!(async move {
         let mut ticker = tokio::time::interval(std::time::Duration::from_secs(
             reiclaw_memory::OUTBOX_OBSERVE_INTERVAL_SECS,
         ));

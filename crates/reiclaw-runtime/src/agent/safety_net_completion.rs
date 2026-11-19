@@ -168,7 +168,7 @@ async fn endpoint(message: serde_json::Value) -> (String, Models, tokio::task::J
     }));
     let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
     let url = format!("http://{}", listener.local_addr().unwrap());
-    let server = reiclaw_spawn::spawn!(async move { axum::serve(listener, app).await.unwrap() });
+    let server = reiclaw_log::spawn!(async move { axum::serve(listener, app).await.unwrap() });
     (url, models, server)
 }
 

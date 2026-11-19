@@ -8,11 +8,8 @@ publish = false
 
 [dependencies]
 reiclaw-policy.workspace = true
-reiclaw-cost.workspace = true
-reiclaw-platform.workspace = true
 reiclaw-http.workspace = true
 reiclaw-api.workspace = true
-reiclaw-spawn.workspace = true
 reiclaw-infra.workspace = true
 reiclaw-config = { workspace = true, features = ["i18n"] }
 reiclaw-log.workspace = true

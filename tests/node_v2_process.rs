@@ -116,7 +116,7 @@ impl Fixture {
                 }
             }),
         );
-        let server = ::reiclaw_spawn::spawn!(async move {
+        let server = ::reiclaw_log::spawn!(async move {
             axum::serve(gateway, router).await.unwrap();
         });
         // Fault-injection proxy duplicates real Invoke frames and injects stale
@@ -160,7 +160,7 @@ impl Fixture {
                 let _ = upstream.close(None).await;
             }) }
         }));
-        let proxy_task = ::reiclaw_spawn::spawn!(async move {
+        let proxy_task = ::reiclaw_log::spawn!(async move {
             axum::serve(proxy, router).await.unwrap();
         });
         Self {
@@ -188,7 +188,7 @@ impl Fixture {
         let input = child.stdin.take().unwrap();
         let stdout = child.stdout.take().unwrap();
         let (tx, events) = mpsc::channel(128);
-        ::reiclaw_spawn::spawn!(async move {
+        ::reiclaw_log::spawn!(async move {
             let mut lines = BufReader::new(stdout).lines();
             while let Ok(Some(line)) = lines.next_line().await {
                 if let Ok(event) = serde_json::from_str::<Value>(&line)
@@ -323,7 +323,7 @@ async fn seven_real_process_scenarios() {
     host.event("holding").await;
     let tool = echo.clone();
     let old =
-        ::reiclaw_spawn::spawn!(async move { tool.execute(json!({"text":"old"})).await.unwrap() });
+        ::reiclaw_log::spawn!(async move { tool.execute(json!({"text":"old"})).await.unwrap() });
     host.event("executed").await;
     host.command("reconnect").await;
     host.event("ready").await;
@@ -347,9 +347,7 @@ async fn seven_real_process_scenarios() {
     host.event("holding").await;
     let tool = echo.clone();
     let pending =
-        ::reiclaw_spawn::spawn!(
-            async move { tool.execute(json!({"text":"reduce"})).await.unwrap() }
-        );
+        ::reiclaw_log::spawn!(async move { tool.execute(json!({"text":"reduce"})).await.unwrap() });
     host.event("executed").await;
     host.command("info-only").await;
     host.event("ready").await;
@@ -389,7 +387,7 @@ async fn seven_real_process_scenarios() {
     host.command("hold").await;
     host.event("holding").await;
     let tool = info.clone();
-    let pending = ::reiclaw_spawn::spawn!(async move { tool.execute(json!({})).await.unwrap() });
+    let pending = ::reiclaw_log::spawn!(async move { tool.execute(json!({})).await.unwrap() });
     host.event("executed").await;
     fixture.registry.revoke_device(&host.device).unwrap();
     assert_eq!(
@@ -441,7 +439,7 @@ async fn seven_real_process_scenarios() {
     host.event("holding").await;
 
     let info = fixture.tool(&host, "system.info").await;
-    let pending = ::reiclaw_spawn::spawn!(async move { info.execute(json!({})).await.unwrap() });
+    let pending = ::reiclaw_log::spawn!(async move { info.execute(json!({})).await.unwrap() });
     host.event("executed").await;
     fixture.registry.shutdown();
     assert_eq!(

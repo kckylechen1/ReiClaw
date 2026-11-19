@@ -236,7 +236,7 @@ mod tests {
             Arc::new(reiclaw_policy::SecurityPolicy::default()),
             channels,
         );
-        let task = reiclaw_spawn::spawn!(async move {
+        let task = reiclaw_log::spawn!(async move {
             tool.execute(json!({"channel":"wss", "question":"Which?", "choices":["2", "beta"], "timeout_secs":5})).await.unwrap()
         });
         let question = next_question(&mut sub).await;
@@ -254,7 +254,7 @@ mod tests {
     async fn free_text_timeout_and_dropped_future_remove_pending_requests() {
         let (mut sub, port) = setup().await;
         let p = port.clone();
-        let task = reiclaw_spawn::spawn!(async move {
+        let task = reiclaw_log::spawn!(async move {
             p.ask("Name?", &[], Duration::from_secs(2)).await.unwrap()
         });
         let q = next_question(&mut sub).await;
@@ -265,7 +265,7 @@ mod tests {
         );
         assert_eq!(task.await.unwrap().as_deref(), Some("hello"));
         let p = port.clone();
-        let task = reiclaw_spawn::spawn!(async move {
+        let task = reiclaw_log::spawn!(async move {
             p.ask("Expire?", &[], Duration::from_secs(1)).await.unwrap()
         });
         let q = next_question(&mut sub).await;
@@ -276,7 +276,7 @@ mod tests {
             "stale"
         );
         let p = port.clone();
-        let task = reiclaw_spawn::spawn!(async move {
+        let task = reiclaw_log::spawn!(async move {
             p.ask("Drop?", &[], Duration::from_secs(5)).await.unwrap()
         });
         next_question(&mut sub).await;
@@ -294,7 +294,7 @@ mod tests {
             };
             let conv = sub.conversation.clone();
             let p = port.clone();
-            let task = reiclaw_spawn::spawn!(async move {
+            let task = reiclaw_log::spawn!(async move {
                 p.ask("Wait?", &[], Duration::from_secs(5)).await.unwrap()
             });
             next_question(&mut sub).await;
@@ -322,7 +322,7 @@ mod tests {
         let token = format!("zc_{}", "abcdef12".repeat(8));
         let prompt = format!("Choose {token}");
         port.config.write().security.leak_detection.enabled = false;
-        let task = reiclaw_spawn::spawn!(async move {
+        let task = reiclaw_log::spawn!(async move {
             p.ask(&prompt, &[], Duration::from_secs(5)).await.unwrap()
         });
         let first = next_question(&mut sub).await;

@@ -922,7 +922,7 @@ fn new_record(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::calculate_token_usage;
+    use crate::cost::calculate_token_usage;
     use tempfile::TempDir;
 
     fn enabled_config() -> CostConfig {

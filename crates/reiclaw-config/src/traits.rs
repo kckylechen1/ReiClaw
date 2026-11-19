@@ -1,8 +1,16 @@
 // Keep config and Configurable-generated paths compatible with the shared API owner.
 pub use reiclaw_api::config_metadata::{
-    ChannelConfig, ChannelInfo, ConfigTab, CredentialSurfaceClass, IntegrationDescriptor,
-    NestedOptionEntry, PropFieldSpec, PropKind, SecretFieldInfo,
+    ChannelInfo, ConfigTab, CredentialSurfaceClass, IntegrationDescriptor, NestedOptionEntry,
+    PropFieldSpec, PropKind, SecretFieldInfo,
 };
+
+/// The trait for describing a channel
+pub trait ChannelConfig {
+    /// human-readable name
+    fn name() -> &'static str;
+    /// short description
+    fn desc() -> &'static str;
+}
 
 /// Sentinel rendered for unset / `None` / empty config values during display.
 /// Never a valid stored value: the write path rejects it so it cannot round-trip

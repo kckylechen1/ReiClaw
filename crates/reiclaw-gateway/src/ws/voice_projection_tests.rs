@@ -604,7 +604,7 @@ async fn voice_projection_rechecks_live_admission_after_metadata() {
         let app = axum::Router::new()
             .route("/ws/chat", axum::routing::get(handle_ws_chat))
             .with_state(state);
-        fixture.tasks.push(reiclaw_spawn::spawn!(async move {
+        fixture.tasks.push(reiclaw_log::spawn!(async move {
             axum::serve(listener, app).await.unwrap();
         }));
         let (status, mut socket) = DeviceWire::upgrade(

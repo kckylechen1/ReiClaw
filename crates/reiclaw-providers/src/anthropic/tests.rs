@@ -396,7 +396,7 @@ data: {\"type\":\"message_start\",\"message\":{\"id\":\"m\",\"type\":\"message\"
     });
     let (tx, _rx) = tokio::sync::mpsc::channel::<StreamResult<StreamEvent>>(64);
 
-    let handle = ::reiclaw_spawn::spawn!(async move {
+    let handle = ::reiclaw_log::spawn!(async move {
         AnthropicModelProvider::parse_anthropic_sse_from_reader(reader, &tx).await;
     });
     let probe = handle.abort_handle();
@@ -444,7 +444,7 @@ async fn successful_stream_can_outlive_configured_request_timeout() {
         .await
         .expect("bind Anthropic SSE test server");
     let addr = listener.local_addr().expect("Anthropic SSE test address");
-    let server = ::reiclaw_spawn::spawn!(async move {
+    let server = ::reiclaw_log::spawn!(async move {
         axum::serve(listener, app)
             .await
             .expect("serve Anthropic SSE test");
@@ -1468,7 +1468,7 @@ async fn chat_with_tools_sends_full_history_and_native_tools() {
 
     let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
     let addr = listener.local_addr().unwrap();
-    let server_handle = reiclaw_spawn::spawn!(async move {
+    let server_handle = reiclaw_log::spawn!(async move {
         axum::serve(listener, app).await.unwrap();
     });
 
@@ -2151,7 +2151,7 @@ async fn anthropic_factory_forwards_timeout_to_native_provider() {
         .expect("bind test server");
     let addr = listener.local_addr().expect("test server addr");
     let app = Router::new().route("/v1/messages", post(slow_messages));
-    let server = reiclaw_spawn::spawn!(async move {
+    let server = reiclaw_log::spawn!(async move {
         axum::serve(listener, app).await.expect("serve test server");
     });
 
@@ -2226,7 +2226,7 @@ async fn tool_result_image_delivered_as_nested_block() {
 
     let listener = TcpListener::bind("127.0.0.1:0").await.expect("bind");
     let addr = listener.local_addr().expect("local addr");
-    let server_handle = reiclaw_spawn::spawn!(async move {
+    let server_handle = reiclaw_log::spawn!(async move {
         axum::serve(listener, app).await.expect("serve");
     });
 

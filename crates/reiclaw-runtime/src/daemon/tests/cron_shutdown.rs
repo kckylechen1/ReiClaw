@@ -19,8 +19,8 @@ async fn blocking_cron_child(
         tokio::task::yield_now().await;
         child_ended.store(true, Ordering::SeqCst);
     });
-    let child = AbortOnDropHandle::new(reiclaw_spawn::spawn!(tracked));
-    let parent = reiclaw_spawn::spawn!(async move {
+    let child = AbortOnDropHandle::new(reiclaw_log::spawn!(tracked));
+    let parent = reiclaw_log::spawn!(async move {
         let _child = child;
         std::future::pending::<()>().await;
     });
@@ -34,7 +34,7 @@ async fn forced_component_abort_waits_for_cron_child_destruction() {
     let (parent, ended, release) = blocking_cron_child(&children).await;
     let parent_abort = parent.abort_handle();
     let stop_tracker = children.clone();
-    let stopping = AbortOnDropHandle::new(reiclaw_spawn::spawn!(async move {
+    let stopping = AbortOnDropHandle::new(reiclaw_log::spawn!(async move {
         stop_components(
             vec![parent],
             &stop_tracker,

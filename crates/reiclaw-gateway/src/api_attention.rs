@@ -201,7 +201,7 @@ mod tests {
             .layer(tower_http::limit::RequestBodyLimitLayer::new(
                 crate::MAX_BODY_SIZE,
             ));
-        let server = reiclaw_spawn::spawn!(async move {
+        let server = reiclaw_log::spawn!(async move {
             axum::serve(
                 listener,
                 app.into_make_service_with_connect_info::<SocketAddr>(),

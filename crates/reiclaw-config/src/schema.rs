@@ -2,8 +2,9 @@
 
 use crate::load::default_path_under_config_dir;
 pub use crate::load::{
-    FTL_CATALOGS, classify_runtime_config_kind, ensure_bootstrap_files, ftl_locale_dir,
-    read_persisted_proxy_for_boot, resolve_config_dir_for_data, resolve_runtime_dirs,
+    FTL_CATALOGS, RuntimeConfigKind, classify_runtime_config_kind, ensure_bootstrap_files,
+    ftl_locale_dir, read_persisted_proxy_for_boot, resolve_config_dir_for_data,
+    resolve_runtime_dirs,
 };
 
 pub(crate) use crate::save::lookup_prop_value_in_table;

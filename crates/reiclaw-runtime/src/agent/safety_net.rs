@@ -308,7 +308,7 @@ async fn safety_net_streaming_event_sequence_for_tool_turn() {
     );
 
     let (tx, mut rx) = mpsc::channel(256);
-    let handle = reiclaw_spawn::spawn!(async move {
+    let handle = reiclaw_log::spawn!(async move {
         agent
             .turn_streamed_with_steering_state("seq", tx, None, None)
             .await
@@ -1382,7 +1382,7 @@ async fn safety_net_midbatch_cancel_emits_events_for_completed_tools() {
         ],
     );
     let (tx, mut rx) = mpsc::channel(256);
-    let handle = reiclaw_spawn::spawn!(async move {
+    let handle = reiclaw_log::spawn!(async move {
         agent
             .turn_streamed_with_steering_state("cancel-events", tx, Some(token), None)
             .await
@@ -1491,7 +1491,7 @@ async fn safety_net_cancel_after_streamed_output_persists_partial() {
     let cancel = token.clone();
 
     let (tx, mut rx) = mpsc::channel(256);
-    let handle = reiclaw_spawn::spawn!(async move {
+    let handle = reiclaw_log::spawn!(async move {
         agent
             .turn_streamed_with_steering_state("stream then cancel", tx, Some(token), None)
             .await
@@ -1566,7 +1566,7 @@ async fn safety_net_stream_error_persists_only_forwarded_text() {
     };
     let mut agent = build_agent(Box::new(provider), vec![]);
     let (tx, mut rx) = mpsc::channel(256);
-    let handle = reiclaw_spawn::spawn!(async move {
+    let handle = reiclaw_log::spawn!(async move {
         agent
             .turn_streamed_with_steering_state("stream then die", tx, None, None)
             .await

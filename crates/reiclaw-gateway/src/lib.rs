@@ -82,7 +82,6 @@ fn is_recoverable_accept_error(e: &std::io::Error) -> bool {
     }
     false
 }
-use reiclaw_api::memory_traits::MemoryStrategy;
 use reiclaw_api::tool::ToolSpec;
 use reiclaw_config::schema::Config;
 use reiclaw_infra::session_backend::SessionBackend;
@@ -431,7 +430,7 @@ pub struct AppState {
     /// `Option<f64>` end-to-end; never substitute a hardcoded default.
     pub temperature: Option<f64>,
     pub mem: Arc<dyn Memory>,
-    pub memory_strategy: Arc<dyn MemoryStrategy>,
+    pub memory_strategy: Arc<DefaultMemoryStrategy>,
     /// Companion PortableKernel store. `None` when `memorycore` is off or
     /// `[companion_memory].enable` is false.
     pub companion_store: Option<Arc<reiclaw_memory::CompanionStore>>,
@@ -508,7 +507,7 @@ fn gateway_session_queue() -> Arc<session_queue::SessionActorQueue> {
     const REAP_EVERY: std::time::Duration = std::time::Duration::from_secs(60);
     let queue = Arc::new(session_queue::SessionActorQueue::new(8, 30, 600));
     let weak = Arc::downgrade(&queue);
-    reiclaw_spawn::spawn!(async move {
+    reiclaw_log::spawn!(async move {
         let mut interval = tokio::time::interval(REAP_EVERY);
         interval.tick().await;
         loop {
@@ -787,7 +786,7 @@ pub async fn run_gateway(
             Arc::new(platform::NativeRuntime::new())
         }
     };
-    let memory_strategy: Arc<dyn MemoryStrategy> = Arc::new(DefaultMemoryStrategy::with_config(
+    let memory_strategy = Arc::new(DefaultMemoryStrategy::with_config(
         mem.clone(),
         config.memory.clone(),
         config.data_dir.clone(),
@@ -1304,7 +1303,7 @@ pub async fn run_gateway(
         reiclaw_api::node_tools::install(&config.data_dir, node_registry.clone());
         let registry = node_registry.clone();
         let mut shutdown = shutdown_tx.subscribe();
-        ::reiclaw_spawn::spawn!(async move {
+        ::reiclaw_log::spawn!(async move {
             let _ = shutdown.changed().await;
             registry.shutdown();
         });
@@ -1322,7 +1321,7 @@ pub async fn run_gateway(
         let advertised_gateway = nodes::mdns::MdnsAdvertisedGateway::new(actual_port, path_prefix);
         let mdns_registry = mdns_peer_registry.clone();
         let mdns_shutdown_rx = shutdown_tx.subscribe();
-        Some(reiclaw_spawn::spawn!(async move {
+        Some(reiclaw_log::spawn!(async move {
             if let Err(err) = nodes::mdns::run_peer_discovery(
                 mdns_config,
                 advertised_gateway,
@@ -1769,7 +1768,7 @@ pub async fn run_gateway(
                     .await
                     .expect("infallible make_service");
 
-                    reiclaw_spawn::spawn!(async move {
+                    reiclaw_log::spawn!(async move {
                         let tls_stream = match tls_acceptor.accept(tcp_stream).await {
                             Ok(s) => s,
                             Err(e) => {
@@ -2726,7 +2725,7 @@ async fn handle_admin_reload(
         .store(false, std::sync::atomic::Ordering::Relaxed);
     let shutdown_tx = state.shutdown_tx.clone();
     // Brief delay so the HTTP response flushes before tear-down begins.
-    reiclaw_spawn::spawn!(async move {
+    reiclaw_log::spawn!(async move {
         tokio::time::sleep(std::time::Duration::from_millis(200)).await;
         // Drain axum first so the listener releases.
         let _ = shutdown_tx.send(true);

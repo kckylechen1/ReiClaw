@@ -1019,7 +1019,7 @@ mod tests {
             .expect("bind test server");
         let addr = listener.local_addr().expect("test server addr");
         let app = Router::new().route("/chat/completions", post(slow_chat_completion));
-        let server = reiclaw_spawn::spawn!(async move {
+        let server = reiclaw_log::spawn!(async move {
             axum::serve(listener, app).await.expect("serve test server");
         });
 
@@ -1211,7 +1211,7 @@ mod tests {
             .expect("bind test server");
         let addr = listener.local_addr().expect("test server addr");
         let app = Router::new().route("/v1/responses", post(slow_responses));
-        let server = reiclaw_spawn::spawn!(async move {
+        let server = reiclaw_log::spawn!(async move {
             axum::serve(listener, app).await.expect("serve test server");
         });
 
@@ -1294,7 +1294,7 @@ mod tests {
         let app = Router::new()
             .route("/v1/responses", post(capture_headers))
             .with_state(Arc::clone(&captured));
-        let server = reiclaw_spawn::spawn!(async move {
+        let server = reiclaw_log::spawn!(async move {
             axum::serve(listener, app).await.expect("serve test server");
         });
 
@@ -1474,7 +1474,7 @@ mod tests {
         let app = Router::new()
             .route("/zen/v1/responses", post(capture_path))
             .with_state(capture.clone());
-        let server = reiclaw_spawn::spawn!(async move {
+        let server = reiclaw_log::spawn!(async move {
             axum::serve(listener, app).await.expect("serve test server");
         });
 

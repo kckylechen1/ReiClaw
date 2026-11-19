@@ -668,13 +668,13 @@ async fn spawn_hanging_server() -> (
     let addr = listener.local_addr().expect("listener addr");
     let accepts = std::sync::Arc::new(std::sync::atomic::AtomicUsize::new(0));
     let accepts_task = std::sync::Arc::clone(&accepts);
-    reiclaw_spawn::spawn!(async move {
+    reiclaw_log::spawn!(async move {
         loop {
             let Ok((stream, _)) = listener.accept().await else {
                 break;
             };
             accepts_task.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
-            reiclaw_spawn::spawn!(async move {
+            reiclaw_log::spawn!(async move {
                 let _stream = stream;
                 tokio::time::sleep(Duration::from_secs(30)).await;
             });
@@ -942,7 +942,7 @@ async fn queued_and_retried_agent_jobs_keep_their_admitted_task_owner() {
                 retry,
                 requests: requests.clone(),
             });
-        let server = reiclaw_spawn::spawn!(async move {
+        let server = reiclaw_log::spawn!(async move {
             axum::serve(listener, app).await.unwrap();
         });
         config.providers.models.ollama.insert(

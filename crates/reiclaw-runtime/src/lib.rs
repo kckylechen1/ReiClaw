@@ -34,6 +34,5 @@ pub mod security;
 pub mod service;
 pub mod skills;
 pub mod subagent_v1;
-pub mod tachi_bridge;
 pub mod tools;
 pub mod tunnel;
