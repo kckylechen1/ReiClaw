@@ -18,8 +18,8 @@ use std::collections::HashSet;
 use std::sync::Arc;
 
 use super::{
-    agent_turn, apply_text_tool_prompt_policy, build_tool_instructions_for_names,
-    compute_excluded_mcp_tools, native_tool_specs_present_for_turn, resolved_agent_for_turn,
+    apply_text_tool_prompt_policy, build_tool_instructions_for_names, compute_excluded_mcp_tools,
+    native_tool_specs_present_for_turn, resolved_agent_for_turn,
 };
 
 /// Process a single message through the full agent (with tools and memory).
@@ -41,6 +41,27 @@ pub async fn process_message_with_task_identity(
     session_id: Option<&str>,
     origin: TurnOrigin,
     task_identity: Option<crate::tools::task_context::TaskIdentity>,
+) -> Result<String> {
+    process_message_with_hooks(
+        config,
+        agent_alias,
+        message,
+        session_id,
+        origin,
+        task_identity,
+        None,
+    )
+    .await
+}
+
+pub async fn process_message_with_hooks(
+    config: Config,
+    agent_alias: &str,
+    message: &str,
+    session_id: Option<&str>,
+    origin: TurnOrigin,
+    task_identity: Option<crate::tools::task_context::TaskIdentity>,
+    hooks: Option<Arc<crate::hooks::HookRunner>>,
 ) -> Result<String> {
     use ::reiclaw_log::Instrument;
     let agent = resolved_agent_for_turn(&config, agent_alias)?;
@@ -375,7 +396,7 @@ pub async fn process_message_with_task_identity(
         reiclaw_api::NATIVE_THINKING_OVERRIDE
             .scope(
                 thinking_params.native_thinking,
-                agent_turn(
+                super::agent_turn::agent_turn_with_security_and_hooks(
                     Some(&config),
                     model_provider.as_ref(),
                     &mut history,
@@ -414,6 +435,8 @@ pub async fn process_message_with_task_identity(
                     Some(agent_alias),
                     Some(&turn_id),
                     task_owner.as_ref(),
+                    Some(security.as_ref()),
+                    hooks.as_deref(),
                 ),
             )
             .await

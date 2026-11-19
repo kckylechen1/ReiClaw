@@ -172,6 +172,13 @@ pub fn transient_error_hint(err: &anyhow::Error) -> Option<&'static str> {
 
 /// Check if an error is non-retryable (client errors that won't resolve with retries).
 pub fn is_non_retryable(err: &anyhow::Error) -> bool {
+    if err
+        .downcast_ref::<reiclaw_api::EstopBlockedError>()
+        .is_some()
+    {
+        return true;
+    }
+
     // Context window errors are NOT non-retryable — they can be recovered
     // by truncating conversation history, so let the retry loop handle them.
     if is_context_window_exceeded(err) {
@@ -821,6 +828,9 @@ pub struct ReliableModelProvider {
     /// which key to park. `None` means no rotation has happened yet and the
     /// provider is still on its construction-time credential.
     last_installed_key: Mutex<Option<String>>,
+    /// Optional explicit emergency-stop host guard (checked in addition to
+    /// `reiclaw_api::TOOL_LOOP_ESTOP_HOST_GUARD`) before each attempt/failover.
+    estop_host_guard: Option<reiclaw_api::EstopHostGuard>,
 }
 
 impl ReliableModelProvider {
@@ -856,12 +866,32 @@ impl ReliableModelProvider {
             rate_limit_cooldowns: Mutex::new(HashMap::new()),
             key_cooldowns: Mutex::new(HashMap::new()),
             last_installed_key: Mutex::new(None),
+            estop_host_guard: None,
         }
     }
     /// Set additional API keys for round-robin rotation on rate-limit errors.
     pub fn with_api_keys(mut self, keys: Vec<String>) -> Self {
         self.api_keys = keys;
         self
+    }
+
+    /// Install an explicit live emergency-stop host guard checked before every
+    /// provider attempt (retry or failover).
+    #[must_use]
+    pub fn with_estop_host_guard(mut self, guard: reiclaw_api::EstopHostGuard) -> Self {
+        self.estop_host_guard = Some(guard);
+        self
+    }
+
+    fn enforce_entry_estop(&self, provider: &dyn ModelProvider, model: &str) -> anyhow::Result<()> {
+        let host = provider.endpoint_host_for_model(model);
+        if let Some(ref guard) = self.estop_host_guard {
+            guard(host.as_deref())
+                .map_err(|msg| anyhow::Error::new(reiclaw_api::EstopBlockedError(msg)))?;
+        }
+        reiclaw_api::check_tool_loop_estop_host(host.as_deref())
+            .map_err(|msg| anyhow::Error::new(reiclaw_api::EstopBlockedError(msg)))?;
+        Ok(())
     }
 
     /// Advance to the next API key that is not inside a cooldown window.
@@ -1104,6 +1134,22 @@ impl ReliableModelProvider {
 
 #[async_trait]
 impl ModelProvider for ReliableModelProvider {
+    fn endpoint_host(&self) -> Option<String> {
+        self.model_providers
+            .iter()
+            .find(|entry| !self.provider_should_skip_for_cooldown(entry))
+            .or_else(|| self.model_providers.first())
+            .and_then(|entry| entry.provider().endpoint_host())
+    }
+
+    fn endpoint_host_for_model(&self, model: &str) -> Option<String> {
+        self.model_providers
+            .iter()
+            .find(|entry| !self.provider_should_skip_for_cooldown(entry))
+            .or_else(|| self.model_providers.first())
+            .and_then(|entry| entry.provider().endpoint_host_for_model(model))
+    }
+
     async fn warmup(&self) -> anyhow::Result<()> {
         for entry in &self.model_providers {
             let provider_name = entry.display_name.as_str();
@@ -1154,6 +1200,7 @@ impl ModelProvider for ReliableModelProvider {
             let mut last_diagnostic: Option<ProviderErrorDiagnostic> = None;
 
             for attempt in 0..=self.max_retries {
+                self.enforce_entry_estop(entry.provider(), model)?;
                 match ProviderDispatch::from_ref(entry.provider())
                     .chat_with_system(system_prompt, message, model, temperature)
                     .await
@@ -1192,6 +1239,9 @@ impl ModelProvider for ReliableModelProvider {
                         return Ok(resp);
                     }
                     Err(e) => {
+                        if e.downcast_ref::<reiclaw_api::EstopBlockedError>().is_some() {
+                            return Err(e);
+                        }
                         // Context window exceeded: no history to truncate
                         // in chat_with_system, bail immediately.
                         if is_context_window_exceeded(&e) {
@@ -1337,6 +1387,7 @@ impl ModelProvider for ReliableModelProvider {
             let mut last_diagnostic: Option<ProviderErrorDiagnostic> = None;
 
             for attempt in 0..=self.max_retries {
+                self.enforce_entry_estop(entry.provider(), model)?;
                 match ProviderDispatch::from_ref(entry.provider())
                     .chat_with_history(&effective_messages, model, temperature)
                     .await
@@ -1376,6 +1427,9 @@ impl ModelProvider for ReliableModelProvider {
                         return Ok(resp);
                     }
                     Err(e) => {
+                        if e.downcast_ref::<reiclaw_api::EstopBlockedError>().is_some() {
+                            return Err(e);
+                        }
                         // Context window exceeded: truncate history and retry
                         if is_context_window_exceeded(&e) && !context_truncated {
                             let dropped = truncate_for_context(&mut effective_messages);
@@ -1573,6 +1627,7 @@ impl ModelProvider for ReliableModelProvider {
             let mut last_diagnostic: Option<ProviderErrorDiagnostic> = None;
 
             for attempt in 0..=self.max_retries {
+                self.enforce_entry_estop(entry.provider(), model)?;
                 match ProviderDispatch::from_ref(entry.provider())
                     .chat_with_tools(&effective_messages, tools, model, temperature)
                     .await
@@ -1613,6 +1668,9 @@ impl ModelProvider for ReliableModelProvider {
                         return Ok(resp);
                     }
                     Err(e) => {
+                        if e.downcast_ref::<reiclaw_api::EstopBlockedError>().is_some() {
+                            return Err(e);
+                        }
                         // Context window exceeded: truncate history and retry
                         if is_context_window_exceeded(&e) && !context_truncated {
                             let dropped = truncate_for_context(&mut effective_messages);
@@ -1766,6 +1824,7 @@ impl ModelProvider for ReliableModelProvider {
             let mut last_diagnostic: Option<ProviderErrorDiagnostic> = None;
 
             for attempt in 0..=self.max_retries {
+                self.enforce_entry_estop(entry.provider(), model)?;
                 let req = ChatRequest {
                     messages: &effective_messages,
                     tools: request.tools,
@@ -1811,6 +1870,9 @@ impl ModelProvider for ReliableModelProvider {
                         return Ok(resp);
                     }
                     Err(e) => {
+                        if e.downcast_ref::<reiclaw_api::EstopBlockedError>().is_some() {
+                            return Err(e);
+                        }
                         // Context window exceeded: truncate history and retry
                         if is_context_window_exceeded(&e) && !context_truncated {
                             let dropped = truncate_for_context(&mut effective_messages);
@@ -1978,6 +2040,18 @@ impl ModelProvider for ReliableModelProvider {
                 continue;
             }
 
+            if let Err(err) = self.enforce_entry_estop(model_provider, model) {
+                let raw = err.to_string();
+                let msg = if raw.contains(reiclaw_api::ESTOP_ERROR_MARKER) {
+                    raw
+                } else {
+                    format!("{}: {raw}", reiclaw_api::ESTOP_ERROR_MARKER)
+                };
+                return Box::pin(stream::once(async move {
+                    Err(crate::traits::StreamError::ModelProvider(msg))
+                }));
+            }
+
             let provider_clone = provider_name.to_string();
 
             let current_model = model.to_owned();
@@ -2128,6 +2202,18 @@ impl ModelProvider for ReliableModelProvider {
             if self.provider_should_skip_for_cooldown(entry) {
                 self.log_cooldown_skip(provider_name);
                 continue;
+            }
+
+            if let Err(err) = self.enforce_entry_estop(model_provider, model) {
+                let raw = err.to_string();
+                let msg = if raw.contains(reiclaw_api::ESTOP_ERROR_MARKER) {
+                    raw
+                } else {
+                    format!("{}: {raw}", reiclaw_api::ESTOP_ERROR_MARKER)
+                };
+                return Box::pin(stream::once(async move {
+                    Err(crate::traits::StreamError::ModelProvider(msg))
+                }));
             }
 
             let provider_clone = provider_name.to_string();

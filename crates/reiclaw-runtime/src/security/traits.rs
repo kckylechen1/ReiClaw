@@ -18,6 +18,13 @@ pub trait Sandbox: Send + Sync {
     /// Displayed in status output and health checks so operators can verify
     /// the active security posture.
     fn description(&self) -> &str;
+
+    /// Whether this sandbox enforces OS-level network isolation (e.g. Docker
+    /// `--network none` or Bubblewrap `--unshare-all` without `--share-net`).
+    /// Used by `network_kill` to decide whether shell execution must fail closed.
+    fn isolates_network(&self) -> bool {
+        false
+    }
 }
 
 #[derive(Debug, Clone, Default)]

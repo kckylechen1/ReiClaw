@@ -4136,3 +4136,29 @@ fn stdin_interpreter_comment_and_heredoc_boundaries() {
         );
     }
 }
+
+#[test]
+fn custom_estop_state_file_and_siblings_are_runtime_config_paths() {
+    let dir = tempfile::tempdir().unwrap();
+    let custom_dir = dir.path().join("custom-state");
+    std::fs::create_dir_all(&custom_dir).unwrap();
+    let state_file = custom_dir.join("my-estop.json");
+    let cfg = reiclaw_config::schema::EstopConfig {
+        enabled: true,
+        state_file: state_file.to_string_lossy().to_string(),
+        require_otp_to_resume: false,
+    };
+    let policy = SecurityPolicy {
+        workspace_dir: dir.path().to_path_buf(),
+        workspace_only: false,
+        config_path: Some(dir.path().join("config.toml")),
+        data_dir: Some(dir.path().join("data")),
+        ..SecurityPolicy::default()
+    }
+    .with_estop(&cfg, dir.path());
+
+    assert!(policy.is_runtime_config_path(&state_file));
+    assert!(policy.is_runtime_config_path(&custom_dir.join("my-estop.json.lock")));
+    assert!(policy.is_runtime_config_path(&custom_dir.join(".my-estop.json.tmp-123")));
+    assert!(!policy.is_runtime_config_path(&dir.path().join("notes.txt")));
+}

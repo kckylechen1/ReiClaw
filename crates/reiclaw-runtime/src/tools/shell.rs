@@ -4,6 +4,7 @@ use crate::security::traits::Sandbox;
 use async_trait::async_trait;
 use reiclaw_api::platform::is_android;
 use reiclaw_api::tool::{Tool, ToolOutput, ToolResult, with_ephemeral_workspace_warning};
+use reiclaw_infra::process::ProcessGroupGuard;
 use serde_json::json;
 use std::collections::{HashMap, HashSet};
 use std::sync::Arc;
@@ -12,47 +13,6 @@ use std::time::Duration;
 /// Maximum output size in bytes (1MB).
 const MAX_OUTPUT_BYTES: usize = 1_048_576;
 const POST_EXIT_DRAIN: Duration = Duration::from_millis(250);
-
-/// Drop guard that SIGKILLs the child's process group on cancel/timeout paths.
-/// Disarmed after `child.wait()` returns so it never signals a recycled PID.
-#[cfg(unix)]
-struct ChildGroupGuard {
-    pgid: std::sync::atomic::AtomicI32,
-}
-
-#[cfg(unix)]
-impl ChildGroupGuard {
-    fn new(child_pid: Option<u32>) -> Self {
-        let pgid = child_pid.and_then(|p| i32::try_from(p).ok()).unwrap_or(0);
-        Self {
-            pgid: std::sync::atomic::AtomicI32::new(pgid),
-        }
-    }
-
-    fn disarm(&self) {
-        self.pgid.store(0, std::sync::atomic::Ordering::Release);
-    }
-}
-
-#[cfg(unix)]
-impl Drop for ChildGroupGuard {
-    fn drop(&mut self) {
-        let pgid = self.pgid.load(std::sync::atomic::Ordering::Acquire);
-        if pgid <= 0 {
-            return;
-        }
-        ::reiclaw_log::record!(
-            WARN,
-            ::reiclaw_log::Event::new(module_path!(), ::reiclaw_log::Action::Kill)
-                .with_outcome(::reiclaw_log::EventOutcome::Unknown)
-                .with_attrs(::serde_json::json!({ "pgid": pgid, "signal": "SIGKILL" })),
-            "shell tool reaping child process group"
-        );
-        unsafe {
-            libc::kill(-pgid, libc::SIGKILL);
-        }
-    }
-}
 
 /// Environment variables safe to pass to shell commands.
 /// Only functional variables are included — never API keys or secrets.
@@ -226,6 +186,16 @@ impl Tool for ShellTool {
             }
         }
 
+        if self.security.is_estop_network_killed() && !self.sandbox.isolates_network() {
+            return Ok(ToolResult {
+                success: false,
+                output: ToolOutput::default(),
+                error: Some(
+                    "blocked by security policy: shell execution blocked while emergency stop (network_kill) is active without a network-isolating sandbox".into(),
+                ),
+            });
+        }
+
         // Execute with timeout to prevent hanging commands.
         // Clear the environment to prevent leaking API keys and other secrets
         // (CWE-200), then re-add only safe, functional variables.
@@ -331,8 +301,7 @@ impl Tool for ShellTool {
             }
         };
 
-        #[cfg(unix)]
-        let group_guard = ChildGroupGuard::new(child.id());
+        let group_guard = ProcessGroupGuard::new(child.id());
 
         let stdout_handle = child.stdout.take();
         let stderr_handle = child.stderr.take();
@@ -340,54 +309,117 @@ impl Tool for ShellTool {
         let stdout_drain = spawn_drain(stdout_handle, MAX_OUTPUT_BYTES);
         let stderr_drain = spawn_drain(stderr_handle, MAX_OUTPUT_BYTES);
 
-        let mut result =
-            match tokio::time::timeout(Duration::from_secs(timeout_secs), child.wait()).await {
-                Ok(Ok(status)) => {
-                    #[cfg(unix)]
-                    group_guard.disarm();
-                    let (stdout_capture, stderr_capture) =
-                        tokio::join!(finish_drain(stdout_drain), finish_drain(stderr_drain));
+        enum ShellWaitOutcome {
+            Done(std::io::Result<std::process::ExitStatus>),
+            TimedOut,
+            Estopped(String),
+        }
 
-                    let mut stdout = decode_output(&stdout_capture.bytes);
-                    let mut stderr = decode_output(&stderr_capture.bytes);
+        let estop_handle = self.security.estop_handle().cloned();
+        let sandbox_isolates_network = self.sandbox.isolates_network();
+        let timeout_fut = tokio::time::sleep(Duration::from_secs(timeout_secs));
+        tokio::pin!(timeout_fut);
 
-                    if stdout_capture.truncated || stdout.len() > MAX_OUTPUT_BYTES {
-                        append_truncation_marker(&mut stdout, "\n... [output truncated at 1MB]");
-                    }
-                    if stderr_capture.truncated || stderr.len() > MAX_OUTPUT_BYTES {
-                        append_truncation_marker(&mut stderr, "\n... [stderr truncated at 1MB]");
-                    }
-
-                    ToolResult {
-                        success: status.success(),
-                        output: stdout.into(),
-                        error: if stderr.is_empty() {
-                            None
-                        } else {
-                            Some(stderr)
-                        },
-                    }
+        let wait_outcome = loop {
+            let check_estop = || -> Option<String> {
+                let handle = estop_handle.as_ref()?;
+                if let Err(reason) = handle.enforce_tool("shell") {
+                    return Some(reason);
                 }
-                Ok(Err(e)) => {
-                    tokio::join!(abort_drain(stdout_drain), abort_drain(stderr_drain));
-                    ToolResult {
-                        success: false,
-                        output: ToolOutput::default(),
-                        error: Some(format!("Failed to execute command: {e}")),
-                    }
+                if handle.is_network_killed() && !sandbox_isolates_network {
+                    return Some(
+                        "blocked by security policy: shell execution halted by emergency stop (network_kill)".into(),
+                    );
                 }
-                Err(_) => {
-                    let _ = child.start_kill();
-                    tokio::join!(abort_drain(stdout_drain), abort_drain(stderr_drain));
-                    ToolResult {
-                        success: false,
-                        output: ToolOutput::default(),
-                        error: Some(format!(
-                            "Command timed out after {timeout_secs}s and was killed"
-                        )),
-                    }
-                }
+                None
             };
+
+            if let Some(reason) = check_estop() {
+                break ShellWaitOutcome::Estopped(reason);
+            }
+
+            if estop_handle.is_some() {
+                let poll_sleep = tokio::time::sleep(Duration::from_millis(100));
+                tokio::select! {
+                    biased;
+                    status = child.wait() => break ShellWaitOutcome::Done(status),
+                    _ = &mut timeout_fut => break ShellWaitOutcome::TimedOut,
+                    _ = poll_sleep => continue,
+                }
+            } else {
+                tokio::select! {
+                    biased;
+                    status = child.wait() => break ShellWaitOutcome::Done(status),
+                    _ = &mut timeout_fut => break ShellWaitOutcome::TimedOut,
+                }
+            }
+        };
+
+        let mut result = match wait_outcome {
+            ShellWaitOutcome::Done(Ok(status)) => {
+                // Keep the process group armed while draining pipes; disarm only if both
+                // pipes reach EOF cleanly, otherwise SIGKILL surviving descendants.
+                let ((stdout_capture, stdout_eof), (stderr_capture, stderr_eof)) =
+                    tokio::join!(finish_drain(stdout_drain), finish_drain(stderr_drain));
+                if stdout_eof && stderr_eof {
+                    group_guard.disarm();
+                } else {
+                    group_guard.kill_now();
+                }
+
+                let mut stdout = decode_output(&stdout_capture.bytes);
+                let mut stderr = decode_output(&stderr_capture.bytes);
+
+                if stdout_capture.truncated || stdout.len() > MAX_OUTPUT_BYTES {
+                    append_truncation_marker(&mut stdout, "\n... [output truncated at 1MB]");
+                }
+                if stderr_capture.truncated || stderr.len() > MAX_OUTPUT_BYTES {
+                    append_truncation_marker(&mut stderr, "\n... [stderr truncated at 1MB]");
+                }
+
+                ToolResult {
+                    success: status.success(),
+                    output: stdout.into(),
+                    error: if stderr.is_empty() {
+                        None
+                    } else {
+                        Some(stderr)
+                    },
+                }
+            }
+            ShellWaitOutcome::Done(Err(e)) => {
+                let _ = child.start_kill();
+                group_guard.kill_now();
+                tokio::join!(abort_drain(stdout_drain), abort_drain(stderr_drain));
+                ToolResult {
+                    success: false,
+                    output: ToolOutput::default(),
+                    error: Some(format!("Failed to execute command: {e}")),
+                }
+            }
+            ShellWaitOutcome::TimedOut => {
+                let _ = child.start_kill();
+                group_guard.kill_now();
+                tokio::join!(abort_drain(stdout_drain), abort_drain(stderr_drain));
+                ToolResult {
+                    success: false,
+                    output: ToolOutput::default(),
+                    error: Some(format!(
+                        "Command timed out after {timeout_secs}s and was killed"
+                    )),
+                }
+            }
+            ShellWaitOutcome::Estopped(reason) => {
+                let _ = child.start_kill();
+                group_guard.kill_now();
+                tokio::join!(abort_drain(stdout_drain), abort_drain(stderr_drain));
+                ToolResult {
+                    success: false,
+                    output: ToolOutput::default(),
+                    error: Some(reason),
+                }
+            }
+        };
 
         // The command ran inside an ephemeral workspace: any files it wrote are
         // invisible on the host and discarded at session end
@@ -404,18 +436,18 @@ impl Tool for ShellTool {
     }
 }
 
-struct DrainHandle {
+pub(crate) struct DrainHandle {
     task: tokio::task::JoinHandle<()>,
     output: Arc<std::sync::Mutex<DrainOutput>>,
 }
 
 #[derive(Clone, Default)]
-struct DrainOutput {
-    bytes: Vec<u8>,
-    truncated: bool,
+pub(crate) struct DrainOutput {
+    pub(crate) bytes: Vec<u8>,
+    pub(crate) truncated: bool,
 }
 
-fn spawn_drain<R>(reader: Option<R>, cap: usize) -> DrainHandle
+pub(crate) fn spawn_drain<R>(reader: Option<R>, cap: usize) -> DrainHandle
 where
     R: tokio::io::AsyncRead + Unpin + Send + 'static,
 {
@@ -427,23 +459,24 @@ where
     DrainHandle { task, output }
 }
 
-async fn finish_drain(mut drain: DrainHandle) -> DrainOutput {
-    if tokio::time::timeout(POST_EXIT_DRAIN, &mut drain.task)
+pub(crate) async fn finish_drain(mut drain: DrainHandle) -> (DrainOutput, bool) {
+    let completed_eof = tokio::time::timeout(POST_EXIT_DRAIN, &mut drain.task)
         .await
-        .is_err()
-    {
+        .is_ok();
+    if !completed_eof {
         drain.task.abort();
         let _ = drain.task.await;
     }
 
-    drain
+    let output = drain
         .output
         .lock()
         .map(|output| output.clone())
-        .unwrap_or_default()
+        .unwrap_or_default();
+    (output, completed_eof)
 }
 
-async fn abort_drain(drain: DrainHandle) {
+pub(crate) async fn abort_drain(drain: DrainHandle) {
     drain.task.abort();
     let _ = drain.task.await;
 }
@@ -1857,6 +1890,151 @@ mod tests {
         assert!(
             env_output_contains_assignment(&result.output, "SSH_AUTH_SOCK", "/tmp/fake.sock"),
             "SSH_AUTH_SOCK from tui_env must reach subprocess"
+        );
+    }
+
+    #[tokio::test(flavor = "current_thread")]
+    async fn shell_network_kill_blocks_noop_sandbox_and_kills_inflight_subprocess() {
+        let dir = tempfile::tempdir().unwrap();
+        let state_path = dir.path().join("estop-state.json");
+        let cfg = reiclaw_config::schema::EstopConfig {
+            enabled: true,
+            state_file: state_path.to_string_lossy().to_string(),
+            require_otp_to_resume: false,
+        };
+        let security = Arc::new(
+            SecurityPolicy {
+                autonomy: AutonomyLevel::Full,
+                workspace_dir: dir.path().to_path_buf(),
+                allowed_commands: vec!["sleep".into(), "echo".into()],
+                ..SecurityPolicy::default()
+            }
+            .with_estop(&cfg, dir.path()),
+        );
+        let tool = ShellTool::new(Arc::clone(&security), test_runtime());
+
+        // Pre-flight network_kill blocks shell when using NoopSandbox (isolates_network() == false).
+        let net_kill = crate::security::estop::EstopState {
+            kill_all: false,
+            network_kill: true,
+            blocked_domains: Vec::new(),
+            frozen_tools: Vec::new(),
+            updated_at: None,
+        };
+        std::fs::write(&state_path, serde_json::to_string(&net_kill).unwrap()).unwrap();
+        let blocked = tool
+            .execute(json!({"command": "echo hi", "approved": true}))
+            .await
+            .unwrap();
+        assert!(!blocked.success);
+        assert!(
+            blocked
+                .error
+                .as_deref()
+                .unwrap_or_default()
+                .contains("network_kill")
+        );
+
+        // Clear state, start a long-running sleep command, then trigger kill_all mid-flight.
+        let clear = crate::security::estop::EstopState::default();
+        std::fs::write(&state_path, serde_json::to_string(&clear).unwrap()).unwrap();
+
+        let state_path_writer = state_path.clone();
+        let engager = ::reiclaw_log::spawn!(async move {
+            tokio::time::sleep(Duration::from_millis(120)).await;
+            let engaged = crate::security::estop::EstopState {
+                kill_all: true,
+                network_kill: false,
+                blocked_domains: Vec::new(),
+                frozen_tools: Vec::new(),
+                updated_at: None,
+            };
+            let tmp = state_path_writer.with_extension("json.tmp");
+            std::fs::write(&tmp, serde_json::to_string(&engaged).unwrap()).unwrap();
+            std::fs::rename(&tmp, &state_path_writer).unwrap();
+        });
+
+        let started = std::time::Instant::now();
+        let inflight = tool
+            .execute(json!({"command": "sleep 30", "approved": true}))
+            .await
+            .unwrap();
+        engager.await.unwrap();
+        assert!(!inflight.success);
+        assert!(
+            started.elapsed() < Duration::from_secs(5),
+            "in-flight shell subprocess must be killed promptly on estop, took {:?}",
+            started.elapsed()
+        );
+    }
+
+    #[cfg(unix)]
+    #[tokio::test]
+    async fn estop_kills_grandchild_process_group() {
+        let workspace = tempfile::tempdir().unwrap();
+        let estop_dir = tempfile::tempdir().unwrap();
+        let state_path = estop_dir.path().join("estop-state.json");
+        let clear = crate::security::estop::EstopState::default();
+        std::fs::write(&state_path, serde_json::to_string(&clear).unwrap()).unwrap();
+
+        let cfg = reiclaw_config::schema::EstopConfig {
+            enabled: true,
+            state_file: state_path.to_string_lossy().to_string(),
+            require_otp_to_resume: false,
+        };
+        let policy = Arc::new(
+            SecurityPolicy {
+                workspace_dir: workspace.path().to_path_buf(),
+                ..(*unrestricted_shell_test_security()).clone()
+            }
+            .with_estop(&cfg, estop_dir.path()),
+        );
+        let tool = ShellTool::new(policy, test_runtime());
+
+        let pid_file = workspace.path().join("descendant.pid");
+        let pid_wait_path = pid_file.clone();
+        let state_writer = state_path.clone();
+        let exec_task = ::reiclaw_log::spawn!(async move {
+            tool.execute(json!({
+                "command": "sh -c 'echo $$ > pid.tmp && mv pid.tmp descendant.pid && exec sleep 30' & wait"
+            }))
+            .await
+        });
+
+        let pid: libc::pid_t = tokio::time::timeout(Duration::from_secs(5), async {
+            loop {
+                if let Ok(text) = std::fs::read_to_string(&pid_wait_path) {
+                    break text.trim().parse().expect("grandchild PID");
+                }
+                tokio::time::sleep(Duration::from_millis(10)).await;
+            }
+        })
+        .await
+        .expect("grandchild pid file created");
+
+        let engaged = crate::security::estop::EstopState {
+            kill_all: true,
+            network_kill: false,
+            blocked_domains: Vec::new(),
+            frozen_tools: Vec::new(),
+            updated_at: None,
+        };
+        let tmp = state_writer.with_extension("json.tmp");
+        std::fs::write(&tmp, serde_json::to_string(&engaged).unwrap()).unwrap();
+        std::fs::rename(&tmp, &state_writer).unwrap();
+
+        let res = exec_task.await.unwrap().unwrap();
+        assert!(!res.success);
+
+        let exited = tokio::time::timeout(Duration::from_secs(2), async {
+            while descendant_running(pid) {
+                tokio::time::sleep(Duration::from_millis(10)).await;
+            }
+        })
+        .await;
+        assert!(
+            exited.is_ok(),
+            "grandchild pid={pid} survived shell estop kill"
         );
     }
 }

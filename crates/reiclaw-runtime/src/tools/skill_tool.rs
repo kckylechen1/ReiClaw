@@ -171,6 +171,14 @@ impl Tool for SkillShellTool {
     async fn execute(&self, args: serde_json::Value) -> anyhow::Result<ToolResult> {
         let command = self.substitute_args(&args);
 
+        if let Err(reason) = self.security.enforce_estop_tool(&self.tool_name) {
+            return Ok(ToolResult {
+                success: false,
+                output: ToolOutput::default(),
+                error: Some(reason),
+            });
+        }
+
         // Security validation — always requires explicit approval (approved=true)
         // since skill tools are user-defined and should be treated as medium-risk.
         match self.security.validate_command_execution(&command, true) {
@@ -182,6 +190,16 @@ impl Tool for SkillShellTool {
                     error: Some(reason),
                 });
             }
+        }
+
+        if self.security.is_estop_network_killed() {
+            return Ok(ToolResult {
+                success: false,
+                output: ToolOutput::default(),
+                error: Some(
+                    "blocked by security policy: skill shell execution blocked while emergency stop (network_kill) is active".into(),
+                ),
+            });
         }
 
         if let Some(path) = self.security.forbidden_workspace_path_argument(&command) {
@@ -221,15 +239,96 @@ impl Tool for SkillShellTool {
             cmd.env(SESSION_ID_ENV_VAR, session_id);
         }
 
-        let result =
-            tokio::time::timeout(Duration::from_secs(self.timeout_secs), cmd.output()).await;
+        cmd.stdin(std::process::Stdio::null());
+        cmd.stdout(std::process::Stdio::piped());
+        cmd.stderr(std::process::Stdio::piped());
+        cmd.kill_on_drop(true);
+        #[cfg(unix)]
+        {
+            use std::os::unix::process::CommandExt;
+            // SAFETY: setsid is async-signal-safe and places the skill shell tree in its own group.
+            unsafe {
+                cmd.as_std_mut().pre_exec(|| {
+                    if libc::setsid() == -1 {
+                        Err(std::io::Error::last_os_error())
+                    } else {
+                        Ok(())
+                    }
+                });
+            }
+        }
 
-        match result {
-            Ok(Ok(output)) => {
-                let mut stdout = String::from_utf8_lossy(&output.stdout).to_string();
-                let mut stderr = String::from_utf8_lossy(&output.stderr).to_string();
+        let mut child = match cmd.spawn() {
+            Ok(c) => c,
+            Err(e) => {
+                return Ok(ToolResult {
+                    success: false,
+                    output: ToolOutput::default(),
+                    error: Some(format!("Failed to execute command: {e}")),
+                });
+            }
+        };
 
-                if stdout.len() > MAX_OUTPUT_BYTES {
+        let group_guard = reiclaw_infra::process::ProcessGroupGuard::new(child.id());
+        let stdout_drain = crate::tools::shell::spawn_drain(child.stdout.take(), MAX_OUTPUT_BYTES);
+        let stderr_drain = crate::tools::shell::spawn_drain(child.stderr.take(), MAX_OUTPUT_BYTES);
+
+        enum SkillWaitOutcome {
+            Done(std::io::Result<std::process::ExitStatus>),
+            TimedOut,
+            Estopped(String),
+        }
+
+        let estop_handle = self.security.estop_handle().cloned();
+        let tool_name = self.tool_name.clone();
+        let timeout_fut = tokio::time::sleep(Duration::from_secs(self.timeout_secs));
+        tokio::pin!(timeout_fut);
+
+        let wait_outcome = loop {
+            if let Some(ref handle) = estop_handle {
+                if let Err(reason) = handle.enforce_tool(&tool_name) {
+                    break SkillWaitOutcome::Estopped(reason);
+                }
+                if handle.is_network_killed() {
+                    break SkillWaitOutcome::Estopped(
+                        "blocked by security policy: skill shell execution halted by emergency stop (network_kill)".into(),
+                    );
+                }
+            }
+
+            if estop_handle.is_some() {
+                let poll_sleep = tokio::time::sleep(Duration::from_millis(100));
+                tokio::select! {
+                    biased;
+                    res = child.wait() => break SkillWaitOutcome::Done(res),
+                    _ = &mut timeout_fut => break SkillWaitOutcome::TimedOut,
+                    _ = poll_sleep => continue,
+                }
+            } else {
+                tokio::select! {
+                    biased;
+                    res = child.wait() => break SkillWaitOutcome::Done(res),
+                    _ = &mut timeout_fut => break SkillWaitOutcome::TimedOut,
+                }
+            }
+        };
+
+        match wait_outcome {
+            SkillWaitOutcome::Done(Ok(status)) => {
+                let ((stdout_capture, stdout_eof), (stderr_capture, stderr_eof)) = tokio::join!(
+                    crate::tools::shell::finish_drain(stdout_drain),
+                    crate::tools::shell::finish_drain(stderr_drain)
+                );
+                if stdout_eof && stderr_eof {
+                    group_guard.disarm();
+                } else {
+                    group_guard.kill_now();
+                }
+
+                let mut stdout = String::from_utf8_lossy(&stdout_capture.bytes).to_string();
+                let mut stderr = String::from_utf8_lossy(&stderr_capture.bytes).to_string();
+
+                if stdout_capture.truncated || stdout.len() > MAX_OUTPUT_BYTES {
                     let mut b = MAX_OUTPUT_BYTES.min(stdout.len());
                     while b > 0 && !stdout.is_char_boundary(b) {
                         b -= 1;
@@ -237,7 +336,7 @@ impl Tool for SkillShellTool {
                     stdout.truncate(b);
                     stdout.push_str("\n... [output truncated at 1MB]");
                 }
-                if stderr.len() > MAX_OUTPUT_BYTES {
+                if stderr_capture.truncated || stderr.len() > MAX_OUTPUT_BYTES {
                     let mut b = MAX_OUTPUT_BYTES.min(stderr.len());
                     while b > 0 && !stderr.is_char_boundary(b) {
                         b -= 1;
@@ -247,7 +346,7 @@ impl Tool for SkillShellTool {
                 }
 
                 Ok(ToolResult {
-                    success: output.status.success(),
+                    success: status.success(),
                     output: stdout.into(),
                     error: if stderr.is_empty() {
                         None
@@ -256,19 +355,48 @@ impl Tool for SkillShellTool {
                     },
                 })
             }
-            Ok(Err(e)) => Ok(ToolResult {
-                success: false,
-                output: ToolOutput::default(),
-                error: Some(format!("Failed to execute command: {e}")),
-            }),
-            Err(_) => Ok(ToolResult {
-                success: false,
-                output: ToolOutput::default(),
-                error: Some(format!(
-                    "Command timed out after {}s and was killed",
-                    self.timeout_secs
-                )),
-            }),
+            SkillWaitOutcome::Done(Err(e)) => {
+                let _ = child.start_kill();
+                group_guard.kill_now();
+                tokio::join!(
+                    crate::tools::shell::abort_drain(stdout_drain),
+                    crate::tools::shell::abort_drain(stderr_drain)
+                );
+                Ok(ToolResult {
+                    success: false,
+                    output: ToolOutput::default(),
+                    error: Some(format!("Failed to execute command: {e}")),
+                })
+            }
+            SkillWaitOutcome::TimedOut => {
+                let _ = child.start_kill();
+                group_guard.kill_now();
+                tokio::join!(
+                    crate::tools::shell::abort_drain(stdout_drain),
+                    crate::tools::shell::abort_drain(stderr_drain)
+                );
+                Ok(ToolResult {
+                    success: false,
+                    output: ToolOutput::default(),
+                    error: Some(format!(
+                        "Command timed out after {}s and was killed",
+                        self.timeout_secs
+                    )),
+                })
+            }
+            SkillWaitOutcome::Estopped(reason) => {
+                let _ = child.start_kill();
+                group_guard.kill_now();
+                tokio::join!(
+                    crate::tools::shell::abort_drain(stdout_drain),
+                    crate::tools::shell::abort_drain(stderr_drain)
+                );
+                Ok(ToolResult {
+                    success: false,
+                    output: ToolOutput::default(),
+                    error: Some(reason),
+                })
+            }
         }
     }
 }
@@ -285,6 +413,7 @@ pub struct SkillBuiltinTool {
     /// reference counts instead of deep-cloning the (possibly MCP-derived,
     /// tens-of-KB) tree — see the invariant on `Tool::spec`.
     advertised_schema: Arc<serde_json::Value>,
+    security: Option<Arc<SecurityPolicy>>,
 }
 
 impl SkillBuiltinTool {
@@ -305,7 +434,14 @@ impl SkillBuiltinTool {
             target_tool,
             locked_args: locked,
             advertised_schema,
+            security: None,
         }
+    }
+
+    #[must_use]
+    pub fn with_security(mut self, security: Arc<SecurityPolicy>) -> Self {
+        self.security = Some(security);
+        self
     }
 
     /// The tool this wrapper actually invokes.
@@ -392,6 +528,22 @@ impl Tool for SkillBuiltinTool {
     }
 
     async fn execute(&self, args: serde_json::Value) -> anyhow::Result<ToolResult> {
+        if let Some(ref security) = self.security {
+            if let Err(reason) = security.enforce_estop_tool(&self.tool_name) {
+                return Ok(ToolResult {
+                    success: false,
+                    output: ToolOutput::default(),
+                    error: Some(reason),
+                });
+            }
+            if let Err(reason) = security.enforce_estop_tool(self.target_tool.name()) {
+                return Ok(ToolResult {
+                    success: false,
+                    output: ToolOutput::default(),
+                    error: Some(reason),
+                });
+            }
+        }
         // Audit: elevated skill tools delegate to a target that may be blocked
         // by SecurityPolicy or hidden from the model. Record every invocation
         // at INFO with the delegation target and the locked scope keys.
@@ -1169,6 +1321,91 @@ mod tests {
         assert!(
             registry.iter().any(|t| t.name() == "ops__use_shell"),
             "the scoped elevation wrapper must be the only callable path"
+        );
+    }
+
+    #[cfg(unix)]
+    #[tokio::test]
+    async fn skill_shell_estop_kills_grandchild_process_group() {
+        let workspace = tempfile::tempdir().unwrap();
+        let estop_dir = tempfile::tempdir().unwrap();
+        let state_path = estop_dir.path().join("estop-state.json");
+        std::fs::write(
+            &state_path,
+            serde_json::to_string(&crate::security::estop::EstopState::default()).unwrap(),
+        )
+        .unwrap();
+
+        let cfg = reiclaw_config::schema::EstopConfig {
+            enabled: true,
+            state_file: state_path.to_string_lossy().to_string(),
+            require_otp_to_resume: false,
+        };
+        let sec = Arc::new(
+            crate::security::SecurityPolicy {
+                autonomy: AutonomyLevel::Full,
+                workspace_dir: workspace.path().to_path_buf(),
+                allowed_commands: vec!["*".into()],
+                block_high_risk_commands: false,
+                ..crate::security::SecurityPolicy::default()
+            }
+            .with_estop(&cfg, estop_dir.path()),
+        );
+
+        let pid_file = workspace.path().join("skill-grandchild.pid");
+        let st = crate::skills::SkillTool {
+            name: "sleepy".to_string(),
+            description: "test".to_string(),
+            kind: "shell".to_string(),
+            command: "sh -c 'echo $$ > pid.tmp && mv pid.tmp skill-grandchild.pid && exec sleep 30' & wait".to_string(),
+            args: HashMap::new(),
+            target: None,
+            locked_args: HashMap::new(),
+            timeout_secs: Some(30),
+        };
+        let tool = SkillShellTool::new("ops", &st, sec);
+        let exec_task =
+            ::reiclaw_log::spawn!(async move { tool.execute(serde_json::json!({})).await });
+
+        let pid: i32 = tokio::time::timeout(Duration::from_secs(5), async {
+            loop {
+                if let Ok(text) = std::fs::read_to_string(&pid_file) {
+                    break text.trim().parse().expect("skill grandchild PID");
+                }
+                tokio::time::sleep(Duration::from_millis(10)).await;
+            }
+        })
+        .await
+        .expect("skill grandchild pid written");
+
+        let engaged = crate::security::estop::EstopState {
+            kill_all: true,
+            network_kill: false,
+            blocked_domains: Vec::new(),
+            frozen_tools: Vec::new(),
+            updated_at: None,
+        };
+        let tmp = state_path.with_extension("json.tmp");
+        std::fs::write(&tmp, serde_json::to_string(&engaged).unwrap()).unwrap();
+        std::fs::rename(&tmp, &state_path).unwrap();
+
+        let res = exec_task.await.unwrap().unwrap();
+        assert!(!res.success);
+
+        let exited = tokio::time::timeout(Duration::from_secs(2), async {
+            loop {
+                // SAFETY: kill(pid, 0) checks process liveness without sending a signal.
+                let alive = unsafe { libc::kill(pid, 0) == 0 };
+                if !alive {
+                    break;
+                }
+                tokio::time::sleep(Duration::from_millis(10)).await;
+            }
+        })
+        .await;
+        assert!(
+            exited.is_ok(),
+            "skill grandchild pid={pid} survived estop kill"
         );
     }
 }

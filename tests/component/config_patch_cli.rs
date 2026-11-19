@@ -92,6 +92,7 @@ fn test_state(config: Config) -> AppState {
         pending_reload: Arc::new(std::sync::atomic::AtomicBool::new(false)),
         ws_conversations: Default::default(),
         bridge_sockets: Default::default(),
+        hooks: None,
     }
 }
 

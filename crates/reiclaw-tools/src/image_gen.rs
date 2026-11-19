@@ -183,6 +183,13 @@ impl ImageGenTool {
         // ── Call fal.ai ────────────────────────────────────────────
         let client = Self::http_client();
         let url = format!("https://fal.run/{model}");
+        if let Err(message) = self.security.enforce_estop_network(Some("fal.run")) {
+            return Ok(ToolResult {
+                success: false,
+                output: ToolOutput::default(),
+                error: Some(message),
+            });
+        }
 
         let body = json!({
             "prompt": prompt,
@@ -228,6 +235,16 @@ impl ImageGenTool {
             })?;
 
         // ── Download image ─────────────────────────────────────────
+        let img_host = reqwest::Url::parse(image_url)
+            .ok()
+            .and_then(|parsed| parsed.host_str().map(str::to_string));
+        if let Err(message) = self.security.enforce_estop_network(img_host.as_deref()) {
+            return Ok(ToolResult {
+                success: false,
+                output: ToolOutput::default(),
+                error: Some(message),
+            });
+        }
         let img_resp = client
             .get(image_url)
             .send()

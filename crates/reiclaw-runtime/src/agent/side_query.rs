@@ -68,6 +68,7 @@ pub struct SideQueryResponse {
 pub struct SideQueryHandle {
     inner: Arc<RwLock<SideQuerySnapshot>>,
     semaphore: Arc<Semaphore>,
+    estop: Option<Arc<crate::security::estop::EstopHandle>>,
 }
 
 /// RAII guard that ensures `active_turn_id` is cleared from the [`SideQuerySnapshot`]
@@ -88,7 +89,17 @@ impl SideQueryHandle {
         Self {
             inner: Arc::new(RwLock::new(initial)),
             semaphore: Arc::new(Semaphore::new(MAX_CONCURRENT_SIDE_QUERIES)),
+            estop: None,
         }
+    }
+
+    #[must_use]
+    pub(crate) fn with_estop(
+        mut self,
+        estop: Option<Arc<crate::security::estop::EstopHandle>>,
+    ) -> Self {
+        self.estop = estop;
+        self
     }
 
     /// Create an RAII guard that clears `active_turn_id` if the turn is dropped early.
@@ -242,17 +253,18 @@ impl SideQueryHandle {
             .step_timeout_secs
             .filter(|&secs| secs > 0)
             .unwrap_or(DEFAULT_SIDE_QUERY_TIMEOUT_SECS);
-        let query_fut = async {
-            match tokio::time::timeout(
-                Duration::from_secs(step_secs),
-                access.run_model_query(request),
-            )
-            .await
-            {
-                Ok(res) => res,
-                Err(_) => anyhow::bail!("LLM side query timed out after {step_secs}s"),
-            }
-        };
+        let query_fut =
+            crate::agent::turn::execution::CURRENT_TURN_ESTOP.scope(self.estop.clone(), async {
+                match tokio::time::timeout(
+                    Duration::from_secs(step_secs),
+                    access.run_model_query(request),
+                )
+                .await
+                {
+                    Ok(res) => res,
+                    Err(_) => anyhow::bail!("LLM side query timed out after {step_secs}s"),
+                }
+            });
 
         let response = if let Some(token) = cancel_token {
             tokio::select! {
@@ -774,5 +786,140 @@ vision_model_provider = "custom.vision"
         assert!(agent.btw("   \n\t  ").await.is_err());
         let oversized = "q".repeat(MAX_SIDE_QUERY_QUESTION_BYTES + 1);
         assert!(agent.btw(&oversized).await.is_err());
+    }
+
+    #[tokio::test]
+    async fn btw_side_query_blocks_network_kill_and_aborts_inflight_kill_all() {
+        use axum::{Json, Router, extract::State, routing::post};
+        use reiclaw_policy::estop::{EstopHandle, EstopState};
+        use serde_json::{Value, json};
+        use std::sync::atomic::{AtomicUsize, Ordering};
+
+        #[derive(Clone)]
+        struct ServerState {
+            hits: Arc<AtomicUsize>,
+            hold_gate: Arc<Semaphore>,
+            entered: Arc<Notify>,
+        }
+
+        async fn handler(State(state): State<ServerState>, _body: Json<Value>) -> Json<Value> {
+            state.hits.fetch_add(1, Ordering::SeqCst);
+            state.entered.notify_waiters();
+            state.hold_gate.acquire().await.unwrap().forget();
+            Json(json!({
+                "choices": [{"message": {
+                    "role": "assistant",
+                    "content": "side answer"
+                }}]
+            }))
+        }
+
+        let hits = Arc::new(AtomicUsize::new(0));
+        let hold_gate = Arc::new(Semaphore::new(0));
+        let entered = Arc::new(Notify::new());
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let addr = listener.local_addr().unwrap();
+        let app = Router::new()
+            .route("/v1/chat/completions", post(handler))
+            .with_state(ServerState {
+                hits: Arc::clone(&hits),
+                hold_gate: Arc::clone(&hold_gate),
+                entered: Arc::clone(&entered),
+            });
+        let server = ::reiclaw_log::spawn!(async move {
+            axum::serve(listener, app).await.unwrap();
+        });
+
+        let dir = tempfile::tempdir().unwrap();
+        let estop_path = dir.path().join("estop-state.json");
+        let write_estop = |state: &EstopState| {
+            let tmp = dir.path().join("estop-state.json.tmp");
+            std::fs::write(&tmp, serde_json::to_string(state).unwrap()).unwrap();
+            std::fs::rename(&tmp, &estop_path).unwrap();
+        };
+        write_estop(&EstopState {
+            kill_all: false,
+            network_kill: true,
+            blocked_domains: Vec::new(),
+            frozen_tools: Vec::new(),
+            updated_at: None,
+        });
+        let estop = EstopHandle::for_path(estop_path.clone());
+        let security = Arc::new(crate::security::SecurityPolicy {
+            estop: Some(Arc::clone(&estop)),
+            ..crate::security::SecurityPolicy::default()
+        });
+
+        let config: reiclaw_config::schema::Config = toml::from_str(&format!(
+            r#"
+schema_version = 3
+[providers.models.custom.side]
+uri = "http://{addr}/v1"
+model = "side-model"
+native_tools = true
+"#
+        ))
+        .unwrap();
+        let provider = reiclaw_providers::create_routed_model_provider_with_options(
+            &config,
+            "custom.side",
+            None,
+            None,
+            &config.reliability,
+            &[],
+            "side-model",
+            &reiclaw_providers::provider_runtime_options_for_alias(&config, "custom", "side"),
+        )
+        .unwrap();
+        let agent = Agent::builder()
+            .model_provider(provider)
+            .model_provider_name("custom.side".into())
+            .model_name("side-model".into())
+            .tools(vec![])
+            .memory(Arc::new(NoneMemory::new("none")))
+            .observer(Arc::new(crate::observability::NoopObserver))
+            .tool_dispatcher(Box::new(NativeToolDispatcher))
+            .security_policy(Some(security))
+            .build()
+            .unwrap();
+        let side_query = agent.side_query_handle();
+
+        // Detached task without CURRENT_TURN_ESTOP: network_kill must fail closed with 0 HTTP hits.
+        let sq_blocked = side_query.clone();
+        let err = ::reiclaw_log::spawn!(async move { sq_blocked.ask("blocked check", None).await })
+            .await
+            .unwrap()
+            .expect_err("network_kill must block /btw");
+        assert!(
+            err.to_string().contains("network_kill")
+                || err.to_string().contains(reiclaw_api::ESTOP_ERROR_MARKER),
+            "unexpected error: {err:#}"
+        );
+        assert_eq!(hits.load(Ordering::SeqCst), 0);
+
+        // Engage kill_all mid-flight while provider is waiting on hold_gate -> must abort promptly.
+        write_estop(&EstopState::default());
+        let sq_inflight = side_query.clone();
+        let inflight =
+            ::reiclaw_log::spawn!(async move { sq_inflight.ask("in-flight check", None).await });
+        tokio::time::timeout(Duration::from_secs(5), entered.notified())
+            .await
+            .expect("provider request should enter server");
+        write_estop(&EstopState {
+            kill_all: true,
+            network_kill: false,
+            blocked_domains: Vec::new(),
+            frozen_tools: Vec::new(),
+            updated_at: None,
+        });
+        let aborted = tokio::time::timeout(Duration::from_secs(2), inflight)
+            .await
+            .expect("kill_all must abort in-flight /btw promptly")
+            .unwrap()
+            .expect_err("kill_all must error");
+        assert!(aborted.to_string().contains("kill_all"), "{aborted:#}");
+        assert_eq!(hits.load(Ordering::SeqCst), 1);
+
+        server.abort();
     }
 }

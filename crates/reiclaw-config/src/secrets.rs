@@ -28,7 +28,6 @@ use std::path::{Path, PathBuf};
 use std::time::{Duration, Instant};
 
 /// Length of the random encryption key in bytes (256-bit, matches `ChaCha20`).
-#[cfg(test)]
 const KEY_LEN: usize = 32;
 
 /// ChaCha20-Poly1305 nonce length in bytes.
@@ -98,10 +97,19 @@ impl SecretStore {
     /// **Warning**: Legacy `enc:` values are insecure. Use `decrypt_and_migrate` to
     /// automatically upgrade them to the secure `enc2:` format.
     pub fn decrypt(&self, value: &str) -> Result<String> {
+        self.decrypt_with_key_policy(value, true)
+    }
+
+    /// Decrypt a secret without creating `.secret_key` if it is missing.
+    pub fn decrypt_existing(&self, value: &str) -> Result<String> {
+        self.decrypt_with_key_policy(value, false)
+    }
+
+    fn decrypt_with_key_policy(&self, value: &str, create_if_missing: bool) -> Result<String> {
         if let Some(hex_str) = value.strip_prefix("enc2:") {
-            self.decrypt_chacha20(hex_str)
+            self.decrypt_chacha20_with_key_policy(hex_str, create_if_missing)
         } else if let Some(hex_str) = value.strip_prefix("enc:") {
-            self.decrypt_legacy_xor(hex_str)
+            self.decrypt_legacy_xor_with_key_policy(hex_str, create_if_missing)
         } else if is_onepassword_ref(value) {
             resolve_onepassword_ref(value)
         } else if is_tachi_vault_ref(value) {
@@ -151,6 +159,14 @@ impl SecretStore {
 
     /// Decrypt using ChaCha20-Poly1305 (current secure format).
     fn decrypt_chacha20(&self, hex_str: &str) -> Result<String> {
+        self.decrypt_chacha20_with_key_policy(hex_str, true)
+    }
+
+    fn decrypt_chacha20_with_key_policy(
+        &self,
+        hex_str: &str,
+        create_if_missing: bool,
+    ) -> Result<String> {
         let blob =
             hex_decode(hex_str).context("Failed to decode encrypted secret (corrupt hex)")?;
         anyhow::ensure!(
@@ -160,7 +176,17 @@ impl SecretStore {
 
         let (nonce_bytes, ciphertext) = blob.split_at(NONCE_LEN);
         let nonce = Nonce::from_slice(nonce_bytes);
-        let key_bytes = self.load_or_create_key()?;
+        let key_bytes = if create_if_missing {
+            self.load_or_create_key()?
+        } else {
+            self.load_existing_key()?
+        };
+        anyhow::ensure!(
+            key_bytes.len() == KEY_LEN,
+            "Secret key has invalid length: expected {} bytes, got {}",
+            KEY_LEN,
+            key_bytes.len()
+        );
         let key = Key::from_slice(&key_bytes);
         let cipher = ChaCha20Poly1305::new(key);
 
@@ -181,9 +207,21 @@ impl SecretStore {
 
     /// Decrypt using legacy XOR cipher (insecure, for backward compatibility only).
     fn decrypt_legacy_xor(&self, hex_str: &str) -> Result<String> {
+        self.decrypt_legacy_xor_with_key_policy(hex_str, true)
+    }
+
+    fn decrypt_legacy_xor_with_key_policy(
+        &self,
+        hex_str: &str,
+        create_if_missing: bool,
+    ) -> Result<String> {
         let ciphertext = hex_decode(hex_str)
             .context("Failed to decode legacy encrypted secret (corrupt hex)")?;
-        let key = self.load_or_create_key()?;
+        let key = if create_if_missing {
+            self.load_or_create_key()?
+        } else {
+            self.load_existing_key()?
+        };
         let plaintext_bytes = xor_cipher(&ciphertext, &key);
         String::from_utf8(plaintext_bytes)
             .context("Decrypted legacy secret is not valid UTF-8 — wrong key or corrupt data")
@@ -214,12 +252,24 @@ impl SecretStore {
         value.starts_with("enc2:")
     }
 
+    /// Load an existing encryption key from disk without creating one if missing.
+    fn load_existing_key(&self) -> Result<Vec<u8>> {
+        let hex_key =
+            fs::read_to_string(&self.key_path).context("Failed to read secret key file")?;
+        let key = hex_decode(hex_key.trim()).context("Secret key file is corrupt")?;
+        anyhow::ensure!(
+            key.len() == KEY_LEN,
+            "Secret key file has invalid length: expected {} bytes, got {}",
+            KEY_LEN,
+            key.len()
+        );
+        Ok(key)
+    }
+
     /// Load the encryption key from disk, or create one if it doesn't exist.
     fn load_or_create_key(&self) -> Result<Vec<u8>> {
         if self.key_path.exists() {
-            let hex_key =
-                fs::read_to_string(&self.key_path).context("Failed to read secret key file")?;
-            hex_decode(hex_key.trim()).context("Secret key file is corrupt")
+            self.load_existing_key()
         } else {
             let key = generate_random_key();
             if let Some(parent) = self.key_path.parent() {
@@ -1826,5 +1876,22 @@ exit 65
             0o600,
             "Key file must be owner-only (0600)"
         );
+    }
+
+    #[test]
+    fn decrypt_existing_fails_closed_on_missing_or_short_key_without_creating() {
+        let tmp = TempDir::new().unwrap();
+        let store = SecretStore::new(tmp.path(), true);
+        let missing_err = store
+            .decrypt_existing("enc2:000102030405060708090a0b0c0d0e0f1011")
+            .expect_err("missing .secret_key must fail");
+        assert!(!missing_err.to_string().is_empty());
+        assert!(!store.key_path.exists());
+
+        fs::write(&store.key_path, "deadbeef").unwrap();
+        let short_err = store
+            .decrypt_existing("enc2:000102030405060708090a0b0c0d0e0f1011")
+            .expect_err("short .secret_key must fail without panic");
+        assert!(short_err.to_string().contains("invalid length"));
     }
 }

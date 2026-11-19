@@ -106,6 +106,14 @@ impl ModelProvider for ModelPinnedProvider {
         self.inner.default_base_url()
     }
 
+    fn endpoint_host(&self) -> Option<String> {
+        self.inner.endpoint_host()
+    }
+
+    fn endpoint_host_for_model(&self, _model: &str) -> Option<String> {
+        self.inner.endpoint_host_for_model(&self.pinned_model)
+    }
+
     fn default_wire_api(&self) -> &str {
         self.inner.default_wire_api()
     }

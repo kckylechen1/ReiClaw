@@ -140,6 +140,7 @@ impl OpenAiCodexModelProvider {
             gateway_api_key: gateway_api_key.map(ToString::to_string),
             reasoning_effort: options.reasoning_effort.clone(),
             client: Client::builder()
+                .redirect(reqwest::redirect::Policy::none())
                 .connect_timeout(std::time::Duration::from_secs(10))
                 .read_timeout(std::time::Duration::from_secs(300))
                 .build()
@@ -1472,6 +1473,10 @@ impl ModelProvider for OpenAiCodexModelProvider {
 
     fn default_base_url(&self) -> Option<&str> {
         Some(DEFAULT_CODEX_RESPONSES_URL)
+    }
+
+    fn endpoint_host(&self) -> Option<String> {
+        crate::extract_endpoint_host(&self.responses_url)
     }
 
     fn capabilities(&self) -> ProviderCapabilities {

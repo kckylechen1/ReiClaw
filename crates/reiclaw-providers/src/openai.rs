@@ -447,7 +447,7 @@ impl OpenAiModelProvider {
     }
 
     fn http_client(&self) -> Client {
-        reiclaw_http::build_runtime_proxy_client_with_timeouts(
+        reiclaw_http::build_runtime_proxy_client_with_timeouts_no_redirect(
             "model_provider.openai",
             self.timeout_secs,
             10,
@@ -460,6 +460,10 @@ impl ModelProvider for OpenAiModelProvider {
     // ── ModelProvider-family defaults ──
     fn default_base_url(&self) -> Option<&str> {
         Some(BASE_URL)
+    }
+
+    fn endpoint_host(&self) -> Option<String> {
+        crate::extract_endpoint_host(&self.base_url)
     }
 
     async fn chat_with_system(
@@ -1146,6 +1150,7 @@ impl OpenAiResponsesModelProvider {
     fn http_client(&self) -> Client {
         let default_headers = self.build_default_headers();
         let mut builder = Client::builder()
+            .redirect(reqwest::redirect::Policy::none())
             .timeout(std::time::Duration::from_secs(self.timeout_secs))
             .connect_timeout(std::time::Duration::from_secs(10));
         if !default_headers.is_empty() {
@@ -1157,6 +1162,7 @@ impl OpenAiResponsesModelProvider {
     fn streaming_client(&self) -> Client {
         let default_headers = self.build_default_headers();
         let mut builder = Client::builder()
+            .redirect(reqwest::redirect::Policy::none())
             .connect_timeout(std::time::Duration::from_secs(10))
             .read_timeout(STREAM_IDLE_TIMEOUT);
         if !default_headers.is_empty() {
@@ -1182,6 +1188,10 @@ impl ModelProvider for OpenAiResponsesModelProvider {
     /// default base vs. OpenAI's).
     fn default_base_url(&self) -> Option<&str> {
         Some(&self.responses_url)
+    }
+
+    fn endpoint_host(&self) -> Option<String> {
+        crate::extract_endpoint_host(&self.responses_url)
     }
 
     fn default_wire_api(&self) -> &str {

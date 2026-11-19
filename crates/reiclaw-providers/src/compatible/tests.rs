@@ -4399,3 +4399,73 @@ fn reasoning_effort_passthrough_without_effort_sends_nothing() {
     let p = effort_provider(true, None);
     assert_eq!(p.reasoning_effort_for_model("gateway/glm-5"), None);
 }
+
+#[tokio::test]
+async fn compatible_provider_does_not_follow_307_redirect_to_blocked_target() {
+    use std::sync::Arc;
+    use std::sync::atomic::{AtomicUsize, Ordering};
+
+    let blocked_hits = Arc::new(AtomicUsize::new(0));
+    let blocked_hits_srv = Arc::clone(&blocked_hits);
+    let target_app = axum::Router::new().fallback(move || {
+        let hits = Arc::clone(&blocked_hits_srv);
+        async move {
+            hits.fetch_add(1, Ordering::SeqCst);
+            axum::http::StatusCode::OK
+        }
+    });
+    let target_listener = tokio::net::TcpListener::bind("127.0.0.1:0")
+        .await
+        .expect("bind target server");
+    let target_addr = target_listener.local_addr().unwrap();
+    let target_task = ::reiclaw_log::spawn!(async move {
+        let _ = axum::serve(target_listener, target_app).await;
+    });
+
+    let location = format!("http://{target_addr}/v1/chat/completions");
+    let redirect_app = axum::Router::new().fallback(move || {
+        let loc = location.clone();
+        async move {
+            (
+                axum::http::StatusCode::TEMPORARY_REDIRECT,
+                [(axum::http::header::LOCATION, loc)],
+                "redirect blocked",
+            )
+        }
+    });
+    let redirect_listener = tokio::net::TcpListener::bind("127.0.0.1:0")
+        .await
+        .expect("bind redirect server");
+    let redirect_addr = redirect_listener.local_addr().unwrap();
+    let redirect_task = ::reiclaw_log::spawn!(async move {
+        let _ = axum::serve(redirect_listener, redirect_app).await;
+    });
+
+    let provider = OpenAiCompatibleModelProvider::builder("test")
+        .display_name("test")
+        .base_url(&format!("http://{redirect_addr}/v1"))
+        .credential(Some("test-key"))
+        .auth_style(AuthStyle::Bearer)
+        .build();
+    let err = provider
+        .chat(
+            crate::traits::ChatRequest {
+                messages: &[ChatMessage::user("hello")],
+                tools: None,
+                thinking: None,
+            },
+            "test-model",
+            None,
+        )
+        .await
+        .expect_err("307 redirect must not succeed");
+    assert!(err.to_string().contains("307"), "{err}");
+    assert_eq!(
+        blocked_hits.load(Ordering::SeqCst),
+        0,
+        "redirect target must receive 0 requests"
+    );
+
+    target_task.abort();
+    redirect_task.abort();
+}

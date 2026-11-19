@@ -494,6 +494,17 @@ pub trait ModelProvider: Send + Sync + crate::attribution::Attributable {
         None
     }
 
+    /// Runtime target host for outbound network policy checks (`network_kill`
+    /// and `blocked_domains`). Pure in-memory/test providers return `None`.
+    fn endpoint_host(&self) -> Option<String> {
+        None
+    }
+
+    /// Model-aware variant of [`Self::endpoint_host`], overridden by routers.
+    fn endpoint_host_for_model(&self, _model: &str) -> Option<String> {
+        self.endpoint_host()
+    }
+
     /// Wire protocol variant. Either `"responses"` (OpenAI Codex-style) or
     /// `"chat_completions"` (everything else). Providers override to their
     /// native format.
@@ -749,6 +760,14 @@ impl<T: ModelProvider + ?Sized> ModelProvider for Arc<T> {
 
     fn default_base_url(&self) -> Option<&str> {
         self.as_ref().default_base_url()
+    }
+
+    fn endpoint_host(&self) -> Option<String> {
+        self.as_ref().endpoint_host()
+    }
+
+    fn endpoint_host_for_model(&self, model: &str) -> Option<String> {
+        self.as_ref().endpoint_host_for_model(model)
     }
 
     fn default_wire_api(&self) -> &str {

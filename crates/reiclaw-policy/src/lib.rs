@@ -1,10 +1,13 @@
 //! Runtime authorization, command/path checks, and shared action budgets.
 //! Operator settings and their defaults remain owned by `zeroclaw-config`.
 
+pub mod estop;
+
 use anyhow::Context as _;
 use parking_lot::Mutex;
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
+use std::sync::Arc;
 use std::time::{Duration, Instant};
 
 // Config owns the operator-selected autonomy and profile settings.
@@ -226,6 +229,10 @@ pub struct SecurityPolicy {
     /// resolves to `"firejail"`.
     pub firejail_args: Vec<String>,
     pub tracker: PerSenderTracker,
+    /// Live emergency-stop handle (`None` when `[security.estop].enabled = false`).
+    pub estop: Option<Arc<estop::EstopHandle>>,
+    /// Resolved custom/default path to `estop-state.json` when estop is enabled.
+    pub estop_state_path: Option<PathBuf>,
 }
 
 impl SecurityPolicy {
@@ -409,6 +416,8 @@ impl Default for SecurityPolicy {
             sandbox_backend: None,
             firejail_args: vec![],
             tracker: PerSenderTracker::new(),
+            estop: None,
+            estop_state_path: None,
         }
     }
 }
@@ -1338,6 +1347,8 @@ impl SecurityPolicy {
         command: &str,
         approved: bool,
     ) -> Result<CommandRiskLevel, String> {
+        self.enforce_estop_tool("shell")?;
+
         if !self.is_command_allowed(command) {
             return Err(format!("Command not allowed by security policy: {command}"));
         }
@@ -2081,8 +2092,48 @@ impl SecurityPolicy {
         false
     }
 
+    fn is_protected_estop_path(&self, resolved: &Path) -> bool {
+        let Some(estop_path) = self.estop_state_path.as_ref() else {
+            return false;
+        };
+        let Some(file_name) = resolved.file_name().and_then(|value| value.to_str()) else {
+            return false;
+        };
+        let Some(estop_file_name) = estop_path.file_name().and_then(|value| value.to_str()) else {
+            return false;
+        };
+        let estop_stem = estop_path
+            .file_stem()
+            .and_then(|value| value.to_str())
+            .unwrap_or(estop_file_name);
+        let matches_name = file_name == estop_file_name
+            || file_name == format!("{estop_file_name}.lock")
+            || file_name == format!("{estop_file_name}.initialized")
+            || file_name.starts_with(&format!("{estop_file_name}.initialized.tmp-"))
+            || file_name.starts_with(&format!("{estop_file_name}.tmp-"))
+            || file_name.starts_with(&format!(".{estop_file_name}.tmp-"))
+            || file_name.starts_with(&format!("{estop_stem}.tmp-"))
+            || file_name.starts_with(&format!(".{estop_stem}.tmp-"));
+        if !matches_name {
+            return false;
+        }
+        let Some(parent) = resolved.parent() else {
+            return false;
+        };
+        let Some(estop_parent) = estop_path.parent() else {
+            return false;
+        };
+        let canon_parent = parent
+            .canonicalize()
+            .unwrap_or_else(|_| parent.to_path_buf());
+        let canon_estop_parent = estop_parent
+            .canonicalize()
+            .unwrap_or_else(|_| estop_parent.to_path_buf());
+        canon_parent == canon_estop_parent
+    }
+
     pub fn is_runtime_config_path(&self, resolved: &Path) -> bool {
-        if self.is_protected_companion_path(resolved) {
+        if self.is_protected_companion_path(resolved) || self.is_protected_estop_path(resolved) {
             return true;
         }
         let Some(file_name) = resolved.file_name().and_then(|value| value.to_str()) else {
@@ -2092,6 +2143,9 @@ impl SecurityPolicy {
             || file_name == "config.toml.bak"
             || file_name.starts_with(".config.toml.tmp-")
             || file_name == "estop-state.json"
+            || file_name == "estop-state.json.lock"
+            || file_name.starts_with("estop-state.tmp-")
+            || file_name.starts_with("estop-state.json.tmp-")
             || file_name == "otp-secret"
             || file_name == "webauthn_credentials.json";
         if !is_protected_name {
@@ -2205,9 +2259,63 @@ impl SecurityPolicy {
         )
     }
 
+    /// Attach a live emergency-stop handle for the given `[security.estop]` config.
+    pub fn with_estop(
+        mut self,
+        config: &reiclaw_config::schema::EstopConfig,
+        config_dir: &Path,
+    ) -> Self {
+        if config.enabled {
+            let handle = estop::EstopHandle::for_config(config, config_dir);
+            self.estop_state_path = Some(handle.state_path().to_path_buf());
+            self.estop = Some(handle);
+        } else {
+            self.estop = None;
+            self.estop_state_path = None;
+        }
+        self
+    }
+
+    pub fn estop_handle(&self) -> Option<&Arc<estop::EstopHandle>> {
+        self.estop.as_ref()
+    }
+
+    pub fn is_estop_kill_all(&self) -> bool {
+        self.estop
+            .as_ref()
+            .is_some_and(|handle| handle.is_kill_all())
+    }
+
+    pub fn is_estop_network_killed(&self) -> bool {
+        self.estop
+            .as_ref()
+            .is_some_and(|handle| handle.is_network_killed())
+    }
+
+    pub fn enforce_estop_not_killed(&self) -> Result<(), String> {
+        if let Some(handle) = &self.estop {
+            handle.enforce_not_killed()?;
+        }
+        Ok(())
+    }
+
+    pub fn enforce_estop_tool(&self, tool_name: &str) -> Result<(), String> {
+        if let Some(handle) = &self.estop {
+            handle.enforce_tool(tool_name)?;
+        }
+        Ok(())
+    }
+
+    pub fn enforce_estop_network(&self, host: Option<&str>) -> Result<(), String> {
+        if let Some(handle) = &self.estop {
+            handle.enforce_network(host)?;
+        }
+        Ok(())
+    }
+
     /// Check if autonomy level permits any action at all
     pub fn can_act(&self) -> bool {
-        self.autonomy != AutonomyLevel::ReadOnly
+        self.autonomy != AutonomyLevel::ReadOnly && !self.is_estop_kill_all()
     }
 
     // ── Tool Operation Gating ──────────────────────────────────────────────
@@ -2216,13 +2324,15 @@ impl SecurityPolicy {
     // (not read-only) and the sliding-window rate limiter.
 
     /// Enforce policy for a tool operation.
-    /// Read operations are always allowed by autonomy/rate gates.
+    /// Read operations are allowed by autonomy/rate gates, unless estop `kill_all` is engaged.
     /// Act operations require non-readonly autonomy and available action budget.
     pub fn enforce_tool_operation(
         &self,
         operation: ToolOperation,
         operation_name: &str,
     ) -> Result<(), String> {
+        self.enforce_estop_not_killed()?;
+
         match operation {
             ToolOperation::Read => Ok(()),
             ToolOperation::Act => {
@@ -2481,6 +2591,8 @@ impl SecurityPolicy {
             sandbox_backend: risk_profile.sandbox_backend.clone(),
             firejail_args: risk_profile.firejail_args.clone(),
             tracker: PerSenderTracker::new(),
+            estop: None,
+            estop_state_path: None,
         }
     }
 
@@ -2573,6 +2685,17 @@ impl SecurityPolicy {
         // (`webauthn_credentials.json` for WebAuthnManager) are protected
         // from agent overwrites when `data_dir` overlaps an allowed root.
         policy.data_dir = Some(config.data_dir.clone());
+        if config.security.estop.enabled {
+            let config_dir = config
+                .config_path
+                .parent()
+                .filter(|parent| !parent.as_os_str().is_empty())
+                .or_else(|| {
+                    (!config.data_dir.as_os_str().is_empty()).then_some(config.data_dir.as_path())
+                })
+                .unwrap_or_else(|| Path::new("."));
+            policy = policy.with_estop(&config.security.estop, config_dir);
+        }
 
         policy
             .allowed_roots_read_only

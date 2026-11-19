@@ -82,6 +82,19 @@ impl RouterModelProvider {
 
 #[async_trait]
 impl ModelProvider for RouterModelProvider {
+    fn endpoint_host(&self) -> Option<String> {
+        self.model_providers
+            .get(self.default_index)
+            .and_then(|(_, provider)| provider.endpoint_host())
+    }
+
+    fn endpoint_host_for_model(&self, model: &str) -> Option<String> {
+        let (provider_idx, resolved_model) = self.resolve(model);
+        self.model_providers[provider_idx]
+            .1
+            .endpoint_host_for_model(&resolved_model)
+    }
+
     async fn chat_with_system(
         &self,
         system_prompt: Option<&str>,

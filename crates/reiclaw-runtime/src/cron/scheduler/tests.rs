@@ -2243,3 +2243,85 @@ async fn persisted_run_carries_component_truth_after_delivery_failure() {
     // Compatibility status is degraded.
     assert_eq!(runs[0].status, "degraded");
 }
+
+#[tokio::test]
+async fn cron_shell_and_agent_jobs_enforce_estop_and_kill_inflight() {
+    let dir = tempfile::tempdir().unwrap();
+    let mut config = test_config(&dir).await;
+    let state_path = dir.path().join("estop-state.json");
+    config.security.estop = reiclaw_config::schema::EstopConfig {
+        enabled: true,
+        state_file: state_path.to_string_lossy().to_string(),
+        require_otp_to_resume: false,
+    };
+
+    let security = SecurityPolicy {
+        autonomy: crate::security::AutonomyLevel::Full,
+        workspace_dir: dir.path().to_path_buf(),
+        allowed_commands: vec!["sleep".into(), "echo".into()],
+        ..SecurityPolicy::default()
+    }
+    .with_estop(&config.security.estop, dir.path());
+
+    let shell_job = test_job("sleep 30");
+
+    // Pre-engaged network_kill blocks cron shell job before spawning.
+    let net_kill = crate::security::estop::EstopState {
+        kill_all: false,
+        network_kill: true,
+        blocked_domains: Vec::new(),
+        frozen_tools: Vec::new(),
+        updated_at: None,
+    };
+    std::fs::write(&state_path, serde_json::to_string(&net_kill).unwrap()).unwrap();
+    let blocked =
+        run_job_command_with_timeout(&config, &security, &shell_job, Duration::from_secs(5)).await;
+    match blocked {
+        ShellJobOutcome::Finished { success, output } => {
+            assert!(!success);
+            assert!(output.starts_with("blocked by security policy:"));
+        }
+        other => panic!("expected Finished(success=false) on network_kill, got {other:?}"),
+    }
+
+    // Also blocks JobType::Agent immediately when kill_all is set.
+    let kill_all = crate::security::estop::EstopState {
+        kill_all: true,
+        network_kill: false,
+        blocked_domains: Vec::new(),
+        frozen_tools: Vec::new(),
+        updated_at: None,
+    };
+    std::fs::write(&state_path, serde_json::to_string(&kill_all).unwrap()).unwrap();
+    let (ok, msg) = run_agent_job_with_timeout(
+        &config,
+        &security,
+        TEST_AGENT,
+        &shell_job,
+        Duration::from_secs(5),
+        None,
+    )
+    .await;
+    assert!(!ok);
+    assert!(msg.starts_with("blocked by security policy:"));
+
+    // Clear state, start sleep 30 cron shell job, engage kill_all mid-flight -> killed promptly.
+    std::fs::write(
+        &state_path,
+        serde_json::to_string(&crate::security::estop::EstopState::default()).unwrap(),
+    )
+    .unwrap();
+    let writer_path = state_path.clone();
+    let engager = ::reiclaw_log::spawn!(async move {
+        tokio::time::sleep(Duration::from_millis(120)).await;
+        let tmp = writer_path.with_extension("json.tmp");
+        std::fs::write(&tmp, serde_json::to_string(&kill_all).unwrap()).unwrap();
+        std::fs::rename(&tmp, &writer_path).unwrap();
+    });
+    let started = std::time::Instant::now();
+    let inflight =
+        run_job_command_with_timeout(&config, &security, &shell_job, Duration::from_secs(30)).await;
+    engager.await.unwrap();
+    assert!(matches!(inflight, ShellJobOutcome::Interrupted(_)));
+    assert!(started.elapsed() < Duration::from_secs(5));
+}

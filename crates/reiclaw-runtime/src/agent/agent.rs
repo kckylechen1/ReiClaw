@@ -102,6 +102,8 @@ pub struct Agent {
     /// Pre-rendered security policy summary injected into the system prompt
     /// so the LLM knows the concrete constraints before making tool calls.
     security_summary: Option<String>,
+    /// Live runtime security policy for per-turn/tool emergency-stop enforcement.
+    security_policy: Option<Arc<crate::security::SecurityPolicy>>,
     /// Autonomy level from config; controls safety prompt instructions.
     autonomy_level: crate::security::AutonomyLevel,
     /// Cross-channel HITL: resolved from the active risk profile's
@@ -270,6 +272,7 @@ pub struct AgentBuilder {
     allowed_tools: Option<Vec<String>>,
     response_cache: Option<Arc<reiclaw_memory::response_cache::ResponseCache>>,
     security_summary: Option<String>,
+    security_policy: Option<Arc<crate::security::SecurityPolicy>>,
     autonomy_level: Option<crate::security::AutonomyLevel>,
     approval_route: Option<reiclaw_config::autonomy::ApprovalRoute>,
     activated_tools: Option<Arc<std::sync::Mutex<crate::tools::ActivatedToolSet>>>,
@@ -322,6 +325,7 @@ impl AgentBuilder {
             allowed_tools: None,
             response_cache: None,
             security_summary: None,
+            security_policy: None,
             autonomy_level: None,
             approval_route: None,
             activated_tools: None,
@@ -503,6 +507,11 @@ impl AgentBuilder {
         self
     }
 
+    pub fn security_policy(mut self, policy: Option<Arc<crate::security::SecurityPolicy>>) -> Self {
+        self.security_policy = policy;
+        self
+    }
+
     pub fn autonomy_level(mut self, level: crate::security::AutonomyLevel) -> Self {
         self.autonomy_level = Some(level);
         self
@@ -667,6 +676,11 @@ impl AgentBuilder {
                 active_turn_id: None,
                 revision: 0,
             },
+        )
+        .with_estop(
+            self.security_policy
+                .as_ref()
+                .and_then(|policy| policy.estop_handle().cloned()),
         );
 
         let agent = Agent {
@@ -735,6 +749,7 @@ impl AgentBuilder {
             route_model_by_hint: self.route_model_by_hint.unwrap_or_default(),
             response_cache: self.response_cache,
             security_summary: self.security_summary,
+            security_policy: self.security_policy,
             approval_route: self.approval_route,
             autonomy_level: self
                 .autonomy_level

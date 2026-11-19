@@ -238,12 +238,47 @@ pub fn build_runtime_proxy_client_with_timeouts(
     timeout_secs: u64,
     connect_timeout_secs: u64,
 ) -> reqwest::Client {
-    let cache_key =
+    build_runtime_proxy_client_with_timeouts_inner(
+        service_key,
+        timeout_secs,
+        connect_timeout_secs,
+        false,
+    )
+}
+
+pub fn build_runtime_proxy_client_with_timeouts_no_redirect(
+    service_key: &str,
+    timeout_secs: u64,
+    connect_timeout_secs: u64,
+) -> reqwest::Client {
+    build_runtime_proxy_client_with_timeouts_inner(
+        service_key,
+        timeout_secs,
+        connect_timeout_secs,
+        true,
+    )
+}
+
+fn build_runtime_proxy_client_with_timeouts_inner(
+    service_key: &str,
+    timeout_secs: u64,
+    connect_timeout_secs: u64,
+    no_redirect: bool,
+) -> reqwest::Client {
+    let base_key =
         runtime_proxy_cache_key(service_key, Some(timeout_secs), Some(connect_timeout_secs));
+    let cache_key = if no_redirect {
+        format!("{base_key}|redirect=none")
+    } else {
+        base_key
+    };
     build_cached_proxy_client(cache_key, |config| {
-        let builder = reqwest::Client::builder()
+        let mut builder = reqwest::Client::builder()
             .timeout(std::time::Duration::from_secs(timeout_secs))
             .connect_timeout(std::time::Duration::from_secs(connect_timeout_secs));
+        if no_redirect {
+            builder = builder.redirect(reqwest::redirect::Policy::none());
+        }
         let builder = apply_proxy_to_builder(config, builder, service_key);
         builder.build().unwrap_or_else(|error| {
             ::reiclaw_log::record!(
@@ -255,7 +290,11 @@ pub fn build_runtime_proxy_client_with_timeouts(
                     ),
                 "Failed to build proxied timeout client: "
             );
-            reqwest::Client::new()
+            let mut fallback = reqwest::Client::builder();
+            if no_redirect {
+                fallback = fallback.redirect(reqwest::redirect::Policy::none());
+            }
+            fallback.build().unwrap_or_else(|_| reqwest::Client::new())
         })
     })
 }

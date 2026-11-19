@@ -200,11 +200,14 @@ impl ScopedToolRegistry {
             .cloned()
             .collect();
         let pipeline_tool = (!composition_minimal && config.pipeline.enabled).then(|| {
-            Arc::new(tools::PipelineTool::with_access_policy(
-                config.pipeline.clone(),
-                context_filtered_tool_arcs.clone(),
-                mcp_tool_access_policy(security.as_ref(), caller_allowed),
-            )) as Arc<dyn Tool>
+            Arc::new(
+                tools::PipelineTool::with_access_policy(
+                    config.pipeline.clone(),
+                    context_filtered_tool_arcs.clone(),
+                    mcp_tool_access_policy(security.as_ref(), caller_allowed),
+                )
+                .with_security(Arc::clone(security)),
+            ) as Arc<dyn Tool>
         });
         if let Some(tool) = pipeline_tool.as_ref() {
             tools_registry.push(Box::new(tools::ArcToolRef(Arc::clone(tool))));
@@ -284,7 +287,12 @@ impl ScopedToolRegistry {
             {
                 Some(Arc::clone(shared))
             } else {
-                match tools::McpRegistry::connect_all(&agent_mcp_servers).await {
+                match tools::McpRegistry::connect_all_with_estop(
+                    &agent_mcp_servers,
+                    security.estop_handle().cloned(),
+                )
+                .await
+                {
                     Ok(registry) => Some(Arc::new(registry)),
                     Err(err) => {
                         // Non-fatal (the assembly proceeds without MCP), but an ERROR

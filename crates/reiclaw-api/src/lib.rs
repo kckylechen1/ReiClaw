@@ -57,6 +57,39 @@ tokio::task_local! {
     /// Native extended thinking parameters, set by the outer orchestration
     /// functions and read by `run_tool_call_loop` when building `ChatRequest`.
     pub static NATIVE_THINKING_OVERRIDE: Option<crate::model_provider::NativeThinkingParams>;
+
+    /// Live emergency-stop network/kill guard checked before every model-provider
+    /// attempt (including retries and fallback providers inside `ReliableModelProvider`).
+    pub static TOOL_LOOP_ESTOP_HOST_GUARD: Option<EstopHostGuard>;
+}
+
+/// Shared callback checking whether outbound model-provider traffic to `host`
+/// is permitted under the active emergency-stop policy.
+pub type EstopHostGuard = std::sync::Arc<dyn Fn(Option<&str>) -> Result<(), String> + Send + Sync>;
+
+/// Marker substring present in emergency-stop block errors returned across
+/// provider streams and `EstopBlockedError`.
+pub const ESTOP_ERROR_MARKER: &str = "blocked by security policy: emergency stop";
+
+/// Typed non-retryable error returned when an emergency-stop guard blocks a
+/// provider dispatch attempt.
+#[derive(Debug, Clone)]
+pub struct EstopBlockedError(pub String);
+
+impl std::fmt::Display for EstopBlockedError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str(&self.0)
+    }
+}
+
+impl std::error::Error for EstopBlockedError {}
+
+/// Run the task-local emergency-stop host guard (if installed) for `host`.
+pub fn check_tool_loop_estop_host(host: Option<&str>) -> Result<(), String> {
+    if let Ok(Some(guard)) = TOOL_LOOP_ESTOP_HOST_GUARD.try_with(Clone::clone) {
+        guard(host)?;
+    }
+    Ok(())
 }
 
 pub mod policy;

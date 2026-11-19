@@ -2028,6 +2028,7 @@ pub(crate) mod tests {
             reload_tx: None,
             ws_conversations: Default::default(),
             bridge_sockets: Default::default(),
+            hooks: None,
         }
     }
 

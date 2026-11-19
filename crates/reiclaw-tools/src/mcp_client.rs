@@ -29,9 +29,11 @@ use crate::mcp_task::{
     TaskHandleError, parse_continuation, poll_delay, require_responses_if_needed,
 };
 use crate::mcp_transport::{
-    McpRequestLifecycle, McpTransportError, SharedMcpTransportConn, create_shared_transport,
+    McpRequestLifecycle, McpTransportError, SharedMcpTransportConn,
+    create_shared_transport_with_estop,
 };
 use reiclaw_config::schema::{McpServerConfig, McpTransport};
+use reiclaw_policy::estop::EstopHandle;
 
 /// Timeout for receiving a response from an MCP server during init/list.
 /// Prevents a hung server from blocking the daemon indefinitely.
@@ -693,14 +695,23 @@ impl Drop for OutcomeUnknownGuard {
 impl McpServer {
     /// Connect to the server, perform the initialize handshake, and fetch the tool list.
     pub async fn connect(config: McpServerConfig) -> Result<Self> {
+        Self::connect_with_estop(config, None).await
+    }
+
+    /// Connect to the server with an optional live estop handle attached to its transport.
+    pub async fn connect_with_estop(
+        config: McpServerConfig,
+        estop: Option<Arc<EstopHandle>>,
+    ) -> Result<Self> {
         // Create transport based on config
-        let transport: Arc<dyn SharedMcpTransportConn> =
-            Arc::from(create_shared_transport(&config).with_context(|| {
+        let transport: Arc<dyn SharedMcpTransportConn> = Arc::from(
+            create_shared_transport_with_estop(&config, estop).with_context(|| {
                 format!(
                     "failed to create transport for MCP server `{}`",
                     config.name
                 )
-            })?);
+            })?,
+        );
         let epoch_gate = Arc::new(RwLock::new(0));
         let serial_gate =
             (config.transport != McpTransport::Stdio).then(|| Arc::new(Mutex::new(())));
@@ -1706,17 +1717,26 @@ pub struct McpRegistry {
     tool_index: HashMap<String, (usize, String)>,
     /// server name → index in `servers`.
     server_index: HashMap<String, usize>,
+    estop: Option<Arc<EstopHandle>>,
 }
 
 impl McpRegistry {
     /// Connect to all configured servers. Non-fatal: failures are logged and skipped.
     pub async fn connect_all(configs: &[McpServerConfig]) -> Result<Self> {
+        Self::connect_all_with_estop(configs, None).await
+    }
+
+    /// Connect to all configured servers with an optional live estop handle.
+    pub async fn connect_all_with_estop(
+        configs: &[McpServerConfig],
+        estop: Option<Arc<EstopHandle>>,
+    ) -> Result<Self> {
         let mut servers = Vec::new();
         let mut tool_index = HashMap::new();
         let mut server_index = HashMap::new();
 
         for config in configs {
-            match McpServer::connect(config.clone()).await {
+            match McpServer::connect_with_estop(config.clone(), estop.clone()).await {
                 Ok(server) => {
                     let server_idx = servers.len();
                     server_index.insert(config.name.clone(), server_idx);
@@ -1745,7 +1765,14 @@ impl McpRegistry {
             servers,
             tool_index,
             server_index,
+            estop,
         })
+    }
+
+    /// Attach a live estop handle to a registry constructed outside `connect_all_with_estop`.
+    pub fn with_estop(mut self, estop: Option<Arc<EstopHandle>>) -> Self {
+        self.estop = estop;
+        self
     }
 
     /// Build a registry with `n` placeholder servers, each backed by a no-op
@@ -1831,6 +1858,7 @@ impl McpRegistry {
             servers,
             tool_index,
             server_index,
+            estop: None,
         }
     }
 
@@ -1883,6 +1911,7 @@ impl McpRegistry {
             servers,
             tool_index,
             server_index,
+            estop: None,
         }
     }
 
@@ -1911,6 +1940,7 @@ impl McpRegistry {
             servers,
             tool_index,
             server_index,
+            estop: None,
         }
     }
 
@@ -2000,6 +2030,11 @@ impl McpRegistry {
         prefixed_name: &str,
         arguments: serde_json::Value,
     ) -> Result<String> {
+        if let Some(ref estop) = self.estop {
+            estop
+                .enforce_tool(prefixed_name)
+                .map_err(anyhow::Error::msg)?;
+        }
         let (server_idx, original_name) = self.tool_index.get(prefixed_name).ok_or_else(|| {
             ::reiclaw_log::record!(
                 WARN,

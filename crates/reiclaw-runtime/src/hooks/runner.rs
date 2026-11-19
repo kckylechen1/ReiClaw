@@ -1,14 +1,15 @@
+use std::sync::Arc;
 use std::time::Duration;
 
 use futures_util::{FutureExt, future::join_all};
 use serde_json::Value;
 use std::panic::AssertUnwindSafe;
 
-use reiclaw_api::channel::ChannelMessage;
-use reiclaw_api::model_provider::{ChatMessage, ChatResponse};
+use reiclaw_api::model_provider::ChatMessage;
 use reiclaw_api::tool::ToolResult;
 
 use super::traits::{HookHandler, HookResult};
+use crate::security::estop::EstopHandle;
 
 pub struct HookRunner {
     handlers: Vec<Box<dyn HookHandler>>,
@@ -41,6 +42,29 @@ impl HookRunner {
         runner
     }
 
+    /// Build a runner from config without panicking on invalid builtin hook settings.
+    pub fn try_from_config(hooks: &reiclaw_config::schema::HooksConfig) -> anyhow::Result<Self> {
+        Self::try_from_config_with_estop(hooks, None)
+    }
+
+    /// Build a runner from config with an optional live estop handle attached to outbound hooks.
+    pub fn try_from_config_with_estop(
+        hooks: &reiclaw_config::schema::HooksConfig,
+        estop: Option<Arc<EstopHandle>>,
+    ) -> anyhow::Result<Self> {
+        let mut runner = Self::new();
+        if hooks.builtin.command_logger {
+            runner.register(Box::new(super::builtin::CommandLoggerHook::new()));
+        }
+        if hooks.builtin.webhook_audit.enabled {
+            let audit =
+                super::builtin::WebhookAuditHook::try_new(hooks.builtin.webhook_audit.clone())?
+                    .with_estop(estop);
+            runner.register(Box::new(audit));
+        }
+        Ok(runner)
+    }
+
     /// Register a handler and re-sort by descending priority.
     pub fn register(&mut self, handler: Box<dyn HookHandler>) {
         self.handlers.push(handler);
@@ -61,43 +85,11 @@ impl HookRunner {
         join_all(futs).await;
     }
 
-    pub async fn fire_gateway_stop(&self) {
-        let futs: Vec<_> = self.handlers.iter().map(|h| h.on_gateway_stop()).collect();
-        join_all(futs).await;
-    }
-
-    pub async fn fire_session_start(&self, session_id: &str, channel: &str) {
-        let futs: Vec<_> = self
-            .handlers
-            .iter()
-            .map(|h| h.on_session_start(session_id, channel))
-            .collect();
-        join_all(futs).await;
-    }
-
-    pub async fn fire_session_end(&self, session_id: &str, channel: &str) {
-        let futs: Vec<_> = self
-            .handlers
-            .iter()
-            .map(|h| h.on_session_end(session_id, channel))
-            .collect();
-        join_all(futs).await;
-    }
-
     pub async fn fire_llm_input(&self, messages: &[ChatMessage], model: &str) {
         let futs: Vec<_> = self
             .handlers
             .iter()
             .map(|h| h.on_llm_input(messages, model))
-            .collect();
-        join_all(futs).await;
-    }
-
-    pub async fn fire_llm_output(&self, response: &ChatResponse) {
-        let futs: Vec<_> = self
-            .handlers
-            .iter()
-            .map(|h| h.on_llm_output(response))
             .collect();
         join_all(futs).await;
     }
@@ -111,116 +103,9 @@ impl HookRunner {
         join_all(futs).await;
     }
 
-    pub async fn fire_message_sent(&self, channel: &str, recipient: &str, content: &str) {
-        let futs: Vec<_> = self
-            .handlers
-            .iter()
-            .map(|h| h.on_message_sent(channel, recipient, content))
-            .collect();
-        join_all(futs).await;
-    }
-
-    pub async fn fire_heartbeat_tick(&self) {
-        let futs: Vec<_> = self
-            .handlers
-            .iter()
-            .map(|h| h.on_heartbeat_tick())
-            .collect();
-        join_all(futs).await;
-    }
-
     // ---------------------------------------------------------------
     // Modifying dispatchers (sequential by priority, short-circuit on Cancel)
     // ---------------------------------------------------------------
-
-    pub async fn run_before_model_resolve(
-        &self,
-        mut model_provider: String,
-        mut model: String,
-    ) -> HookResult<(String, String)> {
-        for h in &self.handlers {
-            let hook_name = h.name();
-            match AssertUnwindSafe(h.before_model_resolve(model_provider.clone(), model.clone()))
-                .catch_unwind()
-                .await
-            {
-                Ok(HookResult::Continue((p, m))) => {
-                    model_provider = p;
-                    model = m;
-                }
-                Ok(HookResult::Cancel(reason)) => {
-                    ::reiclaw_log::record!(INFO, ::reiclaw_log::Event::new(module_path!(), ::reiclaw_log::Action::Note).with_attrs(::serde_json::json!({"hook": hook_name, "reason": reason.to_string()})), "before_model_resolve cancelled by hook");
-                    return HookResult::Cancel(reason);
-                }
-                Err(_) => {
-                    ::reiclaw_log::record!(
-                        ERROR,
-                        ::reiclaw_log::Event::new(module_path!(), ::reiclaw_log::Action::Fail)
-                            .with_outcome(::reiclaw_log::EventOutcome::Failure)
-                            .with_attrs(::serde_json::json!({"hook": hook_name})),
-                        "before_model_resolve hook panicked; continuing with previous values"
-                    );
-                }
-            }
-        }
-        HookResult::Continue((model_provider, model))
-    }
-
-    pub async fn run_before_prompt_build(&self, mut prompt: String) -> HookResult<String> {
-        for h in &self.handlers {
-            let hook_name = h.name();
-            match AssertUnwindSafe(h.before_prompt_build(prompt.clone()))
-                .catch_unwind()
-                .await
-            {
-                Ok(HookResult::Continue(p)) => prompt = p,
-                Ok(HookResult::Cancel(reason)) => {
-                    ::reiclaw_log::record!(INFO, ::reiclaw_log::Event::new(module_path!(), ::reiclaw_log::Action::Note).with_attrs(::serde_json::json!({"hook": hook_name, "reason": reason.to_string()})), "before_prompt_build cancelled by hook");
-                    return HookResult::Cancel(reason);
-                }
-                Err(_) => {
-                    ::reiclaw_log::record!(
-                        ERROR,
-                        ::reiclaw_log::Event::new(module_path!(), ::reiclaw_log::Action::Fail)
-                            .with_outcome(::reiclaw_log::EventOutcome::Failure)
-                            .with_attrs(::serde_json::json!({"hook": hook_name})),
-                        "before_prompt_build hook panicked; continuing with previous value"
-                    );
-                }
-            }
-        }
-        HookResult::Continue(prompt)
-    }
-
-    pub async fn run_before_llm_call(
-        &self,
-        messages: &mut Vec<ChatMessage>,
-        model: &mut String,
-    ) -> HookResult<()> {
-        for h in &self.handlers {
-            let hook_name = h.name();
-            match AssertUnwindSafe(h.before_llm_call(messages, model))
-                .catch_unwind()
-                .await
-            {
-                Ok(HookResult::Continue(())) => {}
-                Ok(HookResult::Cancel(reason)) => {
-                    ::reiclaw_log::record!(INFO, ::reiclaw_log::Event::new(module_path!(), ::reiclaw_log::Action::Note).with_attrs(::serde_json::json!({"hook": hook_name, "reason": reason.to_string()})), "before_llm_call cancelled by hook");
-                    return HookResult::Cancel(reason);
-                }
-                Err(_) => {
-                    ::reiclaw_log::record!(
-                        ERROR,
-                        ::reiclaw_log::Event::new(module_path!(), ::reiclaw_log::Action::Fail)
-                            .with_outcome(::reiclaw_log::EventOutcome::Failure)
-                            .with_attrs(::serde_json::json!({"hook": hook_name})),
-                        "before_llm_call hook panicked; continuing with previous values"
-                    );
-                }
-            }
-        }
-        HookResult::Continue(())
-    }
 
     pub async fn run_before_tool_call(
         &self,
@@ -261,74 +146,6 @@ impl HookRunner {
         }
         HookResult::Continue((name, args))
     }
-
-    pub async fn run_on_message_received(
-        &self,
-        mut message: ChannelMessage,
-    ) -> HookResult<ChannelMessage> {
-        for h in &self.handlers {
-            let hook_name = h.name();
-            match AssertUnwindSafe(h.on_message_received(message.clone()))
-                .catch_unwind()
-                .await
-            {
-                Ok(HookResult::Continue(m)) => message = m,
-                Ok(HookResult::Cancel(reason)) => {
-                    ::reiclaw_log::record!(INFO, ::reiclaw_log::Event::new(module_path!(), ::reiclaw_log::Action::Note).with_attrs(::serde_json::json!({"hook": hook_name, "reason": reason.to_string()})), "on_message_received cancelled by hook");
-                    return HookResult::Cancel(reason);
-                }
-                Err(_) => {
-                    ::reiclaw_log::record!(
-                        ERROR,
-                        ::reiclaw_log::Event::new(module_path!(), ::reiclaw_log::Action::Fail)
-                            .with_outcome(::reiclaw_log::EventOutcome::Failure)
-                            .with_attrs(::serde_json::json!({"hook": hook_name})),
-                        "on_message_received hook panicked; continuing with previous message"
-                    );
-                }
-            }
-        }
-        HookResult::Continue(message)
-    }
-
-    pub async fn run_on_message_sending(
-        &self,
-        mut channel: String,
-        mut recipient: String,
-        mut content: String,
-    ) -> HookResult<(String, String, String)> {
-        for h in &self.handlers {
-            let hook_name = h.name();
-            match AssertUnwindSafe(h.on_message_sending(
-                channel.clone(),
-                recipient.clone(),
-                content.clone(),
-            ))
-            .catch_unwind()
-            .await
-            {
-                Ok(HookResult::Continue((c, r, ct))) => {
-                    channel = c;
-                    recipient = r;
-                    content = ct;
-                }
-                Ok(HookResult::Cancel(reason)) => {
-                    ::reiclaw_log::record!(INFO, ::reiclaw_log::Event::new(module_path!(), ::reiclaw_log::Action::Note).with_attrs(::serde_json::json!({"hook": hook_name, "reason": reason.to_string()})), "on_message_sending cancelled by hook");
-                    return HookResult::Cancel(reason);
-                }
-                Err(_) => {
-                    ::reiclaw_log::record!(
-                        ERROR,
-                        ::reiclaw_log::Event::new(module_path!(), ::reiclaw_log::Action::Fail)
-                            .with_outcome(::reiclaw_log::EventOutcome::Failure)
-                            .with_attrs(::serde_json::json!({"hook": hook_name})),
-                        "on_message_sending hook panicked; continuing with previous message"
-                    );
-                }
-            }
-        }
-        HookResult::Continue((channel, recipient, content))
-    }
 }
 
 #[cfg(test)]
@@ -367,66 +184,70 @@ mod tests {
         fn priority(&self) -> i32 {
             self.priority
         }
-        async fn on_heartbeat_tick(&self) {
+        async fn on_after_tool_call(&self, _tool: &str, _result: &ToolResult, _duration: Duration) {
             self.fire_count.fetch_add(1, Ordering::SeqCst);
         }
     }
 
-    /// A modifying hook that uppercases the prompt.
-    struct UppercasePromptHook {
+    /// A modifying hook that uppercases the tool name.
+    struct UppercaseToolHook {
         name: String,
         priority: i32,
     }
 
     #[async_trait]
-    impl HookHandler for UppercasePromptHook {
+    impl HookHandler for UppercaseToolHook {
         fn name(&self) -> &str {
             &self.name
         }
         fn priority(&self) -> i32 {
             self.priority
         }
-        async fn before_prompt_build(&self, prompt: String) -> HookResult<String> {
-            HookResult::Continue(prompt.to_uppercase())
+        async fn before_tool_call(&self, name: String, args: Value) -> HookResult<(String, Value)> {
+            HookResult::Continue((name.to_uppercase(), args))
         }
     }
 
-    /// A modifying hook that cancels before_prompt_build.
-    struct CancelPromptHook {
+    /// A modifying hook that cancels `before_tool_call`.
+    struct CancelToolHook {
         name: String,
         priority: i32,
     }
 
     #[async_trait]
-    impl HookHandler for CancelPromptHook {
+    impl HookHandler for CancelToolHook {
         fn name(&self) -> &str {
             &self.name
         }
         fn priority(&self) -> i32 {
             self.priority
         }
-        async fn before_prompt_build(&self, _prompt: String) -> HookResult<String> {
+        async fn before_tool_call(
+            &self,
+            _name: String,
+            _args: Value,
+        ) -> HookResult<(String, Value)> {
             HookResult::Cancel("blocked by policy".into())
         }
     }
 
-    /// A modifying hook that appends a suffix to the prompt.
-    struct SuffixPromptHook {
+    /// A modifying hook that appends a suffix to the tool name.
+    struct SuffixToolHook {
         name: String,
         priority: i32,
         suffix: String,
     }
 
     #[async_trait]
-    impl HookHandler for SuffixPromptHook {
+    impl HookHandler for SuffixToolHook {
         fn name(&self) -> &str {
             &self.name
         }
         fn priority(&self) -> i32 {
             self.priority
         }
-        async fn before_prompt_build(&self, prompt: String) -> HookResult<String> {
-            HookResult::Continue(format!("{}{}", prompt, self.suffix))
+        async fn before_tool_call(&self, name: String, args: Value) -> HookResult<(String, Value)> {
+            HookResult::Continue((format!("{}{}", name, self.suffix), args))
         }
     }
 
@@ -454,7 +275,14 @@ mod tests {
         runner.register(Box::new(h1));
         runner.register(Box::new(h2));
 
-        runner.fire_heartbeat_tick().await;
+        let result = ToolResult {
+            success: true,
+            output: "ok".into(),
+            error: None,
+        };
+        runner
+            .fire_after_tool_call("echo", &result, Duration::from_millis(1))
+            .await;
 
         assert_eq!(c1.load(Ordering::SeqCst), 1);
         assert_eq!(c2.load(Ordering::SeqCst), 1);
@@ -463,16 +291,18 @@ mod tests {
     #[tokio::test]
     async fn modifying_hook_can_cancel() {
         let mut runner = HookRunner::new();
-        runner.register(Box::new(CancelPromptHook {
+        runner.register(Box::new(CancelToolHook {
             name: "blocker".into(),
             priority: 10,
         }));
-        runner.register(Box::new(UppercasePromptHook {
+        runner.register(Box::new(UppercaseToolHook {
             name: "upper".into(),
             priority: 0,
         }));
 
-        let result = runner.run_before_prompt_build("hello".into()).await;
+        let result = runner
+            .run_before_tool_call("hello".into(), Value::Null)
+            .await;
         assert!(result.is_cancel());
     }
 
@@ -481,25 +311,28 @@ mod tests {
         let mut runner = HookRunner::new();
 
         // Priority 10 runs first: uppercases
-        runner.register(Box::new(UppercasePromptHook {
+        runner.register(Box::new(UppercaseToolHook {
             name: "upper".into(),
             priority: 10,
         }));
         // Priority 0 runs second: appends suffix
-        runner.register(Box::new(SuffixPromptHook {
+        runner.register(Box::new(SuffixToolHook {
             name: "suffix".into(),
             priority: 0,
             suffix: "_done".into(),
         }));
 
-        match runner.run_before_prompt_build("hello".into()).await {
-            HookResult::Continue(result) => assert_eq!(result, "HELLO_done"),
+        match runner
+            .run_before_tool_call("hello".into(), Value::Null)
+            .await
+        {
+            HookResult::Continue((result, _)) => assert_eq!(result, "HELLO_done"),
             HookResult::Cancel(_) => panic!("should not cancel"),
         }
     }
 
-    /// A hook that panics on a configurable method. Records nothing; its
-    /// only role is to exercise the `catch_unwind` branch in the runner.
+    /// A hook that panics on `before_tool_call`. Exercises the `catch_unwind`
+    /// branch in the runner.
     struct PanickingHook {
         name: String,
         priority: i32,
@@ -514,119 +347,12 @@ mod tests {
             self.priority
         }
 
-        async fn before_model_resolve(
-            &self,
-            _model_provider: String,
-            _model: String,
-        ) -> HookResult<(String, String)> {
-            panic!("simulated before_model_resolve panic");
-        }
-
         async fn before_tool_call(
             &self,
             _name: String,
             _args: Value,
         ) -> HookResult<(String, Value)> {
             panic!("simulated before_tool_call panic");
-        }
-
-        async fn before_llm_call(
-            &self,
-            _messages: &mut Vec<ChatMessage>,
-            _model: &mut String,
-        ) -> HookResult<()> {
-            panic!("simulated before_llm_call panic");
-        }
-
-        async fn on_message_received(
-            &self,
-            _message: ChannelMessage,
-        ) -> HookResult<ChannelMessage> {
-            panic!("simulated on_message_received panic");
-        }
-    }
-
-    /// A hook that cancels the run on a configurable method.
-    struct CancelNonPromptHook {
-        name: String,
-        priority: i32,
-    }
-
-    #[async_trait]
-    impl HookHandler for CancelNonPromptHook {
-        fn name(&self) -> &str {
-            &self.name
-        }
-        fn priority(&self) -> i32 {
-            self.priority
-        }
-
-        async fn before_llm_call(
-            &self,
-            _messages: &mut Vec<ChatMessage>,
-            _model: &mut String,
-        ) -> HookResult<()> {
-            HookResult::Cancel("blocked by non-prompt cancel hook".into())
-        }
-
-        async fn on_message_received(
-            &self,
-            _message: ChannelMessage,
-        ) -> HookResult<ChannelMessage> {
-            HookResult::Cancel("blocked by non-prompt cancel hook".into())
-        }
-    }
-
-    #[tokio::test]
-    async fn panicking_before_model_resolve_does_not_break_subsequent_handler() {
-        let mut runner = HookRunner::new();
-        // Higher priority panics first; lower priority must still run.
-        runner.register(Box::new(PanickingHook {
-            name: "panicker".into(),
-            priority: 10,
-        }));
-        runner.register(Box::new(UppercasePromptHook {
-            name: "upper".into(),
-            priority: 0,
-        }));
-
-        struct ModelConstHook {
-            name: String,
-            priority: i32,
-        }
-        #[async_trait]
-        impl HookHandler for ModelConstHook {
-            fn name(&self) -> &str {
-                &self.name
-            }
-            fn priority(&self) -> i32 {
-                self.priority
-            }
-            async fn before_model_resolve(
-                &self,
-                _provider: String,
-                _model: String,
-            ) -> HookResult<(String, String)> {
-                HookResult::Continue(("const_provider".into(), "const_model".into()))
-            }
-        }
-
-        runner.register(Box::new(ModelConstHook {
-            name: "const".into(),
-            priority: 0,
-        }));
-
-        let result = runner
-            .run_before_model_resolve("openai".into(), "gpt-4o".into())
-            .await;
-        // The panicker panics (catch_unwind recovers), the const hook runs
-        // and overrides the values. Final tuple is the const values.
-        match result {
-            HookResult::Continue((p, m)) => {
-                assert_eq!(p, "const_provider");
-                assert_eq!(m, "const_model");
-            }
-            HookResult::Cancel(_) => panic!("panicking hook must not cancel"),
         }
     }
 
@@ -681,53 +407,46 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn cancelling_before_llm_call_short_circuits_remaining_handlers() {
+    async fn cancelling_before_tool_call_short_circuits_remaining_handlers() {
         let mut runner = HookRunner::new();
-        // CancelNonPromptHook overrides before_llm_call to return Cancel.
-        runner.register(Box::new(CancelNonPromptHook {
+        runner.register(Box::new(CancelToolHook {
             name: "blocker".into(),
             priority: 10,
         }));
 
-        // A second hook that overrides before_llm_call; we count its calls
-        // to verify it did NOT run after the canceller.
-        struct LlmCallCounterHook {
+        struct ToolCallCounterHook {
             name: String,
             priority: i32,
             count: Arc<AtomicU32>,
         }
         #[async_trait]
-        impl HookHandler for LlmCallCounterHook {
+        impl HookHandler for ToolCallCounterHook {
             fn name(&self) -> &str {
                 &self.name
             }
             fn priority(&self) -> i32 {
                 self.priority
             }
-            async fn before_llm_call(
+            async fn before_tool_call(
                 &self,
-                _messages: &mut Vec<ChatMessage>,
-                _model: &mut String,
-            ) -> HookResult<()> {
+                name: String,
+                args: Value,
+            ) -> HookResult<(String, Value)> {
                 self.count.fetch_add(1, Ordering::SeqCst);
-                HookResult::Continue(())
+                HookResult::Continue((name, args))
             }
         }
 
         let count = Arc::new(AtomicU32::new(0));
-        runner.register(Box::new(LlmCallCounterHook {
+        runner.register(Box::new(ToolCallCounterHook {
             name: "counter".into(),
             priority: 0,
             count: Arc::clone(&count),
         }));
 
-        let mut messages = vec![ChatMessage {
-            role: "user".into(),
-            content: "hi".into(),
-        }];
-        let mut model = "gpt-4o".into();
-        let result = runner.run_before_llm_call(&mut messages, &mut model).await;
-
+        let result = runner
+            .run_before_tool_call("shell".into(), Value::Null)
+            .await;
         assert!(
             result.is_cancel(),
             "canceller must short-circuit the run with HookResult::Cancel"
@@ -739,120 +458,7 @@ mod tests {
         );
     }
 
-    #[tokio::test]
-    async fn cancelling_on_message_received_short_circuits_remaining_handlers() {
-        // Same contract verified on a non-modifying-family hook to pin
-        // consistent cancellation behavior across hook families.
-        struct CancelMessageHook {
-            name: String,
-            priority: i32,
-        }
-        #[async_trait]
-        impl HookHandler for CancelMessageHook {
-            fn name(&self) -> &str {
-                &self.name
-            }
-            fn priority(&self) -> i32 {
-                self.priority
-            }
-            async fn on_message_received(
-                &self,
-                _message: ChannelMessage,
-            ) -> HookResult<ChannelMessage> {
-                HookResult::Cancel("blocked by on_message_received cancel".into())
-            }
-        }
-
-        let mut runner = HookRunner::new();
-        runner.register(Box::new(CancelMessageHook {
-            name: "blocker".into(),
-            priority: 10,
-        }));
-
-        // A no-op subsequent handler counted to confirm short-circuit.
-        struct PassThroughMessageHook {
-            name: String,
-            priority: i32,
-            count: Arc<AtomicU32>,
-        }
-        #[async_trait]
-        impl HookHandler for PassThroughMessageHook {
-            fn name(&self) -> &str {
-                &self.name
-            }
-            fn priority(&self) -> i32 {
-                self.priority
-            }
-            async fn on_message_received(
-                &self,
-                message: ChannelMessage,
-            ) -> HookResult<ChannelMessage> {
-                self.count.fetch_add(1, Ordering::SeqCst);
-                HookResult::Continue(message)
-            }
-        }
-
-        let count = Arc::new(AtomicU32::new(0));
-        runner.register(Box::new(PassThroughMessageHook {
-            name: "passthrough".into(),
-            priority: 0,
-            count: Arc::clone(&count),
-        }));
-
-        let result = runner
-            .run_on_message_received(ChannelMessage::default())
-            .await;
-
-        assert!(
-            result.is_cancel(),
-            "on_message_received canceller must short-circuit"
-        );
-        assert_eq!(
-            count.load(Ordering::SeqCst),
-            0,
-            "pass-through hook after the canceller must NOT run"
-        );
-    }
-
-    // ── from_config and lifecycle tests ──────────────────────────
-
-    struct SessionCountingHook {
-        name: String,
-        start_count: Arc<AtomicU32>,
-        end_count: Arc<AtomicU32>,
-    }
-
-    impl SessionCountingHook {
-        fn new(name: &str) -> (Self, Arc<AtomicU32>, Arc<AtomicU32>) {
-            let start = Arc::new(AtomicU32::new(0));
-            let end = Arc::new(AtomicU32::new(0));
-            (
-                Self {
-                    name: name.to_string(),
-                    start_count: start.clone(),
-                    end_count: end.clone(),
-                },
-                start,
-                end,
-            )
-        }
-    }
-
-    #[async_trait]
-    impl HookHandler for SessionCountingHook {
-        fn name(&self) -> &str {
-            &self.name
-        }
-        fn priority(&self) -> i32 {
-            0
-        }
-        async fn on_session_start(&self, _session_id: &str, _channel: &str) {
-            self.start_count.fetch_add(1, Ordering::SeqCst);
-        }
-        async fn on_session_end(&self, _session_id: &str, _channel: &str) {
-            self.end_count.fetch_add(1, Ordering::SeqCst);
-        }
-    }
+    // ── from_config / try_from_config tests ──────────────────────
 
     #[test]
     fn from_config_disabled_builtins_produces_empty_runner() {
@@ -887,24 +493,29 @@ mod tests {
         );
     }
 
-    #[tokio::test]
-    async fn session_lifecycle_events_reach_registered_handler() {
-        let mut runner = HookRunner::new();
-        let (hook, start_count, end_count) = SessionCountingHook::new("session-watcher");
-        runner.register(Box::new(hook));
-
-        runner.fire_session_start("sess-1", "rpc").await;
-        assert_eq!(start_count.load(Ordering::SeqCst), 1);
-
-        runner.fire_session_end("sess-1", "rpc").await;
-        assert_eq!(end_count.load(Ordering::SeqCst), 1);
+    #[test]
+    fn try_from_config_rejects_invalid_webhook_audit_url() {
+        let config = reiclaw_config::schema::HooksConfig {
+            enabled: true,
+            builtin: reiclaw_config::schema::BuiltinHooksConfig {
+                command_logger: false,
+                webhook_audit: reiclaw_config::schema::WebhookAuditConfig {
+                    enabled: true,
+                    url: "http://example.com/audit".to_string(),
+                    tool_patterns: vec!["*".to_string()],
+                    include_args: false,
+                    max_args_bytes: 1024,
+                },
+            },
+        };
+        assert!(HookRunner::try_from_config(&config).is_err());
     }
 
     #[tokio::test]
     async fn empty_runner_lifecycle_events_are_noops() {
         let runner = HookRunner::new();
         // Must not panic when no handlers are registered.
-        runner.fire_session_start("sess-1", "rpc").await;
-        runner.fire_session_end("sess-1", "rpc").await;
+        runner.fire_gateway_start("127.0.0.1", 3000).await;
+        runner.fire_llm_input(&[], "stub").await;
     }
 }

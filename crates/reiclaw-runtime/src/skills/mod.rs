@@ -1757,12 +1757,15 @@ fn resolve_elevated_tool(
         return None;
     }
     match resolution_registry.iter().find(|t| t.name() == target_name) {
-        Some(target) => Some(Box::new(crate::skills::skill_tool::SkillBuiltinTool::new(
-            skill_name,
-            tool,
-            std::sync::Arc::clone(target),
-            tool.locked_args.clone(),
-        ))),
+        Some(target) => Some(Box::new(
+            crate::skills::skill_tool::SkillBuiltinTool::new(
+                skill_name,
+                tool,
+                std::sync::Arc::clone(target),
+                tool.locked_args.clone(),
+            )
+            .with_security(std::sync::Arc::new(security.clone())),
+        )),
         None => {
             ::reiclaw_log::record!(
                 WARN,
@@ -1828,10 +1831,10 @@ pub fn skills_to_tools_with_context_and_runtime(
                     )));
                 }
                 "http" => {
-                    tools.push(Box::new(crate::skills::skill_http::SkillHttpTool::new(
-                        &skill.name,
-                        tool,
-                    )));
+                    tools.push(Box::new(
+                        crate::skills::skill_http::SkillHttpTool::new(&skill.name, tool)
+                            .with_security(security.clone()),
+                    ));
                 }
                 "builtin" => {
                     if let Some(t) = resolve_elevated_tool(

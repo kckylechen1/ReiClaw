@@ -149,6 +149,7 @@ async fn prepare(
         turn_id: "preflight-turn",
         agent_alias: None,
         parent_agent_alias: None,
+        security: None,
     };
     let prepared = prepare_tool_calls(
         &ctx,
@@ -357,6 +358,7 @@ async fn device_prompt_denial_never_calls_or_waits_for_an_approver() {
         turn_id: "device-denial",
         agent_alias: None,
         parent_agent_alias: None,
+        security: None,
     };
     let outcome = tokio::time::timeout(
         std::time::Duration::from_millis(100),

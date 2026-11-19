@@ -290,6 +290,7 @@ fn registry_tool_names_are_stable_across_insertion_orders() {
                 .map(|name| (name.to_string(), (0, name.to_string())))
                 .collect(),
             server_index: HashMap::new(),
+            estop: None,
         };
         assert_eq!(registry.tool_names(), expected);
     }
@@ -4471,4 +4472,106 @@ fn omit_binary_content_recurses_into_structured_content() {
         "[resource attachment omitted: application/pdf, about 9 bytes]"
     );
     assert_eq!(result["structuredContent"]["chart"]["data"]["points"][1], 2);
+}
+
+#[cfg(unix)]
+#[tokio::test]
+async fn stdio_queued_writer_aborts_before_write_when_network_kill_engages() {
+    let temp = tempfile::tempdir().expect("tempdir");
+    let script_path = temp.path().join("queued-estop-mcp.sh");
+    let requests = temp.path().join("requests.log");
+    let generations = temp.path().join("generations.log");
+    write_executable_script(
+        &script_path,
+        br#"#!/bin/sh
+printf '%s\n' "$$" >> "$2"
+while IFS= read -r line; do
+  printf '%s\n' "$line" >> "$1"
+  id=$(printf '%s\n' "$line" | sed -n 's/.*"id":\([0-9][0-9]*\).*/\1/p')
+  case "$line" in
+*'"method":"initialize"'*)
+  printf '%s\n' "{\"jsonrpc\":\"2.0\",\"id\":$id,\"result\":{\"protocolVersion\":\"2024-11-05\",\"capabilities\":{\"tools\":{}},\"serverInfo\":{\"name\":\"queued-estop\",\"version\":\"1\"}}}"
+  ;;
+*'"method":"tools/call"'*)
+  printf '%s\n' "{\"jsonrpc\":\"2.0\",\"id\":$id,\"result\":{\"ok\":true}}"
+  ;;
+  esac
+done
+"#,
+    );
+
+    let estop_path = temp.path().join("estop-state.json");
+    let clear = reiclaw_policy::estop::EstopState::default();
+    std::fs::write(&estop_path, serde_json::to_string(&clear).unwrap()).unwrap();
+    let estop = reiclaw_policy::estop::EstopHandle::for_path(estop_path.clone());
+
+    let config = stdio_test_config(
+        "queued-estop",
+        &script_path,
+        vec![
+            requests.display().to_string(),
+            generations.display().to_string(),
+        ],
+        5,
+    );
+    let transport = Arc::new(StdioTransport::new_with_estop(&config, Some(estop)).expect("build"));
+    let hook = Arc::new(StdioWriteTestHook::new());
+    hook.pause_next_payload();
+    transport.set_write_test_hook(Arc::clone(&hook));
+    let shared_transport: Arc<dyn SharedMcpTransportConn> = transport.clone();
+    let server = server_with_transport("queued-estop", shared_transport, 5);
+
+    timeout(Duration::from_secs(3), async {
+        loop {
+            if tokio::fs::read_to_string(&generations)
+                .await
+                .is_ok_and(|log| log.lines().count() == 1)
+            {
+                break;
+            }
+            tokio::task::yield_now().await;
+        }
+    })
+    .await
+    .expect("initial stdio child did not start");
+
+    let first_server = server.clone();
+    let first =
+        reiclaw_log::spawn!(async move { first_server.call_tool("side_effect", json!({})).await });
+    timeout(Duration::from_secs(3), hook.wait_for_payload_pause())
+        .await
+        .expect("first write paused");
+
+    let second_server = server.clone();
+    let second =
+        reiclaw_log::spawn!(async move { second_server.call_tool("probe", json!({})).await });
+    timeout(Duration::from_secs(3), hook.wait_for_attempts(2))
+        .await
+        .expect("second call queued on writer lock");
+
+    let engaged = reiclaw_policy::estop::EstopState {
+        kill_all: false,
+        network_kill: true,
+        blocked_domains: Vec::new(),
+        frozen_tools: Vec::new(),
+        updated_at: None,
+    };
+    let tmp_estop = estop_path.with_extension("json.tmp");
+    std::fs::write(&tmp_estop, serde_json::to_string(&engaged).unwrap()).unwrap();
+    std::fs::rename(&tmp_estop, &estop_path).unwrap();
+
+    hook.release_payload();
+    let first_res = first.await.unwrap();
+    assert!(first_res.is_ok());
+
+    let second_err = second.await.unwrap().expect_err("queued call must abort");
+    let err_chain = format!("{second_err:#}");
+    assert!(
+        err_chain.contains("network_kill"),
+        "expected network_kill in error chain, got: {err_chain}"
+    );
+
+    let recorded = tokio::fs::read_to_string(&requests).await.unwrap();
+    assert!(recorded.contains("\"side_effect\""));
+    assert!(!recorded.contains("\"probe\""));
 }

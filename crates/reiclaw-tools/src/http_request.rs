@@ -119,6 +119,9 @@ impl HttpRequestTool {
         }
 
         let host = extract_host(url)?;
+        self.security
+            .enforce_estop_network(Some(&host))
+            .map_err(anyhow::Error::msg)?;
         if host
             .parse::<IpAddr>()
             .is_ok_and(domain_guard::is_cloud_metadata_ip)
@@ -365,6 +368,9 @@ impl HttpRequestTool {
         headers: HeaderMap,
         body: Option<&str>,
     ) -> anyhow::Result<reqwest::Response> {
+        self.security
+            .enforce_estop_network(Some(&target.host))
+            .map_err(anyhow::Error::msg)?;
         let timeout_secs = if self.timeout_secs == 0 {
             ::reiclaw_log::record!(
                 WARN,

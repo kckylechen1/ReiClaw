@@ -1,111 +1,82 @@
 use async_trait::async_trait;
 use serde_json::Value;
-use std::collections::HashMap;
-use std::net::IpAddr;
+use std::collections::{HashMap, VecDeque};
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
+use crate::hooks::current_hook_call_id;
 use crate::hooks::traits::{HookHandler, HookResult};
+use crate::security::estop::EstopHandle;
 use reiclaw_api::tool::ToolResult;
 use reiclaw_config::schema::WebhookAuditConfig;
+use reiclaw_config::{
+    validate_webhook_audit_url as validate_webhook_url, validate_webhook_resolved_ip,
+};
 
-fn validate_webhook_url(url: &str) -> Result<(), String> {
-    let parsed = reqwest::Url::parse(url).map_err(|e| format!("invalid webhook URL: {e}"))?;
+const MAX_PENDING_CALL_IDS: usize = 1024;
 
-    let scheme = parsed.scheme();
-    let host_str = parsed.host_str().unwrap_or("");
-
-    // Scheme check: require https, allow http only for localhost in debug builds.
-    let is_localhost = host_str == "localhost" || host_str == "127.0.0.1" || host_str == "::1";
-
-    if scheme != "https" {
-        if scheme == "http" && is_localhost && cfg!(debug_assertions) {
-            // Allow http://localhost in dev/debug builds.
-        } else {
-            return Err(format!(
-                "webhook URL must use https:// scheme (got {scheme}://)"
-            ));
-        }
-    }
-
-    // Resolve the host to check for private/loopback/link-local IPs.
-    if let Some(host) = parsed.host_str() {
-        // Strip brackets from IPv6 literals.
-        let bare = host.trim_start_matches('[').trim_end_matches(']');
-        if let Ok(ip) = bare.parse::<IpAddr>() {
-            reject_private_ip(ip)?;
-        } else {
-            // Domain name — check for well-known loopback domains.
-            if bare == "localhost" && !(cfg!(debug_assertions) && scheme == "http") {
-                return Err("webhook URL must not target localhost".to_string());
-            }
-        }
-    }
-
-    Ok(())
+#[derive(Default)]
+struct PendingArgsStore {
+    by_call_id: HashMap<String, Value>,
+    by_call_order: VecDeque<String>,
+    fifo_fallback: HashMap<String, Vec<Value>>,
 }
 
-fn reject_private_ip(addr: IpAddr) -> Result<(), String> {
-    match addr {
-        IpAddr::V4(ip) => {
-            if ip.is_loopback() {
-                return Err(format!(
-                    "webhook URL must not target loopback address ({ip})"
-                ));
+impl PendingArgsStore {
+    fn record(&mut self, call_id: Option<String>, tool: &str, args: Value) {
+        if let Some(id) = call_id {
+            if !self.by_call_id.contains_key(&id) {
+                if self.by_call_order.len() >= MAX_PENDING_CALL_IDS
+                    && let Some(evicted) = self.by_call_order.pop_front()
+                {
+                    self.by_call_id.remove(&evicted);
+                }
+                self.by_call_order.push_back(id.clone());
             }
-            let octets = ip.octets();
-            // 10.0.0.0/8
-            if octets[0] == 10 {
-                return Err(format!(
-                    "webhook URL must not target private address ({ip})"
-                ));
-            }
-            // 172.16.0.0/12
-            if octets[0] == 172 && (octets[1] & 0xf0) == 16 {
-                return Err(format!(
-                    "webhook URL must not target private address ({ip})"
-                ));
-            }
-            // 192.168.0.0/16
-            if octets[0] == 192 && octets[1] == 168 {
-                return Err(format!(
-                    "webhook URL must not target private address ({ip})"
-                ));
-            }
-            // 169.254.0.0/16 (link-local)
-            if octets[0] == 169 && octets[1] == 254 {
-                return Err(format!(
-                    "webhook URL must not target link-local address ({ip})"
-                ));
-            }
-        }
-        IpAddr::V6(ip) => {
-            if ip.is_loopback() {
-                return Err(format!(
-                    "webhook URL must not target loopback address ({ip})"
-                ));
-            }
-            let segments = ip.segments();
-            // fe80::/10 (link-local)
-            if (segments[0] & 0xffc0) == 0xfe80 {
-                return Err(format!(
-                    "webhook URL must not target link-local address ({ip})"
-                ));
-            }
+            self.by_call_id.insert(id, args);
+        } else {
+            self.fifo_fallback
+                .entry(tool.to_string())
+                .or_default()
+                .push(args);
         }
     }
-    Ok(())
+
+    fn take(&mut self, call_id: Option<&str>, tool: &str) -> Option<Value> {
+        if let Some(id) = call_id {
+            return self.by_call_id.remove(id);
+        }
+        let entry = self.fifo_fallback.get_mut(tool).and_then(|v| {
+            if v.is_empty() {
+                None
+            } else {
+                Some(v.remove(0))
+            }
+        });
+        if self.fifo_fallback.get(tool).is_some_and(|v| v.is_empty()) {
+            self.fifo_fallback.remove(tool);
+        }
+        entry
+    }
+
+    #[cfg(test)]
+    fn is_empty(&self) -> bool {
+        self.by_call_id.is_empty() && self.fifo_fallback.is_empty()
+    }
 }
 
 /// Sends an HTTP POST with a JSON audit payload for matching tool calls.
 pub struct WebhookAuditHook {
     config: WebhookAuditConfig,
     client: reqwest::Client,
-    pending_args: Arc<Mutex<HashMap<String, Vec<Value>>>>,
+    pending_args: Arc<Mutex<PendingArgsStore>>,
+    estop: Option<Arc<EstopHandle>>,
+    #[cfg(test)]
+    allow_loopback_for_test: bool,
 }
 
 impl WebhookAuditHook {
-    pub fn new(config: WebhookAuditConfig) -> Self {
+    pub fn try_new(config: WebhookAuditConfig) -> anyhow::Result<Self> {
         // Warn if enabled but no URL configured.
         if config.enabled && config.url.is_empty() {
             ::reiclaw_log::record!(
@@ -130,18 +101,47 @@ impl WebhookAuditHook {
                     ),
                 "webhook URL validation failed"
             );
-            panic!("webhook-audit: {e}");
+            anyhow::bail!("webhook-audit: {e}");
         }
 
-        let client = reqwest::Client::builder()
+        let client = match reqwest::Client::builder()
+            .no_proxy()
+            .redirect(reqwest::redirect::Policy::none())
             .timeout(Duration::from_secs(5))
             .build()
-            .expect("failed to build webhook HTTP client");
-        Self {
+        {
+            Ok(client) => client,
+            Err(e) => {
+                ::reiclaw_log::record!(
+                    ERROR,
+                    ::reiclaw_log::Event::new(module_path!(), ::reiclaw_log::Action::Fail)
+                        .with_outcome(::reiclaw_log::EventOutcome::Failure)
+                        .with_attrs(
+                            ::serde_json::json!({"hook": "webhook-audit", "error": format!("{e}")})
+                        ),
+                    "failed to build webhook HTTP client"
+                );
+                anyhow::bail!("failed to build webhook HTTP client: {e}");
+            }
+        };
+        Ok(Self {
             config,
             client,
-            pending_args: Arc::new(Mutex::new(HashMap::new())),
-        }
+            pending_args: Arc::new(Mutex::new(PendingArgsStore::default())),
+            estop: None,
+            #[cfg(test)]
+            allow_loopback_for_test: false,
+        })
+    }
+
+    pub fn new(config: WebhookAuditConfig) -> Self {
+        Self::try_new(config).unwrap_or_else(|e| panic!("{e}"))
+    }
+
+    #[must_use]
+    pub fn with_estop(mut self, estop: Option<Arc<EstopHandle>>) -> Self {
+        self.estop = estop;
+        self
     }
 }
 
@@ -260,9 +260,7 @@ impl HookHandler for WebhookAuditHook {
             self.pending_args
                 .lock()
                 .unwrap_or_else(|e| e.into_inner())
-                .entry(name.clone())
-                .or_default()
-                .push(args.clone());
+                .record(current_hook_call_id(), &name, args.clone());
         }
         HookResult::Continue((name, args))
     }
@@ -278,23 +276,14 @@ impl HookHandler for WebhookAuditHook {
             return;
         }
 
-        // Pop the first captured args entry for this tool (FIFO) and optionally truncate.
+        let call_id = current_hook_call_id();
+        // Pop captured args for this call (correlated by call_id when scoped).
         let args_value: Value = if self.config.include_args {
-            let raw = {
-                let mut map = self.pending_args.lock().unwrap_or_else(|e| e.into_inner());
-                let entry = map.get_mut(tool).and_then(|v| {
-                    if v.is_empty() {
-                        None
-                    } else {
-                        Some(v.remove(0))
-                    }
-                });
-                // Clean up empty entries.
-                if map.get(tool).is_some_and(|v| v.is_empty()) {
-                    map.remove(tool);
-                }
-                entry
-            };
+            let raw = self
+                .pending_args
+                .lock()
+                .unwrap_or_else(|e| e.into_inner())
+                .take(call_id.as_deref(), tool);
             match raw {
                 Some(a) => truncate_args(a, self.config.max_args_bytes),
                 None => Value::Null,
@@ -302,6 +291,22 @@ impl HookHandler for WebhookAuditHook {
         } else {
             Value::Null
         };
+
+        if let Some(ref estop) = self.estop {
+            let url_host = reqwest::Url::parse(&self.config.url)
+                .ok()
+                .and_then(|parsed| parsed.host_str().map(str::to_string));
+            if let Err(reason) = estop.enforce_network(url_host.as_deref()) {
+                ::reiclaw_log::record!(
+                    WARN,
+                    ::reiclaw_log::Event::new(module_path!(), ::reiclaw_log::Action::Reject)
+                        .with_outcome(::reiclaw_log::EventOutcome::Failure)
+                        .with_attrs(::serde_json::json!({"hook": "webhook-audit", "tool": tool, "reason": reason})),
+                    "webhook-audit suppressed by emergency stop"
+                );
+                return;
+            }
+        }
 
         #[allow(clippy::cast_possible_truncation)]
         let duration_ms = duration.as_millis() as u64;
@@ -316,11 +321,28 @@ impl HookHandler for WebhookAuditHook {
             "args": args_value,
         });
 
-        let client = self.client.clone();
         let url = self.config.url.clone();
+        let _base_client = &self.client;
+        #[cfg(test)]
+        let allow_loopback = self.allow_loopback_for_test;
+        #[cfg(not(test))]
+        let allow_loopback = false;
 
         // Fire-and-forget — never block the agent loop.
         reiclaw_log::spawn!(async move {
+            let client = match resolve_and_pin_webhook_client(&url, allow_loopback).await {
+                Ok(client) => client,
+                Err(e) => {
+                    ::reiclaw_log::record!(
+                        ERROR,
+                        ::reiclaw_log::Event::new(module_path!(), ::reiclaw_log::Action::Reject)
+                            .with_outcome(::reiclaw_log::EventOutcome::Failure)
+                            .with_attrs(::serde_json::json!({"hook": "webhook-audit", "url": url, "error": format!("{e}")})),
+                        "webhook-audit blocked by SSRF/DNS validation"
+                    );
+                    return;
+                }
+            };
             match client.post(&url).json(&payload).send().await {
                 Ok(resp) => {
                     if !resp.status().is_success() {
@@ -333,6 +355,50 @@ impl HookHandler for WebhookAuditHook {
             }
         });
     }
+}
+
+async fn resolve_and_pin_webhook_client(
+    url: &str,
+    allow_loopback_for_test: bool,
+) -> anyhow::Result<reqwest::Client> {
+    let parsed = reqwest::Url::parse(url).map_err(|e| anyhow::Error::msg(format!("{e}")))?;
+    let host = parsed
+        .host_str()
+        .ok_or_else(|| anyhow::Error::msg("webhook URL missing host"))?;
+    let port = parsed.port_or_known_default().unwrap_or(443);
+    let bare = host.trim_start_matches('[').trim_end_matches(']');
+
+    let validate_ip = |ip: std::net::IpAddr| -> anyhow::Result<()> {
+        if allow_loopback_for_test && ip.is_loopback() {
+            return Ok(());
+        }
+        validate_webhook_resolved_ip(ip).map_err(anyhow::Error::msg)
+    };
+
+    let mut builder = reqwest::Client::builder()
+        .no_proxy()
+        .redirect(reqwest::redirect::Policy::none())
+        .timeout(Duration::from_secs(5));
+
+    if let Ok(ip) = bare.parse::<std::net::IpAddr>() {
+        validate_ip(ip)?;
+    } else {
+        let resolved: Vec<std::net::SocketAddr> = tokio::net::lookup_host((bare, port))
+            .await
+            .map_err(|e| anyhow::Error::msg(format!("DNS lookup failed for {bare}: {e}")))?
+            .collect();
+        if resolved.is_empty() {
+            anyhow::bail!("DNS lookup returned no addresses for {bare}");
+        }
+        for addr in &resolved {
+            validate_ip(addr.ip())?;
+        }
+        builder = builder.resolve_to_addrs(bare, &resolved);
+    }
+
+    builder
+        .build()
+        .map_err(|e| anyhow::Error::msg(format!("failed to build pinned webhook client: {e}")))
 }
 
 #[cfg(test)]
@@ -418,7 +484,7 @@ mod tests {
         assert!(!result.is_cancel());
 
         let pending = hook.pending_args.lock().unwrap();
-        assert_eq!(pending.get("Bash"), Some(&vec![args]));
+        assert_eq!(pending.fifo_fallback.get("Bash"), Some(&vec![args]));
     }
 
     #[tokio::test]
@@ -430,7 +496,7 @@ mod tests {
         hook.before_tool_call("Bash".into(), args2.clone()).await;
 
         let pending = hook.pending_args.lock().unwrap();
-        let bash_args = pending.get("Bash").unwrap();
+        let bash_args = pending.fifo_fallback.get("Bash").unwrap();
         assert_eq!(bash_args.len(), 2);
         assert_eq!(bash_args[0], args1);
         assert_eq!(bash_args[1], args2);
@@ -561,5 +627,230 @@ mod tests {
     #[test]
     fn validate_url_rejects_non_http_scheme() {
         assert!(validate_webhook_url("ftp://example.com/hook").is_err());
+    }
+
+    #[tokio::test]
+    async fn pending_args_call_id_isolation_prevents_cross_contamination() {
+        let hook = WebhookAuditHook::try_new(WebhookAuditConfig {
+            enabled: true,
+            url: String::new(),
+            tool_patterns: vec!["shell".to_string()],
+            include_args: true,
+            max_args_bytes: 4096,
+        })
+        .unwrap();
+
+        // Call A captures args, then gets cancelled before on_after_tool_call.
+        crate::hooks::CURRENT_HOOK_CALL_ID
+            .scope(
+                "call-a".to_string(),
+                hook.before_tool_call("shell".to_string(), serde_json::json!({"cmd": "a"})),
+            )
+            .await;
+
+        // Call B captures args and completes: it must retrieve only Call B's args.
+        crate::hooks::CURRENT_HOOK_CALL_ID
+            .scope(
+                "call-b".to_string(),
+                hook.before_tool_call("shell".to_string(), serde_json::json!({"cmd": "b"})),
+            )
+            .await;
+
+        let taken_b = hook
+            .pending_args
+            .lock()
+            .unwrap()
+            .take(Some("call-b"), "shell");
+        assert_eq!(taken_b, Some(serde_json::json!({"cmd": "b"})));
+        // Call A's entry did not leak into Call B and remains keyed only under call-a.
+        assert_eq!(
+            hook.pending_args
+                .lock()
+                .unwrap()
+                .take(Some("call-a"), "shell"),
+            Some(serde_json::json!({"cmd": "a"}))
+        );
+    }
+
+    #[tokio::test]
+    async fn webhook_audit_suppressed_by_estop() {
+        let server = wiremock::MockServer::start().await;
+        wiremock::Mock::given(wiremock::matchers::method("POST"))
+            .respond_with(wiremock::ResponseTemplate::new(200))
+            .expect(0)
+            .mount(&server)
+            .await;
+
+        let dir = tempfile::tempdir().unwrap();
+        let state_path = dir.path().join("estop.json");
+        let engaged = crate::security::estop::EstopState {
+            kill_all: false,
+            network_kill: true,
+            blocked_domains: Vec::new(),
+            frozen_tools: Vec::new(),
+            updated_at: None,
+        };
+        std::fs::write(&state_path, serde_json::to_string(&engaged).unwrap()).unwrap();
+        let estop = crate::security::estop::EstopHandle::for_path(state_path);
+
+        let hook = WebhookAuditHook {
+            config: WebhookAuditConfig {
+                enabled: true,
+                url: format!("{}/audit", server.uri()),
+                tool_patterns: vec!["*".to_string()],
+                include_args: false,
+                max_args_bytes: 1024,
+            },
+            client: reqwest::Client::builder()
+                .timeout(Duration::from_secs(1))
+                .build()
+                .unwrap(),
+            pending_args: Arc::new(Mutex::new(PendingArgsStore::default())),
+            estop: Some(estop),
+            allow_loopback_for_test: true,
+        };
+
+        let result = ToolResult {
+            success: true,
+            output: "ok".into(),
+            error: None,
+        };
+        hook.on_after_tool_call("shell", &result, Duration::from_millis(5))
+            .await;
+        tokio::time::sleep(Duration::from_millis(50)).await;
+    }
+
+    #[tokio::test]
+    async fn webhook_audit_rejects_private_dns_resolution() {
+        let server = wiremock::MockServer::start().await;
+        wiremock::Mock::given(wiremock::matchers::method("POST"))
+            .respond_with(wiremock::ResponseTemplate::new(200))
+            .expect(0)
+            .mount(&server)
+            .await;
+        let port = server.address().port();
+        let err = resolve_and_pin_webhook_client(&format!("https://localhost:{port}/audit"), false)
+            .await
+            .expect_err("localhost DNS resolution must be rejected for webhook delivery");
+        assert!(err.to_string().contains("loopback") || err.to_string().contains("private"));
+    }
+
+    #[tokio::test]
+    async fn webhook_audit_blocks_redirects() {
+        let target = wiremock::MockServer::start().await;
+        wiremock::Mock::given(wiremock::matchers::method("POST"))
+            .respond_with(wiremock::ResponseTemplate::new(200))
+            .expect(0)
+            .mount(&target)
+            .await;
+        wiremock::Mock::given(wiremock::matchers::method("GET"))
+            .respond_with(wiremock::ResponseTemplate::new(200))
+            .expect(0)
+            .mount(&target)
+            .await;
+
+        let redirector = wiremock::MockServer::start().await;
+        wiremock::Mock::given(wiremock::matchers::method("POST"))
+            .respond_with(
+                wiremock::ResponseTemplate::new(307)
+                    .insert_header("Location", format!("{}/secret", target.uri())),
+            )
+            .expect(1)
+            .mount(&redirector)
+            .await;
+
+        let hook = WebhookAuditHook {
+            config: WebhookAuditConfig {
+                enabled: true,
+                url: format!("{}/audit", redirector.uri()),
+                tool_patterns: vec!["*".to_string()],
+                include_args: false,
+                max_args_bytes: 1024,
+            },
+            client: reqwest::Client::builder()
+                .redirect(reqwest::redirect::Policy::none())
+                .timeout(Duration::from_secs(1))
+                .build()
+                .unwrap(),
+            pending_args: Arc::new(Mutex::new(PendingArgsStore::default())),
+            estop: None,
+            allow_loopback_for_test: true,
+        };
+        let result = ToolResult {
+            success: true,
+            output: "ok".into(),
+            error: None,
+        };
+        hook.on_after_tool_call("shell", &result, Duration::from_millis(5))
+            .await;
+        tokio::time::sleep(Duration::from_millis(120)).await;
+    }
+
+    #[tokio::test]
+    async fn webhook_audit_bypasses_proxy_env_and_pins_resolved_addr() {
+        static PROXY_ENV_LOCK: std::sync::OnceLock<tokio::sync::Mutex<()>> =
+            std::sync::OnceLock::new();
+        struct ProxyEnvGuard(Vec<(&'static str, Option<std::ffi::OsString>)>);
+        impl Drop for ProxyEnvGuard {
+            fn drop(&mut self) {
+                for (key, prev) in &self.0 {
+                    // SAFETY: serialized under PROXY_ENV_LOCK in this test.
+                    unsafe {
+                        match prev {
+                            Some(val) => std::env::set_var(key, val),
+                            None => std::env::remove_var(key),
+                        }
+                    }
+                }
+            }
+        }
+
+        let _lock = PROXY_ENV_LOCK
+            .get_or_init(|| tokio::sync::Mutex::new(()))
+            .lock()
+            .await;
+
+        let fake_proxy = wiremock::MockServer::start().await;
+        wiremock::Mock::given(wiremock::matchers::any())
+            .respond_with(wiremock::ResponseTemplate::new(502))
+            .expect(0)
+            .mount(&fake_proxy)
+            .await;
+
+        let target = wiremock::MockServer::start().await;
+        wiremock::Mock::given(wiremock::matchers::method("POST"))
+            .respond_with(wiremock::ResponseTemplate::new(200))
+            .expect(1)
+            .mount(&target)
+            .await;
+
+        let keys = [
+            "HTTP_PROXY",
+            "http_proxy",
+            "HTTPS_PROXY",
+            "https_proxy",
+            "ALL_PROXY",
+            "all_proxy",
+        ];
+        let mut saved = Vec::with_capacity(keys.len());
+        for key in keys {
+            saved.push((key, std::env::var_os(key)));
+            // SAFETY: serialized under PROXY_ENV_LOCK in this test.
+            unsafe { std::env::set_var(key, fake_proxy.uri()) };
+        }
+        let _env_guard = ProxyEnvGuard(saved);
+
+        let port = target.address().port();
+        let url = format!("http://localhost:{port}/audit");
+        let client = resolve_and_pin_webhook_client(&url, true)
+            .await
+            .expect("pinned webhook client must build");
+        let resp = client
+            .post(&url)
+            .json(&serde_json::json!({"ok": true}))
+            .send()
+            .await
+            .expect("direct pinned webhook delivery must succeed despite proxy env");
+        assert_eq!(resp.status(), reqwest::StatusCode::OK);
     }
 }

@@ -1092,6 +1092,9 @@ async fn run_agent_job_with_timeout(
     timeout: Duration,
     task_identity: Option<TaskIdentity>,
 ) -> (bool, String) {
+    if let Err(reason) = security.enforce_estop_not_killed() {
+        return (false, reason);
+    }
     if !config.agents.contains_key(agent_alias) {
         return (
             false,
@@ -1589,6 +1592,7 @@ pub fn enqueue_for_bridge(
     Ok(())
 }
 
+#[derive(Debug)]
 enum ShellJobOutcome {
     Finished { success: bool, output: String },
     Interrupted(String),
@@ -1629,6 +1633,16 @@ async fn run_job_command_with_timeout(
         return ShellJobOutcome::failed("blocked by security policy: autonomy is read-only");
     }
 
+    if let Err(reason) = security.enforce_estop_tool("shell") {
+        return ShellJobOutcome::failed(reason);
+    }
+
+    if security.is_estop_network_killed() {
+        return ShellJobOutcome::failed(
+            "blocked by security policy: cron shell blocked while emergency stop (network_kill) is active",
+        );
+    }
+
     if security.is_rate_limited() {
         return ShellJobOutcome::failed("blocked by security policy: rate limit exceeded");
     }
@@ -1658,7 +1672,8 @@ async fn run_job_command_with_timeout(
         Ok(command) => command,
         Err(error) => return ShellJobOutcome::failed(format!("shell setup error: {error}")),
     };
-    let output = match run_bounded(
+    let estop_handle = security.estop_handle().cloned();
+    let bounded_fut = run_bounded(
         &mut command,
         ProcessLimits {
             timeout,
@@ -1669,9 +1684,30 @@ async fn run_job_command_with_timeout(
             // diagnostics are noisy. Keep draining, but bound retained bytes.
             overflow: OverflowBehavior::Drain,
         },
-    )
-    .await
-    {
+    );
+    tokio::pin!(bounded_fut);
+    let output_res = loop {
+        if let Some(ref handle) = estop_handle {
+            if let Err(reason) = handle.enforce_tool("shell") {
+                return ShellJobOutcome::Interrupted(reason);
+            }
+            if handle.is_network_killed() {
+                return ShellJobOutcome::Interrupted(
+                    "blocked by security policy: cron shell job halted by emergency stop (network_kill)"
+                        .to_string(),
+                );
+            }
+            let poll = tokio::time::sleep(Duration::from_millis(100));
+            tokio::select! {
+                biased;
+                res = &mut bounded_fut => break res,
+                _ = poll => continue,
+            }
+        } else {
+            break (&mut bounded_fut).await;
+        }
+    };
+    let output = match output_res {
         Ok(output) => output,
         Err(error) => return ShellJobOutcome::failed(format!("spawn error: {error}")),
     };

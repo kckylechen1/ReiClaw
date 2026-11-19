@@ -169,6 +169,7 @@ impl Fixture {
             agent_alias: None,
             parent_agent_alias: None,
             turn_id: "mcp-recovery",
+            security: None,
         };
         let parsed =
             interpret_chat_response(&ctx, response, &specs, false, Instant::now(), 0, false).await;

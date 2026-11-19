@@ -11,8 +11,10 @@ reiclaw-api.workspace = true
 reiclaw-config.workspace = true
 reiclaw-log.workspace = true
 anyhow = "1.0"
+jiff.workspace = true
 parking_lot = "0.12"
 regex = "1.10"
+serde = { version = "1.0", default-features = false, features = ["derive"] }
 serde_json = { version = "1.0", default-features = false, features = ["std"] }
 
 [dev-dependencies]

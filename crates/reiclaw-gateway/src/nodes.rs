@@ -84,6 +84,7 @@ pub struct NodeRegistry {
     identities: Option<DeviceIdentityStore>,
     pending_challenges: Arc<RwLock<HashMap<String, PendingChallenge>>>,
     live: Arc<RwLock<HashMap<String, LiveSocket>>>,
+    estop: Option<Arc<reiclaw_policy::estop::EstopHandle>>,
 }
 
 impl Default for NodeRegistry {
@@ -116,7 +117,14 @@ impl NodeRegistry {
             },
             pending_challenges: Arc::new(RwLock::new(HashMap::new())),
             live: Arc::new(RwLock::new(HashMap::new())),
+            estop: None,
         }
+    }
+
+    #[must_use]
+    pub fn with_estop(mut self, estop: Option<Arc<reiclaw_policy::estop::EstopHandle>>) -> Self {
+        self.estop = estop;
+        self
     }
 
     #[must_use]

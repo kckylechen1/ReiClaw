@@ -471,6 +471,7 @@ pub(crate) fn admin_paircode_state(
         pending_reload: Arc::new(std::sync::atomic::AtomicBool::new(false)),
         ws_conversations: Default::default(),
         bridge_sockets: Default::default(),
+        hooks: None,
     }
 }
 
@@ -1077,6 +1078,7 @@ async fn metrics_endpoint_returns_hint_when_prometheus_is_disabled() {
         pending_reload: Arc::new(std::sync::atomic::AtomicBool::new(false)),
         ws_conversations: Default::default(),
         bridge_sockets: Default::default(),
+        hooks: None,
     };
 
     let response = handle_metrics(State(state)).await.into_response();
@@ -1149,6 +1151,7 @@ async fn metrics_endpoint_renders_prometheus_output() {
         pending_reload: Arc::new(std::sync::atomic::AtomicBool::new(false)),
         ws_conversations: Default::default(),
         bridge_sockets: Default::default(),
+        hooks: None,
     };
 
     let response = handle_metrics(State(state)).await.into_response();
@@ -1867,6 +1870,7 @@ async fn webhook_idempotency_skips_duplicate_provider_calls() {
         pending_reload: Arc::new(std::sync::atomic::AtomicBool::new(false)),
         ws_conversations: Default::default(),
         bridge_sockets: Default::default(),
+        hooks: None,
     };
 
     let mut headers = HeaderMap::new();
@@ -1957,6 +1961,7 @@ async fn webhook_unknown_agent_rejected_before_dispatch() {
         pending_reload: Arc::new(std::sync::atomic::AtomicBool::new(false)),
         ws_conversations: Default::default(),
         bridge_sockets: Default::default(),
+        hooks: None,
     };
 
     // An idempotency key on a rejected request must NOT be consumed.
@@ -2062,6 +2067,7 @@ async fn webhook_explicit_agent_reports_model_without_owning_lifecycle() {
         pending_reload: Arc::new(std::sync::atomic::AtomicBool::new(false)),
         ws_conversations: Default::default(),
         bridge_sockets: Default::default(),
+        hooks: None,
     };
 
     let response = handle_webhook(
@@ -2147,6 +2153,7 @@ async fn webhook_autosave_stores_distinct_keys_per_request() {
         pending_reload: Arc::new(std::sync::atomic::AtomicBool::new(false)),
         ws_conversations: Default::default(),
         bridge_sockets: Default::default(),
+        hooks: None,
     };
 
     let headers = HeaderMap::new();
@@ -2251,6 +2258,7 @@ async fn webhook_secret_hash_rejects_missing_header() {
         pending_reload: Arc::new(std::sync::atomic::AtomicBool::new(false)),
         ws_conversations: Default::default(),
         bridge_sockets: Default::default(),
+        hooks: None,
     };
 
     let response = handle_webhook(
@@ -2321,6 +2329,7 @@ async fn webhook_secret_hash_rejects_invalid_header() {
         pending_reload: Arc::new(std::sync::atomic::AtomicBool::new(false)),
         ws_conversations: Default::default(),
         bridge_sockets: Default::default(),
+        hooks: None,
     };
 
     let mut headers = HeaderMap::new();
@@ -2396,6 +2405,7 @@ async fn webhook_secret_hash_accepts_valid_header() {
         pending_reload: Arc::new(std::sync::atomic::AtomicBool::new(false)),
         ws_conversations: Default::default(),
         bridge_sockets: Default::default(),
+        hooks: None,
     };
 
     let mut headers = HeaderMap::new();
@@ -3654,4 +3664,169 @@ async fn gateway_shutdown_observes_a_signal_sent_before_subscription() {
     )
     .await
     .unwrap();
+}
+
+#[tokio::test]
+async fn gateway_chat_dispatch_threads_configured_hooks_on_completed_tool_call() {
+    use reiclaw_api::tool::ToolResult;
+    use reiclaw_config::schema::{
+        AliasedAgentConfig, CustomModelProviderConfig, ModelProviderConfig, RiskProfileConfig,
+        RuntimeProfileConfig,
+    };
+    use reiclaw_runtime::hooks::HookHandler;
+    use std::sync::atomic::{AtomicUsize, Ordering};
+
+    struct CountingAuditHook {
+        calls: Arc<AtomicUsize>,
+        last_tool: Arc<parking_lot::Mutex<Option<String>>>,
+    }
+
+    #[async_trait::async_trait]
+    impl HookHandler for CountingAuditHook {
+        fn name(&self) -> &str {
+            "counting-audit"
+        }
+
+        async fn on_after_tool_call(
+            &self,
+            tool: &str,
+            _result: &ToolResult,
+            _duration: std::time::Duration,
+        ) {
+            self.calls.fetch_add(1, Ordering::SeqCst);
+            *self.last_tool.lock() = Some(tool.to_string());
+        }
+    }
+
+    // Also verify invalid webhook SSRF URL fails closed at HookRunner construction.
+    let mut bad_hooks = reiclaw_config::schema::HooksConfig {
+        enabled: true,
+        ..Default::default()
+    };
+    bad_hooks.builtin.webhook_audit.enabled = true;
+    bad_hooks.builtin.webhook_audit.url = "https://127.0.0.1/hook".into();
+    assert!(
+        reiclaw_runtime::hooks::HookRunner::try_from_config_with_estop(&bad_hooks, None).is_err()
+    );
+
+    let tmp = tempfile::TempDir::new().unwrap();
+    let workspace = tmp.path().join("workspace");
+    std::fs::create_dir_all(&workspace).unwrap();
+    std::fs::write(workspace.join("hello.txt"), "hello hooks").unwrap();
+
+    let server = wiremock::MockServer::start().await;
+    let call_counter = Arc::new(AtomicUsize::new(0));
+    let server_calls = Arc::clone(&call_counter);
+    wiremock::Mock::given(wiremock::matchers::method("POST"))
+        .and(wiremock::matchers::path("/v1/chat/completions"))
+        .respond_with(move |_req: &wiremock::Request| {
+            let n = server_calls.fetch_add(1, Ordering::SeqCst);
+            if n == 0 {
+                wiremock::ResponseTemplate::new(200).set_body_json(serde_json::json!({
+                    "id": "chatcmpl-1",
+                    "object": "chat.completion",
+                    "choices": [{
+                        "index": 0,
+                        "message": {
+                            "role": "assistant",
+                            "content": null,
+                            "tool_calls": [{
+                                "id": "call_read_1",
+                                "type": "function",
+                                "function": {
+                                    "name": "file_read",
+                                    "arguments": "{\"path\":\"hello.txt\"}"
+                                }
+                            }]
+                        },
+                        "finish_reason": "tool_calls"
+                    }]
+                }))
+            } else {
+                wiremock::ResponseTemplate::new(200).set_body_json(serde_json::json!({
+                    "id": "chatcmpl-2",
+                    "object": "chat.completion",
+                    "choices": [{
+                        "index": 0,
+                        "message": {
+                            "role": "assistant",
+                            "content": "hook-verified-response"
+                        },
+                        "finish_reason": "stop"
+                    }]
+                }))
+            }
+        })
+        .mount(&server)
+        .await;
+
+    let state = admin_paircode_state(&tmp, false, false);
+    let mut state = state;
+    {
+        let mut config = state.config.write();
+        config.hooks.enabled = true;
+        config.providers.models.custom.insert(
+            "test".into(),
+            CustomModelProviderConfig {
+                base: ModelProviderConfig {
+                    model: Some("local-hook-test".into()),
+                    uri: Some(format!("{}/v1", server.uri())),
+                    api_key: Some("sk-test".into()),
+                    native_tools: Some(true),
+                    timeout_secs: Some(5),
+                    ..Default::default()
+                },
+            },
+        );
+        config.risk_profiles.insert(
+            "test".into(),
+            RiskProfileConfig {
+                workspace_only: true,
+                allowed_tools: Some(vec!["file_read".into()]),
+                ..Default::default()
+            },
+        );
+        config.runtime_profiles.insert(
+            "test".into(),
+            RuntimeProfileConfig {
+                agentic: true,
+                max_tool_iterations: 3,
+                ..Default::default()
+            },
+        );
+        let mut agent = AliasedAgentConfig {
+            model_provider: "custom.test".into(),
+            risk_profile: "test".into(),
+            runtime_profile: "test".into(),
+            ..Default::default()
+        };
+        agent.workspace.path = Some(workspace);
+        agent.memory.backend = reiclaw_config::multi_agent::MemoryBackendKind::None;
+        config.agents.insert("web".into(), agent);
+    }
+
+    let hook_calls = Arc::new(AtomicUsize::new(0));
+    let last_tool = Arc::new(parking_lot::Mutex::new(None));
+    let mut runner = reiclaw_runtime::hooks::HookRunner::try_from_config_with_estop(
+        &state.config.read().hooks,
+        None,
+    )
+    .unwrap();
+    runner.register(Box::new(CountingAuditHook {
+        calls: Arc::clone(&hook_calls),
+        last_tool: Arc::clone(&last_tool),
+    }));
+    state.hooks = Some(Arc::new(runner));
+
+    let outcome = run_gateway_chat_with_tools_runtime(
+        &state,
+        "read hello.txt",
+        Some("sess-gateway-hooks"),
+        Some("web"),
+    )
+    .await
+    .unwrap();
+    assert_eq!(outcome.response, "hook-verified-response");
+    assert_eq!(hook_calls.load(Ordering::SeqCst), 1);
+    assert_eq!(last_tool.lock().as_deref(), Some("file_read"));
 }

@@ -130,6 +130,10 @@ impl Sandbox for DockerSandbox {
     fn description(&self) -> &str {
         "Docker container isolation (requires docker)"
     }
+
+    fn isolates_network(&self) -> bool {
+        true
+    }
 }
 
 #[cfg(test)]

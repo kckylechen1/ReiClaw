@@ -1876,7 +1876,7 @@ impl AnthropicModelProvider {
     }
 
     fn http_client(&self) -> Client {
-        reiclaw_http::build_runtime_proxy_client_with_timeouts(
+        reiclaw_http::build_runtime_proxy_client_with_timeouts_no_redirect(
             "model_provider.anthropic",
             self.timeout_secs,
             10,
@@ -1888,6 +1888,7 @@ impl AnthropicModelProvider {
     /// bodies use the shared byte-idle timeout.
     fn streaming_http_client(&self) -> Result<Client, reqwest::Error> {
         let builder = Client::builder()
+            .redirect(reqwest::redirect::Policy::none())
             .connect_timeout(std::time::Duration::from_secs(10))
             .read_timeout(STREAM_IDLE_TIMEOUT);
         let builder =
@@ -2168,6 +2169,10 @@ impl ModelProvider for AnthropicModelProvider {
 
     fn default_base_url(&self) -> Option<&str> {
         Some(BASE_URL)
+    }
+
+    fn endpoint_host(&self) -> Option<String> {
+        crate::extract_endpoint_host(&self.base_url)
     }
 
     async fn chat_with_system(

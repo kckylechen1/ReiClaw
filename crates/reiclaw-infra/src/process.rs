@@ -7,6 +7,7 @@
 
 use std::io;
 use std::process::{ExitStatus, Stdio};
+use std::sync::atomic::{AtomicI32, Ordering};
 use std::time::Duration;
 use tokio::io::{AsyncRead, AsyncReadExt};
 use tokio::process::{Child, Command};
@@ -49,10 +50,56 @@ pub struct ProcessOutput {
     pub stderr_truncated: bool,
 }
 
+/// Drop guard that SIGKILLs an owned child's Unix session/process group on
+/// cancel/timeout/incomplete-drain paths, and is disarmed once all pipes hit EOF.
+pub struct ProcessGroupGuard {
+    pgid: AtomicI32,
+}
+
+impl ProcessGroupGuard {
+    pub fn new(child_pid: Option<u32>) -> Self {
+        #[cfg(unix)]
+        let pgid = child_pid
+            .and_then(|pid| i32::try_from(pid).ok())
+            .filter(|pid| *pid > 0)
+            .unwrap_or(0);
+        #[cfg(not(unix))]
+        let pgid = {
+            let _ = child_pid;
+            0
+        };
+        Self {
+            pgid: AtomicI32::new(pgid),
+        }
+    }
+
+    pub fn disarm(&self) {
+        self.pgid.store(0, Ordering::Release);
+    }
+
+    pub fn kill_now(&self) {
+        let pgid = self.pgid.swap(0, Ordering::AcqRel);
+        if pgid <= 0 {
+            return;
+        }
+        #[cfg(unix)]
+        // SAFETY: positive PGID created by setsid in the owned child; disarmed once
+        // all pipes close and process tree is gone, or signaled here on teardown.
+        unsafe {
+            libc::kill(-pgid, libc::SIGKILL);
+        }
+    }
+}
+
+impl Drop for ProcessGroupGuard {
+    fn drop(&mut self) {
+        self.kill_now();
+    }
+}
+
 struct ProcessOwner {
     child: Child,
-    #[cfg(unix)]
-    pgid: Option<i32>,
+    group_guard: ProcessGroupGuard,
 }
 
 impl ProcessOwner {
@@ -78,33 +125,16 @@ impl ProcessOwner {
             .stderr(Stdio::piped())
             .kill_on_drop(true)
             .spawn()?;
-        Ok(Self {
-            #[cfg(unix)]
-            pgid: child
-                .id()
-                .and_then(|pid| i32::try_from(pid).ok())
-                .filter(|pid| *pid > 0),
-            child,
-        })
+        let group_guard = ProcessGroupGuard::new(child.id());
+        Ok(Self { child, group_guard })
     }
 
-    fn disarm_group(&mut self) {
-        #[cfg(unix)]
-        {
-            self.pgid = None;
-        }
+    fn disarm_group(&self) {
+        self.group_guard.disarm();
     }
 
     fn terminate(&mut self) {
-        #[cfg(unix)]
-        if let Some(pgid) = self.pgid.take() {
-            // SAFETY: this positive PGID was created by setsid in the owned
-            // child. It is cleared as soon as wait reaps the leader, so this
-            // guard never signals a group using a reaped/recycled leader PID.
-            unsafe {
-                libc::kill(-pgid, libc::SIGKILL);
-            }
-        }
+        self.group_guard.kill_now();
         let _ = self.child.start_kill();
     }
 
@@ -196,14 +226,14 @@ pub async fn run_bounded(
             && stdout.is_none()
             && stderr.is_none()
         {
+            owner.disarm_group();
             break ProcessOutcome::Exited(status);
         }
         tokio::select! {
             result = owner.child.wait(), if status.is_none() => {
                 status = Some(result?);
-                // A normal exit may leave descendants holding the pipes. Bound
-                // their drain, but do not signal a possibly recycled leader PID.
-                owner.disarm_group();
+                // Keep the process group armed while descendants may still hold
+                // inherited pipes; disarm only when EOF arrives, or terminate at deadline.
                 post_exit_deadline = Some(Instant::now() + POST_EXIT_DRAIN);
             }
             read = read_pipe(&mut stdout, &mut stdout_buffer) => {
@@ -235,6 +265,7 @@ pub async fn run_bounded(
             _ = drain_deadline(post_exit_deadline), if status.is_some() => {
                 stdout_capture.truncated |= stdout.is_some();
                 stderr_capture.truncated |= stderr.is_some();
+                owner.terminate();
                 // The status branch above established Some; avoid relying on
                 // that invariant with an unwrap in this resource owner.
                 if let Some(status) = status {
