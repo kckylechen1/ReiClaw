@@ -74,7 +74,7 @@ If none of those exists and the issue is not an active tracker or RFC, the issue
 
 ## PR lanes
 
-PR lanes are routing expectations, not another required label family. Use them to decide how much review depth, sequencing, and maintainer attention a PR needs. CODEOWNERS, native GitHub review state, CI, labels, linked issues, and explicit relationship keywords still carry the actual routing data.
+PR lanes are routing expectations, not another required label family. Use them to decide sequencing and maintainer attention. Review depth is set by the "Landing" section of `AGENTS.md`: an independent review only for protected surfaces, persistent data, secrets, and the required gate. CODEOWNERS, native GitHub review state, CI, labels, linked issues, and explicit relationship keywords still carry the actual routing data.
 
 | Lane | Common examples | Expected movement |
 |---|---|---|
@@ -125,10 +125,8 @@ Process a longer stack in dependency order. Keep a parent branch while a child s
 
 Before requesting review, the PR has all of these:
 
-- PR template fully completed.
-- Scope boundary explicit (what changed / what did not).
-- Validation evidence attached, actual command output, not "CI will check."
-- Security & privacy, compatibility, and (for risky paths) rollback fields completed.
+- The template's three lines are filled: what and why, how it was checked, rollback.
+- Every conditional line that applies is present: protected surface and its review, dependency change, Core-Residency Rationale.
 - Privacy and data-hygiene rules satisfied, neutral, project-scoped test wording. See [Privacy](../contributing/privacy.md).
 - Identity-like wording, where unavoidable, uses ZeroClaw / project-native labels.
 
@@ -138,8 +136,7 @@ Before merge:
 
 - All actual required checks and the policy gate are green for the final head; any allowed skip has a documented classification basis.
 - Actual required reviewers approved (including any enforced CODEOWNERS paths), and substantive concerns are resolved.
-- Risk labels match touched paths. See [Labels](./labels.md).
-- Migration / compatibility impact is documented.
+- A change that `AGENTS.md` "Landing" routes to independent review has that review on the final head.
 - Rollback path is concrete and fast.
 
 ## Maintainer merge checklist
@@ -149,8 +146,7 @@ Every merge:
 - Scope is focused and understandable.
 - CI gate is green.
 - Docs-quality checks are green when docs changed.
-- Security and privacy fields are complete; evidence is redacted / anonymized.
-- Agent-workflow notes are sufficient for reproducibility (if AI-assisted).
+- Evidence is redacted / anonymized.
 - Rollback plan is explicit.
 - Commit title follows Conventional Commits.
 

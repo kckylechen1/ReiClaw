@@ -1,119 +1,13 @@
-## Summary
+<!-- Title: `type(scope): summary`. Keep the body to the three lines below; see AGENTS.md "Landing". -->
 
-- **Base branch:** `master` normally; for a dependent PR, name the temporary parent branch and `Depends on #N`. After the parent squash, replay only this PR's increment onto current `master`, retarget, and check the final diff before landing.
-- **What changed and why:** (2 to 5 bullets; the diff shows *what*, you explain *why*)
-- **Scope boundary:** (what this PR explicitly does NOT change)
-- **Blast radius:** (what other subsystems or consumers could be affected)
-- **Linked issue(s):** Use plain text outside backticks. Use `Closes #`,
-  `Fixes #`, or `Resolves #` only for issues this PR fully resolves. Use
-  `Related #`, `Depends on #`, or `Supersedes #` for non-closing relationships.
-- **Labels:** Snapshot the current GitHub labels after labels are applied, for
-  example `type:docs`, `risk:low`, `size:S`, `docs`. During label-spelling
-  migration, copy the exact live label spelling from the GitHub UI.
+- **What and why:**
+- **How it was checked:** <!-- the CI relied on, plus any local command and its result -->
+- **Rollback:** <!-- usually `git revert <squash sha>`; name anything a revert does not undo (data, config, external state) -->
 
-## Dependency refresh disclosure (only when dependencies change)
-
-Omit this section for other changes. Adding a parallel major is a new duplicate, not by itself a downgrade.
-
-- **Downgrades:** Package/source identity, old → new version and reason, or `None`; state unknown causes as unknown.
-- **New duplicate versions:** Package/source identity, added versions and owning dependency paths, or `None`.
-- **Deny exception changes:** Exact entries and reasons, or `None`; name the graph/features checked in the testing evidence.
-
-## Testing (required)
-
-### How you can test (when useful)
-
-Include this subsection when reviewer-run manual verification adds useful signal, especially for user-visible behavior, a non-obvious test path, or a named CI coverage gap. For changes without useful manual verification, including docs-only, pure-refactor, or trivial changes, set the first field to `N/A` with a one-line reason and remove the remaining prompts.
-
-When reviewer testing is requested, frame it A/B: the same steps should show the old behavior on `master` and the new behavior on this branch, so the reviewer can see the delta themselves.
-
-- **Reviewer testing requested?** (`Yes` / `N/A`; if `N/A`, one line why)
-- **Interface(s) exercised:** Name the surface(s) this touches using the same vocabulary the attribution span records: `surface` (`web` / `tui` / `cli`) and `channel` for messaging surfaces. Match the live attribution values; do not invent interface names.
-- **Setup / preconditions:** (config, provider, channel, or state needed first)
-- **Steps to run:** (the exact click-through or command sequence)
-- **Expected on this branch (after):** (what the reviewer should observe if it works)
-- **Prior behavior on `master` (before):** (run the same steps unpatched; what breaks or is missing, so the fix is visible)
-
-### How I tested
-
-Explain how the change was checked. Use the evidence that matches the changed surface: required CI, focused local tests, manual smoke, docs/link gates, or full workspace checks when they prove something narrower evidence would miss. Paste relevant output tails for commands you ran, not "all passed".
-
-Fresh required CI is valid evidence when it covers the changed surface on the same head, target, and feature set. Name that head or link the exact run. Add extra validation only for a concrete coverage gap, such as platform-specific tests, cross-platform lint, desktop app coverage, release target builds, or stale/unavailable CI. For a stack, distinguish parent evidence from this PR's increment and refresh the evidence after its final restack/retarget.
-
-```sh
-# Rust/code examples; follow AGENTS.md for the changed surface:
-scripts/dev/cargo-local.sh fmt --all -- --check
-scripts/dev/cargo-local.sh check -p <crate>
-scripts/dev/leg.sh <owning-leg>
-```
-
-Docs-only changes: replace the Rust examples with the following, using the actual PR base commit as `PR_BASE_SHA` (the temporary parent for a stack), as described in `AGENTS.md`. Run against the committed candidate and record the base; no local Cargo is required for prose alone.
-
-```sh
-BASE_SHA="${PR_BASE_SHA:?resolve the actual PR base SHA}" bash scripts/ci/docs_quality_gate.sh
-BASE_SHA="${PR_BASE_SHA:?resolve the actual PR base SHA}" bash scripts/ci/docs_links_gate.sh
-```
-
-Workflow/policy/configuration changes still need the applicable structural checks and risk review. Bootstrap scripts: add `bash -n install.sh`. Protected code surfaces retain the additional validation in `AGENTS.md`.
-
-- **CI checks relied on and why they cover this change:** (for example, `Docs Style` covers the changed Markdown lines)
-- **Known CI coverage gap, if any:** (for example, `None after the docs and links gates`)
-- **Commands run and tail output:**
-- **Beyond CI, what did you manually verify?** (functional scenarios, edge cases, and any security-relevant behavior; also what you did NOT verify)
-- **If any command was intentionally skipped, why:**
-
-## Security & Privacy Impact (required)
-
-Yes/No for each. Answer any `Yes` with a 1-2 sentence risk-and-mitigation note. Manual verification of these scenarios goes under `### How I tested`, not here.
-
-- New permissions, capabilities, or file system access scope? (`Yes/No`)
-- New external network calls? (`Yes/No`)
-- Secrets / tokens / credentials handling changed? (`Yes/No`)
-- PII, real identities, or personal data in diff, tests, fixtures, or docs? (`Yes/No`)
-- Prompt injection or untrusted model-visible text introduced/changed? (`Yes/No`)
-- If any `Yes`, describe the risk and mitigation:
-
-## Compatibility (required)
-
-- Backward compatible? (`Yes/No`)
-- Config / env / CLI surface changed? (`Yes/No`)
-- Rust/MSRV/toolchain floor changed? (`Yes/No`)
-- If backward compatibility is `No` or either surface/floor question is `Yes`: exact upgrade steps for existing users:
-
-## Core-Residency Rationale (required for new default tools or kernel primitives)
-
-If this PR introduces or widens default tools, kernel primitives, or built-in integrations, answer the questions below (see `docs/book/src/contributing/core-residency-rationale.md`). For changes not touching default/kernel tool surfaces, write `N/A` with a brief note.
-
-- **Why can this not live as a Skill?**
-- **Why can this not live as an MCP / optional integration?**
-- **Why can this not live as a Node capability?**
-- **Why can this not live as a Surface/Channel integration or Provider adapter?**
-- **Why can this not live as a Tachi worker/harness adapter?**
-
-## Rollback (required for medium/high-risk PRs)
-
-Low-risk PRs: `git revert <sha>` is the plan unless otherwise noted.
-
-Medium/high-risk PRs must fill:
-
-- **Fast rollback command/path:**
-- **Feature flags or config toggles:** (or `None`)
-- **Observable failure symptoms:** (what to grep logs for, which metric moves, which alert fires)
-
-## Supersede Attribution (required only when `Supersedes #` is used)
-
-- Superseded PRs + authors (`#<pr> by @<author>`, one per line):
-- Scope materially carried forward:
-- `Co-authored-by` trailers added in commit messages for incorporated contributors? (`Yes/No`)
-- If `No`, why (inspiration-only, no direct code/design carry-over):
-
----
-
-**Labels** live in the GitHub label UI, not in the body. Maintainers and reviewers with label permissions set `risk:*`, `size:*`, and any missing manual labels via the sidebar. The PR path labeler only owns path/scope labels from `.github/labeler.yml`. Contributors without label permission can note obvious label mismatches in a comment. Canonical colon-scoped labels use no-space spelling; during migration, copy exact live label spelling from the GitHub UI.
-
-**Do not add bot/AI attribution footers** such as `Co-authored-by: Claude ...`
-or `Created with Claude Code` to the PR body or commit-message tail. Human
-co-author trailers are appropriate only for incorporated contributor work under
-the supersede-attribution section and privacy contract.
-
-**Privacy contract** (`docs/book/src/contributing/privacy.md`) is a merge gate. Never commit real identities, secrets, personal emails, or PII in diff, tests, fixtures, or docs.
+<!--
+Add a line only when it applies:
+- Depends on #N / Closes #N / Related #N
+- Protected surface, persistent data, secrets, or the required gate: name it, and link the independent review of the final head.
+- Dependency change: downgrades, new duplicate versions, deny.toml exception changes.
+- New default tool or kernel primitive: Core-Residency Rationale (docs/book/src/contributing/core-residency-rationale.md).
+-->
