@@ -32,15 +32,23 @@ env:
 jobs:
   # Keep the workflow unconditional: path-filtered required workflows remain
   # pending. Only the documented prose allowlist skips the runtime matrix.
+  #
+  # The account's hosted runners are capped at 20 concurrent jobs, so a run
+  # with more jobs than that queues against itself. Cheap checks therefore
+  # share jobs: this one also selects the targeted jobs and checks Rust
+  # formatting before the runtime matrix, and `policy` groups the light
+  # policy, Nix and web checks.
   changes:
-    name: Change Scope
+    name: Change Scope and Format
     runs-on: ubuntu-latest
-    timeout-minutes: 5
+    timeout-minutes: 10
     outputs:
       full: ${{ steps.scope.outputs.full }}
       docs_build: ${{ steps.scope.outputs.docs_build }}
       base_sha: ${{ steps.scope.outputs.base_sha }}
       test_matrix: ${{ steps.test-matrix.outputs.matrix }}
+      windows_clippy: ${{ steps.targeted.outputs.windows_clippy }}
+      installer: ${{ steps.targeted.outputs.installer }}
     steps:
       - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
         with:
@@ -72,80 +80,58 @@ jobs:
           jq -e 'type == "array" and length > 0' <<<"$matrix" >/dev/null
           echo "matrix=$matrix" >> "$GITHUB_OUTPUT"
           jq -r '.[] | "  Test (\(.name))"' <<<"$matrix"
-
-  # Fail Rust formatting before the runtime matrix; docs run independently.
-
-  fmt:
-    name: Format
-    needs: [changes]
-    if: needs.changes.outputs.full == 'true'
-    runs-on: ubuntu-latest
-    timeout-minutes: 10
-    steps:
-      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+      # Targeted jobs a PR's diff cannot affect stay skipped. Pushes and merge
+      # groups always run them, which keeps their Rust caches warm.
+      - name: Select targeted Windows Clippy and installer-drift jobs
+        id: targeted
+        shell: bash
+        env:
+          EVENT_NAME: ${{ github.event_name }}
+          PR_BASE_SHA: ${{ github.event.pull_request.base.sha }}
+        run: |
+          set -euo pipefail
+          if [ "$EVENT_NAME" != "pull_request" ]; then
+            echo "windows_clippy=true" >> "$GITHUB_OUTPUT"
+            echo "installer=true" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+          changed="$(git diff --name-only "$PR_BASE_SHA" HEAD)"
+          pick() {
+            if grep -Eq "$1" <<<"$changed"; then
+              echo "$2=true" >> "$GITHUB_OUTPUT"
+            else
+              echo "$2=false" >> "$GITHUB_OUTPUT"
+            fi
+          }
+          pick '^(crates/reiclaw-tools/|\.github/workflows/(ci|cross-platform-clippy)\.yml$)' windows_clippy
+          # The installer generator derives every install surface from Cargo
+          # manifests (features), xtask, and the surfaces themselves.
+          pick '(^|/)Cargo\.toml$|^Cargo\.lock$|^xtask/|^dev/ci/|^dist/|^scripts/ci/install|^install\.sh$|^setup\.bat$|^flake\.nix$|^\.cargo/config\.toml$|^\.github/workflows/ci\.yml$' installer
+      # Fail Rust formatting before the runtime matrix starts.
       - uses: dtolnay/rust-toolchain@e97e2d8cc328f1b50210efc529dca0028893a2d9 # v1
+        if: steps.scope.outputs.full == 'true'
         with:
           toolchain: 1.96.1
           components: rustfmt
       - name: Toolchain pin guard (self-test + active check)
+        if: steps.scope.outputs.full == 'true'
         run: |
           bash scripts/ci/toolchain_gate.test.sh
           bash scripts/dev/cargo-local.test.sh
           bash scripts/dev/leg.test.sh
           bash scripts/ci/toolchain_gate.sh
       - name: Rust quality gate orchestration self-test
+        if: steps.scope.outputs.full == 'true'
         run: bash scripts/ci/rust_quality_gate.test.sh
       - name: Check formatting
+        if: steps.scope.outputs.full == 'true'
         run: cargo fmt --all -- --check
 
-  repo-structure:
-    name: Repository Structure
-    needs: [changes, fmt]
-    # PR-only: nothing here writes a cache, and the PR run already proved it.
-    if: needs.changes.outputs.full == 'true' && github.event_name != 'push'
-    runs-on: ubuntu-latest
-    timeout-minutes: 5
-    steps:
-      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
-      - name: Guard declared submodules
-        shell: bash
-        run: |
-          set -euo pipefail
-
-          gitlinks="$(mktemp)"
-          declared="$(mktemp)"
-          allowed="$(mktemp)"
-
-          git ls-files -s | awk '$1 == "160000" { print $4 }' | sort > "$gitlinks"
-          { git config --file .gitmodules --get-regexp '^submodule\..*\.path$' 2>/dev/null || true; } \
-            | awk '{ print $2 }' | sort > "$declared"
-          printf '%s\n' 'docs/book/po' > "$allowed"
-
-          if ! cmp -s "$gitlinks" "$declared"; then
-            echo "::error::Gitlink paths must exactly match .gitmodules paths."
-            echo "Index gitlinks:"
-            sed 's/^/  /' "$gitlinks"
-            echo ".gitmodules paths:"
-            sed 's/^/  /' "$declared"
-            exit 1
-          fi
-
-          if ! cmp -s "$gitlinks" "$allowed"; then
-            echo "::error::Unexpected submodule path. Update this guard when adding an intentional submodule."
-            echo "Allowed submodule paths:"
-            sed 's/^/  /' "$allowed"
-            echo "Actual gitlink paths:"
-            sed 's/^/  /' "$gitlinks"
-            exit 1
-          fi
-      - name: Test translation release submodule handling
-        run: scripts/release/refresh-translations.test.sh
-
-  # ── Post-format required quality gate ─────────────────────────────────────
+  # ── Required quality gate ─────────────────────────────────────────────────
 
   lint:
     name: Lint
-    needs: [changes, fmt]
+    needs: [changes]
     if: needs.changes.outputs.full == 'true'
     runs-on: ubuntu-latest
     # 25: a cold rust-cache after a Cargo.lock change puts a full workspace
@@ -221,50 +207,11 @@ jobs:
       - name: Fluent catalog syntax gate
         run: cargo fluent check
 
-  windows-clippy-tools-changes:
-    name: Detect Windows Clippy changes
-    needs: [changes, fmt]
-    if: needs.changes.outputs.full == 'true'
-    runs-on: ubuntu-latest
-    timeout-minutes: 5
-    outputs:
-      run: ${{ steps.changed.outputs.run }}
-    steps:
-      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
-        with:
-          fetch-depth: 0
-      - name: Detect targeted Windows Clippy changes
-        id: changed
-        shell: bash
-        run: |
-          set -euo pipefail
-
-          changed_files="$(mktemp)"
-
-          case "${{ github.event_name }}" in
-            pull_request)
-              git diff --name-only "${{ github.event.pull_request.base.sha }}" HEAD > "$changed_files"
-              ;;
-            push|merge_group)
-              echo "run=true" >> "$GITHUB_OUTPUT"
-              exit 0
-              ;;
-            *)
-              echo "run=true" >> "$GITHUB_OUTPUT"
-              exit 0
-              ;;
-          esac
-
-          if grep -Eq '^(crates/reiclaw-tools/|\.github/workflows/(ci|cross-platform-clippy)\.yml$)' "$changed_files"; then
-            echo "run=true" >> "$GITHUB_OUTPUT"
-          else
-            echo "run=false" >> "$GITHUB_OUTPUT"
-          fi
 
   windows-clippy-tools:
     name: Clippy (x86_64-pc-windows-msvc, targeted)
-    needs: [windows-clippy-tools-changes]
-    if: needs.windows-clippy-tools-changes.outputs.run == 'true'
+    needs: [changes]
+    if: needs.changes.outputs.full == 'true' && needs.changes.outputs.windows_clippy == 'true'
     runs-on: windows-latest
     timeout-minutes: 45
     steps:
@@ -324,11 +271,11 @@ jobs:
         env:
           RUST_CACHE_HIT: ${{ steps.rust-cache.outputs.cache-hit }}
 
-  # ── Post-format build + check fan-out ─────────────────────────────────────
+  # ── Build + check fan-out ─────────────────────────────────────────────────
 
   build:
     name: ${{ matrix.label }} ${{ matrix.target }}
-    needs: [changes, fmt]
+    needs: [changes]
     if: needs.changes.outputs.full == 'true'
     runs-on: ${{ matrix.os }}
     timeout-minutes: 40
@@ -442,35 +389,41 @@ jobs:
         run: cargo test --locked -p reiclaw-platform --target x86_64-pc-windows-msvc
 
   # `lint` checks the ci-all graph. Keep these distinct no-default-feature
-  # graphs in the required gate; check-32bit below covers the 32-bit target.
+  # graphs (and the 32-bit target) in the required gate. Each job checks two
+  # graphs back to back to stay under the hosted concurrency cap; the second
+  # check still runs and reports when the first fails.
   check:
     name: Check (${{ matrix.name }})
-    needs: [changes, fmt]
+    needs: [changes]
     if: needs.changes.outputs.full == 'true'
     runs-on: ubuntu-latest
-    timeout-minutes: 20
+    timeout-minutes: 30
     strategy:
       fail-fast: false
       matrix:
         include:
-          - name: no default features
-            args: --no-default-features
+          - name: no default features, 32-bit
+            targets: i686-unknown-linux-gnu
+            sys_deps: gcc-multilib
+            first: --no-default-features
+            second: --target i686-unknown-linux-gnu --no-default-features
+          # The second graph is an explicit standard feature selection
+          # without Cargo defaults.
+          - name: slim control, minimal companion
+            targets: ""
             sys_deps: ""
-          # Explicit standard feature selection without Cargo defaults.
-          - name: minimal companion
-            args: --no-default-features --features agent-runtime,default-channels,gateway,observability-prometheus,schema-export
-            sys_deps: ""
-          - name: slim control
-            args: --all-targets --no-default-features --features slim-control
-            sys_deps: ""
+            first: --all-targets --no-default-features --features slim-control
+            second: --no-default-features --features agent-runtime,default-channels,gateway,observability-prometheus,schema-export
     steps:
       - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
       - uses: dtolnay/rust-toolchain@e97e2d8cc328f1b50210efc529dca0028893a2d9 # v1
         with:
           toolchain: 1.96.1
+          targets: ${{ matrix.targets }}
       - uses: Swatinem/rust-cache@c19371144df3bb44fab255c43d04cbc2ab54d1c4 # v2.9.1
         id: rust-cache
         with:
+          key: pair-${{ strategy.job-index }}
           cache-on-failure: true
           save-if: ${{ github.ref == 'refs/heads/master' }}
       - name: Install system dependencies
@@ -478,34 +431,13 @@ jobs:
         run: bash scripts/ci/apt_install.sh ${{ matrix.sys_deps }}
       - name: Ensure web/dist placeholder exists
         run: mkdir -p web/dist && touch web/dist/.gitkeep
-      - name: Check
-        run: cargo check --locked ${{ matrix.args }}
+      - name: cargo check ${{ matrix.first }}
+        run: cargo check --locked ${{ matrix.first }}
+      - name: cargo check ${{ matrix.second }}
+        if: ${{ !cancelled() }}
+        run: cargo check --locked ${{ matrix.second }}
 
-  check-32bit:
-    name: Check (32-bit)
-    needs: [changes, fmt]
-    if: needs.changes.outputs.full == 'true'
-    runs-on: ubuntu-latest
-    timeout-minutes: 15
-    steps:
-      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
-      - uses: dtolnay/rust-toolchain@e97e2d8cc328f1b50210efc529dca0028893a2d9 # v1
-        with:
-          toolchain: 1.96.1
-          targets: i686-unknown-linux-gnu
-      - uses: Swatinem/rust-cache@c19371144df3bb44fab255c43d04cbc2ab54d1c4 # v2.9.1
-        id: rust-cache
-        with:
-          cache-on-failure: true
-          save-if: ${{ github.ref == 'refs/heads/master' }}
-      - name: Install 32-bit system libraries
-        run: bash scripts/ci/apt_install.sh gcc-multilib
-      - name: Ensure web/dist placeholder exists
-        run: mkdir -p web/dist && touch web/dist/.gitkeep
-      - name: Check (32-bit, no default features)
-        run: cargo check --locked --target i686-unknown-linux-gnu --no-default-features
-
-  # ── Post-format tests ─────────────────────────────────────────────────────
+  # ── Tests ─────────────────────────────────────────────────────────────────
 
   # The workspace is tested as matrix legs so no single job carries the whole
   # compile, and each extra feature run is its own job instead of a second,
@@ -517,7 +449,7 @@ jobs:
   # result, so every matrix entry must succeed.
   test:
     name: Test (${{ matrix.name }})
-    needs: [changes, fmt]
+    needs: [changes]
     if: needs.changes.outputs.full == 'true'
     runs-on: ubuntu-latest
     # 45 per phase. A cold leg once measured ~35 minutes; a timed-out job
@@ -590,93 +522,57 @@ jobs:
         run: |
           bash scripts/dev/leg.sh --no-fail-fast --phase "$PHASE" "$LEG"
 
-  # ── Post-format security checks ───────────────────────────────────────────
+  # ── Policy, Nix and web checks ────────────────────────────────────────────
+  # Light checks share one job (see the concurrency note on `changes`). Every
+  # step runs even after an earlier one fails, so each check still reports.
+  # Repository structure and Nix steps are PR-only: nothing there writes a
+  # cache, and the PR run already proved them.
 
-  security:
-    name: Security
-    needs: [changes, fmt]
+  policy:
+    name: Policy, Nix and Web
+    needs: [changes]
     if: needs.changes.outputs.full == 'true'
     runs-on: ubuntu-latest
-    timeout-minutes: 15
+    timeout-minutes: 30
     steps:
       - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
-      - uses: dtolnay/rust-toolchain@e97e2d8cc328f1b50210efc529dca0028893a2d9 # v1
-        with:
-          toolchain: 1.96.1
-      - uses: Swatinem/rust-cache@c19371144df3bb44fab255c43d04cbc2ab54d1c4 # v2.9.1
-        id: rust-cache
-        with:
-          cache-on-failure: true
-          save-if: ${{ github.ref == 'refs/heads/master' }}
-      - name: Install cargo-deny
+      - name: Guard declared submodules
+        if: ${{ !cancelled() && github.event_name != 'push' }}
+        shell: bash
         run: |
-          download_dir="$(mktemp -d)"
-          trap 'rm -rf -- "$download_dir"' EXIT
-          bash scripts/ci/download_tool.sh \
-            https://github.com/EmbarkStudios/cargo-deny/releases/download/0.19.9/cargo-deny-0.19.9-x86_64-unknown-linux-musl.tar.gz \
-            "$download_dir/cargo-deny.tar.gz"
-          tar zxf "$download_dir/cargo-deny.tar.gz" -C ~/.cargo/bin --strip-components=1
-      - name: Check default dependency policy
-        run: cargo deny --locked check
-      - name: Check dependency policy for all workspace features
-        run: cargo deny --workspace --all-features --locked check
-      - name: Verify dependency policy boundaries
-        run: python3 scripts/ci/dependency_policy_smoke.py
-      - name: Lockfile integrity
-        run: cargo verify-project && cargo fetch --locked
+          set -euo pipefail
 
-      - name: Validate YAML workflow syntax
-        run: |
-          pip install pyyaml -q 2>/dev/null || true
-          python3 - <<'PY'
-          import yaml
+          gitlinks="$(mktemp)"
+          declared="$(mktemp)"
+          allowed="$(mktemp)"
 
-          for path in (".github/workflows/ci.yml",):
-              yaml.safe_load(open(path))
-              print(f"{path}: valid")
-          PY
-      - name: Install cargo-audit
-        run: |
-          download_dir="$(mktemp -d)"
-          trap 'rm -rf -- "$download_dir"' EXIT
-          bash scripts/ci/download_tool.sh \
-            https://github.com/rustsec/rustsec/releases/download/cargo-audit%2Fv0.22.2/cargo-audit-x86_64-unknown-linux-gnu-v0.22.2.tgz \
-            "$download_dir/cargo-audit.tgz"
-          tar zxf "$download_dir/cargo-audit.tgz" -C ~/.cargo/bin --strip-components=1
-      - name: Run cargo audit (RustSec advisory database)
-        run: cargo audit
+          git ls-files -s | awk '$1 == "160000" { print $4 }' | sort > "$gitlinks"
+          { git config --file .gitmodules --get-regexp '^submodule\..*\.path$' 2>/dev/null || true; } \
+            | awk '{ print $2 }' | sort > "$declared"
+          printf '%s\n' 'docs/book/po' > "$allowed"
 
-  nix-eval:
-    name: Nix Module Eval
-    needs: [changes, fmt]
-    # PR-only: nothing here writes a cache, and the PR run already proved it.
-    if: needs.changes.outputs.full == 'true' && github.event_name != 'push'
-    runs-on: ubuntu-latest
-    timeout-minutes: 15
-    steps:
-      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
-      - name: Install Nix
-        run: bash scripts/ci/apt_install.sh nix-bin nix-setup-systemd
-      - name: Verify Nix
-        run: sudo nix --version
-      - name: Evaluate Nix module assertions
-        run: sudo nix --extra-experimental-features "nix-command flakes" build .#checks.x86_64-linux.nixos-module-eval --no-link
-      - name: Evaluate package feature overrides
-        run: |
-          sudo nix --extra-experimental-features "nix-command flakes" \
-            eval --json .#packages.x86_64-linux.reiclaw \
-            --apply "$(cat nix/package-eval.nix)"
+          if ! cmp -s "$gitlinks" "$declared"; then
+            echo "::error::Gitlink paths must exactly match .gitmodules paths."
+            echo "Index gitlinks:"
+            sed 's/^/  /' "$gitlinks"
+            echo ".gitmodules paths:"
+            sed 's/^/  /' "$declared"
+            exit 1
+          fi
 
-  nix-hash-drift:
-    name: Nix Hash Drift
-    needs: [changes, fmt]
-    # PR-only: nothing here writes a cache, and the PR run already proved it.
-    if: needs.changes.outputs.full == 'true' && github.event_name != 'push'
-    runs-on: ubuntu-latest
-    timeout-minutes: 5
-    steps:
-      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+          if ! cmp -s "$gitlinks" "$allowed"; then
+            echo "::error::Unexpected submodule path. Update this guard when adding an intentional submodule."
+            echo "Allowed submodule paths:"
+            sed 's/^/  /' "$allowed"
+            echo "Actual gitlink paths:"
+            sed 's/^/  /' "$gitlinks"
+            exit 1
+          fi
+      - name: Test translation release submodule handling
+        if: ${{ !cancelled() && github.event_name != 'push' }}
+        run: scripts/release/refresh-translations.test.sh
       - name: Validate nix/hashes.json matches Cargo.lock git deps
+        if: ${{ !cancelled() && github.event_name != 'push' }}
         run: |
           set -euo pipefail
           if [[ ! -f Cargo.lock ]]; then
@@ -709,6 +605,106 @@ jobs:
             exit 1
           fi
           echo "All git deps have hashes in nix/hashes.json."
+      - uses: actions/setup-node@48b55a011bda9f5d6aeb4c2d9c7362e8dae4041e # v6.4.0
+        if: ${{ !cancelled() }}
+        with:
+          node-version-file: '.nvmrc'
+          cache: npm
+          cache-dependency-path: web/package-lock.json
+      - name: Install web dependencies
+        if: ${{ !cancelled() }}
+        working-directory: web
+        run: npm ci
+      - name: Run permission and catalog regressions
+        if: ${{ !cancelled() }}
+        working-directory: web
+        run: npm run test:permissions
+      - name: Run owner review regressions
+        if: ${{ !cancelled() }}
+        working-directory: web
+        run: npm run test:review
+      - name: Run chat surface regressions
+        if: ${{ !cancelled() }}
+        working-directory: web
+        run: npm run test:chat
+      - name: Run monitor component regressions
+        if: ${{ !cancelled() }}
+        working-directory: web
+        run: npm run test:monitor
+      - name: Typecheck and build web client
+        if: ${{ !cancelled() }}
+        working-directory: web
+        run: npm run build
+      - uses: dtolnay/rust-toolchain@e97e2d8cc328f1b50210efc529dca0028893a2d9 # v1
+        if: ${{ !cancelled() }}
+        with:
+          toolchain: 1.96.1
+      - uses: Swatinem/rust-cache@c19371144df3bb44fab255c43d04cbc2ab54d1c4 # v2.9.1
+        if: ${{ !cancelled() }}
+        id: rust-cache
+        with:
+          cache-on-failure: true
+          save-if: ${{ github.ref == 'refs/heads/master' }}
+      - name: Install cargo-deny
+        if: ${{ !cancelled() }}
+        run: |
+          download_dir="$(mktemp -d)"
+          trap 'rm -rf -- "$download_dir"' EXIT
+          bash scripts/ci/download_tool.sh \
+            https://github.com/EmbarkStudios/cargo-deny/releases/download/0.19.9/cargo-deny-0.19.9-x86_64-unknown-linux-musl.tar.gz \
+            "$download_dir/cargo-deny.tar.gz"
+          tar zxf "$download_dir/cargo-deny.tar.gz" -C ~/.cargo/bin --strip-components=1
+      - name: Check default dependency policy
+        if: ${{ !cancelled() }}
+        run: cargo deny --locked check
+      - name: Check dependency policy for all workspace features
+        if: ${{ !cancelled() }}
+        run: cargo deny --workspace --all-features --locked check
+      - name: Verify dependency policy boundaries
+        if: ${{ !cancelled() }}
+        run: python3 scripts/ci/dependency_policy_smoke.py
+      - name: Lockfile integrity
+        if: ${{ !cancelled() }}
+        run: cargo verify-project && cargo fetch --locked
+
+      - name: Validate YAML workflow syntax
+        if: ${{ !cancelled() }}
+        run: |
+          pip install pyyaml -q 2>/dev/null || true
+          python3 - <<'PY'
+          import yaml
+
+          for path in (".github/workflows/ci.yml",):
+              yaml.safe_load(open(path))
+              print(f"{path}: valid")
+          PY
+      - name: Install cargo-audit
+        if: ${{ !cancelled() }}
+        run: |
+          download_dir="$(mktemp -d)"
+          trap 'rm -rf -- "$download_dir"' EXIT
+          bash scripts/ci/download_tool.sh \
+            https://github.com/rustsec/rustsec/releases/download/cargo-audit%2Fv0.22.2/cargo-audit-x86_64-unknown-linux-gnu-v0.22.2.tgz \
+            "$download_dir/cargo-audit.tgz"
+          tar zxf "$download_dir/cargo-audit.tgz" -C ~/.cargo/bin --strip-components=1
+      - name: Run cargo audit (RustSec advisory database)
+        if: ${{ !cancelled() }}
+        run: cargo audit
+      - name: Install Nix
+        if: ${{ !cancelled() && github.event_name != 'push' }}
+        run: bash scripts/ci/apt_install.sh nix-bin nix-setup-systemd
+      - name: Verify Nix
+        if: ${{ !cancelled() && github.event_name != 'push' }}
+        run: sudo nix --version
+      - name: Evaluate Nix module assertions
+        if: ${{ !cancelled() && github.event_name != 'push' }}
+        run: sudo nix --extra-experimental-features "nix-command flakes" build .#checks.x86_64-linux.nixos-module-eval --no-link
+      - name: Evaluate package feature overrides
+        if: ${{ !cancelled() && github.event_name != 'push' }}
+        run: |
+          sudo nix --extra-experimental-features "nix-command flakes" \
+            eval --json .#packages.x86_64-linux.reiclaw \
+            --apply "$(cat nix/package-eval.nix)"
 
   docs-style:
     name: Docs Style
@@ -778,81 +774,25 @@ jobs:
 
   installer-drift:
     name: Installer Drift
-    needs: [changes, fmt]
-    if: needs.changes.outputs.full == 'true'
+    needs: [changes]
+    # Selected by `changes`: a PR touching no install input cannot drift.
+    if: needs.changes.outputs.full == 'true' && needs.changes.outputs.installer == 'true'
     runs-on: ubuntu-latest
     timeout-minutes: 15
     steps:
       - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
-        with:
-          fetch-depth: 0
-      # The generator derives every install surface from Cargo manifests
-      # (features), xtask, and the surfaces themselves, so a PR touching none
-      # of them cannot drift. Pushes to master always run, which keeps this
-      # job's Rust cache (an xtask build) warm for the PRs that do need it.
-      - name: Detect install-surface changes
-        id: changed
-        shell: bash
-        run: |
-          set -euo pipefail
-          if [ "${{ github.event_name }}" != "pull_request" ]; then
-            echo "run=true" >> "$GITHUB_OUTPUT"
-            exit 0
-          fi
-          if git diff --name-only "${{ github.event.pull_request.base.sha }}" HEAD \
-            | grep -qE '(^|/)Cargo\.toml$|^Cargo\.lock$|^xtask/|^dev/ci/|^dist/|^scripts/ci/install|^install\.sh$|^setup\.bat$|^flake\.nix$|^\.cargo/config\.toml$|^\.github/workflows/ci\.yml$'; then
-            echo "run=true" >> "$GITHUB_OUTPUT"
-          else
-            echo "run=false" >> "$GITHUB_OUTPUT"
-          fi
       - name: Test POSIX source installer
-        if: steps.changed.outputs.run == 'true'
         run: bash scripts/ci/install_source_smoke.sh
       - uses: dtolnay/rust-toolchain@e97e2d8cc328f1b50210efc529dca0028893a2d9 # v1
-        if: steps.changed.outputs.run == 'true'
         with:
           toolchain: 1.96.1
       - uses: Swatinem/rust-cache@c19371144df3bb44fab255c43d04cbc2ab54d1c4 # v2.9.1
-        if: steps.changed.outputs.run == 'true'
         id: rust-cache
         with:
           cache-on-failure: true
           save-if: ${{ github.ref == 'refs/heads/master' }}
       - name: Check generated install surfaces are in sync with the spec
-        if: steps.changed.outputs.run == 'true'
         run: cargo generate installers --check
-
-  web-permission-tests:
-    name: Web Permission Tests
-    needs: [changes, fmt]
-    if: needs.changes.outputs.full == 'true'
-    runs-on: ubuntu-latest
-    timeout-minutes: 10
-    steps:
-      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
-      - uses: actions/setup-node@48b55a011bda9f5d6aeb4c2d9c7362e8dae4041e # v6.4.0
-        with:
-          node-version-file: '.nvmrc'
-          cache: npm
-          cache-dependency-path: web/package-lock.json
-      - name: Install web dependencies
-        working-directory: web
-        run: npm ci
-      - name: Run permission and catalog regressions
-        working-directory: web
-        run: npm run test:permissions
-      - name: Run owner review regressions
-        working-directory: web
-        run: npm run test:review
-      - name: Run chat surface regressions
-        working-directory: web
-        run: npm run test:chat
-      - name: Run monitor component regressions
-        working-directory: web
-        run: npm run test:monitor
-      - name: Typecheck and build web client
-        working-directory: web
-        run: npm run build
 
   # ── Required gate ─────────────────────────────────────────────────────────
   # Required-check policy: require this stable aggregate. Administrators must
@@ -861,7 +801,7 @@ jobs:
   gate:
     name: CI Required Gate
     if: always()
-    needs: [changes, fmt, repo-structure, lint, windows-clippy-tools-changes, windows-clippy-tools, build, check, check-32bit, test, security, nix-eval, nix-hash-drift, docs-style, docs-build, installer-drift, web-permission-tests]
+    needs: [changes, lint, windows-clippy-tools, build, check, test, policy, docs-style, docs-build, installer-drift]
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2

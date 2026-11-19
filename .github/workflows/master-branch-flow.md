@@ -38,7 +38,7 @@ This fork is maintained by `kckylechen1`; review routing is in [CODEOWNERS](../C
 |---|---|
 | PR opened or updated against `master` or a temporary parent branch | `ci.yml`; applicable docs/code checks and aggregate policy are described below. Runtime, infra, or cross-platform workflow changes also trigger `cross-platform-clippy.yml`. |
 | `merge_group` | Reserved CI compatibility only. GitHub's merge-queue eligibility does not currently include this user-owned repository. |
-| Push to `master` | `ci.yml` (scope-selected checks and docs style; code changes also warm trusted Rust caches; repository structure and Nix checks remain PR-only) and, when the book changes, `docs-deploy.yml` |
+| Push to `master` | `ci.yml` (scope-selected checks and docs style; code changes also warm trusted Rust caches; repository structure and Nix steps remain PR-only) and, when the book changes, `docs-deploy.yml` |
 | Manual dispatch | `cross-platform-build-manual.yml`, `cross-platform-clippy.yml`, or `release-stable-manual.yml` |
 | Tag push `vX.Y.Z` | `release-stable-manual.yml` (full release pipeline) |
 
@@ -56,23 +56,26 @@ tag push.
 1. Contributor opens or updates a PR with an explicit scope and dependency, if any. The final landing target is `master`.
 2. Use `scripts/ci/change_scope.py` as the canonical diff classifier and `scripts/ci/required_gate.py` as the expected-result policy, wired by `ci.yml`. Ordinary README/book prose receives the Markdown, source/navigation, and local-link checks. Code, workflow, policy, build, configuration, executable, and unknown paths retain full coverage; missing or uncertain diff evidence does too. Navigation, renderer, generator, and preprocessor-input changes also run the real docs build. The aggregate always reports and rejects failed, cancelled, or unexpected missing/skipped work.
 3. The code path includes:
-   - `fmt`: `cargo fmt --all -- --check` (the Rust matrix waits on it; docs validation runs independently).
+   - `changes` (Change Scope and Format): classifies the diff, selects the targeted jobs below, and runs `cargo fmt --all -- --check`. Every other job waits on it. The hosted runners allow 20 concurrent jobs per account, so light checks share jobs rather than each taking a runner.
    - `lint`: `cargo clippy --workspace --all-targets --locked --features
      ci-all -- -D warnings`, plus the provider dispatch gate and the Fluent
      catalog syntax gate (`cargo fluent check`). This is the only
      all-features compile in the gate (benches included).
    - `build`: matrix across `x86_64-unknown-linux-gnu`,
      `aarch64-apple-darwin`, `x86_64-pc-windows-msvc`.
-   - `check`: no default features.
+   - `check`: two jobs, each checking two graphs back to back: no default features plus the 32-bit target, and slim control plus the minimal companion feature set.
    - `test`: `cargo nextest run --locked` per phase of
      `dev/ci/test-partition.json`, one parallel job each: the main run of
      every leg (runtime, channels, app, eval, tail) plus each filtered extra
      run (`runtime / landlock`, `channels / voice-surface`). The matrix comes
      from `scripts/dev/leg.sh --matrix`; the app leg runs the architecture
      guards.
-   - `security`: `cargo deny check`, lockfile integrity, `cargo audit`.
+   - `policy` (Policy, Nix and Web): `cargo deny check`, lockfile integrity, `cargo audit`, the web permission and regression tests, and, on PRs only, the repository structure guard, the Nix hash drift check and the Nix module evaluation. Every step runs even when an earlier one fails.
    - `installer-drift`: `cargo generate installers --check` (PRs: only when
-     manifests, `xtask/`, or generated install surfaces change).
+     manifests, `xtask/`, or generated install surfaces change; `changes`
+     selects it).
+   - `windows-clippy-tools`: targeted Windows Clippy (PRs: only when
+     `reiclaw-tools` or the Clippy workflows change; `changes` selects it).
    - `CI Required Gate`: stable aggregate for the classified result. Verify the actual required contexts rather than assuming cloud protection already uses this single job.
 4. Review the final diff/head and check actual required CI and review policy. Carry out an already-authorized merge task without another yes/no exchange, keep monitoring pending checks, and squash with a final-head precondition. Verify GitHub's resulting state and merge SHA.
 

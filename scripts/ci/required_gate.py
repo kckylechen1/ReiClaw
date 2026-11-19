@@ -8,13 +8,10 @@ import os
 import sys
 
 
-FULL_JOBS = {
-    "fmt", "repo-structure", "lint", "windows-clippy-tools-changes", "build",
-    "check", "check-32bit", "test", "security", "nix-eval", "nix-hash-drift",
-    "installer-drift", "web-permission-tests",
-}
-PR_ONLY_JOBS = {"repo-structure", "nix-eval", "nix-hash-drift"}
-ALL_JOBS = FULL_JOBS | {"changes", "docs-style", "docs-build", "windows-clippy-tools"}
+FULL_JOBS = {"lint", "build", "check", "test", "policy"}
+# Full-lane jobs that run only when the named `changes` output selects them.
+TARGETED_JOBS = {"windows-clippy-tools": "windows_clippy", "installer-drift": "installer"}
+ALL_JOBS = FULL_JOBS | set(TARGETED_JOBS) | {"changes", "docs-style", "docs-build"}
 
 
 def boolean_output(job: dict, name: str) -> bool:
@@ -30,25 +27,23 @@ def validate(needs: dict, event_name: str) -> list[str]:
     if event_name not in {"pull_request", "push", "merge_group"}:
         return [f"Unsupported event: {event_name}"]
     if needs["changes"].get("result") != "success":
-        return ["Change classification did not succeed"]
+        return ["Change classification or formatting did not succeed"]
     try:
-        full = boolean_output(needs["changes"], "full")
-        docs_build = boolean_output(needs["changes"], "docs_build")
-        windows = full and boolean_output(needs["windows-clippy-tools-changes"], "run")
+        changes = needs["changes"]
+        full = boolean_output(changes, "full")
+        docs_build = boolean_output(changes, "docs_build")
+        targeted = {
+            job for job, output in TARGETED_JOBS.items()
+            if full and boolean_output(changes, output)
+        }
     except (TypeError, ValueError) as error:
         return [str(error)]
     expected = {job: "skipped" for job in ALL_JOBS}
     expected.update({"changes": "success", "docs-style": "success"})
     if full:
-        for job in FULL_JOBS:
-            expected[job] = "success"
-        if event_name == "push":
-            for job in PR_ONLY_JOBS:
-                expected[job] = "skipped"
+        expected.update({job: "success" for job in FULL_JOBS | targeted})
     if docs_build:
         expected["docs-build"] = "success"
-    if windows:
-        expected["windows-clippy-tools"] = "success"
     return [
         f"{job}: expected {wanted}, got {needs[job].get('result', 'missing')}"
         for job, wanted in sorted(expected.items())
