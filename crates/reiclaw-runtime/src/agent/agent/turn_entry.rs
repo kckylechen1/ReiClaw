@@ -287,6 +287,7 @@ impl Agent {
                     false,
                     Some((&self.side_query, &self.model_provider)),
                     None,
+                    self.security_policy.as_deref(),
                 ),
             )
             .await;
@@ -671,6 +672,7 @@ impl Agent {
                     true,
                     Some((&self.side_query, &self.model_provider)),
                     Some(&dispatched_route),
+                    self.security_policy.as_deref(),
                 ),
             );
             // Scope the provider-fallback task-local around the round so the

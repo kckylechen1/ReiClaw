@@ -496,6 +496,8 @@ pub struct AppState {
     pub ws_conversations: Arc<ws_conversation::ConversationHub<ws::WsSession>>,
     /// The live `/ws/bridge` control socket of each bridge.
     pub bridge_sockets: Arc<ws_bridge::BridgeSockets>,
+    /// Configured lifecycle/tool hooks shared across gateway turns.
+    pub hooks: Option<Arc<reiclaw_runtime::hooks::HookRunner>>,
 }
 
 /// The gateway's per-session turn queue, with a background reaper that
@@ -630,11 +632,22 @@ pub async fn run_gateway(
     let ws_conversations = Arc::new(ws_conversation::ConversationHub::owned(&config.data_dir)?);
     let config_state = Arc::new(RwLock::new(config.clone()));
 
+    let gateway_estop = config.security.estop.enabled.then(|| {
+        let config_dir = config
+            .config_path
+            .parent()
+            .unwrap_or_else(|| std::path::Path::new("."));
+        reiclaw_policy::estop::EstopHandle::for_config(&config.security.estop, config_dir)
+    });
+
     // ── Hooks ──────────────────────────────────────────────────────
     let hooks: Option<std::sync::Arc<reiclaw_runtime::hooks::HookRunner>> = if config.hooks.enabled
     {
         Some(std::sync::Arc::new(
-            reiclaw_runtime::hooks::HookRunner::new(),
+            reiclaw_runtime::hooks::HookRunner::try_from_config_with_estop(
+                &config.hooks,
+                gateway_estop.clone(),
+            )?,
         ))
     } else {
         None
@@ -1278,7 +1291,8 @@ pub async fn run_gateway(
     // Node registry for dynamic node discovery
     #[cfg(feature = "nodes")]
     let node_registry = Arc::new({
-        let mut registry = nodes::NodeRegistry::new(config.nodes.max_nodes);
+        let mut registry =
+            nodes::NodeRegistry::new(config.nodes.max_nodes).with_estop(gateway_estop.clone());
         match crate::device_identity::DeviceIdentityStore::open(
             &config.data_dir,
             config.nodes.max_nodes,
@@ -1422,6 +1436,7 @@ pub async fn run_gateway(
         pending_reload: Arc::new(std::sync::atomic::AtomicBool::new(false)),
         ws_conversations,
         bridge_sockets: Default::default(),
+        hooks,
     };
 
     let review_notifications_task = review_notifications::start(
@@ -2222,46 +2237,57 @@ pub(crate) async fn run_gateway_chat_with_tools(
 
     #[cfg(not(test))]
     {
-        let config = state.config.read().clone();
-        let agent_alias = require_gateway_chat_agent_alias(&config, agent_override)?;
-
-        // Scope the cost tracking context so per-LLM-call usage flows into
-        // the gateway's cost tracker and costs.jsonl. A separate
-        // `TOOL_LOOP_TURN_USAGE` task-local accumulates this turn's totals so
-        // the runtime-owned lifecycle guard can annotate its `AgentEnd`
-        // without racing concurrent requests sharing the same tracker.
-        // Pricing is built from the
-        // unified `build_model_provider_pricing` (alias-keyed, `cost.rates`
-        // wins over legacy per-alias pricing).
-        let cost_tracking_context = state.cost_tracker.as_ref().map(|tracker| {
-            let pricing = reiclaw_runtime::agent::cost::build_model_provider_pricing(&config);
-            reiclaw_runtime::agent::cost::ToolLoopCostTrackingContext::new(
-                tracker.clone(),
-                std::sync::Arc::new(pricing),
-            )
-            .with_agent_alias(&agent_alias)
-        });
-        let turn_usage = state.cost_tracker.as_ref().map(|_| {
-            std::sync::Arc::new(parking_lot::Mutex::new(
-                reiclaw_runtime::agent::cost::TurnUsage::default(),
-            ))
-        });
-        let response = Box::pin(reiclaw_runtime::agent::cost::TOOL_LOOP_TURN_USAGE.scope(
-            turn_usage.clone(),
-            reiclaw_runtime::agent::cost::TOOL_LOOP_COST_TRACKING_CONTEXT.scope(
-                cost_tracking_context,
-                reiclaw_runtime::agent::process_message(
-                    config,
-                    &agent_alias,
-                    message,
-                    session_id,
-                    reiclaw_api::ingress::TurnOrigin::Interactive,
-                ),
-            ),
-        ))
-        .await?;
-        Ok(GatewayChatOutcome { response })
+        run_gateway_chat_with_tools_runtime(state, message, session_id, agent_override).await
     }
+}
+
+pub(crate) async fn run_gateway_chat_with_tools_runtime(
+    state: &AppState,
+    message: &str,
+    session_id: Option<&str>,
+    agent_override: Option<&str>,
+) -> anyhow::Result<GatewayChatOutcome> {
+    let config = state.config.read().clone();
+    let agent_alias = require_gateway_chat_agent_alias(&config, agent_override)?;
+
+    // Scope the cost tracking context so per-LLM-call usage flows into
+    // the gateway's cost tracker and costs.jsonl. A separate
+    // `TOOL_LOOP_TURN_USAGE` task-local accumulates this turn's totals so
+    // the runtime-owned lifecycle guard can annotate its `AgentEnd`
+    // without racing concurrent requests sharing the same tracker.
+    // Pricing is built from the
+    // unified `build_model_provider_pricing` (alias-keyed, `cost.rates`
+    // wins over legacy per-alias pricing).
+    let cost_tracking_context = state.cost_tracker.as_ref().map(|tracker| {
+        let pricing = reiclaw_runtime::agent::cost::build_model_provider_pricing(&config);
+        reiclaw_runtime::agent::cost::ToolLoopCostTrackingContext::new(
+            tracker.clone(),
+            std::sync::Arc::new(pricing),
+        )
+        .with_agent_alias(&agent_alias)
+    });
+    let turn_usage = state.cost_tracker.as_ref().map(|_| {
+        std::sync::Arc::new(parking_lot::Mutex::new(
+            reiclaw_runtime::agent::cost::TurnUsage::default(),
+        ))
+    });
+    let response = Box::pin(reiclaw_runtime::agent::cost::TOOL_LOOP_TURN_USAGE.scope(
+        turn_usage.clone(),
+        reiclaw_runtime::agent::cost::TOOL_LOOP_COST_TRACKING_CONTEXT.scope(
+            cost_tracking_context,
+            reiclaw_runtime::agent::process_message_with_hooks(
+                config,
+                &agent_alias,
+                message,
+                session_id,
+                reiclaw_api::ingress::TurnOrigin::Interactive,
+                None,
+                state.hooks.clone(),
+            ),
+        ),
+    ))
+    .await?;
+    Ok(GatewayChatOutcome { response })
 }
 
 fn resolve_gateway_chat_agent_alias(
@@ -2273,7 +2299,6 @@ fn resolve_gateway_chat_agent_alias(
         .or_else(|| config.resolved_runtime_agent_alias().map(str::to_owned))
 }
 
-#[cfg(not(test))]
 fn require_gateway_chat_agent_alias(
     config: &Config,
     agent_override: Option<&str>,

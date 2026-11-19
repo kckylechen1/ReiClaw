@@ -20,6 +20,32 @@ use crate::mcp_era::{
 };
 use crate::mcp_protocol::{JsonRpcRequest, JsonRpcResponse};
 use reiclaw_config::schema::{McpServerConfig, McpTransport};
+use reiclaw_policy::estop::EstopHandle;
+
+fn enforce_stdio_estop(estop: Option<&Arc<EstopHandle>>) -> Result<()> {
+    let Some(handle) = estop else {
+        return Ok(());
+    };
+    handle.enforce_not_killed().map_err(anyhow::Error::msg)?;
+    if handle.is_network_killed() {
+        bail!(
+            "blocked by security policy: stdio MCP transport blocked while emergency stop (network_kill) is active"
+        );
+    }
+    Ok(())
+}
+
+fn enforce_url_estop(estop: Option<&Arc<EstopHandle>>, url: &str) -> Result<()> {
+    let Some(handle) = estop else {
+        return Ok(());
+    };
+    let host = reqwest::Url::parse(url)
+        .ok()
+        .and_then(|parsed| parsed.host_str().map(str::to_string));
+    handle
+        .enforce_network(host.as_deref())
+        .map_err(anyhow::Error::msg)
+}
 
 /// Maximum bytes for a single JSON-RPC response.
 const MAX_LINE_BYTES: usize = 4 * 1024 * 1024; // 4 MB
@@ -412,6 +438,7 @@ pub struct StdioTransport {
     /// child-exit watcher when the direct child process exits. Read
     /// synchronously by `health_check`.
     child_exited: Arc<AtomicBool>,
+    estop: Option<Arc<EstopHandle>>,
     #[cfg(all(test, unix))]
     write_test_hook: ParkingMutex<Option<Arc<StdioWriteTestHook>>>,
 }
@@ -439,6 +466,10 @@ impl StdioWriteTestHook {
 
     pub(crate) fn pause_next_payload(&self) {
         self.pause_next_payload.store(true, Ordering::Release);
+    }
+
+    pub(crate) fn release_payload(&self) {
+        self.release_payload.notify_waiters();
     }
 
     pub(crate) async fn wait_for_attempts(&self, expected: usize) {
@@ -470,6 +501,14 @@ impl StdioWriteTestHook {
 
 impl StdioTransport {
     pub fn new(config: &McpServerConfig) -> Result<Self> {
+        Self::new_with_estop(config, None)
+    }
+
+    pub fn new_with_estop(
+        config: &McpServerConfig,
+        estop: Option<Arc<EstopHandle>>,
+    ) -> Result<Self> {
+        enforce_stdio_estop(estop.as_ref())?;
         let pending = Arc::new(ParkingMutex::new(HashMap::new()));
         let alive = Arc::new(AtomicBool::new(false));
         let active_generation = Arc::new(AtomicU64::new(1));
@@ -492,6 +531,7 @@ impl StdioTransport {
             alive,
             active_generation,
             child_exited,
+            estop,
             #[cfg(all(test, unix))]
             write_test_hook: ParkingMutex::new(None),
         })
@@ -819,6 +859,7 @@ impl SharedMcpTransportConn for StdioTransport {
         request: &JsonRpcRequest,
         lifecycle: &McpRequestLifecycle,
     ) -> Result<JsonRpcResponse> {
+        enforce_stdio_estop(self.estop.as_ref())?;
         let line = serde_json::to_string(request)?;
         let epoch_guard = lifecycle.begin_write().await;
         #[cfg(all(test, unix))]
@@ -844,6 +885,9 @@ impl SharedMcpTransportConn for StdioTransport {
         {
             return Err(McpTransportError::TransportClosed.into());
         }
+        // Re-check live estop after acquiring the writer lock so a queued
+        // request aborts with "not sent" if network_kill engaged while waiting.
+        enforce_stdio_estop(self.estop.as_ref())?;
 
         let request_id = request.id.as_ref().and_then(serde_json::Value::as_u64);
         let receiver = if let Some(id) = request_id {
@@ -900,6 +944,7 @@ impl SharedMcpTransportConn for StdioTransport {
         if let Some(conn) = state.conn.take() {
             Self::reap_conn(conn, &self.config.name).await?;
         }
+        enforce_stdio_estop(self.estop.as_ref())?;
 
         let generation = old_generation.wrapping_add(1);
         let conn = Self::spawn(
@@ -952,10 +997,18 @@ pub struct HttpTransport {
     client: reqwest::Client,
     headers: std::collections::HashMap<String, String>,
     session_id: ParkingMutex<Option<String>>,
+    estop: Option<Arc<EstopHandle>>,
 }
 
 impl HttpTransport {
     pub fn new(config: &McpServerConfig) -> Result<Self> {
+        Self::new_with_estop(config, None)
+    }
+
+    pub fn new_with_estop(
+        config: &McpServerConfig,
+        estop: Option<Arc<EstopHandle>>,
+    ) -> Result<Self> {
         let url = config
             .url
             .as_ref()
@@ -973,6 +1026,7 @@ impl HttpTransport {
                 anyhow::Error::msg("URL required for HTTP transport")
             })?
             .clone();
+        enforce_url_estop(estop.as_ref(), &url)?;
 
         let client = reqwest::Client::builder()
             .build()
@@ -984,6 +1038,7 @@ impl HttpTransport {
             client,
             headers: config.headers.clone(),
             session_id: ParkingMutex::new(None),
+            estop,
         })
     }
 
@@ -1038,6 +1093,7 @@ impl SharedMcpTransportConn for HttpTransport {
         request: &JsonRpcRequest,
         lifecycle: &McpRequestLifecycle,
     ) -> Result<JsonRpcResponse> {
+        enforce_url_estop(self.estop.as_ref(), &self.url)?;
         let body = serde_json::to_string(request)?;
 
         let has_accept = self
@@ -1182,6 +1238,7 @@ pub struct SseTransport {
     shared: std::sync::Arc<Mutex<SseSharedState>>,
     pending: SsePendingMap,
     notify: std::sync::Arc<Notify>,
+    estop: Option<Arc<EstopHandle>>,
 }
 
 struct SseConnState {
@@ -1192,6 +1249,13 @@ struct SseConnState {
 
 impl SseTransport {
     pub fn new(config: &McpServerConfig) -> Result<Self> {
+        Self::new_with_estop(config, None)
+    }
+
+    pub fn new_with_estop(
+        config: &McpServerConfig,
+        estop: Option<Arc<EstopHandle>>,
+    ) -> Result<Self> {
         let sse_url = config
             .url
             .as_ref()
@@ -1209,6 +1273,7 @@ impl SseTransport {
                 anyhow::Error::msg("URL required for SSE transport")
             })?
             .clone();
+        enforce_url_estop(estop.as_ref(), &sse_url)?;
 
         let client = reqwest::Client::builder()
             .build()
@@ -1228,6 +1293,7 @@ impl SseTransport {
             shared: std::sync::Arc::new(Mutex::new(SseSharedState::default())),
             pending: Arc::new(ParkingMutex::new(HashMap::new())),
             notify: std::sync::Arc::new(Notify::new()),
+            estop,
         })
     }
 
@@ -1259,6 +1325,7 @@ impl SseTransport {
             req = req.header("Accept", MCP_STREAMABLE_ACCEPT);
         }
 
+        enforce_url_estop(self.estop.as_ref(), &self.sse_url)?;
         let resp = req.send().await.context("SSE GET to MCP server failed")?;
         if resp.status() == reqwest::StatusCode::NOT_FOUND
             || resp.status() == reqwest::StatusCode::METHOD_NOT_ALLOWED
@@ -1749,6 +1816,7 @@ impl SharedMcpTransportConn for SseTransport {
         } else {
             self.sse_url.clone()
         };
+        enforce_url_estop(self.estop.as_ref(), &message_url)?;
 
         // Acquire the epoch permit before registering a response waiter.
         // Cancellation while waiting for the permit is provably pre-write and
@@ -1903,10 +1971,17 @@ impl SharedMcpTransportConn for SseTransport {
 pub(crate) fn create_shared_transport(
     config: &McpServerConfig,
 ) -> Result<Box<dyn SharedMcpTransportConn>> {
+    create_shared_transport_with_estop(config, None)
+}
+
+pub(crate) fn create_shared_transport_with_estop(
+    config: &McpServerConfig,
+    estop: Option<Arc<EstopHandle>>,
+) -> Result<Box<dyn SharedMcpTransportConn>> {
     match config.transport {
-        McpTransport::Stdio => Ok(Box::new(StdioTransport::new(config)?)),
-        McpTransport::Http => Ok(Box::new(HttpTransport::new(config)?)),
-        McpTransport::Sse => Ok(Box::new(SseTransport::new(config)?)),
+        McpTransport::Stdio => Ok(Box::new(StdioTransport::new_with_estop(config, estop)?)),
+        McpTransport::Http => Ok(Box::new(HttpTransport::new_with_estop(config, estop)?)),
+        McpTransport::Sse => Ok(Box::new(SseTransport::new_with_estop(config, estop)?)),
     }
 }
 

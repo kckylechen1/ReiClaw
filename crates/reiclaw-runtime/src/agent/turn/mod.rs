@@ -275,7 +275,14 @@ impl<'a> TurnState<'a> {
 }
 
 pub async fn run_tool_call_loop(p: ToolLoop<'_>) -> Result<String> {
-    run_tool_call_loop_with_guard(p, None, false, None, None).await
+    run_tool_call_loop_with_security(p, None).await
+}
+
+pub async fn run_tool_call_loop_with_security(
+    p: ToolLoop<'_>,
+    security: Option<&crate::security::SecurityPolicy>,
+) -> Result<String> {
+    run_tool_call_loop_with_guard(p, None, false, None, None, security).await
 }
 
 /// Agent owns this guard for the full API turn, including steering rounds.
@@ -291,6 +298,7 @@ pub(crate) async fn run_tool_call_loop_with_guard(
         &Arc<dyn ModelProvider>,
     )>,
     dispatched_route: Option<&DispatchedModelRouteSink>,
+    security: Option<&crate::security::SecurityPolicy>,
 ) -> Result<String> {
     // One loop invocation is one agent turn: advisor consultations made by
     // its tools count against a fresh per-turn budget (#405).
@@ -310,18 +318,23 @@ pub(crate) async fn run_tool_call_loop_with_guard(
         p.ingress.origin,
         !memory_sessions.is_empty(),
     );
-    reiclaw_api::TOOL_LOOP_MEMORY_SESSIONS
+    let estop_handle = security.and_then(|s| s.estop_handle().cloned());
+    execution::CURRENT_TURN_ESTOP
         .scope(
-            memory_sessions,
-            reiclaw_api::TOOL_LOOP_MEMORY_READ_POLICY.scope(
-                read_policy,
-                crate::subagent_v1::scope_advisor_turn(run_tool_call_loop_turn(
-                    p,
-                    repetition_guard,
-                    yield_to_steering,
-                    side_query,
-                    dispatched_route,
-                )),
+            estop_handle,
+            reiclaw_api::TOOL_LOOP_MEMORY_SESSIONS.scope(
+                memory_sessions,
+                reiclaw_api::TOOL_LOOP_MEMORY_READ_POLICY.scope(
+                    read_policy,
+                    crate::subagent_v1::scope_advisor_turn(run_tool_call_loop_turn(
+                        p,
+                        repetition_guard,
+                        yield_to_steering,
+                        side_query,
+                        dispatched_route,
+                        security,
+                    )),
+                ),
             ),
         )
         .await
@@ -336,6 +349,7 @@ async fn run_tool_call_loop_turn(
         &Arc<dyn ModelProvider>,
     )>,
     dispatched_route: Option<&DispatchedModelRouteSink>,
+    security: Option<&crate::security::SecurityPolicy>,
 ) -> Result<String> {
     let ToolLoop {
         exec,
@@ -503,9 +517,11 @@ async fn run_tool_call_loop_turn(
         turn_id,
         agent_alias,
         parent_agent_alias,
+        security,
     };
 
     for iteration in 0..max_iterations {
+        provider_call::enforce_ctx_estop_not_killed(&ctx)?;
         if cancellation_token
             .as_ref()
             .is_some_and(CancellationToken::is_cancelled)

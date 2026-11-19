@@ -3576,3 +3576,198 @@ async fn rate_limit_cools_only_the_key_that_was_429ed() {
         "exactly key-a must be cooling; got {cooled:?}"
     );
 }
+
+struct HostAwareFailMock {
+    host: &'static str,
+    calls: Arc<AtomicUsize>,
+    fail_error: Option<&'static str>,
+    response: &'static str,
+}
+
+#[async_trait]
+impl ModelProvider for HostAwareFailMock {
+    fn endpoint_host(&self) -> Option<String> {
+        Some(self.host.to_string())
+    }
+
+    async fn chat_with_system(
+        &self,
+        _system_prompt: Option<&str>,
+        _message: &str,
+        _model: &str,
+        _temperature: Option<f64>,
+    ) -> anyhow::Result<String> {
+        self.calls.fetch_add(1, Ordering::SeqCst);
+        if let Some(err) = self.fail_error {
+            anyhow::bail!("{err}");
+        }
+        Ok(self.response.to_string())
+    }
+
+    fn supports_streaming(&self) -> bool {
+        true
+    }
+
+    fn stream_chat(
+        &self,
+        _request: ChatRequest<'_>,
+        _model: &str,
+        _temperature: Option<f64>,
+        _options: StreamOptions,
+    ) -> stream::BoxStream<'static, StreamResult<StreamEvent>> {
+        self.calls.fetch_add(1, Ordering::SeqCst);
+        let text = self.response.to_string();
+        Box::pin(stream::once(async move {
+            Ok(StreamEvent::TextDelta(StreamChunk::delta(text)))
+        }))
+    }
+}
+
+impl ::reiclaw_api::attribution::Attributable for HostAwareFailMock {
+    fn role(&self) -> ::reiclaw_api::attribution::Role {
+        ::reiclaw_api::attribution::Role::Provider(::reiclaw_api::attribution::ProviderKind::Model(
+            ::reiclaw_api::attribution::ModelProviderKind::Custom,
+        ))
+    }
+    fn alias(&self) -> &str {
+        self.host
+    }
+}
+
+#[tokio::test]
+async fn fallback_to_blocked_domain_receives_zero_requests() {
+    let primary_calls = Arc::new(AtomicUsize::new(0));
+    let fallback_calls = Arc::new(AtomicUsize::new(0));
+    let guard: reiclaw_api::EstopHostGuard = Arc::new(|host| {
+        match host {
+            Some("blocked-fallback.example") => Err(
+                "blocked by security policy: emergency stop blocks network host 'blocked-fallback.example'"
+                    .to_string(),
+            ),
+            _ => Ok(()),
+        }
+    });
+
+    let provider = ReliableModelProvider::new(
+        "test",
+        vec![
+            (
+                "primary".into(),
+                Box::new(HostAwareFailMock {
+                    host: "allowed-primary.example",
+                    calls: Arc::clone(&primary_calls),
+                    fail_error: Some("503 service unavailable"),
+                    response: "unused",
+                }),
+            ),
+            (
+                "fallback".into(),
+                Box::new(HostAwareFailMock {
+                    host: "blocked-fallback.example",
+                    calls: Arc::clone(&fallback_calls),
+                    fail_error: None,
+                    response: "should never run",
+                }),
+            ),
+        ],
+        0,
+        1,
+    );
+
+    // Check task-local guard (production path from provider_call.rs) across chat() & chat_with_system().
+    let err = reiclaw_api::TOOL_LOOP_ESTOP_HOST_GUARD
+        .scope(
+            Some(Arc::clone(&guard)),
+            provider.chat(
+                ChatRequest {
+                    messages: &[ChatMessage::user("hi")],
+                    tools: None,
+                    thinking: None,
+                },
+                "test-model",
+                None,
+            ),
+        )
+        .await
+        .expect_err("fallback to blocked host must abort");
+    assert!(
+        err.to_string().contains("blocked-fallback.example"),
+        "{err}"
+    );
+    assert_eq!(primary_calls.load(Ordering::SeqCst), 1);
+    assert_eq!(
+        fallback_calls.load(Ordering::SeqCst),
+        0,
+        "blocked fallback endpoint must receive 0 requests"
+    );
+
+    // Also verify streaming path blocks a cooldown-skipped fallback entry before stream_chat dispatch.
+    let provider_stream = ReliableModelProvider::new(
+        "test",
+        vec![(
+            "fallback".into(),
+            Box::new(HostAwareFailMock {
+                host: "blocked-fallback.example",
+                calls: Arc::clone(&fallback_calls),
+                fail_error: None,
+                response: "should never stream",
+            }),
+        )],
+        0,
+        1,
+    )
+    .with_estop_host_guard(Arc::clone(&guard));
+    let mut stream = provider_stream.stream_chat(
+        ChatRequest {
+            messages: &[ChatMessage::user("hi")],
+            tools: None,
+            thinking: None,
+        },
+        "test-model",
+        None,
+        StreamOptions::default(),
+    );
+    let first = stream.next().await.expect("stream must yield error");
+    assert!(first.is_err());
+    assert_eq!(fallback_calls.load(Ordering::SeqCst), 0);
+}
+
+#[tokio::test]
+async fn retry_after_estop_engagement_aborts_before_second_attempt() {
+    let calls = Arc::new(AtomicUsize::new(0));
+    let calls_for_guard = Arc::clone(&calls);
+    let guard: reiclaw_api::EstopHostGuard = Arc::new(move |_| {
+        if calls_for_guard.load(Ordering::SeqCst) >= 1 {
+            Err("blocked by security policy: emergency stop (kill_all active)".to_string())
+        } else {
+            Ok(())
+        }
+    });
+
+    let provider = ReliableModelProvider::new(
+        "test",
+        vec![(
+            "primary".into(),
+            Box::new(HostAwareFailMock {
+                host: "allowed-primary.example",
+                calls: Arc::clone(&calls),
+                fail_error: Some("500 transient error"),
+                response: "ok",
+            }),
+        )],
+        2,
+        1,
+    )
+    .with_estop_host_guard(guard);
+
+    let err = provider
+        .simple_chat("hi", "test-model", None)
+        .await
+        .expect_err("estop engaged after first failure must abort retry");
+    assert!(err.to_string().contains("emergency stop"), "{err}");
+    assert_eq!(
+        calls.load(Ordering::SeqCst),
+        1,
+        "retry attempt after estop must not dispatch"
+    );
+}

@@ -3,10 +3,10 @@ use super::web_search_provider_routing::{
 };
 use async_trait::async_trait;
 use regex::Regex;
-use reiclaw_api::tool::{Tool, ToolResult};
+use reiclaw_api::tool::{Tool, ToolOutput, ToolResult};
 use serde_json::json;
 use std::path::{Path, PathBuf};
-use std::sync::LazyLock;
+use std::sync::{Arc, LazyLock};
 use std::time::Duration;
 
 /// Web search tool for searching the internet.
@@ -39,6 +39,8 @@ pub struct WebSearchTool {
     config_path: PathBuf,
     /// Whether secret encryption is enabled (needed to create a `SecretStore`).
     secrets_encrypt: bool,
+    /// Optional security policy for live estop enforcement on outbound requests.
+    security: Option<Arc<reiclaw_policy::SecurityPolicy>>,
 }
 
 impl WebSearchTool {
@@ -59,6 +61,7 @@ impl WebSearchTool {
             timeout_secs: timeout_secs.max(1),
             config_path: PathBuf::new(),
             secrets_encrypt: false,
+            security: None,
         }
     }
 
@@ -84,7 +87,27 @@ impl WebSearchTool {
             timeout_secs: timeout_secs.max(1),
             config_path,
             secrets_encrypt,
+            security: None,
         }
+    }
+
+    pub fn with_security(mut self, security: Arc<reiclaw_policy::SecurityPolicy>) -> Self {
+        self.security = Some(security);
+        self
+    }
+
+    fn enforce_estop_endpoint(&self, url: Option<&str>) -> anyhow::Result<()> {
+        let Some(ref security) = self.security else {
+            return Ok(());
+        };
+        let host = url.and_then(|raw| {
+            reqwest::Url::parse(raw)
+                .ok()
+                .and_then(|parsed| parsed.host_str().map(str::to_string))
+        });
+        security
+            .enforce_estop_network(host.as_deref())
+            .map_err(anyhow::Error::msg)
     }
 
     /// Resolve the Brave API key, preferring the boot-time value but falling
@@ -184,6 +207,7 @@ impl WebSearchTool {
         endpoint_url: &str,
         query: &str,
     ) -> anyhow::Result<String> {
+        self.enforce_estop_endpoint(Some(endpoint_url))?;
         let encoded_query = urlencoding::encode(query);
         let search_url = format!("{}?q={}", endpoint_url, encoded_query);
 
@@ -265,6 +289,7 @@ impl WebSearchTool {
     }
 
     async fn search_brave(&self, query: &str) -> anyhow::Result<String> {
+        self.enforce_estop_endpoint(Some("https://api.search.brave.com/res/v1/web/search"))?;
         let api_key = self.resolve_brave_api_key()?;
 
         let encoded_query = urlencoding::encode(query);
@@ -393,6 +418,7 @@ impl WebSearchTool {
         url: &str,
         query: &str,
     ) -> anyhow::Result<String> {
+        self.enforce_estop_endpoint(Some(url))?;
         let api_key = self.resolve_tavily_api_key()?;
 
         // Tavily authenticates via `Authorization: Bearer <key>` per
@@ -547,6 +573,7 @@ impl WebSearchTool {
     }
 
     async fn search_jina(&self, query: &str) -> anyhow::Result<String> {
+        self.enforce_estop_endpoint(Some("https://s.jina.ai/"))?;
         let api_key = self.resolve_jina_api_key()?;
 
         let builder = reqwest::Client::builder()
@@ -701,6 +728,7 @@ impl WebSearchTool {
         url: &str,
         query: &str,
     ) -> anyhow::Result<String> {
+        self.enforce_estop_endpoint(Some(url))?;
         let api_key = self.resolve_bocha_api_key()?;
 
         let body = serde_json::json!({
@@ -916,6 +944,7 @@ impl WebSearchTool {
 
     async fn search_searxng(&self, query: &str) -> anyhow::Result<String> {
         let instance_url = self.resolve_searxng_instance_url()?;
+        self.enforce_estop_endpoint(Some(&instance_url))?;
         let base_url = instance_url.trim_end_matches('/');
 
         let encoded_query = urlencoding::encode(query);
@@ -1095,6 +1124,13 @@ impl Tool for WebSearchTool {
     }
 
     async fn execute(&self, args: serde_json::Value) -> anyhow::Result<ToolResult> {
+        if let Err(err) = self.enforce_estop_endpoint(None) {
+            return Ok(ToolResult {
+                success: false,
+                output: ToolOutput::default(),
+                error: Some(err.to_string()),
+            });
+        }
         let query = args.get("query").and_then(|q| q.as_str()).ok_or_else(|| {
             ::reiclaw_log::record!(
                 WARN,
@@ -1899,6 +1935,7 @@ mod tests {
             timeout_secs: 15,
             config_path: PathBuf::new(),
             secrets_encrypt: false,
+            security: None,
         };
         let url = tool.resolve_searxng_instance_url().unwrap();
         assert_eq!(url, "https://searx.example.com");

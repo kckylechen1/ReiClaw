@@ -22,6 +22,121 @@ pub(crate) struct ProviderCallOutcome {
     pub(crate) streamed_visible_text: String,
 }
 
+#[derive(Debug)]
+pub(crate) struct EstopAbortedError(pub String);
+
+impl std::fmt::Display for EstopAbortedError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str(&self.0)
+    }
+}
+
+impl std::error::Error for EstopAbortedError {}
+
+pub(crate) fn is_estop_aborted(err: &anyhow::Error) -> bool {
+    err.downcast_ref::<EstopAbortedError>().is_some()
+        || err
+            .downcast_ref::<reiclaw_api::EstopBlockedError>()
+            .is_some()
+        || err.to_string().contains(reiclaw_api::ESTOP_ERROR_MARKER)
+}
+
+pub(crate) fn enforce_ctx_estop_not_killed(ctx: &TurnCtx<'_>) -> Result<()> {
+    if let Some(sec) = ctx.security {
+        sec.enforce_estop_not_killed()
+            .map_err(|msg| anyhow::Error::new(EstopAbortedError(msg)))?;
+    }
+    Ok(())
+}
+
+pub(crate) fn enforce_handle_provider_estop(
+    handle: &crate::security::estop::EstopHandle,
+    provider: &dyn ModelProvider,
+    model: &str,
+) -> Result<()> {
+    if let Some(host) = provider.endpoint_host_for_model(model) {
+        handle
+            .enforce_network(Some(&host))
+            .map_err(|msg| anyhow::Error::new(EstopAbortedError(msg)))?;
+    } else {
+        handle
+            .enforce_not_killed()
+            .map_err(|msg| anyhow::Error::new(EstopAbortedError(msg)))?;
+    }
+    Ok(())
+}
+
+pub(crate) fn estop_host_guard(
+    handle: std::sync::Arc<crate::security::estop::EstopHandle>,
+) -> reiclaw_api::EstopHostGuard {
+    std::sync::Arc::new(move |host: Option<&str>| handle.enforce_network(host))
+}
+
+pub(crate) fn enforce_ctx_provider_estop(
+    ctx: &TurnCtx<'_>,
+    provider: &dyn ModelProvider,
+    model: &str,
+) -> Result<()> {
+    let Some(handle) = ctx.security.and_then(|s| s.estop_handle()) else {
+        return Ok(());
+    };
+    enforce_handle_provider_estop(handle, provider, model)
+}
+
+async fn run_provider_future_with_estop<F, T>(
+    ctx: &TurnCtx<'_>,
+    provider: &dyn ModelProvider,
+    model: &str,
+    cancel_token: Option<&tokio_util::sync::CancellationToken>,
+    step_timeout: Option<Duration>,
+    fut: F,
+) -> Result<T>
+where
+    F: std::future::Future<Output = Result<T>>,
+{
+    enforce_ctx_provider_estop(ctx, provider, model)?;
+    let has_estop = ctx.security.and_then(|s| s.estop_handle()).is_some();
+    tokio::pin!(fut);
+    let timeout_sleep = step_timeout.map(tokio::time::sleep);
+    tokio::pin!(timeout_sleep);
+
+    loop {
+        let poll_sleep = has_estop.then(|| tokio::time::sleep(Duration::from_millis(100)));
+        tokio::select! {
+            biased;
+            () = async {
+                if let Some(token) = cancel_token {
+                    token.cancelled().await;
+                } else {
+                    std::future::pending::<()>().await;
+                }
+            } => return Err(ToolLoopCancelled.into()),
+            res = &mut fut => return res,
+            () = async {
+                if let Some(t) = timeout_sleep.as_mut().as_pin_mut() {
+                    t.await;
+                } else {
+                    std::future::pending::<()>().await;
+                }
+            } => {
+                let secs = step_timeout.map_or(0, |d| d.as_secs());
+                anyhow::bail!(
+                    "LLM inference step timed out after {secs}s (step_timeout_secs)"
+                );
+            }
+            () = async {
+                if let Some(sleep) = poll_sleep {
+                    sleep.await;
+                } else {
+                    std::future::pending::<()>().await;
+                }
+            } => {
+                enforce_ctx_provider_estop(ctx, provider, model)?;
+            }
+        }
+    }
+}
+
 pub(crate) async fn announce_llm_request(
     ctx: &TurnCtx<'_>,
     history: &[ChatMessage],
@@ -186,147 +301,163 @@ pub(crate) async fn call_provider(
     let mut streamed_protocol_suppressed = false;
     let mut streamed_visible_text = String::new();
 
-    let chat_result = if should_consume_provider_stream {
-        // Attribution is opened by ProviderDispatch::from_ref(...).stream_chat
-        // inside `consume_provider_streaming_response`; the caller does not
-        // wrap a second attribution_span! here.
-        let stream_future = consume_provider_streaming_response(
-            active_model_provider,
-            prepared_messages,
-            request_tools,
-            known_tool_names,
-            active_model,
-            ctx.temperature,
-            ctx.cancellation_token,
-            ctx.on_delta,
-            ctx.event_tx,
-            ctx.strict_tool_parsing,
-        );
-        match stream_future.await {
-            Ok(streamed) => {
-                streamed_live_deltas = streamed.forwarded_live_deltas;
-                streamed_protocol_suppressed = streamed.suppressed_protocol;
-                streamed_visible_text = streamed.forwarded_visible_text;
-                let reasoning_content = if streamed.reasoning_content.is_empty() {
-                    None
-                } else {
-                    Some(streamed.reasoning_content)
-                };
-                Ok(reiclaw_providers::ChatResponse {
-                    text: Some(streamed.response_text),
-                    tool_calls: streamed.tool_calls,
-                    usage: streamed.usage,
-                    reasoning_content,
-                })
-            }
-            Err(stream_err)
-                if is_tool_loop_cancelled(&stream_err)
-                    || is_stream_auth_error(&stream_err)
-                    || stream_err
-                        .downcast_ref::<StreamInterruptedAfterOutput>()
-                        .is_some() =>
-            {
-                Err(stream_err)
-            }
-            Err(stream_err) => {
-                ::reiclaw_log::record!(
-                    WARN,
-                    ::reiclaw_log::Event::new(module_path!(), ::reiclaw_log::Action::Fail)
-                        .with_category(::reiclaw_log::EventCategory::Provider)
-                        .with_outcome(::reiclaw_log::EventOutcome::Failure)
-                        .with_attrs(::serde_json::json!({
-                            "model": active_model,
-                            "iteration": iteration + 1,
-                            "error": scrub_credentials(&stream_err.to_string()),
-                            "trace_id": ctx.turn_id,
-                        })),
-                    "llm_stream_fallback: provider stream failed, falling back to non-streaming chat"
+    enforce_ctx_provider_estop(ctx, active_model_provider, active_model)?;
+
+    let estop_guard: Option<reiclaw_api::EstopHostGuard> = ctx
+        .security
+        .and_then(|s| s.estop_handle())
+        .cloned()
+        .map(estop_host_guard);
+
+    reiclaw_api::TOOL_LOOP_ESTOP_HOST_GUARD
+        .scope(estop_guard, async {
+            let chat_result = if should_consume_provider_stream {
+                // Attribution is opened by ProviderDispatch::from_ref(...).stream_chat
+                // inside `consume_provider_streaming_response`; the caller does not
+                // wrap a second attribution_span! here.
+                let stream_future = consume_provider_streaming_response(
+                    active_model_provider,
+                    prepared_messages,
+                    request_tools,
+                    known_tool_names,
+                    active_model,
+                    ctx.temperature,
+                    ctx.cancellation_token,
+                    ctx.on_delta,
+                    ctx.event_tx,
+                    ctx.strict_tool_parsing,
                 );
+                // Let `consume_provider_streaming_response` handle `ctx.cancellation_token`
+                // directly so cancel after streamed deltas returns `StreamCancelledAfterOutput`
+                // instead of being preempted by bare `ToolLoopCancelled`.
+                match run_provider_future_with_estop(
+                    ctx,
+                    active_model_provider,
+                    active_model,
+                    None,
+                    None,
+                    stream_future,
+                )
+                .await
                 {
-                    let dispatcher = ProviderDispatch::from_ref(active_model_provider);
-                    let chat_future = dispatcher.chat(
-                        ChatRequest {
-                            messages: prepared_messages,
-                            tools: request_tools,
-                            thinking: reiclaw_api::NATIVE_THINKING_OVERRIDE
-                                .try_with(Clone::clone)
-                                .ok()
-                                .flatten(),
-                        },
-                        active_model,
-                        ctx.temperature,
-                    );
-                    if let Some(token) = ctx.cancellation_token {
-                        tokio::select! {
-                            () = token.cancelled() => Err(ToolLoopCancelled.into()),
-                            result = chat_future => result,
+                    Ok(streamed) => {
+                        streamed_live_deltas = streamed.forwarded_live_deltas;
+                        streamed_protocol_suppressed = streamed.suppressed_protocol;
+                        streamed_visible_text = streamed.forwarded_visible_text;
+                        let reasoning_content = if streamed.reasoning_content.is_empty() {
+                            None
+                        } else {
+                            Some(streamed.reasoning_content)
+                        };
+                        Ok(reiclaw_providers::ChatResponse {
+                            text: Some(streamed.response_text),
+                            tool_calls: streamed.tool_calls,
+                            usage: streamed.usage,
+                            reasoning_content,
+                        })
+                    }
+                    Err(stream_err) if is_estop_aborted(&stream_err) => return Err(stream_err),
+                    Err(stream_err)
+                        if is_tool_loop_cancelled(&stream_err)
+                            || is_stream_auth_error(&stream_err)
+                            || stream_err
+                                .downcast_ref::<StreamInterruptedAfterOutput>()
+                                .is_some() =>
+                    {
+                        Err(stream_err)
+                    }
+                    Err(stream_err) => {
+                        enforce_ctx_provider_estop(ctx, active_model_provider, active_model)?;
+                        ::reiclaw_log::record!(
+                            WARN,
+                            ::reiclaw_log::Event::new(module_path!(), ::reiclaw_log::Action::Fail)
+                                .with_category(::reiclaw_log::EventCategory::Provider)
+                                .with_outcome(::reiclaw_log::EventOutcome::Failure)
+                                .with_attrs(::serde_json::json!({
+                                    "model": active_model,
+                                    "iteration": iteration + 1,
+                                    "error": scrub_credentials(&stream_err.to_string()),
+                                    "trace_id": ctx.turn_id,
+                                })),
+                            "llm_stream_fallback: provider stream failed, falling back to non-streaming chat"
+                        );
+                        let dispatcher = ProviderDispatch::from_ref(active_model_provider);
+                        let chat_future = dispatcher.chat(
+                            ChatRequest {
+                                messages: prepared_messages,
+                                tools: request_tools,
+                                thinking: reiclaw_api::NATIVE_THINKING_OVERRIDE
+                                    .try_with(Clone::clone)
+                                    .ok()
+                                    .flatten(),
+                            },
+                            active_model,
+                            ctx.temperature,
+                        );
+                        match run_provider_future_with_estop(
+                            ctx,
+                            active_model_provider,
+                            active_model,
+                            ctx.cancellation_token,
+                            None,
+                            chat_future,
+                        )
+                        .await
+                        {
+                            Err(err) if is_estop_aborted(&err) => return Err(err),
+                            other => other,
                         }
-                    } else {
-                        chat_future.await
                     }
                 }
-            }
-        }
-    } else {
-        // Non-streaming path: wrap with optional per-step timeout from
-        // pacing config to catch hung model responses.
-        let dispatcher = ProviderDispatch::from_ref(active_model_provider);
-        let chat_future = dispatcher.chat(
-            ChatRequest {
-                messages: prepared_messages,
-                tools: request_tools,
-                thinking: reiclaw_api::NATIVE_THINKING_OVERRIDE
-                    .try_with(Clone::clone)
-                    .ok()
-                    .flatten(),
-            },
-            active_model,
-            ctx.temperature,
-        );
+            } else {
+                // Non-streaming path: wrap with optional per-step timeout from
+                // pacing config to catch hung model responses.
+                let dispatcher = ProviderDispatch::from_ref(active_model_provider);
+                let chat_future = dispatcher.chat(
+                    ChatRequest {
+                        messages: prepared_messages,
+                        tools: request_tools,
+                        thinking: reiclaw_api::NATIVE_THINKING_OVERRIDE
+                            .try_with(Clone::clone)
+                            .ok()
+                            .flatten(),
+                    },
+                    active_model,
+                    ctx.temperature,
+                );
 
-        match ctx.pacing.step_timeout_secs {
-            Some(step_secs) if step_secs > 0 => {
-                let step_timeout = Duration::from_secs(step_secs);
-                if let Some(token) = ctx.cancellation_token {
-                    tokio::select! {
-                        () = token.cancelled() => return Err(ToolLoopCancelled.into()),
-                        result = tokio::time::timeout(step_timeout, chat_future) => {
-                            match result {
-                                Ok(inner) => inner,
-                                Err(_) => anyhow::bail!(
-                                    "LLM inference step timed out after {step_secs}s (step_timeout_secs)"
-                                ),
-                            }
-                        },
+                let step_timeout = ctx
+                    .pacing
+                    .step_timeout_secs
+                    .filter(|&secs| secs > 0)
+                    .map(Duration::from_secs);
+                match run_provider_future_with_estop(
+                    ctx,
+                    active_model_provider,
+                    active_model,
+                    ctx.cancellation_token,
+                    step_timeout,
+                    chat_future,
+                )
+                .await
+                {
+                    Err(err)
+                        if is_estop_aborted(&err) || is_tool_loop_cancelled(&err) =>
+                    {
+                        return Err(err);
                     }
-                } else {
-                    match tokio::time::timeout(step_timeout, chat_future).await {
-                        Ok(inner) => inner,
-                        Err(_) => anyhow::bail!(
-                            "LLM inference step timed out after {step_secs}s (step_timeout_secs)"
-                        ),
-                    }
+                    other => other,
                 }
-            }
-            _ => {
-                if let Some(token) = ctx.cancellation_token {
-                    tokio::select! {
-                        () = token.cancelled() => return Err(ToolLoopCancelled.into()),
-                        result = chat_future => result,
-                    }
-                } else {
-                    chat_future.await
-                }
-            }
-        }
-    };
+            };
 
-    Ok(ProviderCallOutcome {
-        chat_result,
-        streamed_live_deltas,
-        streamed_protocol_suppressed,
-        streamed_visible_text,
-    })
+            Ok(ProviderCallOutcome {
+                chat_result,
+                streamed_live_deltas,
+                streamed_protocol_suppressed,
+                streamed_visible_text,
+            })
+        })
+        .await
 }
 
 #[cfg(test)]
@@ -387,6 +518,7 @@ mod payload_capture_tests {
             channel: None,
             agent_alias: None,
             turn_id: "trace-req-test",
+            security: None,
         }
     }
 
@@ -549,6 +681,7 @@ mod fallback_tests {
             channel: None,
             agent_alias: None,
             turn_id: "trace-req-test",
+            security: None,
         }
     }
 

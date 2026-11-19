@@ -11,7 +11,16 @@ use crate::agent::tool_receipts::ReceiptGenerator;
 use crate::approval::ApprovalManager;
 use crate::hooks::HookRunner;
 use crate::observability::Observer;
+use crate::security::estop::EstopHandle;
 use crate::tools::{ActivatedToolSet, Tool};
+
+tokio::task_local! {
+    pub(crate) static CURRENT_TURN_ESTOP: Option<Arc<EstopHandle>>;
+}
+
+pub(crate) fn current_turn_estop() -> Option<Arc<EstopHandle>> {
+    CURRENT_TURN_ESTOP.try_with(Clone::clone).ok().flatten()
+}
 
 /// The resolved model binding: which provider, model, and temperature a turn
 /// uses. The base layer any LLM call needs; [`ResolvedAgentExecution`] composes
@@ -27,8 +36,16 @@ pub struct ResolvedModelAccess<'a> {
 impl ResolvedModelAccess<'_> {
     pub async fn run_model_query(&self, request: ChatRequest<'_>) -> anyhow::Result<ChatResponse> {
         // Fail closed before spending a provider call when the enclosing turn's
-        // cost budget is already exhausted. No-op when unscoped.
+        // cost budget is already exhausted or emergency stop is engaged.
         crate::agent::turn::provider_call::enforce_tool_loop_budget()?;
+        let turn_estop = current_turn_estop();
+        if let Some(ref handle) = turn_estop {
+            super::provider_call::enforce_handle_provider_estop(
+                handle,
+                self.model_provider,
+                self.model,
+            )?;
+        }
         // This one-shot seam does NOT run `prepare_messages_for_provider` (the
         // main iteration path does that upstream), so a tool-result
         // `[AUDIO:/path]` in the history — e.g. the max-iteration graceful
@@ -47,9 +64,32 @@ impl ResolvedModelAccess<'_> {
             tools,
             thinking,
         };
-        let resp = ProviderDispatch::from_ref(self.model_provider)
-            .chat(request, self.model, self.temperature)
-            .await?;
+        let dispatcher = ProviderDispatch::from_ref(self.model_provider);
+        let resp = if let Some(handle) = turn_estop {
+            let estop_guard = Some(super::provider_call::estop_host_guard(Arc::clone(&handle)));
+            let chat_fut = reiclaw_api::TOOL_LOOP_ESTOP_HOST_GUARD.scope(
+                estop_guard,
+                dispatcher.chat(request, self.model, self.temperature),
+            );
+            tokio::pin!(chat_fut);
+            loop {
+                tokio::select! {
+                    biased;
+                    res = &mut chat_fut => break res?,
+                    () = tokio::time::sleep(std::time::Duration::from_millis(100)) => {
+                        super::provider_call::enforce_handle_provider_estop(
+                            &handle,
+                            self.model_provider,
+                            self.model,
+                        )?;
+                    }
+                }
+            }
+        } else {
+            reiclaw_api::TOOL_LOOP_ESTOP_HOST_GUARD
+                .scope(None, dispatcher.chat(request, self.model, self.temperature))
+                .await?
+        };
         // Record spend immediately after the call (before any caller-side output
         // validation) so a downstream failure still counts the provider usage.
         if let Some(usage) = resp.usage.as_ref() {
@@ -292,5 +332,92 @@ mod run_model_query_tests {
         let recorded = *turn_usage.lock();
         assert_eq!(recorded.input_tokens, 100);
         assert_eq!(recorded.output_tokens, 20);
+    }
+
+    #[tokio::test]
+    async fn run_model_query_enforces_network_kill_for_http_host_provider() {
+        use std::sync::atomic::{AtomicUsize, Ordering};
+
+        struct RemoteProvider(Arc<AtomicUsize>);
+
+        #[async_trait]
+        impl ModelProvider for RemoteProvider {
+            fn endpoint_host(&self) -> Option<String> {
+                Some("api.example.com".to_string())
+            }
+
+            async fn chat_with_system(
+                &self,
+                _system_prompt: Option<&str>,
+                _message: &str,
+                _model: &str,
+                _temperature: Option<f64>,
+            ) -> anyhow::Result<String> {
+                self.0.fetch_add(1, Ordering::SeqCst);
+                Ok("ok".to_string())
+            }
+
+            async fn chat(
+                &self,
+                _request: ChatRequest<'_>,
+                _model: &str,
+                _temperature: Option<f64>,
+            ) -> anyhow::Result<ChatResponse> {
+                self.0.fetch_add(1, Ordering::SeqCst);
+                Ok(ChatResponse {
+                    text: Some("ok".to_string()),
+                    tool_calls: Vec::new(),
+                    usage: None,
+                    reasoning_content: None,
+                })
+            }
+        }
+
+        impl Attributable for RemoteProvider {
+            fn role(&self) -> Role {
+                Role::Provider(ProviderKind::Model(ModelProviderKind::Custom))
+            }
+            fn alias(&self) -> &str {
+                "remote-provider"
+            }
+        }
+
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("estop-state.json");
+        std::fs::write(
+            &path,
+            serde_json::to_string(&reiclaw_policy::estop::EstopState {
+                kill_all: false,
+                network_kill: true,
+                blocked_domains: Vec::new(),
+                frozen_tools: Vec::new(),
+                updated_at: None,
+            })
+            .unwrap(),
+        )
+        .unwrap();
+        let handle = crate::security::estop::EstopHandle::for_path(path);
+        let calls = Arc::new(AtomicUsize::new(0));
+        let provider = RemoteProvider(Arc::clone(&calls));
+        let messages = [ChatMessage::user("hi")];
+        let access = ResolvedModelAccess {
+            model_provider: &provider,
+            provider_name: "custom",
+            model: "test-model",
+            temperature: None,
+        };
+        let err = super::CURRENT_TURN_ESTOP
+            .scope(
+                Some(handle),
+                access.run_model_query(ChatRequest {
+                    messages: &messages,
+                    tools: None,
+                    thinking: None,
+                }),
+            )
+            .await
+            .expect_err("network_kill must block HTTP host in run_model_query");
+        assert!(err.to_string().contains("network_kill"), "{err:#}");
+        assert_eq!(calls.load(Ordering::SeqCst), 0);
     }
 }

@@ -23,8 +23,7 @@ use super::{
     ResolvedModelAccess, ResolvedRuntimeKnobs, TOOL_LOOP_COST_TRACKING_CONTEXT, ToolLoop,
     agent_provider_composite, api_key_and_uri_for_provider, autosave_memory_key,
     build_system_prompt_for_turn, compute_excluded_mcp_tools, resolved_agent_for_turn,
-    retain_registered_tool_descriptions, run_tool_call_loop, scope_session_key,
-    synthetic_session_key_for_run,
+    retain_registered_tool_descriptions, scope_session_key, synthetic_session_key_for_run,
 };
 
 #[allow(clippy::too_many_lines, clippy::too_many_arguments)]
@@ -572,7 +571,8 @@ pub async fn run(
                     thinking_params.native_thinking,
                     TOOL_LOOP_COST_TRACKING_CONTEXT.scope(
                         cost_tracking_context.clone(),
-                        run_tool_call_loop(ToolLoop {
+                        crate::agent::turn::run_tool_call_loop_with_security(
+                            ToolLoop {
                             exec: ResolvedAgentExecution::resolve(
                                 ResolvedModelAccess {
                                     model_provider: model_provider.as_ref(),
@@ -635,7 +635,7 @@ pub async fn run(
                             agent_alias: Some(agent_alias),
                             parent_agent_alias: None,
                             turn_id: &turn_id,
-                        }),
+                        }, Some(&security)),
                     ),
                 )
                 .await?;
@@ -653,17 +653,20 @@ pub async fn run(
                     // internally when the provider call or its output is
                     // unusable. Default path stays the deterministic generator.
                     let creation_result = if config.skills.skill_creation.reflection_enabled {
-                        TOOL_LOOP_COST_TRACKING_CONTEXT
+                        crate::agent::turn::execution::CURRENT_TURN_ESTOP
                             .scope(
-                                cost_tracking_context.clone(),
-                                creator.create_from_execution_reflected(
-                                    &msg,
-                                    &tool_calls,
-                                    &response,
-                                    None,
-                                    &provider_name,
-                                    model_provider.as_ref(),
-                                    &model_name,
+                                security.estop_handle().cloned(),
+                                TOOL_LOOP_COST_TRACKING_CONTEXT.scope(
+                                    cost_tracking_context.clone(),
+                                    creator.create_from_execution_reflected(
+                                        &msg,
+                                        &tool_calls,
+                                        &response,
+                                        None,
+                                        &provider_name,
+                                        model_provider.as_ref(),
+                                        &model_name,
+                                    ),
                                 ),
                             )
                             .await

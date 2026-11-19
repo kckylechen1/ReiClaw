@@ -62,8 +62,18 @@ pub(crate) async fn record_executed_outcomes(
                 output: outcome.output.clone().into(),
                 error: None,
             };
-            hooks
-                .fire_after_tool_call(&call.name, &tool_result_obj, outcome.duration)
+            let hook_call_id = format!(
+                "{}:iter{}:idx{}:{}",
+                ctx.turn_id,
+                iteration,
+                idx,
+                call.tool_call_id.as_deref().unwrap_or("")
+            );
+            crate::hooks::CURRENT_HOOK_CALL_ID
+                .scope(
+                    hook_call_id,
+                    hooks.fire_after_tool_call(&call.name, &tool_result_obj, outcome.duration),
+                )
                 .await;
         }
 

@@ -671,6 +671,7 @@ impl OpenAiCompatibleModelProvider {
             }
 
             let builder = Client::builder()
+                .redirect(reqwest::redirect::Policy::none())
                 .timeout(std::time::Duration::from_secs(timeout))
                 .connect_timeout(std::time::Duration::from_secs(10))
                 .default_headers(headers);
@@ -688,11 +689,14 @@ impl OpenAiCompatibleModelProvider {
                         ),
                     "Failed to build proxied timeout client with custom headers or TLS certificate: "
                 );
-                Client::new()
+                Client::builder()
+                    .redirect(reqwest::redirect::Policy::none())
+                    .build()
+                    .unwrap_or_else(|_| Client::new())
             });
         }
 
-        reiclaw_http::build_runtime_proxy_client_with_timeouts(
+        reiclaw_http::build_runtime_proxy_client_with_timeouts_no_redirect(
             "model_provider.compatible",
             timeout,
             10,
@@ -736,6 +740,7 @@ impl OpenAiCompatibleModelProvider {
             }
 
             let builder = Client::builder()
+                .redirect(reqwest::redirect::Policy::none())
                 .connect_timeout(std::time::Duration::from_secs(10))
                 .read_timeout(STREAM_IDLE_TIMEOUT)
                 .default_headers(headers);
@@ -752,11 +757,15 @@ impl OpenAiCompatibleModelProvider {
                         ),
                     "Failed to build proxied streaming client with custom headers or TLS certificate: "
                 );
-                Client::new()
+                Client::builder()
+                    .redirect(reqwest::redirect::Policy::none())
+                    .build()
+                    .unwrap_or_else(|_| Client::new())
             });
         }
 
         let builder = Client::builder()
+            .redirect(reqwest::redirect::Policy::none())
             .connect_timeout(std::time::Duration::from_secs(10))
             .read_timeout(STREAM_IDLE_TIMEOUT);
         let builder = reiclaw_http::apply_runtime_proxy_to_builder(builder, "provider.compatible");
@@ -768,7 +777,10 @@ impl OpenAiCompatibleModelProvider {
                     .with_attrs(::serde_json::json!({"error": super::format_error_chain(&error)})),
                 "Failed to build proxied streaming client: "
             );
-            Client::new()
+            Client::builder()
+                .redirect(reqwest::redirect::Policy::none())
+                .build()
+                .unwrap_or_else(|_| Client::new())
         })
     }
 
@@ -2623,6 +2635,10 @@ impl OpenAiCompatibleModelProvider {
 
 #[async_trait]
 impl ModelProvider for OpenAiCompatibleModelProvider {
+    fn endpoint_host(&self) -> Option<String> {
+        crate::extract_endpoint_host(&self.base_url)
+    }
+
     fn set_credential(&self, key: Option<String>) -> bool {
         *self.credential.write() = key;
         true

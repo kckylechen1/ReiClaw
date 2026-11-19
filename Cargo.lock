@@ -2887,11 +2887,13 @@ name = "reiclaw-policy"
 version = "0.8.3"
 dependencies = [
  "anyhow",
+ "jiff",
  "parking_lot",
  "regex",
  "reiclaw-api",
  "reiclaw-config",
  "reiclaw-log",
+ "serde",
  "serde_json",
  "tempfile",
  "toml",

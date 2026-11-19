@@ -113,7 +113,15 @@ impl NodeRegistry {
                     return false;
                 };
                 let state = &mut socket.invocation;
+                let estop_allows = self.estop.as_ref().is_none_or(|estop| {
+                    state.pending.get(call_id).is_some_and(|p| {
+                        let tool_name = format!("node:{device}:{}", p.cap);
+                        estop.enforce_network(None).is_ok()
+                            && estop.enforce_tool(&tool_name).is_ok()
+                    })
+                });
                 let valid = !self.stopped.load(Ordering::SeqCst)
+                    && estop_allows
                     && reiclaw_api::time::parse_rfc3339(deadline)
                         .is_ok_and(|d| d > jiff::Timestamp::now())
                     && state.pending.get(call_id).is_some_and(|p| {
@@ -170,6 +178,15 @@ impl NodeRegistry {
         if !node_capability::invocable(cap).is_some_and(|spec| spec.validate_args(&args)) {
             return ToolResult::err("invalid_or_unsupported_capability");
         }
+        if let Some(ref estop) = self.estop {
+            if let Err(reason) = estop.enforce_network(None) {
+                return ToolResult::err(reason);
+            }
+            let tool_name = format!("node:{device}:{cap}");
+            if let Err(reason) = estop.enforce_tool(&tool_name) {
+                return ToolResult::err(reason);
+            }
+        }
         let snapshot = {
             let live = self.live.read();
             live.values()
@@ -203,6 +220,15 @@ impl NodeRegistry {
     ) -> ToolResult {
         if !node_capability::invocable(cap).is_some_and(|spec| spec.validate_args(&args)) {
             return ToolResult::err("invalid_or_unsupported_capability");
+        }
+        if let Some(ref estop) = self.estop {
+            if let Err(reason) = estop.enforce_network(None) {
+                return ToolResult::err(reason);
+            }
+            let tool_name = format!("node:{device}:{cap}");
+            if let Err(reason) = estop.enforce_tool(&tool_name) {
+                return ToolResult::err(reason);
+            }
         }
         let Some((bound_device, fingerprint)) = self.bound_identity(connection) else {
             return ToolResult::err("stale_connection");
@@ -466,5 +492,69 @@ mod tests {
             task.await.unwrap();
             assert_eq!(registry.pending_invocations(), 0);
         }
+    }
+
+    #[tokio::test]
+    async fn estop_blocks_node_invoke_and_queued_prepare_send() {
+        let dir = tempfile::tempdir().unwrap();
+        let state_path = dir.path().join("estop.json");
+        let handle = reiclaw_policy::estop::EstopHandle::for_path(state_path.clone());
+
+        let (registry, device, connection, mut wire) = queued_registry();
+        let registry = Arc::new(registry.with_estop(Some(handle)));
+
+        // Frozen node:<device>:<cap> blocks invoke before queuing.
+        let frozen = reiclaw_policy::estop::EstopState {
+            kill_all: false,
+            network_kill: false,
+            blocked_domains: Vec::new(),
+            frozen_tools: vec![format!("node:{device}:test.echo")],
+            updated_at: None,
+        };
+        std::fs::write(&state_path, serde_json::to_string(&frozen).unwrap()).unwrap();
+        let frozen_res = registry
+            .invoke(
+                &device,
+                &connection,
+                1,
+                "test.echo",
+                serde_json::json!({"text": ""}),
+            )
+            .await;
+        assert!(
+            frozen_res
+                .error
+                .as_deref()
+                .unwrap_or_default()
+                .contains("frozen")
+        );
+
+        // Clear state, enqueue frame, then engage network_kill before prepare_send runs.
+        std::fs::write(
+            &state_path,
+            serde_json::to_string(&reiclaw_policy::estop::EstopState::default()).unwrap(),
+        )
+        .unwrap();
+        let r = registry.clone();
+        let d = device.clone();
+        let c = connection.clone();
+        let task = ::reiclaw_log::spawn!(async move {
+            r.invoke(&d, &c, 1, "test.echo", serde_json::json!({"text": ""}))
+                .await
+        });
+        let frame = wire.recv().await.unwrap();
+        let net_kill = reiclaw_policy::estop::EstopState {
+            kill_all: false,
+            network_kill: true,
+            blocked_domains: Vec::new(),
+            frozen_tools: Vec::new(),
+            updated_at: None,
+        };
+        std::fs::write(&state_path, serde_json::to_string(&net_kill).unwrap()).unwrap();
+        assert!(!registry.prepare_send(&connection, &frame));
+        assert_eq!(
+            task.await.unwrap().error.as_deref(),
+            Some("before_send_refused")
+        );
     }
 }

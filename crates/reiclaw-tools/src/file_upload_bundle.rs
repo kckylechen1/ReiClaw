@@ -242,6 +242,18 @@ impl Tool for FileUploadBundleTool {
             });
         }
 
+        let target_host = reqwest::Url::parse(url)
+            .ok()
+            .and_then(|parsed| parsed.host_str().map(str::to_string));
+
+        if let Err(reason) = self.security.enforce_estop_network(target_host.as_deref()) {
+            return Ok(ToolResult {
+                success: false,
+                output: ToolOutput::default(),
+                error: Some(reason),
+            });
+        }
+
         if !self.security.can_act() {
             return Ok(ToolResult {
                 success: false,
@@ -483,11 +495,22 @@ impl Tool for FileUploadBundleTool {
             form = form.text("project_id", pid);
         }
 
-        let client = reiclaw_http::build_runtime_proxy_client_with_timeouts(
+        if let Err(reason) = self.security.enforce_estop_network(target_host.as_deref()) {
+            return Ok(ToolResult {
+                success: false,
+                output: ToolOutput::default(),
+                error: Some(reason),
+            });
+        }
+
+        let client = reiclaw_http::apply_runtime_proxy_to_builder(
+            reqwest::Client::builder()
+                .redirect(reqwest::redirect::Policy::none())
+                .timeout(std::time::Duration::from_secs(self.config.timeout_secs))
+                .connect_timeout(std::time::Duration::from_secs(10)),
             "tool.file_upload_bundle",
-            self.config.timeout_secs,
-            10,
-        );
+        )
+        .build()?;
 
         let mut request = if method == "PUT" {
             client.put(url)
@@ -1162,5 +1185,63 @@ mod tests {
             before_marker.bytes().all(|b| b == b'A'),
             "clipped body should be the leading 'A' run, got: {before_marker}"
         );
+    }
+
+    #[tokio::test]
+    async fn estop_blocks_bundle_upload_before_sending_requests() {
+        let tmp = TempDir::new().unwrap();
+        let file = tmp.path().join("payload.txt");
+        fs::write(&file, b"hello").unwrap();
+
+        let server = MockServer::start().await;
+        Mock::given(method("POST"))
+            .respond_with(ResponseTemplate::new(200))
+            .expect(0)
+            .mount(&server)
+            .await;
+
+        let estop_path = tmp.path().join("estop-state.json");
+        let net_kill = reiclaw_policy::estop::EstopState {
+            kill_all: false,
+            network_kill: true,
+            blocked_domains: Vec::new(),
+            frozen_tools: Vec::new(),
+            updated_at: None,
+        };
+        fs::write(&estop_path, serde_json::to_string(&net_kill).unwrap()).unwrap();
+        let mut sec = (*test_security(tmp.path().to_path_buf(), AutonomyLevel::Full)).clone();
+        sec.estop_state_path = Some(estop_path.clone());
+        sec.estop = Some(reiclaw_policy::estop::EstopHandle::for_path(
+            estop_path.clone(),
+        ));
+        let security = Arc::new(sec);
+
+        let config = FileUploadBundleConfig {
+            url: Some(format!("{}/upload_bundle", server.uri())),
+            ..FileUploadBundleConfig::default()
+        };
+        let tool = FileUploadBundleTool::new(security, config);
+        let res = tool
+            .execute(json!({ "file_paths": ["payload.txt"] }))
+            .await
+            .unwrap();
+        assert!(!res.success);
+        assert!(res.error.unwrap_or_default().contains("network_kill"));
+
+        // Switch to blocked domain (127.0.0.1 / localhost).
+        let blocked = reiclaw_policy::estop::EstopState {
+            kill_all: false,
+            network_kill: false,
+            blocked_domains: vec!["127.0.0.1".into(), "localhost".into()],
+            frozen_tools: Vec::new(),
+            updated_at: None,
+        };
+        fs::write(&estop_path, serde_json::to_string(&blocked).unwrap()).unwrap();
+        let res = tool
+            .execute(json!({ "file_paths": ["payload.txt"] }))
+            .await
+            .unwrap();
+        assert!(!res.success);
+        assert!(res.error.unwrap_or_default().contains("blocked"));
     }
 }

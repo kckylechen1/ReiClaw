@@ -20,6 +20,42 @@ pub struct OtpValidator {
 }
 
 impl OtpValidator {
+    /// Load an already-enrolled OTP secret without generating a new one.
+    /// Fails closed when missing or corrupted.
+    pub fn load_existing(
+        config: &OtpConfig,
+        zeroclaw_dir: &Path,
+        store: &SecretStore,
+    ) -> Result<Self> {
+        let secret_path = secret_file_path(zeroclaw_dir);
+        let encoded = match fs::read_to_string(&secret_path) {
+            Ok(raw) => raw,
+            Err(err) if err.kind() == std::io::ErrorKind::NotFound => {
+                anyhow::bail!(
+                    "OTP secret not initialized at {}; run `rei estop otp-init` first",
+                    secret_path.display()
+                );
+            }
+            Err(err) => {
+                return Err(err).with_context(|| {
+                    format!(
+                        "Failed to read OTP secret file {}",
+                        secret_path.display().to_string()
+                    )
+                });
+            }
+        };
+        let decrypted = store
+            .decrypt_existing(encoded.trim())
+            .context("Failed to decrypt OTP secret file")?;
+        let secret = decode_base32_secret(&decrypted)?;
+        Ok(Self {
+            config: config.clone(),
+            secret,
+            cached_codes: Mutex::new(HashMap::new()),
+        })
+    }
+
     pub fn from_config(
         config: &OtpConfig,
         zeroclaw_dir: &Path,
@@ -233,6 +269,9 @@ fn decode_base32_secret(raw: &str) -> Result<Vec<u8>> {
     if cleaned.is_empty() {
         anyhow::bail!("OTP secret is empty");
     }
+    if matches!(cleaned.len() % 8, 1 | 3 | 6) {
+        anyhow::bail!("OTP secret has invalid base32 length");
+    }
 
     let mut output = Vec::new();
     let mut buffer = 0u32;
@@ -251,8 +290,14 @@ fn decode_base32_secret(raw: &str) -> Result<Vec<u8>> {
         }
     }
 
-    if output.is_empty() {
-        anyhow::bail!("OTP secret did not decode to any bytes");
+    if bits_left > 0 && (buffer & ((1u32 << bits_left) - 1)) != 0 {
+        anyhow::bail!("OTP secret contains non-zero trailing padding bits");
+    }
+    if output.len() != 20 {
+        anyhow::bail!(
+            "OTP secret must decode to exactly 20 bytes (got {} bytes)",
+            output.len()
+        );
     }
     Ok(output)
 }
@@ -321,5 +366,52 @@ mod tests {
 
         let ts = 1_700_000_000u64;
         assert_eq!(first.code_for_timestamp(ts), second.code_for_timestamp(ts));
+    }
+
+    #[test]
+    fn load_existing_fails_closed_without_creating_secret() {
+        let dir = tempdir().unwrap();
+        let store = SecretStore::new(dir.path(), true);
+        let err = OtpValidator::load_existing(&test_config(), dir.path(), &store)
+            .expect_err("missing otp-secret must fail closed");
+        assert!(err.to_string().contains("otp-init"));
+        assert!(!secret_file_path(dir.path()).exists());
+    }
+
+    #[test]
+    fn load_existing_with_missing_or_corrupt_secret_key_leaves_dir_untouched() {
+        let dir = tempdir().unwrap();
+        let secret_path = secret_file_path(dir.path());
+        fs::write(&secret_path, "enc2:000102030405060708090a0b0c0d0e0f1011").unwrap();
+
+        let store = SecretStore::new(dir.path(), true);
+        let err = OtpValidator::load_existing(&test_config(), dir.path(), &store)
+            .expect_err("missing .secret_key must fail");
+        assert!(!err.to_string().is_empty());
+        assert!(!dir.path().join(".secret_key").exists());
+
+        fs::write(dir.path().join(".secret_key"), "deadbeef").unwrap();
+        let short_err = OtpValidator::load_existing(&test_config(), dir.path(), &store)
+            .expect_err("short .secret_key must fail");
+        assert!(!short_err.to_string().is_empty());
+        assert_eq!(
+            fs::read_to_string(dir.path().join(".secret_key")).unwrap(),
+            "deadbeef"
+        );
+    }
+
+    #[test]
+    fn decode_base32_rejects_truncated_secrets_and_nonzero_tail_bits() {
+        // Invalid base32 lengths (1, 3, 6 mod 8)
+        assert!(decode_base32_secret("A").is_err());
+        assert!(decode_base32_secret("ABC").is_err());
+        assert!(decode_base32_secret("ABCDEF").is_err());
+        // Non-zero trailing padding bits in 2-char (10-bit -> 8-bit + 2 pad bits) base32
+        assert!(decode_base32_secret("AB").is_err());
+        // Valid 10-byte secret is rejected because 20 bytes are required
+        assert!(decode_base32_secret("JBSWY3DPEBLW64TM").is_err());
+        // Valid 20-byte RFC 6238 secret passes
+        let decoded = decode_base32_secret("GEZDGNBVGY3TQOJQGEZDGNBVGY3TQOJQ").unwrap();
+        assert_eq!(decoded.len(), 20);
     }
 }

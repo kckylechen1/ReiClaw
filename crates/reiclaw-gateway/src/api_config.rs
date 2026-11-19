@@ -790,6 +790,33 @@ pub async fn handle_prop_get(
     }
 }
 
+fn is_immutable_security_control_path(path: &str) -> bool {
+    let normalized = path.trim().trim_matches('.');
+    normalized.eq_ignore_ascii_case("security")
+        || normalized.eq_ignore_ascii_case("security.estop")
+        || normalized
+            .get(..15)
+            .is_some_and(|p| p.eq_ignore_ascii_case("security.estop."))
+        || normalized.eq_ignore_ascii_case("security.otp")
+        || normalized
+            .get(..13)
+            .is_some_and(|p| p.eq_ignore_ascii_case("security.otp."))
+}
+
+fn reject_immutable_security_control_path(path: &str) -> Option<Response> {
+    if is_immutable_security_control_path(path) {
+        Some(error_response(
+            ConfigApiError::new(
+                ConfigApiCode::ValidationFailed,
+                "security.estop and security.otp cannot be modified via the gateway config API; edit config.toml locally and use `rei estop`",
+            )
+            .with_path(path),
+        ))
+    } else {
+        None
+    }
+}
+
 pub async fn handle_prop_put(
     ConnectInfo(peer): ConnectInfo<SocketAddr>,
     State(state): State<AppState>,
@@ -798,6 +825,9 @@ pub async fn handle_prop_put(
 ) -> Response {
     if let Err(e) = require_auth(&state, &headers) {
         return e.into_response();
+    }
+    if let Some(resp) = reject_immutable_security_control_path(&body.path) {
+        return resp;
     }
 
     let _cfg_guard = Arc::clone(&state.config_write_lock).lock_owned().await;
@@ -900,6 +930,9 @@ pub async fn handle_prop_delete(
 ) -> Response {
     if let Err(e) = require_auth(&state, &headers) {
         return e.into_response();
+    }
+    if let Some(resp) = reject_immutable_security_control_path(&q.path) {
+        return resp;
     }
 
     let _cfg_guard = Arc::clone(&state.config_write_lock).lock_owned().await;
@@ -1968,6 +2001,12 @@ pub async fn handle_patch(
         Ok(ops) => ops,
         Err(e) => return error_response(e),
     };
+    for op in &ops {
+        let dotted = json_pointer_to_dotted(&op.path);
+        if let Some(resp) = reject_immutable_security_control_path(&dotted) {
+            return resp;
+        }
+    }
 
     let _cfg_guard = Arc::clone(&state.config_write_lock).lock_owned().await;
     let working = state.config.read().clone();
@@ -2531,6 +2570,7 @@ mod tests {
             pending_reload: Arc::new(std::sync::atomic::AtomicBool::new(false)),
             ws_conversations: Default::default(),
             bridge_sockets: Default::default(),
+            hooks: None,
         }
     }
 
@@ -5292,5 +5332,64 @@ mod tests {
             .await
             .unwrap();
         assert!(state.config.read().tasks.reminder_target.is_none());
+    }
+
+    #[tokio::test]
+    async fn config_api_rejects_security_estop_and_otp_even_when_unpaired() {
+        let tmp = tempfile::tempdir().unwrap();
+        let mut config = temp_config(&tmp);
+        config.gateway.require_pairing = false;
+        config.save().await.unwrap();
+        let state = test_state(config);
+        let peer: SocketAddr = "127.0.0.1:12345".parse().unwrap();
+        let headers = HeaderMap::new();
+
+        for path in [
+            "security.estop.enabled",
+            "security.estop.state_file",
+            "security.otp.enabled",
+            "security",
+        ] {
+            let put_resp = handle_prop_put(
+                ConnectInfo(peer),
+                State(state.clone()),
+                headers.clone(),
+                axum::Json(PropPutBody {
+                    path: path.to_string(),
+                    value: serde_json::json!(false),
+                    comment: None,
+                }),
+            )
+            .await;
+            assert!(
+                !put_resp.status().is_success(),
+                "PUT {path} must be rejected even when require_pairing = false"
+            );
+
+            let del_resp = handle_prop_delete(
+                ConnectInfo(peer),
+                State(state.clone()),
+                headers.clone(),
+                Query(PropQuery {
+                    path: path.to_string(),
+                }),
+            )
+            .await;
+            assert!(
+                !del_resp.status().is_success(),
+                "DELETE {path} must be rejected even when require_pairing = false"
+            );
+        }
+
+        let patch_resp = handle_patch(
+            ConnectInfo(peer),
+            State(state.clone()),
+            headers,
+            axum::Json(serde_json::json!([
+                { "op": "replace", "path": "/security/estop/enabled", "value": false }
+            ])),
+        )
+        .await;
+        assert!(!patch_resp.status().is_success());
     }
 }

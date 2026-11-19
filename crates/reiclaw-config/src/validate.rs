@@ -13,6 +13,96 @@ use crate::schema::{
 };
 use crate::validation_bail;
 use anyhow::{Context, Result};
+use std::net::IpAddr;
+
+/// Validate a `webhook_audit` destination URL against scheme and SSRF rules.
+pub fn validate_webhook_audit_url(url: &str) -> std::result::Result<(), String> {
+    let parsed = url::Url::parse(url).map_err(|e| format!("invalid webhook URL: {e}"))?;
+
+    let scheme = parsed.scheme();
+    let host_str = parsed.host_str().unwrap_or("");
+
+    // Scheme check: require https, allow http only for localhost in debug builds.
+    let is_localhost = host_str == "localhost" || host_str == "127.0.0.1" || host_str == "::1";
+
+    if scheme != "https" {
+        if scheme == "http" && is_localhost && cfg!(debug_assertions) {
+            // Allow http://localhost in dev/debug builds.
+        } else {
+            return Err(format!(
+                "webhook URL must use https:// scheme (got {scheme}://)"
+            ));
+        }
+    }
+
+    // Resolve the host to check for private/loopback/link-local IPs.
+    if let Some(host) = parsed.host_str() {
+        // Strip brackets from IPv6 literals.
+        let bare = host.trim_start_matches('[').trim_end_matches(']');
+        if let Ok(ip) = bare.parse::<IpAddr>() {
+            validate_webhook_resolved_ip(ip)?;
+        } else if bare == "localhost" && !(cfg!(debug_assertions) && scheme == "http") {
+            return Err("webhook URL must not target localhost".to_string());
+        }
+    }
+
+    Ok(())
+}
+
+/// Reject loopback, private, link-local, unspecified, CGNAT, and mapped IP addresses for webhook audit delivery.
+pub fn validate_webhook_resolved_ip(addr: IpAddr) -> std::result::Result<(), String> {
+    match addr {
+        IpAddr::V4(ip) => {
+            if ip.is_unspecified() {
+                return Err(format!(
+                    "webhook URL must not target unspecified address ({ip})"
+                ));
+            }
+            if ip.is_loopback() {
+                return Err(format!(
+                    "webhook URL must not target loopback address ({ip})"
+                ));
+            }
+            let octets = ip.octets();
+            if octets[0] == 10
+                || (octets[0] == 172 && (octets[1] & 0xf0) == 16)
+                || (octets[0] == 192 && octets[1] == 168)
+                || (octets[0] == 100 && (octets[1] & 0xc0) == 64)
+            {
+                return Err(format!(
+                    "webhook URL must not target private address ({ip})"
+                ));
+            }
+            if octets[0] == 169 && octets[1] == 254 {
+                return Err(format!(
+                    "webhook URL must not target link-local address ({ip})"
+                ));
+            }
+        }
+        IpAddr::V6(ip) => {
+            if let Some(mapped) = ip.to_ipv4_mapped() {
+                return validate_webhook_resolved_ip(IpAddr::V4(mapped));
+            }
+            if ip.is_unspecified() {
+                return Err(format!(
+                    "webhook URL must not target unspecified address ({ip})"
+                ));
+            }
+            if ip.is_loopback() {
+                return Err(format!(
+                    "webhook URL must not target loopback address ({ip})"
+                ));
+            }
+            let segments = ip.segments();
+            if (segments[0] & 0xffc0) == 0xfe80 || (segments[0] & 0xfe00) == 0xfc00 {
+                return Err(format!(
+                    "webhook URL must not target link-local/private address ({ip})"
+                ));
+            }
+        }
+    }
+    Ok(())
+}
 
 pub(crate) const SUPPORTED_PROXY_SERVICE_KEYS: &[&str] = &[
     "model_provider.anthropic",
@@ -1626,6 +1716,17 @@ impl Config {
                 RequiredFieldEmpty,
                 "security.estop.state_file",
                 "security.estop.state_file must not be empty"
+            );
+        }
+        if self.hooks.enabled
+            && self.hooks.builtin.webhook_audit.enabled
+            && !self.hooks.builtin.webhook_audit.url.trim().is_empty()
+            && let Err(reason) = validate_webhook_audit_url(&self.hooks.builtin.webhook_audit.url)
+        {
+            validation_bail!(
+                InvalidFormat,
+                "hooks.builtin.webhook_audit.url",
+                "hooks.builtin.webhook_audit.url is invalid: {reason}"
             );
         }
         if !(0.0..=1.0).contains(&self.security.leak_detection.sensitivity) {

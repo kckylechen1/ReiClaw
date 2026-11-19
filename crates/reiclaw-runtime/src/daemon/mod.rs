@@ -890,7 +890,32 @@ async fn connect_heartbeat_mcp_registry(
     // the "construct the registry once per worker" guarantee
     // still holds whenever the registry IS reachable — the healthy
     // case this targets.
-    match crate::tools::McpRegistry::connect_all(&servers).await {
+    let policy = match crate::security::SecurityPolicy::for_agent(config, agent_alias) {
+        Ok(policy) => policy,
+        Err(e) => {
+            ::reiclaw_log::record!(
+                ERROR,
+                ::reiclaw_log::Event::new(module_path!(), ::reiclaw_log::Action::Reject)
+                    .with_outcome(::reiclaw_log::EventOutcome::Failure)
+                    .with_attrs(::serde_json::json!({
+                        "agent": agent_alias,
+                        "error": format!("{:#}", e),
+                    })),
+                "heartbeat worker: failed to resolve agent SecurityPolicy; skipping MCP connection"
+            );
+            return Ok(None);
+        }
+    };
+    let estop = policy.estop_handle().cloned().or_else(|| {
+        config.security.estop.enabled.then(|| {
+            let config_dir = config
+                .config_path
+                .parent()
+                .unwrap_or_else(|| std::path::Path::new("."));
+            crate::security::estop::EstopHandle::for_config(&config.security.estop, config_dir)
+        })
+    });
+    match crate::tools::McpRegistry::connect_all_with_estop(&servers, estop).await {
         Ok(registry) => Ok(Some(std::sync::Arc::new(registry))),
         Err(e) => {
             ::reiclaw_log::record!(

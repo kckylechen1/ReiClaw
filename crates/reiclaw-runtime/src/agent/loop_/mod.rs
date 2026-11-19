@@ -96,7 +96,9 @@ pub use super::tool_execution::{ToolExecutionOutcome, should_execute_tools_in_pa
 pub use self::agent_turn::agent_turn;
 
 // Run overrides / resolve helpers moved to `run_overrides`.
-pub use self::process_message::{process_message, process_message_with_task_identity};
+pub use self::process_message::{
+    process_message, process_message_with_hooks, process_message_with_task_identity,
+};
 pub use self::run::run;
 pub use self::run_overrides::AgentRunOverrides;
 #[cfg(all(test, feature = "heavy-tests"))]
@@ -120,7 +122,7 @@ pub use super::turn::{
     DraftEvent, LoopKnobs, MaxIterationBehavior, PROGRESS_MIN_INTERVAL_MS, ResolvedAgentExecution,
     ResolvedIo, ResolvedModelAccess, ResolvedRuntimeKnobs, StreamDelta, ToolLoop,
     ToolLoopCancelled, drain_steering_messages, is_tool_loop_cancelled, run_tool_call_loop,
-    scrub_credentials,
+    run_tool_call_loop_with_security, scrub_credentials,
 };
 
 // Heavy suite gated so lib-test iteration does not pay 13.9k lines; CI runtime leg enables it.

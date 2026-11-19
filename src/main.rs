@@ -984,6 +984,8 @@ enum SecurityCommands {
 enum EstopSubcommands {
     /// Print current estop status.
     Status,
+    /// Initialize or inspect the local OTP enrollment secret for estop resume.
+    OtpInit,
     /// Resume from an engaged estop level.
     Resume {
         /// Resume only network kill.
@@ -1452,20 +1454,6 @@ async fn async_main(command: clap::Command) -> Result<()> {
     warn_verifiable_intent_withheld(&config);
     #[cfg(feature = "agent-runtime")]
     warn_withheld_operator_tools(&config);
-    #[cfg(feature = "agent-runtime")]
-    if config.security.otp.enabled {
-        let config_dir = config
-            .config_path
-            .parent()
-            .context("Config path must have a parent directory")?;
-        let store = security::SecretStore::new(config_dir, config.secrets.encrypt);
-        let (_validator, enrollment_uri) =
-            security::OtpValidator::from_config(&config.security.otp, config_dir, &store)?;
-        if let Some(uri) = enrollment_uri {
-            println!("Initialized OTP secret for ReiClaw.");
-            println!("Enrollment URI: {uri}");
-        }
-    }
 
     #[cfg(not(feature = "agent-runtime"))]
     {
@@ -2328,14 +2316,34 @@ fn handle_estop_command(
     domains: Vec<String>,
     tools: Vec<String>,
 ) -> Result<()> {
-    if !config.security.estop.enabled {
-        bail!("Emergency stop is disabled. Enable [security.estop].enabled = true in config.toml");
-    }
-
     let config_dir = config
         .config_path
         .parent()
         .context("Config path must have a parent directory")?;
+
+    if matches!(estop_command, Some(EstopSubcommands::OtpInit)) {
+        if !config.security.otp.enabled {
+            bail!("OTP is disabled. Enable [security.otp].enabled = true in config.toml");
+        }
+        let store = security::SecretStore::new(config_dir, config.secrets.encrypt);
+        let (_validator, enrollment_uri) =
+            security::OtpValidator::from_config(&config.security.otp, config_dir, &store)?;
+        if let Some(uri) = enrollment_uri {
+            println!("Initialized OTP secret for ReiClaw.");
+            println!("Enrollment URI: {uri}");
+        } else {
+            let secret_path = security::otp::secret_file_path(config_dir)
+                .display()
+                .to_string();
+            println!("OTP secret is already initialized at {secret_path}.");
+        }
+        return Ok(());
+    }
+
+    if !config.security.estop.enabled {
+        bail!("Emergency stop is disabled. Enable [security.estop].enabled = true in config.toml");
+    }
+
     let mut manager = security::EstopManager::load(&config.security.estop, config_dir)?;
 
     match estop_command {
@@ -2343,6 +2351,7 @@ fn handle_estop_command(
             print_estop_status(&manager.status());
             Ok(())
         }
+        Some(EstopSubcommands::OtpInit) => unreachable!("handled above"),
         Some(EstopSubcommands::Resume {
             network,
             domains,
@@ -2366,12 +2375,11 @@ fn handle_estop_command(
                 }
 
                 let store = security::SecretStore::new(config_dir, config.secrets.encrypt);
-                let (validator, enrollment_uri) =
-                    security::OtpValidator::from_config(&config.security.otp, config_dir, &store)?;
-                if let Some(uri) = enrollment_uri {
-                    println!("Initialized OTP secret for ReiClaw.");
-                    println!("Enrollment URI: {uri}");
-                }
+                let validator = security::OtpValidator::load_existing(
+                    &config.security.otp,
+                    config_dir,
+                    &store,
+                )?;
                 Some(validator)
             } else {
                 None
@@ -2385,7 +2393,8 @@ fn handle_estop_command(
         None => {
             let engage_level = build_engage_level(level, domains, tools)?;
             manager.engage(engage_level)?;
-            println!("Estop engaged.");
+            let state_path = manager.state_path().display().to_string();
+            println!("Estop state persisted to {state_path} (active runtimes enforce on check).");
             print_estop_status(&manager.status());
             Ok(())
         }

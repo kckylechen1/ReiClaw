@@ -95,12 +95,23 @@ pub(crate) async fn prepare_tool_calls(
     let mut prompt_approval_tool_signatures_this_round: HashSet<(String, String)> = HashSet::new();
 
     for (idx, call) in tool_calls.iter().enumerate() {
+        super::provider_call::enforce_ctx_estop_not_killed(ctx)?;
         // ── Hook: before_tool_call (modifying) ──────────
         let mut tool_name = call.name.clone();
         let mut tool_args = call.arguments.clone();
         if let Some(hooks) = ctx.hooks {
-            match hooks
-                .run_before_tool_call(tool_name.clone(), tool_args.clone())
+            let hook_call_id = format!(
+                "{}:iter{}:idx{}:{}",
+                ctx.turn_id,
+                iteration,
+                idx,
+                call.tool_call_id.as_deref().unwrap_or("")
+            );
+            match crate::hooks::CURRENT_HOOK_CALL_ID
+                .scope(
+                    hook_call_id,
+                    hooks.run_before_tool_call(tool_name.clone(), tool_args.clone()),
+                )
                 .await
             {
                 crate::hooks::HookResult::Cancel(reason) => {
@@ -177,6 +188,71 @@ pub(crate) async fn prepare_tool_calls(
         // execution must agree on the actual tool identity (including always_ask).
         if let Some(canonical_name) = dispatch_tool_name(&tool_name, dispatch) {
             tool_name = canonical_name;
+        }
+
+        if let Some(security) = ctx.security {
+            super::provider_call::enforce_ctx_estop_not_killed(ctx)?;
+            let frozen_reason = security.enforce_estop_tool(&tool_name).err().or_else(|| {
+                (call.name != tool_name)
+                    .then(|| security.enforce_estop_tool(&call.name).err())
+                    .flatten()
+            });
+            if let Some(reason) = frozen_reason {
+                super::provider_call::enforce_ctx_estop_not_killed(ctx)?;
+                let full_args = super::redact::scrub_credentials_json(&tool_args);
+                let tool_call_id_owned = call.tool_call_id.clone();
+                let meta = ctx.meta();
+                ctx.observer
+                    .record_event(&crate::observability::ObserverEvent::ToolCallStart {
+                        tool: tool_name.clone(),
+                        tool_call_id: tool_call_id_owned.clone(),
+                        arguments: Some(full_args.clone()),
+                        channel: Some(meta.channel_name.to_string()),
+                        agent_alias: meta.agent_alias.map(str::to_string),
+                        parent_agent_alias: meta.parent_agent_alias.map(str::to_string),
+                        turn_id: Some(meta.turn_id.to_string()),
+                    });
+                ctx.observer
+                    .record_event(&crate::observability::ObserverEvent::ToolCall {
+                        tool: tool_name.clone(),
+                        tool_call_id: tool_call_id_owned.clone(),
+                        duration: Duration::ZERO,
+                        success: false,
+                        arguments: Some(full_args),
+                        result: Some(scrub_credentials(&reason)),
+                        channel: Some(meta.channel_name.to_string()),
+                        agent_alias: meta.agent_alias.map(str::to_string),
+                        parent_agent_alias: meta.parent_agent_alias.map(str::to_string),
+                        turn_id: Some(meta.turn_id.to_string()),
+                    });
+                if let Some(tx) = ctx.on_delta {
+                    let _ = tx
+                        .send(StreamDelta::Status(format!(
+                            "\u{274c} {}: {}\n",
+                            tool_name,
+                            truncate_with_ellipsis(&scrub_credentials(&reason), 200)
+                        )))
+                        .await;
+                }
+                let outcome = ToolExecutionOutcome {
+                    output: reason.clone(),
+                    success: false,
+                    error_reason: Some(reason),
+                    duration: Duration::ZERO,
+                    receipt: None,
+                };
+                if let Some(tx) = ctx.event_tx {
+                    let prepared_call = ParsedToolCall {
+                        name: tool_name.clone(),
+                        arguments: tool_args.clone(),
+                        tool_call_id: tool_call_id_owned,
+                    };
+                    emit_tool_call_pair(tx, &prepared_call, &outcome).await;
+                }
+                ordered_results[idx] =
+                    Some((tool_name.clone(), call.tool_call_id.clone(), outcome));
+                continue;
+            }
         }
 
         maybe_inject_channel_delivery_defaults(

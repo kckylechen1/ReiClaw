@@ -317,6 +317,37 @@ async fn execute_one_tool_with_provenance(
     });
     let start = Instant::now();
 
+    if let Some(estop) = super::turn::execution::current_turn_estop() {
+        estop.enforce_not_killed().map_err(|msg| {
+            anyhow::Error::new(super::turn::provider_call::EstopAbortedError(msg))
+        })?;
+        if let Err(reason) = estop.enforce_tool(call_name) {
+            let outcome = ToolExecutionOutcome {
+                output: reason.clone(),
+                success: false,
+                error_reason: Some(reason),
+                duration: start.elapsed(),
+                receipt: None,
+            };
+            observer.record_event(&ObserverEvent::ToolCall {
+                tool: call_name.to_string(),
+                tool_call_id: tool_call_id_owned,
+                duration: outcome.duration,
+                success: false,
+                arguments: Some(full_args),
+                result: Some(scrub_credentials(&outcome.output)),
+                channel: Some(meta.channel_name.to_string()),
+                agent_alias: meta.agent_alias.map(str::to_string),
+                parent_agent_alias: meta.parent_agent_alias.map(str::to_string),
+                turn_id: Some(meta.turn_id.to_string()),
+            });
+            return Ok(CompletedToolExecution {
+                executed_tool_name: None,
+                outcome,
+            });
+        }
+    }
+
     if is_excluded_tool(call_name, dispatch.excluded_tools) {
         return Ok(CompletedToolExecution {
             executed_tool_name: None,
@@ -353,6 +384,37 @@ async fn execute_one_tool_with_provenance(
         });
     };
     let tool = resolved.tool();
+
+    if let Some(estop) = super::turn::execution::current_turn_estop() {
+        estop.enforce_not_killed().map_err(|msg| {
+            anyhow::Error::new(super::turn::provider_call::EstopAbortedError(msg))
+        })?;
+        if let Err(reason) = estop.enforce_tool(tool.name()) {
+            let outcome = ToolExecutionOutcome {
+                output: reason.clone(),
+                success: false,
+                error_reason: Some(reason),
+                duration: start.elapsed(),
+                receipt: None,
+            };
+            observer.record_event(&ObserverEvent::ToolCall {
+                tool: call_name.to_string(),
+                tool_call_id: tool_call_id_owned,
+                duration: outcome.duration,
+                success: false,
+                arguments: Some(full_args),
+                result: Some(scrub_credentials(&outcome.output)),
+                channel: Some(meta.channel_name.to_string()),
+                agent_alias: meta.agent_alias.map(str::to_string),
+                parent_agent_alias: meta.parent_agent_alias.map(str::to_string),
+                turn_id: Some(meta.turn_id.to_string()),
+            });
+            return Ok(CompletedToolExecution {
+                executed_tool_name: None,
+                outcome,
+            });
+        }
+    }
 
     if is_excluded_tool(tool.name(), dispatch.excluded_tools) {
         return Ok(CompletedToolExecution {
@@ -415,17 +477,54 @@ async fn execute_one_tool_with_provenance(
             .await;
     }
 
+    let estop = super::turn::execution::current_turn_estop();
+    let resolved_tool_name = tool.name().to_string();
     let tool_future = tool
         .execute(call_arguments.clone())
         .instrument(tool_span.clone());
+    tokio::pin!(tool_future);
     let execute = async {
-        if let Some(token) = cancellation_token {
-            tokio::select! {
-                () = token.cancelled() => Err::<_, anyhow::Error>(ToolLoopCancelled.into()),
-                result = tool_future => Ok(result),
+        loop {
+            if let Some(ref handle) = estop {
+                handle.enforce_not_killed().map_err(|msg| {
+                    anyhow::Error::new(super::turn::provider_call::EstopAbortedError(msg))
+                })?;
+                if let Err(reason) = handle
+                    .enforce_tool(call_name)
+                    .and_then(|()| handle.enforce_tool(&resolved_tool_name))
+                {
+                    return Ok(Ok(reiclaw_api::tool::ToolResult {
+                        success: false,
+                        output: reiclaw_api::tool::ToolOutput::default(),
+                        error: Some(reason),
+                    }));
+                }
             }
-        } else {
-            Ok(tool_future.await)
+
+            if estop.is_some() {
+                let poll = tokio::time::sleep(Duration::from_millis(100));
+                if let Some(token) = cancellation_token {
+                    tokio::select! {
+                        biased;
+                        () = token.cancelled() => return Err::<_, anyhow::Error>(ToolLoopCancelled.into()),
+                        result = &mut tool_future => return Ok(result),
+                        _ = poll => continue,
+                    }
+                } else {
+                    tokio::select! {
+                        biased;
+                        result = &mut tool_future => return Ok(result),
+                        _ = poll => continue,
+                    }
+                }
+            } else if let Some(token) = cancellation_token {
+                tokio::select! {
+                    () = token.cancelled() => return Err::<_, anyhow::Error>(ToolLoopCancelled.into()),
+                    result = &mut tool_future => return Ok(result),
+                }
+            } else {
+                return Ok((&mut tool_future).await);
+            }
         }
     };
     let tool_result = execute.await?;

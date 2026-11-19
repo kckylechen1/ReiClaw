@@ -239,6 +239,17 @@ impl Tool for FileDownloadTool {
             });
         }
 
+        let url_host = reqwest::Url::parse(url)
+            .ok()
+            .and_then(|parsed| parsed.host_str().map(str::to_string));
+        if let Err(message) = self.security.enforce_estop_network(url_host.as_deref()) {
+            return Ok(ToolResult {
+                success: false,
+                output: ToolOutput::default(),
+                error: Some(message),
+            });
+        }
+
         // Debit the action budget only once the request is validated, mirroring
         // file_upload — right before the network call.
         if !self.security.record_action() {

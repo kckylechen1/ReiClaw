@@ -115,12 +115,23 @@ impl WebFetchTool {
         let blocked_domains = self.blocked_domains.clone();
         let allowed_private_hosts = self.allowed_private_hosts.clone();
         let pinned_host = target.host.clone();
+        let estop = self.security.estop_handle().cloned();
         let rejected = Arc::new(AtomicBool::new(false));
         let rejected_by_policy = Arc::clone(&rejected);
         let redirect_policy = reqwest::redirect::Policy::custom(move |attempt| {
             if attempt.previous().len() >= 10 {
                 rejected_by_policy.store(true, Ordering::Relaxed);
                 return attempt.error(std::io::Error::other("Too many redirects (max 10)"));
+            }
+
+            if let Some(ref handle) = estop
+                && let Err(err) = handle.enforce_network(attempt.url().host_str())
+            {
+                rejected_by_policy.store(true, Ordering::Relaxed);
+                return attempt.error(std::io::Error::new(
+                    std::io::ErrorKind::PermissionDenied,
+                    err,
+                ));
             }
 
             if attempt.url().host_str() != Some(pinned_host.as_str()) {
@@ -249,6 +260,18 @@ impl WebFetchTool {
         api_key: &str,
     ) -> anyhow::Result<ToolResult> {
         let endpoint = format!("{}/scrape", self.firecrawl.api_url.trim_end_matches('/'));
+        let target_host = reqwest::Url::parse(url)
+            .ok()
+            .and_then(|parsed| parsed.host_str().map(str::to_string));
+        let endpoint_host = reqwest::Url::parse(&endpoint)
+            .ok()
+            .and_then(|parsed| parsed.host_str().map(str::to_string));
+        self.security
+            .enforce_estop_network(target_host.as_deref())
+            .map_err(anyhow::Error::msg)?;
+        self.security
+            .enforce_estop_network(endpoint_host.as_deref())
+            .map_err(anyhow::Error::msg)?;
 
         let client = reqwest::Client::builder()
             .timeout(Duration::from_secs(60))
@@ -370,6 +393,17 @@ impl WebFetchTool {
 
     /// Perform the standard HTTP GET fetch and convert to text.
     async fn standard_fetch(&self, client: &reqwest::Client, url: &str) -> ToolResult {
+        let parsed_host = reqwest::Url::parse(url)
+            .ok()
+            .and_then(|parsed| parsed.host_str().map(str::to_string));
+        if let Err(err) = self.security.enforce_estop_network(parsed_host.as_deref()) {
+            return ToolResult {
+                success: false,
+                output: ToolOutput::default(),
+                error: Some(err),
+            };
+        }
+
         let response = match client.get(url).send().await {
             Ok(r) => r,
             Err(e) => {
@@ -490,6 +524,14 @@ impl Tool for WebFetchTool {
             });
         }
 
+        if let Err(err) = self.security.enforce_estop_network(None) {
+            return Ok(ToolResult {
+                success: false,
+                output: ToolOutput::default(),
+                error: Some(err),
+            });
+        }
+
         // Rate limiting is applied by the RateLimitedTool wrapper at
         // registration time (see zeroclaw-runtime::tools::mod).
 
@@ -529,6 +571,14 @@ impl Tool for WebFetchTool {
                 });
             }
         };
+
+        if let Err(err) = self.security.enforce_estop_network(Some(&target.host)) {
+            return Ok(ToolResult {
+                success: false,
+                output: ToolOutput::default(),
+                error: Some(err),
+            });
+        }
 
         let url = target.url.clone();
         let (client, redirect_policy_rejected) =

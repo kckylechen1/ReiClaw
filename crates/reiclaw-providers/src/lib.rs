@@ -48,6 +48,12 @@ const QWEN_OAUTH_PLACEHOLDER: &str = "qwen-oauth";
 const QWEN_OAUTH_DEFAULT_CLIENT_ID: &str = "f0304373b74a44d2b584a3fb70ca9e56";
 const QWEN_OAUTH_CREDENTIAL_FILE: &str = ".qwen/oauth_creds.json";
 
+pub(crate) fn extract_endpoint_host(url: &str) -> Option<String> {
+    reqwest::Url::parse(url)
+        .ok()
+        .and_then(|parsed| parsed.host_str().map(str::to_string))
+}
+
 pub fn is_minimax_intl_alias(name: &str) -> bool {
     matches!(
         name,

@@ -3,6 +3,7 @@
 use async_trait::async_trait;
 use reiclaw_api::tool::{Tool, ToolOutput, ToolResult};
 use std::collections::HashMap;
+use std::sync::Arc;
 use std::time::Duration;
 
 /// Maximum response body size (1 MB).
@@ -16,6 +17,7 @@ pub struct SkillHttpTool {
     tool_description: String,
     url_template: String,
     args: HashMap<String, String>,
+    security: Option<Arc<crate::security::SecurityPolicy>>,
 }
 
 impl SkillHttpTool {
@@ -28,7 +30,15 @@ impl SkillHttpTool {
             tool_description: tool.description.clone(),
             url_template: tool.command.clone(),
             args: tool.args.clone(),
+            security: None,
         }
+    }
+
+    /// Attach a security policy for live emergency-stop enforcement.
+    #[must_use]
+    pub fn with_security(mut self, security: Arc<crate::security::SecurityPolicy>) -> Self {
+        self.security = Some(security);
+        self
     }
 
     fn build_parameters_schema(&self) -> serde_json::Value {
@@ -111,8 +121,25 @@ impl Tool for SkillHttpTool {
                 )),
             });
         }
+        if let Some(ref security) = self.security {
+            if let Err(reason) = security.enforce_estop_tool(&self.tool_name) {
+                return Ok(ToolResult {
+                    success: false,
+                    output: ToolOutput::default(),
+                    error: Some(reason),
+                });
+            }
+            if let Err(reason) = security.enforce_estop_network(parsed.host_str()) {
+                return Ok(ToolResult {
+                    success: false,
+                    output: ToolOutput::default(),
+                    error: Some(reason),
+                });
+            }
+        }
 
         let client = reqwest::Client::builder()
+            .redirect(reqwest::redirect::Policy::none())
             .timeout(Duration::from_secs(HTTP_TIMEOUT_SECS))
             .build()
             .map_err(|e| {
@@ -388,5 +415,34 @@ mod tests {
         assert!(!result.success);
         let err = result.error.unwrap();
         assert!(err.contains("Invalid URL"), "got: {err}");
+    }
+
+    #[tokio::test(flavor = "current_thread")]
+    async fn skill_http_blocks_redirects() {
+        use wiremock::matchers::method;
+        use wiremock::{Mock, MockServer, ResponseTemplate};
+
+        let target = MockServer::start().await;
+        Mock::given(method("GET"))
+            .respond_with(ResponseTemplate::new(200).set_body_string("secret"))
+            .expect(0)
+            .mount(&target)
+            .await;
+
+        let redirector = MockServer::start().await;
+        Mock::given(method("GET"))
+            .respond_with(
+                ResponseTemplate::new(302)
+                    .insert_header("Location", format!("{}/secret", target.uri())),
+            )
+            .expect(1)
+            .mount(&redirector)
+            .await;
+
+        let tool = http_tool_with_command(&format!("{}/start", redirector.uri()));
+        let res = tool.execute(json!({})).await.unwrap();
+        // 302 is returned directly (not followed to target).
+        assert!(!res.success);
+        assert!(!res.output.contains("secret"));
     }
 }

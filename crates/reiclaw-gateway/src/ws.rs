@@ -3612,6 +3612,7 @@ mod tests {
     /// request carried. Holds each call until `gate` has a permit.
     struct ScriptedProvider {
         vision: bool,
+        endpoint_host: Option<String>,
         gate: Arc<tokio::sync::Semaphore>,
         side_query_gate: Option<Arc<SideQueryTestGate>>,
         seen: Arc<parking_lot::Mutex<Vec<Vec<String>>>>,
@@ -3626,6 +3627,10 @@ mod tests {
     impl reiclaw_api::model_provider::ModelProvider for ScriptedProvider {
         fn supports_vision(&self) -> bool {
             self.vision
+        }
+
+        fn endpoint_host(&self) -> Option<String> {
+            self.endpoint_host.clone()
         }
         async fn chat_with_system(
             &self,
@@ -3751,6 +3756,8 @@ mod tests {
 
     struct SharedChat {
         vision: bool,
+        endpoint_host: Option<String>,
+        security_policy: Option<Arc<reiclaw_runtime::security::SecurityPolicy>>,
         state: AppState,
         scope: WsTurnScope,
         gate: Arc<tokio::sync::Semaphore>,
@@ -3773,6 +3780,8 @@ mod tests {
             let state = crate::tests::admin_paircode_state(&tmp, false, false);
             Self {
                 vision: false,
+                endpoint_host: None,
+                security_policy: None,
                 state,
                 scope: WsTurnScope {
                     session_key: "gw_shared".into(),
@@ -3802,8 +3811,10 @@ mod tests {
                 .state
                 .ws_conversations
                 .attach(key, |_seed| {
+                    let endpoint_host = self.endpoint_host.clone();
                     let provider = ScriptedProvider {
                         vision: self.vision,
+                        endpoint_host: endpoint_host.clone(),
                         gate: Arc::clone(&self.gate),
                         side_query_gate: self.side_query_gate.clone(),
                         seen: Arc::clone(&self.seen),
@@ -3812,8 +3823,20 @@ mod tests {
                         correction_tool: self.correction_tool.clone(),
                         correction_results: Arc::clone(&self.correction_results),
                     };
+                    let boxed_provider: Box<dyn reiclaw_providers::ModelProvider> =
+                        if endpoint_host.is_some() {
+                            Box::new(reiclaw_providers::reliable::ReliableModelProvider::new(
+                                "scripted",
+                                vec![("scripted".into(), Box::new(provider))],
+                                0,
+                                50,
+                            ))
+                        } else {
+                            Box::new(provider)
+                        };
                     let workspace = self._tmp.path().to_path_buf();
                     let owner_config = self.owner_config.clone();
+                    let security_policy = self.security_policy.clone();
                     async move {
                         let memory_cfg = reiclaw_config::schema::MemoryConfig {
                             backend: "none".into(),
@@ -3823,7 +3846,7 @@ mod tests {
                             reiclaw_memory::create_memory(&memory_cfg, &workspace, None).unwrap(),
                         );
                         let mut builder = reiclaw_runtime::agent::Agent::builder()
-                            .model_provider(Box::new(provider))
+                            .model_provider(boxed_provider)
                             .tools(vec![])
                             .memory(mem)
                             .observer(Arc::new(reiclaw_runtime::observability::NoopObserver))
@@ -3833,7 +3856,8 @@ mod tests {
                             .workspace_dir(workspace.clone())
                             .model_name("test-model".into())
                             .model_provider_name("scripted".into())
-                            .agent_alias("web".into());
+                            .agent_alias("web".into())
+                            .security_policy(security_policy);
                         if let Some(config) = owner_config {
                             builder = builder
                                 .multimodal_config(config.multimodal.clone())
@@ -4999,6 +5023,59 @@ mod tests {
         assert!(
             content.contains("[REDACTED"),
             "redaction marker expected: {content}"
+        );
+    }
+
+    #[tokio::test]
+    async fn btw_gateway_entry_blocks_network_kill_with_zero_provider_requests() {
+        let mut chat = SharedChat::new();
+        let estop_path = chat._tmp.path().join("estop-state.json");
+        std::fs::write(
+            &estop_path,
+            serde_json::to_string(&reiclaw_policy::estop::EstopState {
+                kill_all: false,
+                network_kill: true,
+                blocked_domains: Vec::new(),
+                frozen_tools: Vec::new(),
+                updated_at: None,
+            })
+            .unwrap(),
+        )
+        .unwrap();
+        let estop = reiclaw_policy::estop::EstopHandle::for_path(estop_path);
+        chat.endpoint_host = Some("api.example.com".to_string());
+        chat.security_policy = Some(Arc::new(reiclaw_runtime::security::SecurityPolicy {
+            estop: Some(estop),
+            ..reiclaw_runtime::security::SecurityPolicy::default()
+        }));
+
+        let mut a = chat.attach().await;
+        let ack = chat
+            .send(
+                &a,
+                message_with_id("/btw echo:must not reach model", "btw-netkill"),
+            )
+            .expect("accepted ack");
+        assert_eq!(ack["type"], "ack");
+        assert_eq!(ack["turn"], "btw");
+
+        let frame = tokio::time::timeout(Duration::from_secs(5), a.frames.recv())
+            .await
+            .expect("btw_error")
+            .expect("frame");
+        let frame: serde_json::Value = serde_json::from_str(&frame).unwrap();
+        assert_eq!(frame["type"], "btw_error");
+        assert_eq!(frame["code"], "BTW_FAILED");
+        assert_eq!(frame["id"], "btw-netkill");
+        assert!(
+            frame["message"].as_str().is_some_and(
+                |m| m.contains("network_kill") || m.contains(reiclaw_api::ESTOP_ERROR_MARKER)
+            ),
+            "unexpected btw_error frame: {frame}"
+        );
+        assert!(
+            chat.seen.lock().is_empty(),
+            "network_kill /btw query must send zero requests to provider"
         );
     }
 }

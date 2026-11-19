@@ -71,6 +71,7 @@ pub struct PipelineTool {
     tools: Vec<Arc<dyn Tool>>,
     allowed_set: HashSet<String>,
     access_policy: Option<ToolAccessPolicy>,
+    security: Option<Arc<reiclaw_policy::SecurityPolicy>>,
 }
 
 impl PipelineTool {
@@ -91,7 +92,13 @@ impl PipelineTool {
             tools,
             allowed_set,
             access_policy,
+            security: None,
         }
+    }
+
+    pub fn with_security(mut self, security: Arc<reiclaw_policy::SecurityPolicy>) -> Self {
+        self.security = Some(security);
+        self
     }
 
     /// Find a tool by name in the registry.
@@ -148,6 +155,15 @@ impl PipelineTool {
         let mut results: Vec<StepResult> = Vec::with_capacity(steps.len());
 
         for (i, step) in steps.iter().enumerate() {
+            if let Some(ref security) = self.security
+                && let Err(message) = security.enforce_estop_tool(&step.tool)
+            {
+                return Err(PipelineError::StepFailed {
+                    index: i,
+                    tool: step.tool.clone(),
+                    message,
+                });
+            }
             let tool = self
                 .find_tool(&step.tool)
                 .ok_or_else(|| PipelineError::UnknownTool(step.tool.clone()))?;
@@ -195,6 +211,15 @@ impl PipelineTool {
         let mut join_set = JoinSet::new();
 
         for (i, step) in steps.iter().enumerate() {
+            if let Some(ref security) = self.security
+                && let Err(message) = security.enforce_estop_tool(&step.tool)
+            {
+                return Err(PipelineError::StepFailed {
+                    index: i,
+                    tool: step.tool.clone(),
+                    message,
+                });
+            }
             let tool = self
                 .find_tool(&step.tool)
                 .ok_or_else(|| PipelineError::UnknownTool(step.tool.clone()))?;
@@ -202,12 +227,18 @@ impl PipelineTool {
             // Clone what we need for the spawned task.
             let tool_name = step.tool.clone();
             let args = step.args.clone();
+            let security = self.security.clone();
 
             // We need a reference that lives long enough — use Arc.
             let tool_arc = self.tools.iter().find(|t| t.name() == tool.name()).cloned();
 
             if let Some(tool_arc) = tool_arc {
                 join_set.spawn(async move {
+                    if let Some(ref security) = security
+                        && let Err(message) = security.enforce_estop_tool(&tool_name)
+                    {
+                        return (i, tool_name, Err(anyhow::Error::msg(message)));
+                    }
                     let result = tool_arc.execute(args).await;
                     (i, tool_name, result)
                 });

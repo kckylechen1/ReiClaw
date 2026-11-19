@@ -606,6 +606,7 @@ async fn confined_tool_loop_exposes_only_sleep_primitives_and_preserves_thoughts
         WATERMARK_COMPACTOR_SYSTEM_PROMPT,
         "Compact sess_1",
         4,
+        None,
     )
     .await
     .unwrap();
@@ -1277,4 +1278,127 @@ async fn memorycore_end_to_end_sleep_compactor_parity() {
             .iter()
             .any(|c| c.content == "Dual SQLite stores were rejected")
     );
+}
+
+#[tokio::test]
+async fn sleep_compactor_respects_kill_all_and_frozen_tools() {
+    let (dir, store, _sessions) = sleep_fixture();
+    let mem: Arc<dyn Memory> = store.clone();
+    mem.store("old_fact", "stale value", MemoryCategory::Core, None)
+        .await
+        .unwrap();
+
+    let estop_path = dir.path().join("estop-state.json");
+    let kill_all_state = crate::security::estop::EstopState {
+        kill_all: true,
+        network_kill: false,
+        blocked_domains: Vec::new(),
+        frozen_tools: Vec::new(),
+        updated_at: None,
+    };
+    std::fs::write(&estop_path, serde_json::to_string(&kill_all_state).unwrap()).unwrap();
+
+    let mut cfg = Config {
+        config_path: dir.path().join("config.toml"),
+        data_dir: dir.path().to_path_buf(),
+        ..Config::default()
+    };
+    cfg.security.estop.enabled = true;
+    cfg.security.estop.state_file = estop_path.display().to_string();
+    let security = sleep_security_for_agent(&cfg, "nova");
+
+    let provider_kill = ScriptedNativeProvider::new(
+        "sleep-kill",
+        vec![ChatResponse {
+            text: Some("unreachable".into()),
+            tool_calls: Vec::new(),
+            usage: None,
+            reasoning_content: None,
+        }],
+    );
+    let outcome_kill = SharedOutcome::new();
+    let tools_kill: Vec<Box<dyn Tool>> = vec![Box::new(MemorySupersedeTool {
+        memory: Arc::clone(&mem),
+        agent_id: "nova".into(),
+        outcome: outcome_kill.clone(),
+    })];
+    let err = run_confined_loop(
+        &provider_kill,
+        "custom",
+        "gpt-5",
+        None,
+        "nova",
+        tools_kill,
+        WATERMARK_COMPACTOR_SYSTEM_PROMPT,
+        "Compact sess_1",
+        2,
+        Some(&security),
+    )
+    .await
+    .expect_err("kill_all must abort confined sleep loop");
+    assert!(err.to_string().contains("kill_all"));
+    assert!(outcome_kill.0.lock().superseded_facts.is_empty());
+
+    // Switch to frozen_tools = ["memory_supersede"].
+    let freeze_state = crate::security::estop::EstopState {
+        kill_all: false,
+        network_kill: false,
+        blocked_domains: Vec::new(),
+        frozen_tools: vec!["memory_supersede".into()],
+        updated_at: None,
+    };
+    std::fs::write(&estop_path, serde_json::to_string(&freeze_state).unwrap()).unwrap();
+
+    let provider_freeze = ScriptedNativeProvider::new(
+        "sleep-freeze",
+        vec![
+            ChatResponse {
+                text: None,
+                tool_calls: vec![ToolCall {
+                    id: "call_sup".into(),
+                    name: "memory_supersede".into(),
+                    arguments: serde_json::json!({
+                        "old_key": "old_fact",
+                        "reason": "replaced"
+                    })
+                    .to_string(),
+                    extra_content: None,
+                }],
+                usage: None,
+                reasoning_content: None,
+            },
+            ChatResponse {
+                text: Some("done".into()),
+                tool_calls: Vec::new(),
+                usage: None,
+                reasoning_content: None,
+            },
+        ],
+    );
+    let outcome_freeze = SharedOutcome::new();
+    let tools_freeze: Vec<Box<dyn Tool>> = vec![Box::new(MemorySupersedeTool {
+        memory: Arc::clone(&mem),
+        agent_id: "nova".into(),
+        outcome: outcome_freeze.clone(),
+    })];
+    let _ = run_confined_loop(
+        &provider_freeze,
+        "custom",
+        "gpt-5",
+        None,
+        "nova",
+        tools_freeze,
+        WATERMARK_COMPACTOR_SYSTEM_PROMPT,
+        "Compact sess_1",
+        2,
+        Some(&security),
+    )
+    .await
+    .unwrap();
+    assert!(
+        outcome_freeze.0.lock().superseded_facts.is_empty(),
+        "frozen memory_supersede must not mutate durable memory"
+    );
+    let old = mem.get("old_fact").await.unwrap().unwrap();
+    assert!(old.superseded_by.is_none());
 }

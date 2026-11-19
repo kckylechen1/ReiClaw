@@ -39,10 +39,11 @@ use serde::{Deserialize, Serialize};
 use crate::agent::history::{estimate_history_tokens, floor_char_boundary};
 use crate::agent::loop_::{
     LoopKnobs, ResolvedAgentExecution, ResolvedIo, ResolvedModelAccess, ResolvedRuntimeKnobs,
-    ToolLoop, run_tool_call_loop,
+    ToolLoop, run_tool_call_loop_with_security,
 };
 use crate::agent::session_model_provider::build_session_model_provider;
 use crate::observability::NoopObserver;
+use crate::security::SecurityPolicy;
 
 /// Context-budget utilization percentage that triggers staging an L1 checkpoint.
 pub const WATERMARK_STAGE_PERCENT: usize = 65;
@@ -535,6 +536,27 @@ pub use dream::{
 use tools::{
     CheckpointStageTool, EpisodeCommitTool, EpisodeReadTool, MemorySupersedeTool, SessionSearchTool,
 };
+pub(crate) fn sleep_security_for_agent(config: &Config, agent_alias: &str) -> SecurityPolicy {
+    match SecurityPolicy::for_agent(config, agent_alias) {
+        Ok(policy) => policy,
+        Err(_) => {
+            let mut policy = SecurityPolicy::from_risk_profile(
+                &reiclaw_config::schema::RiskProfileConfig::default(),
+                &config.data_dir,
+            );
+            if config.security.estop.enabled {
+                let config_dir = config
+                    .config_path
+                    .parent()
+                    .unwrap_or_else(|| std::path::Path::new("."));
+                policy = policy.with_estop(&config.security.estop, config_dir);
+            }
+            policy
+        }
+    }
+}
+
+#[allow(clippy::too_many_arguments)]
 pub(super) async fn run_confined_loop(
     provider: &dyn ModelProvider,
     provider_name: &str,
@@ -545,6 +567,7 @@ pub(super) async fn run_confined_loop(
     system_prompt: &str,
     user_prompt: &str,
     max_iterations: usize,
+    security: Option<&SecurityPolicy>,
 ) -> Result<String> {
     let pacing = PacingConfig::default();
     let multimodal = MultimodalConfig::default();
@@ -555,56 +578,59 @@ pub(super) async fn run_confined_loop(
         ChatMessage::user(user_prompt),
     ];
     let turn_id = format!("sleep_{}", uuid::Uuid::new_v4());
-    run_tool_call_loop(ToolLoop {
-        exec: ResolvedAgentExecution::resolve(
-            ResolvedModelAccess {
-                model_provider: provider,
-                provider_name,
-                model,
-                temperature,
-            },
-            ResolvedIo {
-                tools_registry: &tools,
-                observer: &observer,
-                silent: true,
-                approval: None,
-                multimodal_config: &multimodal,
-                config: None,
-                hooks: None,
-                activated_tools: None,
-                receipt_generator: None,
-            },
-            ResolvedRuntimeKnobs {
-                max_tool_iterations: max_iterations,
-                excluded_tools: &[],
-                dedup_exempt_tools: &[],
-                pacing: &pacing,
-                strict_tool_parsing: false,
-                parallel_tools: false,
-                max_tool_result_chars: 16_000,
-                keep_tool_context_turns: usize::MAX,
-                context_token_budget: 0,
-                knobs: &knobs,
-            },
-        ),
-        history: &mut history,
-        channel_name: "sleep_compactor",
-        channel_reply_target: None,
-        cancellation_token: None,
-        on_delta: None,
-        shared_budget: None,
-        channel: None,
-        collected_receipts: None,
-        event_tx: None,
-        steering: None,
-        new_messages_out: None,
-        image_cache: None,
-        memory: None,
-        ingress: reiclaw_api::ingress::IngressContext::sub_turn(),
-        agent_alias: Some(agent_alias),
-        parent_agent_alias: None,
-        turn_id: &turn_id,
-    })
+    run_tool_call_loop_with_security(
+        ToolLoop {
+            exec: ResolvedAgentExecution::resolve(
+                ResolvedModelAccess {
+                    model_provider: provider,
+                    provider_name,
+                    model,
+                    temperature,
+                },
+                ResolvedIo {
+                    tools_registry: &tools,
+                    observer: &observer,
+                    silent: true,
+                    approval: None,
+                    multimodal_config: &multimodal,
+                    config: None,
+                    hooks: None,
+                    activated_tools: None,
+                    receipt_generator: None,
+                },
+                ResolvedRuntimeKnobs {
+                    max_tool_iterations: max_iterations,
+                    excluded_tools: &[],
+                    dedup_exempt_tools: &[],
+                    pacing: &pacing,
+                    strict_tool_parsing: false,
+                    parallel_tools: false,
+                    max_tool_result_chars: 16_000,
+                    keep_tool_context_turns: usize::MAX,
+                    context_token_budget: 0,
+                    knobs: &knobs,
+                },
+            ),
+            history: &mut history,
+            channel_name: "sleep_compactor",
+            channel_reply_target: None,
+            cancellation_token: None,
+            on_delta: None,
+            shared_budget: None,
+            channel: None,
+            collected_receipts: None,
+            event_tx: None,
+            steering: None,
+            new_messages_out: None,
+            image_cache: None,
+            memory: None,
+            ingress: reiclaw_api::ingress::IngressContext::sub_turn(),
+            agent_alias: Some(agent_alias),
+            parent_agent_alias: None,
+            turn_id: &turn_id,
+        },
+        security,
+    )
     .await
 }
 
@@ -711,6 +737,7 @@ pub async fn consolidate_turn_via_sleep(
             TURN_PARITY_SYSTEM_PROMPT,
             &truncated,
             4,
+            None,
         )
         .await?
     } else {
@@ -943,6 +970,7 @@ pub async fn maybe_compact_ws_turn(
         let user_prompt = format!(
             "Session `{session_key}` reached {used_tokens}/{budget} tokens (watermark up_to_message_id={max_delta_id}).\n\nTranscript:\n{transcript}"
         );
+        let security = sleep_security_for_agent(config, agent_alias);
         let final_text = run_confined_loop(
             sleep_model.provider.as_ref(),
             &sleep_model.provider_name,
@@ -953,6 +981,7 @@ pub async fn maybe_compact_ws_turn(
             WATERMARK_COMPACTOR_SYSTEM_PROMPT,
             &user_prompt,
             6,
+            Some(&security),
         )
         .await?;
 

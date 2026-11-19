@@ -484,6 +484,7 @@ mod cost_usd_regression_tests {
             channel: None,
             agent_alias: None,
             turn_id: "turn-cost-regression",
+            security: None,
         };
 
         let specs = IterationToolSpecs {

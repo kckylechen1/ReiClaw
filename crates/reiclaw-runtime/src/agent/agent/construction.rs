@@ -483,15 +483,19 @@ impl Agent {
             .auto_save(config.memory.auto_save)
             .exclude_memory(exclude_memory)
             .security_summary(Some(security.prompt_summary()))
+            .security_policy(Some(security.clone()))
             .autonomy_level(risk_profile.level)
             .approval_route(risk_profile.approval_route.clone())
             .activated_tools(activated_handle)
             .mcp_deferred_section(Some(deferred_section))
             .mcp_pinned_section(Some(pinned_section))
             .hook_runner(if config.hooks.enabled {
-                Some(Arc::new(crate::hooks::HookRunner::from_config(
-                    &config.hooks,
-                )))
+                Some(Arc::new(
+                    crate::hooks::HookRunner::try_from_config_with_estop(
+                        &config.hooks,
+                        security.estop_handle().cloned(),
+                    )?,
+                ))
             } else {
                 None
             })

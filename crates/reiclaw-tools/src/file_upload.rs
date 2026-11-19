@@ -315,6 +315,17 @@ impl Tool for FileUploadTool {
             }
         };
 
+        let url_host = reqwest::Url::parse(url)
+            .ok()
+            .and_then(|parsed| parsed.host_str().map(str::to_string));
+        if let Err(message) = self.security.enforce_estop_network(url_host.as_deref()) {
+            return Ok(ToolResult {
+                success: false,
+                output: ToolOutput::default(),
+                error: Some(message),
+            });
+        }
+
         let form = reqwest::multipart::Form::new().part(self.config.field_name.clone(), part);
 
         let client = reiclaw_http::build_runtime_proxy_client_with_timeouts(

@@ -930,7 +930,18 @@ impl GeminiModelProvider {
     }
 
     fn http_client(&self) -> Client {
-        reiclaw_http::build_runtime_proxy_client_with_timeouts("model_provider.gemini", 120, 10)
+        reiclaw_http::build_runtime_proxy_client_with_timeouts_no_redirect(
+            "model_provider.gemini",
+            120,
+            10,
+        )
+    }
+
+    fn active_endpoint_base_url(&self) -> &str {
+        match self.auth.as_ref() {
+            Some(GeminiAuth::OAuthToken(_) | GeminiAuth::ManagedOAuth) => CLOUDCODE_PA_ENDPOINT,
+            _ => BASE_URL,
+        }
     }
 
     /// Resolve the GCP project ID for OAuth by calling the loadCodeAssist endpoint.
@@ -1394,7 +1405,11 @@ impl GeminiModelProvider {
 impl ModelProvider for GeminiModelProvider {
     // ── ModelProvider-family defaults ──
     fn default_base_url(&self) -> Option<&str> {
-        Some(BASE_URL)
+        Some(self.active_endpoint_base_url())
+    }
+
+    fn endpoint_host(&self) -> Option<String> {
+        crate::extract_endpoint_host(self.active_endpoint_base_url())
     }
 
     fn capabilities(&self) -> reiclaw_api::model_provider::ProviderCapabilities {
@@ -2656,6 +2671,68 @@ mod tests {
             system_instruction.expect("tool instructions should be system prompt");
         assert!(
             matches!(&system_instruction.parts[0], Part::Text { text } if text == "Use tools carefully")
+        );
+    }
+
+    #[test]
+    fn endpoint_host_matches_oauth_vs_api_key_auth_mode() {
+        let api_key_provider = GeminiModelProvider::builder("gemini")
+            .api_key(Some("test-api-key"))
+            .build();
+        assert_eq!(
+            api_key_provider.endpoint_host().as_deref(),
+            Some("generativelanguage.googleapis.com")
+        );
+        assert_eq!(api_key_provider.default_base_url(), Some(BASE_URL));
+
+        let oauth_provider = GeminiModelProvider {
+            alias: "gemini".to_string(),
+            auth: Some(GeminiAuth::OAuthToken(Arc::new(tokio::sync::Mutex::new(
+                OAuthTokenState {
+                    access_token: "token".to_string(),
+                    refresh_token: None,
+                    client_id: None,
+                    client_secret: None,
+                    expiry_millis: None,
+                },
+            )))),
+            oauth_project: Arc::new(tokio::sync::Mutex::new(None)),
+            oauth_project_seed: None,
+            oauth_cred_paths: Vec::new(),
+            oauth_index: Arc::new(tokio::sync::Mutex::new(0)),
+            auth_service: None,
+            auth_profile_override: None,
+            oauth_client_id: None,
+            oauth_client_secret: None,
+        };
+        assert_eq!(
+            oauth_provider.endpoint_host().as_deref(),
+            Some("cloudcode-pa.googleapis.com")
+        );
+        assert_eq!(
+            oauth_provider.default_base_url(),
+            Some(CLOUDCODE_PA_ENDPOINT)
+        );
+
+        let managed_oauth_provider = GeminiModelProvider {
+            alias: "gemini".to_string(),
+            auth: Some(GeminiAuth::ManagedOAuth),
+            oauth_project: Arc::new(tokio::sync::Mutex::new(None)),
+            oauth_project_seed: None,
+            oauth_cred_paths: Vec::new(),
+            oauth_index: Arc::new(tokio::sync::Mutex::new(0)),
+            auth_service: None,
+            auth_profile_override: None,
+            oauth_client_id: None,
+            oauth_client_secret: None,
+        };
+        assert_eq!(
+            managed_oauth_provider.endpoint_host().as_deref(),
+            Some("cloudcode-pa.googleapis.com")
+        );
+        assert_eq!(
+            managed_oauth_provider.default_base_url(),
+            Some(CLOUDCODE_PA_ENDPOINT)
         );
     }
 }

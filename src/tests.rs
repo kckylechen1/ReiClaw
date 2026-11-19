@@ -1599,3 +1599,100 @@ fn config_cli_exposes_current_validation_and_generation_only() {
         assert!(Cli::try_parse_from(["rei", "config", "generate", version]).is_err());
     }
 }
+
+#[cfg(feature = "agent-runtime")]
+#[test]
+fn estop_engage_and_status_work_without_otp_secret_and_otp_init_enrolls_resume() {
+    let dir = tempfile::tempdir().unwrap();
+    let mut config = Config::default();
+    config.config_path = dir.path().join("config.toml");
+    config.data_dir = dir.path().join("data");
+    config.security.estop.enabled = true;
+    config.security.estop.require_otp_to_resume = true;
+    config.security.otp.enabled = true;
+
+    // 1. Parsing `rei estop otp-init` succeeds.
+    assert!(matches!(
+        Cli::try_parse_from(["rei", "estop", "otp-init"])
+            .unwrap()
+            .command,
+        Commands::Estop {
+            estop_command: Some(EstopSubcommands::OtpInit),
+            ..
+        }
+    ));
+
+    // 2. Engage + status work with NO otp-secret on disk (ADR-024 #13).
+    handle_estop_command(&config, None, Some(EstopLevelArg::KillAll), vec![], vec![]).unwrap();
+    handle_estop_command(
+        &config,
+        Some(EstopSubcommands::Status),
+        None,
+        vec![],
+        vec![],
+    )
+    .unwrap();
+    assert!(!security::otp::secret_file_path(dir.path()).exists());
+
+    // 3. Resume fails closed before otp-init (still does not auto-create secret).
+    let resume_before_init = handle_estop_command(
+        &config,
+        Some(EstopSubcommands::Resume {
+            network: false,
+            domains: vec![],
+            tools: vec![],
+            otp: Some("000000".into()),
+        }),
+        None,
+        vec![],
+        vec![],
+    );
+    assert!(resume_before_init.is_err());
+    assert!(!security::otp::secret_file_path(dir.path()).exists());
+
+    // 4. Explicit `otp-init` creates otp-secret so `resume` can succeed with valid TOTP.
+    handle_estop_command(
+        &config,
+        Some(EstopSubcommands::OtpInit),
+        None,
+        vec![],
+        vec![],
+    )
+    .unwrap();
+    assert!(security::otp::secret_file_path(dir.path()).exists());
+
+    let store = security::SecretStore::new(dir.path(), config.secrets.encrypt);
+    assert!(
+        security::OtpValidator::load_existing(&config.security.otp, dir.path(), &store).is_ok()
+    );
+    assert!(
+        handle_estop_command(
+            &config,
+            Some(EstopSubcommands::Resume {
+                network: false,
+                domains: vec![],
+                tools: vec![],
+                otp: Some("000000".into()),
+            }),
+            None,
+            vec![],
+            vec![],
+        )
+        .is_err()
+    );
+
+    config.security.estop.require_otp_to_resume = false;
+    handle_estop_command(
+        &config,
+        Some(EstopSubcommands::Resume {
+            network: false,
+            domains: vec![],
+            tools: vec![],
+            otp: None,
+        }),
+        None,
+        vec![],
+        vec![],
+    )
+    .unwrap();
+}

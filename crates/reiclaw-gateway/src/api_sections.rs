@@ -1399,6 +1399,7 @@ mod tests {
             pending_reload: std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false)),
             ws_conversations: Default::default(),
             bridge_sockets: Default::default(),
+            hooks: None,
         }
     }
 

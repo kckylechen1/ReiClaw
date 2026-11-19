@@ -170,3 +170,28 @@ async fn spawn_failure_remains_an_io_error() {
         .unwrap_err();
     assert_eq!(error.kind(), io::ErrorKind::NotFound);
 }
+
+#[tokio::test]
+async fn normal_exit_kills_descendant_holding_pipe_at_drain_deadline() {
+    let dir = tempfile::tempdir().unwrap();
+    let pid_file = dir.path().join("grandchild.pid");
+    let mut command = shell("sleep 30 & echo $! > \"$1\"; printf done");
+    command.arg("fixture").arg(&pid_file);
+
+    let output = run_bounded(&mut command, limits()).await.unwrap();
+    assert!(matches!(output.outcome, ProcessOutcome::Exited(status) if status.success()));
+    assert_eq!(output.stdout, b"done");
+
+    let pid: i32 = std::fs::read_to_string(&pid_file)
+        .unwrap()
+        .trim()
+        .parse()
+        .unwrap();
+    tokio::time::sleep(Duration::from_millis(50)).await;
+    // SAFETY: kill(pid, 0) checks process existence without sending a signal.
+    let alive = unsafe { libc::kill(pid, 0) == 0 };
+    assert!(
+        !alive,
+        "descendant holding pipe past drain deadline must be killed (pid={pid})"
+    );
+}

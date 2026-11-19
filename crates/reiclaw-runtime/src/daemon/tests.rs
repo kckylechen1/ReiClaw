@@ -2198,6 +2198,10 @@ done
         pinned_resources: vec![],
     });
     let agent_alias = "ops".to_string();
+    config.risk_profiles.insert(
+        "standard".to_string(),
+        reiclaw_config::schema::RiskProfileConfig::default(),
+    );
     config.mcp_bundles.insert(
         "reconnect-bundle".to_string(),
         McpBundleConfig {
@@ -2209,6 +2213,7 @@ done
         agent_alias.clone(),
         AliasedAgentConfig {
             mcp_bundles: vec!["reconnect-bundle".to_string()],
+            risk_profile: "standard".into(),
             ..AliasedAgentConfig::default()
         },
     );
@@ -2915,4 +2920,105 @@ async fn heartbeat_worker_preserves_healthy_a_admits_recovered_b_additively() {
 
     // `_hook_guard` drops here, releasing the serialising lock
     // and clearing the global hook for the next test.
+}
+
+#[tokio::test]
+async fn connect_heartbeat_mcp_skips_when_policy_errors_or_network_killed() {
+    let dir = tempfile::tempdir().unwrap();
+    let marker_policy_err = dir.path().join("spawned-policy-err");
+    let marker_net_kill = dir.path().join("spawned-net-kill");
+
+    let script = dir.path().join("mcp-marker.sh");
+    std::fs::write(&script, "#!/bin/sh\ntouch \"$1\"\nexit 1\n").unwrap();
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        std::fs::set_permissions(&script, std::fs::Permissions::from_mode(0o755)).unwrap();
+    }
+
+    let mut cfg = test_config(&dir);
+    cfg.mcp.enabled = true;
+    cfg.mcp
+        .servers
+        .push(reiclaw_config::schema::McpServerConfig {
+            name: "marker".into(),
+            command: script.display().to_string(),
+            args: vec![marker_policy_err.display().to_string()],
+            ..Default::default()
+        });
+    cfg.mcp_bundles.insert(
+        "b".to_string(),
+        reiclaw_config::schema::McpBundleConfig {
+            servers: vec!["marker".to_string()],
+            exclude: vec![],
+        },
+    );
+    cfg.risk_profiles.insert(
+        "standard".to_string(),
+        reiclaw_config::schema::RiskProfileConfig::default(),
+    );
+    let bad_agent_cfg = reiclaw_config::schema::AliasedAgentConfig {
+        mcp_bundles: vec!["b".to_string()],
+        risk_profile: "missing_profile".into(),
+        ..Default::default()
+    };
+    cfg.agents.insert("bad_agent".into(), bad_agent_cfg);
+
+    let mut good_agent_cfg = reiclaw_config::schema::AliasedAgentConfig {
+        mcp_bundles: vec!["b".to_string()],
+        risk_profile: "standard".into(),
+        ..Default::default()
+    };
+    good_agent_cfg.workspace.path = Some(dir.path().to_path_buf());
+    cfg.agents.insert("main".into(), good_agent_cfg);
+
+    // 1) Missing risk_profile makes SecurityPolicy::for_agent fail even though servers are granted -> must skip MCP spawn!
+    let res = connect_heartbeat_mcp_registry(&cfg, "bad_agent", None)
+        .await
+        .unwrap();
+    assert!(res.is_none());
+    assert!(!marker_policy_err.exists());
+
+    // 2) Valid agent with network_kill engaged -> must block MCP spawn!
+    let estop_path = dir.path().join("estop-state.json");
+    let engaged = crate::security::estop::EstopState {
+        kill_all: false,
+        network_kill: true,
+        blocked_domains: Vec::new(),
+        frozen_tools: Vec::new(),
+        updated_at: None,
+    };
+    std::fs::write(&estop_path, serde_json::to_string(&engaged).unwrap()).unwrap();
+    cfg.security.estop.enabled = true;
+    cfg.security.estop.state_file = estop_path.display().to_string();
+    cfg.mcp.servers[0].args = vec![marker_net_kill.display().to_string()];
+
+    let res = connect_heartbeat_mcp_registry(&cfg, "main", None)
+        .await
+        .unwrap();
+    assert!(
+        res.as_ref().is_none_or(|r| r.server_names().is_empty()),
+        "network_kill must prevent connecting any MCP server"
+    );
+    assert!(!marker_net_kill.exists());
+
+    // 3) Positive control: same valid agent spawns MCP when network_kill is cleared.
+    let marker_allowed = dir.path().join("spawned-allowed");
+    let cleared = crate::security::estop::EstopState {
+        kill_all: false,
+        network_kill: false,
+        blocked_domains: Vec::new(),
+        frozen_tools: Vec::new(),
+        updated_at: None,
+    };
+    std::fs::write(&estop_path, serde_json::to_string(&cleared).unwrap()).unwrap();
+    cfg.mcp.servers[0].args = vec![marker_allowed.display().to_string()];
+
+    let _ = connect_heartbeat_mcp_registry(&cfg, "main", None)
+        .await
+        .unwrap();
+    assert!(
+        marker_allowed.exists(),
+        "valid agent must spawn stdio MCP child once network_kill is cleared"
+    );
 }

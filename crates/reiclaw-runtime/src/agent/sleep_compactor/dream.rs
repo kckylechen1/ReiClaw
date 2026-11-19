@@ -242,6 +242,7 @@ pub async fn flush_session_to_episode(
         let prompt = format!(
             "Flush unflushed session `{session_key}` ({source_kind}) up to message_id={max_delta_id}.\n\nTranscript:\n{transcript}"
         );
+        let security = super::sleep_security_for_agent(config, agent_alias);
         let final_text = run_confined_loop(
             model.provider.as_ref(),
             &model.provider_name,
@@ -252,6 +253,7 @@ pub async fn flush_session_to_episode(
             EPISODE_FLUSH_SYSTEM_PROMPT,
             &prompt,
             5,
+            Some(&security),
         )
         .await?;
 
@@ -389,6 +391,7 @@ pub async fn run_deep_dream_for_agent(
         truncate_utf8(&episodes_json, 24_000),
     );
 
+    let security = super::sleep_security_for_agent(config, agent_alias);
     let final_text = run_confined_loop(
         primary_model.provider.as_ref(),
         &primary_model.provider_name,
@@ -399,6 +402,7 @@ pub async fn run_deep_dream_for_agent(
         DEEP_DREAM_SYSTEM_PROMPT,
         &prompt,
         8,
+        Some(&security),
     )
     .await?;
 

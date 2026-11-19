@@ -33,6 +33,7 @@ pub(crate) struct TurnCtx<'a> {
     /// the EFFECTIVE agent whose policy/tools execute; this keeps the parent
     /// correlation on every emitted record. `None` for ordinary turns.
     pub(crate) parent_agent_alias: Option<&'a str>,
+    pub(crate) security: Option<&'a crate::security::SecurityPolicy>,
 }
 
 /// Lightweight metadata for turn-level event emission.
