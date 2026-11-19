@@ -32,10 +32,7 @@ pub(crate) fn response_preview(bytes: &[u8], limit: usize) -> String {
     while end > 0 && !body.is_char_boundary(end) {
         end -= 1;
     }
-    crate::i18n::get_required_tool_string_with_args(
-        "tool-http-response-preview-truncated",
-        &[("body", &body[..end])],
-    )
+    format!("{body}... [truncated]", body = &body[..end])
 }
 
 #[cfg(test)]

@@ -150,17 +150,14 @@ fn signature(schema: &Value) -> String {
 }
 
 fn hint(schema: &Value, problem: &str) -> String {
-    crate::i18n::get_required_tool_string_with_args(
-        "tool-mcp-arguments-invalid",
-        &[("problem", problem), ("signature", &signature(schema))],
+    format!(
+        "Invalid MCP arguments. {problem} Expected fields/types: {signature}. Fetch the full schema with tool_search if needed, then correct the arguments. Input values are omitted.",
+        signature = signature(schema)
     )
 }
 
 pub(super) fn server_rejection(schema: &Value) -> String {
-    hint(
-        schema,
-        &crate::i18n::get_required_tool_string("tool-mcp-arguments-server-rejected"),
-    )
+    hint(schema, "The MCP server rejected the arguments.")
 }
 
 pub(super) fn shape_error(schema: &Value, args: &Value) -> Option<String> {
@@ -168,9 +165,9 @@ pub(super) fn shape_error(schema: &Value, args: &Value) -> Option<String> {
         return None;
     }
     if let Some(expected) = type_mismatch(schema, args) {
-        let problem = crate::i18n::get_required_tool_string_with_args(
-            "tool-mcp-arguments-root-type",
-            &[("expected", &expected), ("actual", value_kind(args))],
+        let problem = format!(
+            "Arguments must have type {expected}; received {actual}.",
+            actual = value_kind(args)
         );
         return Some(hint(schema, &problem));
     }
@@ -178,10 +175,7 @@ pub(super) fn shape_error(schema: &Value, args: &Value) -> Option<String> {
     if let Some(required) = schema.get("required").and_then(Value::as_array) {
         for name in required.iter().filter_map(Value::as_str) {
             if !args.contains_key(name) {
-                let problem = crate::i18n::get_required_tool_string_with_args(
-                    "tool-mcp-arguments-missing",
-                    &[("field", &field_name(name))],
-                );
+                let problem = format!("Missing required field {field}.", field = field_name(name));
                 return Some(hint(schema, &problem));
             }
         }
@@ -190,13 +184,10 @@ pub(super) fn shape_error(schema: &Value, args: &Value) -> Option<String> {
         if let Some(value) = args.get(name)
             && let Some(expected) = type_mismatch(property, value)
         {
-            let problem = crate::i18n::get_required_tool_string_with_args(
-                "tool-mcp-arguments-field-type",
-                &[
-                    ("field", &field_name(name)),
-                    ("expected", &expected),
-                    ("actual", value_kind(value)),
-                ],
+            let problem = format!(
+                "Field {field} expects {expected}; received {actual}.",
+                actual = value_kind(value),
+                field = field_name(name)
             );
             return Some(hint(schema, &problem));
         }

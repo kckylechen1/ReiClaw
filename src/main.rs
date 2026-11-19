@@ -132,32 +132,8 @@ fn interactive_agent_unsupported_flags(
 }
 
 fn print_no_command_help(cmd: clap::Command) -> Result<()> {
-    #[cfg(feature = "agent-runtime")]
-    {
-        println!(
-            "{}",
-            crate::i18n::get_cli_string("cli-no-command-provided")
-                .as_deref()
-                .unwrap_or("No command provided.")
-        );
-        println!(
-            "{}",
-            crate::i18n::get_cli_string("cli-try-quickstart")
-                .as_deref()
-                .unwrap_or("Try `rei quickstart` to create your first agent.")
-        );
-    }
-    #[cfg(not(feature = "agent-runtime"))]
-    {
-        println!("{}", t("cli-no-command", "No command provided."));
-        println!(
-            "{}",
-            t(
-                "cli-try-quickstart",
-                "Try `rei quickstart` to create your first agent."
-            )
-        );
-    }
+    println!("No command provided.");
+    println!("Try `rei quickstart` to create your first agent.");
     println!();
 
     let mut cmd = cmd;
@@ -194,8 +170,6 @@ mod gateway_helpers;
 #[cfg(feature = "agent-runtime")]
 mod hooks;
 #[cfg(feature = "agent-runtime")]
-mod i18n;
-#[cfg(feature = "agent-runtime")]
 mod integrations;
 mod memory;
 #[cfg(feature = "agent-runtime")]
@@ -222,7 +196,6 @@ use gateway_helpers::{
     shutdown_gateway,
 };
 use gateway_helpers::{log_gateway_start, resolve_gateway_addr};
-pub(crate) use gateway_helpers::{t, ta};
 
 // Re-export so binary modules can use crate::<CommandEnum> while keeping a single source of truth.
 pub use reiclaw::{
@@ -266,7 +239,6 @@ enum EstopLevelArg {
     env!("CARGO_PKG_VERSION"),
     "\nReiClaw (rei) - personal agent controller\nOriginally forked from zeroclaw-labs/zeroclaw"
 ))]
-// i18n-exempt: clap derive help — framework requires a compile-time literal
 #[command(about = "ReiClaw (rei) - Personal AI Controller", long_about = None)]
 struct Cli {
     #[arg(long, global = true)]
@@ -318,7 +290,6 @@ impl LogLevel {
 #[derive(Subcommand, Debug)]
 enum TelegramCommands {
     /// Explain migration of the retired Telegram skip command
-    // i18n-exempt: clap derive help — framework requires a compile-time literal
     #[command(long_about = "\
 The in-process Telegram listener and its skip markers are retired. \
 This compatibility command returns a migration error without writing a marker. \
@@ -343,7 +314,9 @@ this command cannot skip a bridge update.")]
 #[cfg(feature = "agent-runtime")]
 #[derive(Subcommand, Debug)]
 enum SoulCommands {
-    /// Check that the Soul behaves the same on the selected models.
+    #[command(
+        about = "Check that the Soul behaves the same on the selected models (spends real model calls)"
+    )]
     Check {
         /// Agent alias whose Soul to check.
         #[arg(long)]
@@ -367,10 +340,7 @@ enum SoulCommands {
 
 #[derive(Subcommand, Debug)]
 enum Commands {
-    /// Quickstart — create one working agent end-to-end. Replaces the
-    /// section-by-section onboarding flow with a single preset-driven
-    /// path. Interactive: the flags below pre-seed checklist selectors
-    /// but do not skip them; a terminal is required.
+    #[command(about = "Create your first agent end-to-end")]
     Quickstart {
         /// Provider type (anthropic / openai / ollama).
         #[arg(long)]
@@ -447,18 +417,17 @@ enum Commands {
     },
 
     /// Start the AI agent loop
-    // i18n-exempt: clap derive help — framework requires a compile-time literal
     #[command(long_about = "\
 Start the AI agent loop.
 
-With --message, runs one turn locally and prints the reply. Without it, \
-opens `rei chat` for this agent on this machine's gateway, so the \
-conversation is shared with every other client.
+With --message, runs one turn locally and prints the reply. Without it, opens `rei chat` for this agent on this machine's gateway, so the conversation is shared with every other client.
 
 Examples:
-  rei agent -a assistant                                          # chat through the gateway
-  rei agent -a assistant -m \"Summarize today's logs\"              # single message
-  rei agent -a assistant -m \"Hi\" -p anthropic --model claude-sonnet-4-20250514")]
+  rei agent -a assistant                              # chat through the gateway
+  rei agent -a assistant -m \"Summarize today's logs\"  # single message
+  rei agent -a assistant -m \"Hi\" -p anthropic --model claude-sonnet-4-20250514
+
+--model-provider, --model, and --temperature apply only with --message; the interactive chat uses the agent's configured model.")]
     Agent {
         /// Configured agent alias to run as (must match `[agents.<alias>]`).
         /// Required — there is no default agent.
@@ -484,7 +453,6 @@ Examples:
 
     #[cfg(feature = "agent-runtime")]
     /// Chat with an agent through the gateway
-    // i18n-exempt: clap derive help — framework requires a compile-time literal
     #[command(long_about = "\
 Chat with an agent through the gateway.
 
@@ -516,8 +484,6 @@ Examples:
         message: Option<String>,
     },
 
-    /// Start/manage the gateway server (webhooks, websockets)
-    // i18n-exempt: clap derive help — framework requires a compile-time literal
     #[command(long_about = "\
 Manage the gateway server (webhooks, websockets).
 
@@ -528,13 +494,12 @@ Examples:
   rei gateway start              # start gateway
   rei gateway restart            # restart gateway
   rei gateway get-paircode       # show pairing code")]
+    #[command(about = "Manage the gateway server (webhooks, websockets)")]
     Gateway {
         #[command(subcommand)]
         gateway_command: Option<reiclaw::GatewayCommands>,
     },
 
-    /// Start ACP (Agent Control Protocol) server over stdio
-    // i18n-exempt: clap derive help — framework requires a compile-time literal
     #[command(long_about = "\
 Start the ACP server (JSON-RPC 2.0 over stdio).
 
@@ -547,6 +512,7 @@ Methods: initialize, session/new, session/prompt, session/stop.
 Examples:
   rei acp                        # start ACP server
   rei acp --max-sessions 5       # limit concurrent sessions")]
+    #[command(about = "Start the ACP server (JSON-RPC 2.0 over stdio)")]
     Acp {
         /// Maximum concurrent sessions (default: 10)
         #[arg(long)]
@@ -557,8 +523,6 @@ Examples:
         session_timeout: Option<u64>,
     },
 
-    /// Start long-running autonomous runtime (gateway + channels + heartbeat + scheduler)
-    // i18n-exempt: clap derive help — framework requires a compile-time literal
     #[command(long_about = "\
 Start the long-running autonomous daemon.
 
@@ -574,6 +538,7 @@ Examples:
   rei daemon                   # use config defaults
   rei daemon -p 9090           # gateway on port 9090
   rei daemon --host 127.0.0.1  # localhost only")]
+    #[command(about = "Start the long-running autonomous daemon")]
     Daemon {
         /// Port to listen on (use 0 for random available port); defaults to config gateway.port
         #[arg(short, long)]
@@ -608,6 +573,17 @@ Examples:
     },
 
     /// Show system status (full details)
+    #[command(long_about = "\
+Show system status (full details).
+
+When companion memory is enabled and companion-memory.db already exists,
+this command opens that file with deny-migration and never creates a
+missing store. Opening is not a strictly read-only inspect: SQLite takes
+a WAL lock, and the probe still applies owner-only permissions (0600)
+to the database file and any existing -wal/-shm sidecars.
+
+--format exit-code exits 0 if the gateway /health probe succeeds, 1 otherwise
+(for Docker HEALTHCHECK).")]
     Status {
         /// Output format: "exit-code" exits 0 if healthy, 1 otherwise (for Docker HEALTHCHECK)
         #[arg(long)]
@@ -621,6 +597,7 @@ Examples:
         security_command: SecurityCommands,
     },
 
+    #[command(about = "Engage, inspect, and resume emergency-stop states")]
     Estop {
         #[command(subcommand)]
         estop_command: Option<EstopSubcommands>,
@@ -639,18 +616,12 @@ Examples:
     },
 
     /// Configure and manage scheduled tasks
-    // i18n-exempt: clap derive help — framework requires a compile-time literal
     #[command(long_about = "\
 Configure and manage scheduled tasks.
 
-Schedule recurring, one-shot, or interval-based tasks using cron \
-expressions, RFC3339 timestamps with explicit Z or offsets, durations, \
-or fixed intervals.
+Schedule recurring, one-shot, or interval-based tasks using cron expressions, RFC 3339 timestamps, durations, or fixed intervals.
 
-Cron expressions use the standard 5-field format: \
-'min hour day month weekday'. When --tz is omitted, cron schedules use \
-the runtime local timezone. For user-facing schedules, pass --tz with \
-an explicit IANA timezone.
+Cron expressions use the standard 5-field format: 'min hour day month weekday'. Timezones default to UTC; override with --tz and an IANA timezone name.
 
 Examples:
   rei cron list
@@ -667,25 +638,22 @@ Examples:
         cron_command: CronCommands,
     },
 
-    /// Manage model_provider model catalogs
+    #[command(about = "Manage provider model catalogs")]
     Models {
         #[command(subcommand)]
         model_command: ModelCommands,
     },
 
+    #[command(about = "List supported AI providers")]
     Providers {
         #[command(subcommand)]
         providers_command: Option<ProvidersCommands>,
     },
 
-    /// Manage channels (telegram, webhook)
-    // i18n-exempt: clap derive help — framework requires a compile-time literal
     #[command(long_about = "\
 Manage communication channels.
 
-Add, remove, list, send, and health-check channels that connect ReiClaw \
-to messaging surfaces. Live channel types: telegram, \
-webhook (other legacy sections are retired; see the channels book page).
+Add, remove, list, send, and health-check channels that connect ReiClaw to messaging platforms. Live channel types: telegram, webhook (other legacy sections are retired).
 
 Examples:
   rei channel list
@@ -694,6 +662,7 @@ Examples:
   rei channel remove my-bot
   rei channel bind-telegram rei_user
   rei channel send 'Alert!' --channel-id telegram --recipient 123456789")]
+    #[command(about = "Manage communication channels")]
     Channel {
         #[command(subcommand)]
         channel_command: ChannelCommands,
@@ -725,7 +694,6 @@ Examples:
     },
 
     /// Browse the shared workspace one directory at a time
-    // i18n-exempt: clap derive help — framework requires a compile-time literal
     #[command(long_about = "\
 List children of a directory under `<install>`/shared/. Paths are relative \
 to the shared workspace root; `..` traversal that escapes the root is \
@@ -748,14 +716,12 @@ Examples:
         migrate_command: MigrateCommands,
     },
 
-    /// Manage model_provider subscription authentication profiles
+    #[command(about = "Manage provider subscription authentication profiles")]
     Auth {
         #[command(subcommand)]
         auth_command: AuthCommands,
     },
 
-    /// Manage agent memory (list, get, stats, clear)
-    // i18n-exempt: clap derive help — framework requires a compile-time literal
     #[command(long_about = "\
 Manage agent memory entries.
 
@@ -769,18 +735,16 @@ Examples:
   rei memory list --category core --limit 10
   rei memory get KEY
   rei memory clear --category conversation --yes")]
+    #[command(about = "Manage agent memory entries")]
     Memory {
         #[command(subcommand)]
         memory_command: MemoryCommands,
     },
 
-    /// Manage configuration
-    // i18n-exempt: clap derive help — framework requires a compile-time literal
     #[command(long_about = "\
 Manage ReiClaw configuration.
 
-View, set, or initialize config properties by dotted path. \
-Use 'schema' to dump the full JSON Schema for the config file.
+View, set, or initialize config properties by dotted path. Use 'schema' to dump the full JSON Schema for the config file.
 
 Properties are addressed by dotted path (e.g. channels.matrix.mention-only).
 Secret fields (API keys, tokens) automatically use masked input.
@@ -795,26 +759,19 @@ Examples:
   rei config set channels.matrix.access-token      # secret: masked input
   rei config set channels.matrix.stream-mode       # enum: interactive select
   rei config init channels.matrix                  # init section with defaults
-  rei config init risk_profiles.strict             # create a new dynamic-map alias
   rei config schema                                # print JSON Schema to stdout
   rei config schema > schema.json
 
 Property path tab completion is included automatically in `rei completions <shell>`.")]
+    #[command(about = "Manage ReiClaw configuration")]
     Config {
         #[command(subcommand)]
         config_command: ConfigCommands,
     },
 
     /// Update this fork from source
-    // i18n-exempt: clap derive help — framework requires a compile-time literal
     #[command(long_about = "\
-This fork has no verified binary update channel.
-
-Update a checkout of https://github.com/kckylechen1/ReiClaw and run \
-./install.sh --source with your existing preset/features.
-
-Legacy --check, --force, --version and --json options remain parseable, \
-but this command refuses every binary update without network access.")]
+This fork has no verified binary update channel. Update a checkout of https://github.com/kckylechen1/ReiClaw and run ./install.sh --source with your existing preset/features. Upstream releases cannot update this fork.")]
     Update {
         /// Legacy flag; binary update checks are disabled in this fork
         #[arg(long)]
@@ -831,7 +788,6 @@ but this command refuses every binary update without network access.")]
     },
 
     /// Run diagnostic self-tests
-    // i18n-exempt: clap derive help — framework requires a compile-time literal
     #[command(long_about = "\
 Run diagnostic self-tests to verify the ReiClaw installation.
 
@@ -850,7 +806,6 @@ Examples:
 
     #[cfg(feature = "agent-runtime")]
     /// Inspect and check the agent Soul
-    // i18n-exempt: clap derive help — framework requires a compile-time literal
     #[command(long_about = "\
 Soul diagnostics.
 
@@ -876,7 +831,6 @@ Examples:
 
     #[cfg(all(feature = "agent-runtime", feature = "channel-telegram"))]
     /// Compatibility diagnostics for retired Telegram operator tooling
-    // i18n-exempt: clap derive help — framework requires a compile-time literal
     #[command(long_about = "\
 The in-process Telegram listener is retired. Telegram intake and cursor \
 recovery belong to rei-bridge-telegram.
@@ -888,21 +842,16 @@ error. It does not write a skip marker or advance the bridge cursor.")]
         telegram_command: TelegramCommands,
     },
 
-    /// Generate shell completion script to stdout
-    // i18n-exempt: clap derive help — framework requires a compile-time literal
     #[command(long_about = "\
 Generate shell completion scripts for `rei`.
 
 The script is printed to stdout so it can be sourced directly:
 
-Examples (Unix shells):
+Examples:
   source <(rei completions bash)
   rei completions zsh > ~/.zfunc/_rei
-  rei completions fish > ~/.config/fish/completions/rei.fish
-
-Examples (PowerShell):
-  rei completions powershell | Out-String | Invoke-Expression
-  rei completions powershell > $PROFILE.CurrentUserAllHosts")]
+  rei completions fish > ~/.config/fish/completions/rei.fish")]
+    #[command(about = "Generate shell completion scripts")]
     Completions {
         /// Target shell
         #[arg(value_enum)]
@@ -923,38 +872,6 @@ Examples (PowerShell):
         #[command(subcommand)]
         props_command: DeprecatedPropsCommands,
     },
-
-    /// Restore the translated locale files (FTL) shipped with this build
-    // i18n-exempt: clap derive help — framework requires a compile-time literal
-    #[command(long_about = "\
-Restore this build's translated Fluent (.ftl) catalogues under \
-`<config-dir>/data/ftl/<locale>/`, where the runtime loader reads them. \
-The compatibility command name is fetch; no network access is needed.
-
-Pass en or zh-CN. By default every catalogue is restored; restrict with \
---catalog (comma-separated): cli, tools.
-
-Examples:
-  rei locales fetch zh-CN
-  rei locales fetch zh-CN --catalog cli,tools")]
-    Locales {
-        #[command(subcommand)]
-        locales_command: LocalesCommands,
-    },
-}
-
-#[derive(Subcommand, Debug)]
-enum LocalesCommands {
-    // i18n-exempt: clap derive help — framework requires a compile-time literal
-    /// Restore this build's translated FTL files without network access
-    Fetch {
-        /// Locale code to restore: en or zh-CN.
-        locale: String,
-        /// Comma-separated catalogues to restore: cli, tools.
-        /// Omit to restore all of them.
-        #[arg(long)]
-        catalog: Option<String>,
-    },
 }
 
 /// Stub enum that mirrors the old `props` subcommands so clap can still parse
@@ -967,9 +884,7 @@ enum DeprecatedPropsCommands {
 
 #[derive(Subcommand, Debug)]
 enum ConfigCommands {
-    /// Dump the full configuration JSON Schema to stdout. With `--path`, returns
-    /// the schema fragment for that property only — same payload `OPTIONS
-    /// /api/config/prop?path=...` returns over HTTP.
+    #[command(about = "Dump the full configuration JSON Schema to stdout")]
     Schema {
         /// Property path to scope the schema dump (e.g.
         /// `agents.researcher.model_provider`). Without it, dumps the
@@ -1018,7 +933,7 @@ enum ConfigCommands {
         #[arg(long)]
         json: bool,
     },
-    /// Validate the current on-disk configuration without modifying it
+    #[command(about = "Validate the current config.toml without modifying it")]
     Validate {
         /// Emit a structured JSON envelope ({valid, schema_version, error}) instead of plain text.
         #[arg(long)]
@@ -1158,7 +1073,7 @@ enum AuthCommands {
         #[arg(long, default_value = "default")]
         profile: String,
     },
-    /// Set active profile for a model_provider
+    #[command(about = "Set active profile for a provider")]
     Use {
         /// ModelProvider
         #[arg(long)]
@@ -1175,7 +1090,7 @@ enum AuthCommands {
 
 #[derive(Subcommand, Debug)]
 enum ModelCommands {
-    /// Refresh and cache model_provider models
+    #[command(about = "Refresh and cache provider models")]
     Refresh {
         /// ModelProvider name (defaults to configured default model_provider)
         #[arg(long)]
@@ -1189,7 +1104,7 @@ enum ModelCommands {
         #[arg(long)]
         force: bool,
     },
-    /// List the models configured in config.toml
+    #[command(about = "List cached models for a provider")]
     List {
         /// ModelProvider name (defaults to all configured entries)
         #[arg(long)]
@@ -1210,7 +1125,7 @@ enum ModelCommands {
 
 #[derive(Subcommand, Debug)]
 enum DoctorCommands {
-    /// Probe model catalogs across model_providers and report availability
+    #[command(about = "Probe model catalogs across providers and report availability")]
     Models {
         /// Probe a specific model_provider only (default: all known model_providers)
         #[arg(long)]
@@ -1307,158 +1222,11 @@ fn probe_config_dir(
         .cloned()
 }
 
-fn apply_i18n_to_command(cmd: clap::Command) -> clap::Command {
-    #[cfg(feature = "agent-runtime")]
-    {
-        apply_cmd_translations(cmd, "cli")
-    }
-    #[cfg(not(feature = "agent-runtime"))]
-    cmd
-}
-
-#[cfg(feature = "agent-runtime")]
-fn apply_cmd_translations(cmd: clap::Command, prefix: &str) -> clap::Command {
-    let sub_names: Vec<String> = cmd
-        .get_subcommands()
-        .map(|s| s.get_name().to_string())
-        .collect();
-
-    let about_key = format!("{prefix}-about");
-    let cmd = match crate::i18n::get_cli_string(&about_key) {
-        Some(about) => cmd.about(about),
-        None => cmd,
-    };
-
-    let long_about_key = format!("{prefix}-long-about");
-    let cmd = match crate::i18n::get_cli_string(&long_about_key) {
-        Some(long_about) => cmd.long_about(long_about),
-        None => cmd,
-    };
-
-    let mut cmd = cmd;
-    for name in &sub_names {
-        let child_prefix = format!("{prefix}-{name}");
-        cmd = cmd.mut_subcommand(name, |sub| apply_cmd_translations(sub, &child_prefix));
-    }
-    cmd
-}
-
-#[cfg(feature = "agent-runtime")]
-fn validated_locale(locale: &str) -> Result<String> {
-    let ok_shape = !locale.is_empty()
-        && locale.len() <= 16
-        && locale
-            .chars()
-            .all(|c| c.is_ascii_alphanumeric() || c == '-');
-    if !ok_shape {
-        bail!("invalid locale code '{locale}'");
-    }
-    let known = reiclaw_runtime::i18n::available_locales();
-    if !known.iter().any(|o| o.code == locale) {
-        let codes: Vec<&str> = known.iter().map(|o| o.code.as_str()).collect();
-        bail!(
-            "locale '{locale}' is not in the locales.toml registry; known: {}",
-            codes.join(", ")
-        );
-    }
-    Ok(locale.to_string())
-}
-
-#[cfg(feature = "agent-runtime")]
-fn fetch_locales(locale: &str, catalog: Option<&str>) -> Result<()> {
-    let locale = validated_locale(locale)?;
-
-    let selected: Vec<&(&str, &str)> = match catalog {
-        None => reiclaw_config::schema::FTL_CATALOGS.iter().collect(),
-        Some(list) => {
-            let names: Vec<&str> = list
-                .split(',')
-                .map(str::trim)
-                .filter(|s| !s.is_empty())
-                .collect();
-            let mut out = Vec::new();
-            for name in &names {
-                match reiclaw_config::schema::FTL_CATALOGS
-                    .iter()
-                    .find(|(n, _)| n == name)
-                {
-                    Some(entry) => out.push(entry),
-                    None => {
-                        let valid = reiclaw_config::schema::FTL_CATALOGS
-                            .iter()
-                            .map(|(n, _)| *n)
-                            .collect::<Vec<_>>()
-                            .join(", ");
-                        bail!("unknown catalog '{name}'; valid: {valid}");
-                    }
-                }
-            }
-            out
-        }
-    };
-
-    let dest = reiclaw_config::schema::ftl_locale_dir(&locale)?;
-    std::fs::create_dir_all(&dest).with_context(|| format!("creating {}", dest.display()))?;
-    // Confinement check: the resolved dest must live under the data-dir FTL root.
-    let ftl_root = dest
-        .parent()
-        .map(Path::to_path_buf)
-        .unwrap_or_else(|| dest.clone());
-    let canon_dest = std::fs::canonicalize(&dest).unwrap_or_else(|_| dest.clone());
-    let canon_root = std::fs::canonicalize(&ftl_root).unwrap_or(ftl_root);
-    if !canon_dest.starts_with(&canon_root) {
-        bail!("refusing to write outside the FTL data directory");
-    }
-
-    let mut restored = 0u32;
-
-    for (name, out_name) in selected {
-        let content = reiclaw_runtime::i18n::builtin_catalog(&locale, name).with_context(|| {
-            ta(
-                "cli-locales-missing-builtin",
-                &[("name", name), ("locale", &locale)],
-                "catalogue is not included in this build",
-            )
-        })?;
-        let out_path = dest.join(out_name);
-        std::fs::write(&out_path, content)
-            .with_context(|| format!("writing {}", out_path.display()))?;
-        println!(
-            "{}",
-            ta(
-                "cli-locales-restored",
-                &[("name", name), ("path", &out_path.display().to_string())],
-                "restored bundled catalogue",
-            )
-        );
-        restored += 1;
-    }
-
-    if restored == 0 {
-        bail!(crate::i18n::get_required_cli_string(
-            "cli-locales-none-selected"
-        ));
-    }
-    println!(
-        "{}",
-        ta(
-            "cli-locales-installed",
-            &[
-                ("count", &restored.to_string()),
-                ("locale", &locale),
-                ("dir", &dest.display().to_string())
-            ],
-            "Installed catalogues",
-        )
-    );
-    Ok(())
-}
-
 fn main() -> Result<()> {
     let command = Cli::command();
 
-    // Locale detection runs while clap builds localized help, so expose the CLI
-    // override through the bootstrap env before either i18n or Tokio starts.
+    // The boot-time proxy read below resolves the config directory from the
+    // environment, so expose the CLI override there before Tokio starts.
     // Empty values remain for clap's canonical parse/validation path below.
     if let Some(config_dir) = probe_config_dir(&command, std::env::args_os())
         && !config_dir.trim().is_empty()
@@ -1481,8 +1249,7 @@ fn main() -> Result<()> {
     // dropped before anything is applied. Daemon reloads refresh the
     // runtime global only, keeping live-env application restart-only.
     // Stdout-only invocations (completions, markdown-help/schema, help,
-    // version, parse errors) skip this read; the pre-existing i18n
-    // locale detection is unchanged by this gate.
+    // version, parse errors) skip this read.
     if invocation_needs_config() {
         let proxy = {
             let pre_runtime = tokio::runtime::Builder::new_current_thread()
@@ -1504,13 +1271,10 @@ fn main() -> Result<()> {
 }
 
 /// Decide pre-parse whether this invocation will need the config-driven
-/// runtime, using a non-exiting trial parse of the canonical (not yet
-/// localized) CLI. Parse errors, `--help` and `--version` surface as
-/// `Err` and re-parse inside `async_main` for the localized error/help
-/// path; the stdout-only subcommands are enumerated explicitly so they
-/// skip the proxy bootstrap read. (The pre-existing locale detection in
-/// `apply_i18n_to_command` still reads config.toml on every invocation,
-/// including these — unchanged by this gate.)
+/// runtime, using a non-exiting trial parse of the CLI. Parse errors,
+/// `--help` and `--version` surface as `Err` and re-parse inside
+/// `async_main` for the error/help path; the stdout-only subcommands are
+/// enumerated explicitly so they skip the proxy bootstrap read.
 fn invocation_needs_config() -> bool {
     let command = Cli::command();
     let Ok(matches) = command.try_get_matches_from(std::env::args_os()) else {
@@ -1533,17 +1297,10 @@ async fn async_main(command: clap::Command) -> Result<()> {
     // when both aws-lc-rs and ring features are available (or neither is explicitly selected).
     #[cfg(feature = "agent-runtime")]
     if let Err(e) = rustls::crypto::ring::default_provider().install_default() {
-        eprintln!(
-            "{}",
-            ta(
-                "cli-warn-crypto-provider",
-                &[("err", &format!("{e:?}"))],
-                "Warning: Failed to install default crypto provider"
-            )
-        );
+        eprintln!("Warning: Failed to install default crypto provider: {e:?}");
     }
 
-    let cmd = apply_i18n_to_command(command);
+    let cmd = command;
 
     if std::env::args_os().len() <= 1 {
         return print_no_command_help(cmd);
@@ -1556,9 +1313,6 @@ async fn async_main(command: clap::Command) -> Result<()> {
     {
         bail!("--config-dir cannot be empty");
     }
-
-    #[cfg(feature = "agent-runtime")]
-    crate::i18n::init(&crate::i18n::detect_locale());
 
     // Completions must remain stdout-only and should not load config or initialize logging.
     // This avoids warnings/log lines corrupting sourced completion scripts.
@@ -1654,13 +1408,7 @@ async fn async_main(command: clap::Command) -> Result<()> {
             );
             std::process::exit(2);
         }
-        eprintln!(
-            "{}",
-            t(
-                "cli-onboard-deprecated",
-                "`rei onboard` is deprecated — use `rei quickstart`."
-            )
-        );
+        eprintln!("`rei onboard` is deprecated — use `rei quickstart`.");
         return Ok(());
     }
 
@@ -1686,18 +1434,8 @@ async fn async_main(command: clap::Command) -> Result<()> {
         .chain(config.degraded_security.iter())
     {
         eprintln!(
-            "{}",
-            ta(
-                "cli-config-section-degraded",
-                &[
-                    ("section", section),
-                    ("path", &config.config_path.display().to_string()),
-                ],
-                "warning: config section is malformed and was reset to defaults \
-                 for this run. Values in that section are NOT in effect. Run \
-                 `rei config validate` to see the parse error, then repair \
-                 the file."
-            )
+            "warning: config section `{section}` in {path} is malformed and was reset to defaults for this run. Values in that section are NOT in effect. Run `rei config validate` to see the parse error, then repair the file.",
+            path = config.config_path.display()
         );
     }
     #[cfg(feature = "agent-runtime")]
@@ -1724,14 +1462,8 @@ async fn async_main(command: clap::Command) -> Result<()> {
         let (_validator, enrollment_uri) =
             security::OtpValidator::from_config(&config.security.otp, config_dir, &store)?;
         if let Some(uri) = enrollment_uri {
-            println!(
-                "{}",
-                t("cli-otp-initialized", "Initialized OTP secret for ReiClaw.")
-            );
-            println!(
-                "{}",
-                ta("cli-otp-enrollment-uri", &[("uri", &uri)], "Enrollment URI")
-            );
+            println!("Initialized OTP secret for ReiClaw.");
+            println!("Enrollment URI: {uri}");
         }
     }
 
@@ -1813,36 +1545,32 @@ async fn async_main(command: clap::Command) -> Result<()> {
                                 .await?;
                         println!("{response}");
                     }
-                    None => {
-                        loop {
-                            eprint!("> ");
-                            let line = {
-                                let stdin = std::io::stdin().lock();
-                                match read_capped_line(stdin, STDIN_LINE_CAP) {
-                                    Ok(CappedLine::Eof) => break,
-                                    Ok(CappedLine::Line(s)) => s,
-                                    Ok(CappedLine::Truncated) => {
-                                        // i18n-exempt: no-runtime fallback lacks the Fluent catalogue.
-                                        eprintln!(
-                                            "\nWarning: input line exceeds {} bytes and was discarded.",
-                                            STDIN_LINE_CAP
-                                        );
-                                        continue;
-                                    }
-                                    Err(e) => {
-                                        // i18n-exempt: no-runtime fallback lacks the Fluent catalogue.
-                                        eprintln!("\nError reading input: {e}\n");
-                                        break;
-                                    }
+                    None => loop {
+                        eprint!("> ");
+                        let line = {
+                            let stdin = std::io::stdin().lock();
+                            match read_capped_line(stdin, STDIN_LINE_CAP) {
+                                Ok(CappedLine::Eof) => break,
+                                Ok(CappedLine::Line(s)) => s,
+                                Ok(CappedLine::Truncated) => {
+                                    eprintln!(
+                                        "\nWarning: input line exceeds {} bytes and was discarded.",
+                                        STDIN_LINE_CAP
+                                    );
+                                    continue;
                                 }
-                            };
-                            let response =
-                                reiclaw_providers::ProviderDispatch::from_ref(&*model_provider)
-                                    .simple_chat(line.trim(), model_name, Some(final_temperature))
-                                    .await?;
-                            println!("{response}");
-                        }
-                    }
+                                Err(e) => {
+                                    eprintln!("\nError reading input: {e}\n");
+                                    break;
+                                }
+                            }
+                        };
+                        let response =
+                            reiclaw_providers::ProviderDispatch::from_ref(&*model_provider)
+                                .simple_chat(line.trim(), model_name, Some(final_temperature))
+                                .await?;
+                        println!("{response}");
+                    },
                 }
                 return Ok(());
             }
@@ -1925,12 +1653,7 @@ async fn async_main(command: clap::Command) -> Result<()> {
                         "interactive agent refused: flags only apply with --message"
                     );
                     anyhow::bail!(
-                        "{}",
-                        ta(
-                            "cli-agent-interactive-flags-need-message",
-                            &[("flags", &flags), ("agent", &agent_alias)],
-                            "These flags only apply with -m/--message"
-                        )
+                        "{flags} only apply with -m/--message. Interactive `rei agent` opens `rei chat`, which uses the model configured for agent \"{agent_alias}\". Add -m \"<message>\" for a one-off turn with these overrides, or change the agent's configuration."
                     );
                 }
                 return commands::chat::run(&config, agent_alias, "main".into(), None, None).await;
@@ -2080,10 +1803,7 @@ async fn async_main(command: clap::Command) -> Result<()> {
                     .await
                     {
                         Ok(PaircodeResult::Code { code, message }) => {
-                            println!(
-                                "{}",
-                                t("cli-pairing-enabled", "🔐 Gateway pairing is enabled.")
-                            );
+                            println!("🔐 Gateway pairing is enabled.");
                             println!();
                             if let Some(message) = message.as_deref()
                                 && rotating
@@ -2095,21 +1815,8 @@ async fn async_main(command: clap::Command) -> Result<()> {
                             println!("  │  {code}  │");
                             println!("  └──────────────┘");
                             println!();
-                            println!(
-                                "{}",
-                                t(
-                                    "cli-pairing-use-code",
-                                    "  Use this one-time code to pair a new device:"
-                                )
-                            );
-                            println!(
-                                "{}",
-                                ta(
-                                    "cli-pairing-post",
-                                    &[("code", &code)],
-                                    "POST /pair with header X-Pairing-Code"
-                                )
-                            );
+                            println!("  Use this one-time code to pair a new device:");
+                            println!("    POST /pair with header X-Pairing-Code: {code}");
                         }
                         Ok(PaircodeResult::NoCode { message }) => {
                             println!(
@@ -2129,19 +1836,10 @@ async fn async_main(command: clap::Command) -> Result<()> {
                             println!(
                                 "❌ Failed to fetch pairing code from gateway at {host}:{port}"
                             );
-                            println!(
-                                "{}",
-                                ta("cli-error-label", &[("err", &e.to_string())], "Error")
-                            );
+                            println!("   Error: {err}", err = e);
                             println!();
-                            println!(
-                                "{}",
-                                t(
-                                    "cli-gateway-running-q",
-                                    "   Is the gateway running? Start it with:"
-                                )
-                            );
-                            println!("     rei gateway start"); // i18n-exempt: literal command/identifier example
+                            println!("   Is the gateway running? Start it with:");
+                            println!("     rei gateway start");
                         }
                     }
                     Ok(())
@@ -2471,7 +2169,7 @@ async fn async_main(command: clap::Command) -> Result<()> {
                 "Supported model model_providers ({} total):\n",
                 model_providers.len()
             );
-            println!("  ID (use in config)  DESCRIPTION"); // i18n-exempt: literal command/identifier example
+            println!("  ID (use in config)  DESCRIPTION");
             println!("  ─────────────────── ───────────");
             for category in reiclaw_providers::ModelProviderCategory::all() {
                 let in_category: Vec<_> = model_providers
@@ -2578,12 +2276,6 @@ async fn async_main(command: clap::Command) -> Result<()> {
             commands::auth::handle_auth_command(auth_command, &config).await
         }
 
-        Commands::Locales { locales_command } => {
-            let LocalesCommands::Fetch { locale, catalog } = locales_command;
-            fetch_locales(&locale, catalog.as_deref())?;
-            Ok(())
-        }
-
         Commands::Update { .. } => commands::update::unavailable(),
 
         Commands::SelfTest { quick } => {
@@ -2677,14 +2369,8 @@ fn handle_estop_command(
                 let (validator, enrollment_uri) =
                     security::OtpValidator::from_config(&config.security.otp, config_dir, &store)?;
                 if let Some(uri) = enrollment_uri {
-                    println!(
-                        "{}",
-                        t("cli-otp-initialized", "Initialized OTP secret for ReiClaw.")
-                    );
-                    println!(
-                        "{}",
-                        ta("cli-otp-enrollment-uri", &[("uri", &uri)], "Enrollment URI")
-                    );
+                    println!("Initialized OTP secret for ReiClaw.");
+                    println!("Enrollment URI: {uri}");
                 }
                 Some(validator)
             } else {
@@ -2692,14 +2378,14 @@ fn handle_estop_command(
             };
 
             manager.resume(selector, otp_code.as_deref(), otp_validator.as_ref())?;
-            println!("{}", t("cli-estop-resume-done", "Estop resume completed."));
+            println!("Estop resume completed.");
             print_estop_status(&manager.status());
             Ok(())
         }
         None => {
             let engage_level = build_engage_level(level, domains, tools)?;
             manager.engage(engage_level)?;
-            println!("{}", t("cli-estop-engaged", "Estop engaged."));
+            println!("Estop engaged.");
             print_estop_status(&manager.status());
             Ok(())
         }
@@ -2772,7 +2458,7 @@ fn build_resume_selector(
 
 #[cfg(feature = "agent-runtime")]
 fn print_estop_status(state: &security::EstopState) {
-    println!("{}", t("cli-estop-status", "Estop status:"));
+    println!("Estop status:");
     println!(
         "  engaged:        {}",
         if state.is_engaged() { "yes" } else { "no" }
@@ -2790,41 +2476,20 @@ fn print_estop_status(state: &security::EstopState) {
         }
     );
     if state.blocked_domains.is_empty() {
-        println!(
-            "{}",
-            t("cli-estop-domains-none", "  domain_blocks:  (none)")
-        );
+        println!("  domain_blocks:  (none)");
     } else {
         println!(
-            "{}",
-            ta(
-                "cli-estop-domains",
-                &[("v", &state.blocked_domains.join(", "))],
-                "domain_blocks"
-            )
+            "  domain_blocks:  {v}",
+            v = state.blocked_domains.join(", ")
         );
     }
     if state.frozen_tools.is_empty() {
-        println!("{}", t("cli-estop-tools-none", "  tool_freeze:    (none)"));
+        println!("  tool_freeze:    (none)");
     } else {
-        println!(
-            "{}",
-            ta(
-                "cli-estop-tools",
-                &[("v", &state.frozen_tools.join(", "))],
-                "tool_freeze"
-            )
-        );
+        println!("  tool_freeze:    {v}", v = state.frozen_tools.join(", "));
     }
     if let Some(updated_at) = &state.updated_at {
-        println!(
-            "{}",
-            ta(
-                "cli-estop-updated-at",
-                &[("v", &updated_at.to_string())],
-                "updated_at"
-            )
-        );
+        println!("  updated_at:     {v}", v = updated_at);
     }
 }
 
@@ -3008,13 +2673,7 @@ fn print_companion_outbox_line(config: &reiclaw_config::schema::Config) {
     let health = companion_outbox_health_for_cli(config);
     match health.status {
         CompanionOutboxStatus::NotConfigured => {
-            println!(
-                "{}",
-                t(
-                    "cli-status-companion-outbox-not-configured",
-                    "Companion outbox: not configured"
-                )
-            );
+            println!("Companion outbox: not configured");
         }
         CompanionOutboxStatus::Pending => {
             let pending = health.pending_count.to_string();
@@ -3022,24 +2681,10 @@ fn print_companion_outbox_line(config: &reiclaw_config::schema::Config) {
                 let age = age.to_string();
                 let fallback =
                     format!("Companion outbox: pending ({pending} events, oldest {age}s)");
-                println!(
-                    "{}",
-                    ta(
-                        "cli-status-companion-outbox-pending-oldest",
-                        &[("pending", &pending), ("age", &age)],
-                        &fallback
-                    )
-                );
+                println!("Companion outbox: pending ({pending} events, oldest {age}s)");
             } else {
                 let fallback = format!("Companion outbox: pending ({pending} events)");
-                println!(
-                    "{}",
-                    ta(
-                        "cli-status-companion-outbox-pending",
-                        &[("pending", &pending)],
-                        &fallback
-                    )
-                );
+                println!("Companion outbox: pending ({pending} events)");
             }
         }
     }
@@ -3229,16 +2874,7 @@ async fn handle_models_set(config: &mut Config, model: &str) -> Result<()> {
     let prop_path = format!("providers.models.{type_key}.{alias}.model");
     config.set_prop_persistent(&prop_path, model)?;
     Box::pin(config.save_dirty()).await?;
-    println!(
-        "{}",
-        crate::i18n::get_required_cli_string_with_args(
-            "cli-models-set-ok",
-            &[
-                ("model", model),
-                ("provider", &format!("{type_key}.{alias}")),
-            ]
-        )
-    );
+    println!("Default model set to \"{model}\" on {type_key}.{alias}.");
     Ok(())
 }
 
@@ -3262,19 +2898,10 @@ async fn dispatch_models_command(model_command: ModelCommands, config: &mut Conf
             {
                 Some((ty, alias, entry)) => {
                     let model = entry.model.as_deref().unwrap_or("unknown");
-                    println!(
-                        "{}",
-                        crate::i18n::get_required_cli_string_with_args(
-                            "cli-models-status-current",
-                            &[("model", model), ("provider", &format!("{ty}.{alias}")),]
-                        )
-                    );
+                    println!("Default model: {model} (provider: {ty}.{alias})");
                 }
                 None => {
-                    println!(
-                        "{}",
-                        crate::i18n::get_required_cli_string("cli-models-status-none")
-                    );
+                    println!("No default model configured.");
                 }
             }
             Ok(())

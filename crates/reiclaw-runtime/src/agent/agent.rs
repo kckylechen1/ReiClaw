@@ -1126,7 +1126,7 @@ impl Agent {
         crate::agent::history_trim::insert_conversation_breadcrumb(&mut self.history);
         self.history_has_trim_breadcrumb = true;
         self.sync_side_query_snapshot(None);
-        let reason = crate::i18n::get_required_cli_string("history-trim-reason-message-cap");
+        let reason = "history message limit exceeded".to_string();
         let channel = self.channel_name.clone();
         let agent_alias = self.observer_agent_alias();
         let turn_id = turn_id.map(str::to_owned);
@@ -1231,14 +1231,12 @@ impl Agent {
         {
             return response;
         }
-        let notice = crate::i18n::get_required_cli_string_with_args(
-            "turn-model-fallback-notice",
-            &[
-                ("requested_model", fallback.requested_model.as_str()),
-                ("requested_provider", fallback.requested_provider.as_str()),
-                ("actual_model", fallback.actual_model.as_str()),
-                ("actual_provider", fallback.actual_provider.as_str()),
-            ],
+        let notice = format!(
+            "⚡ {requested_model} ({requested_provider}) was unavailable; this reply was served by {actual_model} ({actual_provider}).",
+            actual_model = fallback.actual_model.as_str(),
+            actual_provider = fallback.actual_provider.as_str(),
+            requested_model = fallback.requested_model.as_str(),
+            requested_provider = fallback.requested_provider.as_str()
         );
         let delta = format!("\n\n{notice}");
         let _ = event_tx

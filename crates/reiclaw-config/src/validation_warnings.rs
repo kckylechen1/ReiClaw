@@ -102,6 +102,10 @@ use serde::{Deserialize, Serialize};
 ///   `browser.native_*` key is still set. Selecting it fails the browser tool
 ///   with an explicit error (see `RETIRED_CONFIG_VALUES` and
 ///   `RETIRED_CONFIG_FIELDS`).
+/// - `ui_locale_removed`: the root `locale` key is still set. ReiClaw's CLI and
+///   tool text is English only and the Fluent catalogues were removed, so the
+///   key is ignored (see `RETIRED_CONFIG_FIELDS`). Voice and transcription
+///   `language` settings are unaffected.
 /// - `ollama_native_options_removed`: an Ollama alias still sets `num_ctx`,
 ///   `num_predict` or `temperature_override`. These native `/api/chat` options
 ///   were not consumed by the current OpenAI-compatible `/v1` provider and
@@ -415,6 +419,7 @@ pub const RETIRED_CONFIG_FIELDS: &[(&str, &str)] = &[
     ("memory.snapshot_enabled", "memory_snapshot_removed"),
     ("memory.snapshot_on_hygiene", "memory_snapshot_removed"),
     ("memory.auto_hydrate", "memory_snapshot_removed"),
+    ("locale", "ui_locale_removed"),
 ];
 
 /// Retired config VALUES: dotted path (one `*` wildcard segment allowed, as
@@ -483,6 +488,9 @@ fn retired_field_reason(code: &str) -> &'static str {
         }
         "whatsapp_audio_option_removed" => {
             "the WhatsApp-only forwarded audio selector has no runtime consumer after the transport retired"
+        }
+        "ui_locale_removed" => {
+            "ReiClaw is English only; the Fluent catalogues this key selected were removed"
         }
         "a2a_server_removed" => {
             "the A2A discovery server and agent cards were never consumers in \

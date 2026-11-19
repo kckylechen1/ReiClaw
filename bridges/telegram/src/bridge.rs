@@ -46,8 +46,7 @@ const RETRY_WAIT_CAP: Duration = Duration::from_secs(30);
 const NOTICE_RETRY_PAUSE: Duration = Duration::from_secs(1);
 const MAX_PENDING_STOPS: usize = 32;
 
-/// Replies the bridge writes itself. English only: the bridge carries no
-/// Fluent catalogue (it does not link the runtime).
+/// Replies the bridge writes itself.
 mod text {
     pub const STEERED: &str = "(added to the current turn)";
     pub const ABORTED: &str = "(cancelled)";

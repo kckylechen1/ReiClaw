@@ -8,6 +8,3 @@ mod no_duplicate_state;
 
 #[path = "architecture/config_save_isolation.rs"]
 mod config_save_isolation;
-
-#[path = "architecture/cli_fluent_coverage.rs"]
-mod cli_fluent_coverage;

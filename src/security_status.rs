@@ -85,74 +85,45 @@ pub fn build_report(config: &Config, agent_alias: &str) -> Result<SecurityStatus
 
     let mut warnings = Vec::new();
     if !resolved.agent_enabled {
-        warnings.push(crate::t(
-            "cli-security-status-warning-agent-disabled",
-            "agent is disabled",
-        ));
+        warnings.push("agent is disabled".to_string());
     }
     if sandbox_config.enabled == Some(false) {
-        warnings.push(crate::t(
-            "cli-security-status-warning-sandbox-disabled",
-            "sandboxing is disabled for this agent risk profile",
-        ));
+        warnings.push("sandboxing is disabled for this agent risk profile".to_string());
     }
     if sandbox.active_backend == "none" {
-        warnings.push(crate::t(
-            "cli-security-status-warning-sandbox-none",
-            "active sandbox is application-layer only",
-        ));
+        warnings.push("active sandbox is application-layer only".to_string());
     }
     if sandbox.fallback {
-        warnings.push(crate::ta(
-            "cli-security-status-warning-sandbox-fallback",
-            &[
-                ("requested", sandbox.requested_backend),
-                ("active", sandbox.active_backend),
-            ],
-            "requested sandbox backend fell back",
+        warnings.push(format!(
+            "requested sandbox backend `{requested}` fell back to `{active}`",
+            active = sandbox.active_backend,
+            requested = sandbox.requested_backend
         ));
     }
     if !resolved.policy.workspace_only {
-        warnings.push(crate::t(
-            "cli-security-status-warning-workspace-not-restricted",
-            "workspace-only filesystem policy is disabled",
-        ));
+        warnings.push("workspace-only filesystem policy is disabled".to_string());
     }
     if !resolved.policy.shell_env_passthrough.is_empty() {
         let count = resolved.policy.shell_env_passthrough.len().to_string();
-        warnings.push(crate::ta(
-            "cli-security-status-warning-shell-env-passthrough",
-            &[("count", &count)],
-            "shell environment variables are passed through",
+        warnings.push(format!(
+            "{count} shell environment variable(s) are passed through"
         ));
     }
     if !config.secrets.encrypt {
-        warnings.push(crate::t(
-            "cli-security-status-warning-secrets-unencrypted",
-            "config secret encryption is disabled",
-        ));
+        warnings.push("config secret encryption is disabled".to_string());
     }
     if classification_counts
         .get("requires_follow_up")
         .is_some_and(|count| *count > 0)
     {
-        warnings.push(crate::t(
-            "cli-security-status-warning-credential-follow-up",
-            "some credential-shaped config surfaces still require follow-up",
-        ));
+        warnings.push("some credential-shaped config surfaces still require follow-up".to_string());
     }
     if !config.gateway.require_pairing {
-        warnings.push(crate::t(
-            "cli-security-status-warning-pairing-disabled",
-            "gateway pairing is not required",
-        ));
+        warnings.push("gateway pairing is not required".to_string());
     }
     let tls_enabled = config.gateway.tls.as_ref().is_some_and(|tls| tls.enabled);
     if config.gateway.allow_public_bind && !tls_enabled {
-        warnings.push(crate::t(
-            "cli-security-status-warning-public-bind-no-tls",
-            "gateway allows public bind without TLS enabled",
-        ));
+        warnings.push("gateway allows public bind without TLS enabled".to_string());
     }
 
     Ok(SecurityStatusReport {
@@ -203,75 +174,26 @@ pub fn build_report(config: &Config, agent_alias: &str) -> Result<SecurityStatus
 }
 
 pub fn print_report(report: &SecurityStatusReport) {
-    println!(
-        "{}",
-        crate::t("cli-security-status-title", "ReiClaw Security Status")
-    );
-    println!(
-        "{}",
-        crate::ta(
-            "cli-security-status-source",
-            &[("v", &report.source)],
-            "Source"
-        )
-    );
-    println!(
-        "{}",
-        crate::ta(
-            "cli-security-status-agent",
-            &[("v", &report.agent)],
-            "Agent"
-        )
-    );
+    println!("ReiClaw Security Status");
+    println!("Source:      {v}", v = report.source);
+    println!("Agent:       {v}", v = report.agent);
     let agent_enabled = report.agent_enabled.to_string();
-    println!(
-        "{}",
-        crate::ta(
-            "cli-security-status-agent-enabled",
-            &[("enabled", &agent_enabled)],
-            "Agent enabled"
-        )
-    );
-    println!(
-        "{}",
-        crate::ta(
-            "cli-security-status-risk-profile",
-            &[("v", &report.risk_profile.alias)],
-            "Risk profile"
-        )
-    );
-    println!(
-        "{}",
-        crate::ta(
-            "cli-security-status-autonomy",
-            &[("v", &report.risk_profile.level)],
-            "Autonomy"
-        )
-    );
+    println!("Agent enabled: {agent_enabled}");
+    println!("Risk profile: {v}", v = report.risk_profile.alias);
+    println!("Autonomy:   {v}", v = report.risk_profile.level);
     let medium = report
         .risk_profile
         .require_approval_for_medium_risk
         .to_string();
     let high = report.risk_profile.block_high_risk_commands.to_string();
     println!(
-        "{}",
-        crate::ta(
-            "cli-security-status-approvals",
-            &[("medium", &medium), ("high", &high)],
-            "Approvals"
-        )
+        "Approvals:  medium-risk approval required: {medium}, high-risk commands blocked: {high}"
     );
     println!(
-        "{}",
-        crate::ta(
-            "cli-security-status-sandbox",
-            &[
-                ("requested", &report.sandbox.requested_backend),
-                ("active", &report.sandbox.active_backend),
-                ("description", &report.sandbox.active_description),
-            ],
-            "Sandbox"
-        )
+        "Sandbox:    requested {requested}, active {active} ({description})",
+        active = report.sandbox.active_backend,
+        description = report.sandbox.active_description,
+        requested = report.sandbox.requested_backend
     );
     let workspace_only = report.workspace.workspace_only.to_string();
     let read_write_roots = report.workspace.read_write_roots_count.to_string();
@@ -279,19 +201,8 @@ pub fn print_report(report: &SecurityStatusReport) {
     let write_only_roots = report.workspace.write_only_roots_count.to_string();
     let env_passthrough = report.workspace.shell_env_passthrough_count.to_string();
     println!(
-        "{}",
-        crate::ta(
-            "cli-security-status-workspace",
-            &[
-                ("dir", &report.workspace.workspace_dir),
-                ("workspace_only", &workspace_only),
-                ("read_write_roots", &read_write_roots),
-                ("read_only_roots", &read_only_roots),
-                ("write_only_roots", &write_only_roots),
-                ("env_passthrough", &env_passthrough),
-            ],
-            "Workspace"
-        )
+        "Workspace:  {dir}; workspace-only: {workspace_only}; rw roots: {read_write_roots}; read-only roots: {read_only_roots}; write-only roots: {write_only_roots}; env passthrough: {env_passthrough}",
+        dir = report.workspace.workspace_dir
     );
     let encryption = report.credentials.encryption_enabled.to_string();
     let secrets_set = report.credentials.secret_fields_set.to_string();
@@ -299,51 +210,20 @@ pub fn print_report(report: &SecurityStatusReport) {
     let classified_total = report.credentials.classified_fields_total.to_string();
     let classification_summary = credential_classification_summary(&report.credentials);
     println!(
-        "{}",
-        crate::ta(
-            "cli-security-status-credentials",
-            &[
-                ("encryption", &encryption),
-                ("secrets_set", &secrets_set),
-                ("secrets_total", &secrets_total),
-                ("classified_total", &classified_total),
-                ("classification_summary", &classification_summary),
-            ],
-            "Credentials"
-        )
+        "Credentials: encryption: {encryption}; secrets set: {secrets_set}/{secrets_total}; classified fields: {classified_total}; classes: {classification_summary}"
     );
     let gateway_port = report.gateway.port.to_string();
     let gateway_pairing = report.gateway.require_pairing.to_string();
     let gateway_public_bind = report.gateway.allow_public_bind.to_string();
     let gateway_tls = report.gateway.tls_enabled.to_string();
     println!(
-        "{}",
-        crate::ta(
-            "cli-security-status-gateway",
-            &[
-                ("host", &report.gateway.host),
-                ("port", &gateway_port),
-                ("pairing", &gateway_pairing),
-                ("public_bind", &gateway_public_bind),
-                ("tls", &gateway_tls),
-            ],
-            "Gateway"
-        )
+        "Gateway:    {host}:{gateway_port}; pairing required: {gateway_pairing}; public bind: {gateway_public_bind}; TLS: {gateway_tls}",
+        host = report.gateway.host
     );
     if report.warnings.is_empty() {
-        println!(
-            "{}",
-            crate::t("cli-security-status-warnings-none", "Warnings: none")
-        );
+        println!("Warnings:   none");
     } else {
-        println!(
-            "{}",
-            crate::ta(
-                "cli-security-status-warnings",
-                &[("v", &report.warnings.join("; "))],
-                "Warnings"
-            )
-        );
+        println!("Warnings:   {v}", v = report.warnings.join("; "));
     }
 }
 
@@ -421,7 +301,7 @@ fn credential_classification_counts(
 
 fn credential_classification_summary(credentials: &CredentialStatus) -> String {
     if credentials.classification_counts.is_empty() {
-        return crate::t("cli-security-status-credentials-classes-none", "none");
+        return "none".to_string();
     }
 
     credentials

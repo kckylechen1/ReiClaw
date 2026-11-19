@@ -236,13 +236,6 @@ pub async fn handle_api_status(
         channels.insert(composite, serde_json::Value::Bool(true));
     }
 
-    let locale = config
-        .locale
-        .as_deref()
-        .filter(|s| !s.is_empty())
-        .map(String::from)
-        .unwrap_or_else(reiclaw_runtime::i18n::detect_locale);
-
     // Per-agent resolution when `?agent=<alias>` is supplied. Falls back
     // to the install-wide first-of-each view when the alias is unknown
     // (so the dashboard's old shape still renders during onboarding,
@@ -306,7 +299,7 @@ pub async fn handle_api_status(
         "uptime_seconds": health.uptime_seconds,
         "daemon_started_at": reiclaw_runtime::health::daemon_started_at(),
         "gateway_port": config.gateway.port,
-        "locale": locale,
+        "locale": "en",
         "memory_backend": memory_backend,
         "paired": state.pairing.is_paired(),
         "channels": channels,

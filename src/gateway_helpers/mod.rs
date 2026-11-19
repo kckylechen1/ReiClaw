@@ -10,34 +10,6 @@ pub mod bridges;
 
 use crate::config::Config;
 
-/// Resolve a `cli-*` Fluent key for CLI output. Routes through the runtime
-/// i18n catalogue under `agent-runtime` (default + CI/release); without that
-/// feature the runtime crate is absent, so the English `fallback` is used.
-#[allow(unused_variables)]
-pub(crate) fn t(key: &str, fallback: &str) -> String {
-    #[cfg(feature = "agent-runtime")]
-    {
-        reiclaw_runtime::i18n::get_required_cli_string(key)
-    }
-    #[cfg(not(feature = "agent-runtime"))]
-    {
-        fallback.to_string() // i18n-exempt: English fallback when Fluent (agent-runtime) is disabled
-    }
-}
-
-/// `t` with `{$name}` arguments.
-#[allow(unused_variables)]
-pub(crate) fn ta(key: &str, args: &[(&str, &str)], fallback: &str) -> String {
-    #[cfg(feature = "agent-runtime")]
-    {
-        reiclaw_runtime::i18n::get_required_cli_string_with_args(key, args)
-    }
-    #[cfg(not(feature = "agent-runtime"))]
-    {
-        fallback.to_string() // i18n-exempt: English fallback when Fluent (agent-runtime) is disabled
-    }
-}
-
 /// Resolve gateway host and port from CLI args or config.
 pub fn resolve_gateway_addr(
     config: &Config,
@@ -177,7 +149,7 @@ pub async fn fetch_paircode(
     let ip = host.parse::<std::net::IpAddr>().ok().filter(|ip| ip.is_loopback())
         .ok_or_else(|| {
             ::reiclaw_log::record!(WARN, ::reiclaw_log::Event::new(module_path!(), ::reiclaw_log::Action::Fail), "pairing-code request rejected: non-loopback destination");
-            anyhow::Error::msg(t("cli-paircode-local-only", "Pairing-code requests must target loopback. Run this on the gateway host with --host 127.0.0.1."))
+            anyhow::Error::msg("Pairing-code requests must target loopback. Run this on the gateway host with --host 127.0.0.1.".to_string())
         })?;
     let address = std::net::SocketAddr::new(ip, port);
     let mut url = reqwest::Url::parse(&format!("http://{address}"))?;
@@ -194,11 +166,7 @@ pub async fn fetch_paircode(
     let admin_token =
         reiclaw_runtime::security::pairing::read_gateway_admin_token(data_dir).ok_or_else(|| {
             ::reiclaw_log::record!(WARN, ::reiclaw_log::Event::new(module_path!(), ::reiclaw_log::Action::Fail), "pairing-code request rejected: owner token unavailable");
-            anyhow::Error::msg(ta(
-                "cli-paircode-admin-token-missing",
-                &[("path", &reiclaw_runtime::security::pairing::gateway_admin_token_path(data_dir).display().to_string())],
-                "No gateway admin token. Run this on the gateway host, as the user running it, while the gateway is running."
-            ))
+            anyhow::Error::msg(format!("No gateway admin token at {path}. Run this on the gateway host, as the user running it, while the gateway is running.", path = reiclaw_runtime::security::pairing::gateway_admin_token_path(data_dir).display()))
         })?;
     let client = reqwest::Client::builder()
         .no_proxy()
@@ -305,10 +273,7 @@ pub fn paircode_no_code_message(
         lines
             .push("🔐 Gateway pairing is enabled, but no active pairing code is available.".into());
     } else {
-        lines.push(t(
-            "cli-pairing-disabled",
-            "⚠️  Gateway pairing is disabled in config.",
-        ));
+        lines.push("⚠️  Gateway pairing is disabled in config.".to_string());
         lines.push("All requests will be accepted without authentication.".into());
         lines.push("To enable pairing, set [gateway] require_pairing = true.".into());
         return indent_paircode_lines(lines);

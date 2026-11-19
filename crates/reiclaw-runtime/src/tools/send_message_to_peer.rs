@@ -525,7 +525,7 @@ mod tests {
         );
 
         let tool = SendMessageToPeerTool::new(Arc::new(config), "aa");
-        assert!(crate::i18n::get_tool_description(tool.name()).is_none());
+        assert!(crate::agent::prompt::prompt_tool_description(tool.name()).is_none());
         let spec = tool.spec();
         let description = spec.description.as_str();
 

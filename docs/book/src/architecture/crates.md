@@ -27,7 +27,6 @@ TOML schema and its validation. Handles:
 - Encrypted secrets store (local key file)
 - Workspace resolution (env vars, Homebrew paths, XDG, container detection)
 - Current-schema admission and normalization
-- Shared locale discovery and Fluent formatting through the optional `i18n` feature; runtime re-exports this implementation, and the ACP bridge uses it directly
 - Stateless encoding/comparison for persisted token hashes (`tokens`); runtime owns the pairing guard and its live state
 
 All user-facing config keys are documented in [Reference → Config](../reference/config.md), which is generated from this crate.
@@ -93,7 +92,7 @@ Callable tools the agent invokes. Not to be confused with CLI `zeroclaw` subcomm
 
 Includes: `browser`, `http_request`, `web_search`, `shell`, `file_read`, `file_write`, and more. See [Tools → Overview](../tools/overview.md).
 
-Each tool is registered via factory and described to the model via Fluent-localised strings.
+Each tool is registered via factory and describes itself to the model in English.
 
 ## Layer: Support
 

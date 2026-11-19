@@ -50,8 +50,7 @@ so post-merge Quality Gate runs can seed Rust caches for later PRs.
 3. The code path includes:
    - `changes` (Change Scope and Format): classifies the diff, selects the targeted jobs below, and runs `cargo fmt --all -- --check` and `scripts/ci/source_tree_gate.py` (orphaned sources, module-wide dead-code silencing, the approved crate list). Every other job waits on it. The hosted runners allow 20 concurrent jobs per account, so light checks share jobs rather than each taking a runner.
    - `lint`: `cargo clippy --workspace --all-targets --locked --features
-     ci-all -- -D warnings`, plus the provider dispatch gate and the Fluent
-     catalog syntax gate (`cargo fluent check`). This is the only
+     ci-all -- -D warnings`, plus the provider dispatch gate. This is the only
      all-features compile in the gate (benches included).
    - `build`: matrix across `x86_64-unknown-linux-gnu` and
      `aarch64-apple-darwin`. Windows is not a supported platform.

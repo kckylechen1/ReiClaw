@@ -2,29 +2,17 @@ use reiclaw_api::runtime_traits::DockerWorkspaceMountError;
 
 pub(super) fn format_runtime_command_error(error: &anyhow::Error) -> String {
     if let Some(error) = error.downcast_ref::<DockerWorkspaceMountError>() {
-        let (key, path, cause) = match error {
-            DockerWorkspaceMountError::WorkspacePath { path, source } => (
-                "tool-runtime-command-docker-workspace-path",
-                path.as_str(),
-                source.to_string(),
+        return match error {
+            DockerWorkspaceMountError::WorkspacePath { path, source } => format!(
+                "Failed to build runtime command: Failed to canonicalize Docker workspace path {path}: {source}"
             ),
-            DockerWorkspaceMountError::AllowedRoot { path, source } => (
-                "tool-runtime-command-docker-allowed-root",
-                path.as_str(),
-                source.to_string(),
+            DockerWorkspaceMountError::AllowedRoot { path, source } => format!(
+                "Failed to build runtime command: Failed to canonicalize Docker workspace root {path}: {source}"
             ),
         };
-        return crate::i18n::get_required_cli_string_with_args(
-            key,
-            &[("path", path), ("cause", cause.as_str())],
-        );
     }
 
-    let message = format!("{error:#}");
-    crate::i18n::get_required_cli_string_with_args(
-        "tool-runtime-command-build-failed",
-        &[("error", message.as_str())],
-    )
+    format!("Failed to build runtime command: {error:#}")
 }
 
 #[cfg(test)]

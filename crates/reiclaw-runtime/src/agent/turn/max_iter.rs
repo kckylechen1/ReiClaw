@@ -186,9 +186,9 @@ pub(crate) async fn finish_after_max_iterations(
     // Graceful shutdown with a visible reason so the user knows why the
     // agent stopped making progress.
     accumulated_display_text.push_str("\n\n");
-    accumulated_display_text.push_str(&crate::i18n::get_required_cli_string_with_args(
-        "turn-max-iterations-reached",
-        &[("max_iterations", &max_iterations.to_string())],
+    accumulated_display_text.push_str(&format!(
+        "*Turn stopped: reached maximum tool iterations ({max_iterations}).*",
+        max_iterations = max_iterations.to_string()
     ));
     Ok(accumulated_display_text)
 }
@@ -452,9 +452,9 @@ mod i18n_message_tests {
     /// the user-visible message so the operator knows why the agent stopped.
     #[test]
     fn max_iterations_message_includes_count() {
-        let msg = crate::i18n::get_required_cli_string_with_args(
-            "turn-max-iterations-reached",
-            &[("max_iterations", "42")],
+        let msg = format!(
+            "*Turn stopped: reached maximum tool iterations ({max_iterations}).*",
+            max_iterations = "42"
         );
         assert!(
             msg.contains("42"),

@@ -5,7 +5,6 @@
 
 use anyhow::Result;
 use reiclaw_runtime::browse::list_directory;
-use reiclaw_runtime::i18n::{get_required_cli_string, get_required_cli_string_with_args};
 
 pub fn handle_browse(path: String, config: &crate::config::Config) -> Result<()> {
     let result = list_directory(config, &path)?;
@@ -15,23 +14,14 @@ pub fn handle_browse(path: String, config: &crate::config::Config) -> Result<()>
         &result.path
     };
     println!(
-        "{}",
-        get_required_cli_string_with_args(
-            "cli-browse-header",
-            &[
-                (
-                    "path",
-                    &console::style(format!("shared/{display_path}"))
-                        .white()
-                        .bold()
-                        .to_string(),
-                ),
-                ("count", &result.entries.len().to_string()),
-            ],
-        )
+        "{path} ({count} entries)",
+        count = result.entries.len(),
+        path = console::style(format!("shared/{display_path}"))
+            .white()
+            .bold()
     );
     if result.entries.is_empty() {
-        println!("  {}", get_required_cli_string("cli-browse-empty"));
+        println!("  (empty)");
         return Ok(());
     }
     for entry in result.entries {
@@ -39,14 +29,9 @@ pub fn handle_browse(path: String, config: &crate::config::Config) -> Result<()>
             "dir" => println!("  {}/", console::style(&entry.name).cyan().bold()),
             _ => match entry.size {
                 Some(s) => println!(
-                    "  {}",
-                    get_required_cli_string_with_args(
-                        "cli-browse-file-bytes",
-                        &[
-                            ("name", &console::style(&entry.name).dim().to_string()),
-                            ("bytes", &s.to_string()),
-                        ],
-                    )
+                    "  {name} ({bytes} bytes)",
+                    bytes = s,
+                    name = console::style(&entry.name).dim()
                 ),
                 None => println!("  {}", console::style(&entry.name).dim()),
             },

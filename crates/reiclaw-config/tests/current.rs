@@ -1243,8 +1243,8 @@ fn property_and_json_input_cannot_change_the_supported_version() {
                 .is_err()
         );
     }
-    config.set_prop_persistent("locale", "en").unwrap();
-    assert_eq!(config.locale.as_deref(), Some("en"));
+    config.set_prop_persistent("gateway.port", "42618").unwrap();
+    assert_eq!(config.gateway.port, 42618);
     assert_eq!(
         toml::from_str::<Config>("").unwrap().schema_version,
         CURRENT_SCHEMA_VERSION

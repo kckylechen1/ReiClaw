@@ -1881,9 +1881,8 @@ fn systemd_user_linger_status_from_output(
 }
 
 fn systemd_linger_hint(user: &str) -> String {
-    crate::i18n::get_required_cli_string_with_args(
-        "cli-service-systemd-linger-disabled-warning",
-        &[("user", user)],
+    format!(
+        "systemd user lingering is disabled. ReiClaw's user service may stop after logout. Enable it with: loginctl enable-linger {user}"
     )
 }
 

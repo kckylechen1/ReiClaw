@@ -21,7 +21,6 @@ pub mod doctor;
 pub mod health;
 pub mod heartbeat;
 pub mod hooks;
-pub mod i18n;
 pub mod integrations;
 pub mod observability;
 pub mod peers;

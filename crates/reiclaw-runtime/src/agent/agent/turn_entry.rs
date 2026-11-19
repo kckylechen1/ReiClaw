@@ -554,7 +554,7 @@ impl Agent {
                 .as_ref()
                 .is_some_and(tokio_util::sync::CancellationToken::is_cancelled)
             {
-                let marker = crate::i18n::get_required_cli_string("turn-interrupted-by-user");
+                let marker = crate::agent::INTERRUPTED_BY_USER_MARKER.to_string();
                 let interruption =
                     ConversationMessage::Chat(ChatMessage::assistant(marker.clone()));
                 new_msgs.push(interruption.clone());
@@ -821,8 +821,7 @@ impl Agent {
                         // literal, so suffix-matching round_added would
                         // misfire. Synthesize the bare marker only when no
                         // interruption text was persisted this round.
-                        let marker =
-                            crate::i18n::get_required_cli_string("turn-interrupted-by-user");
+                        let marker = crate::agent::INTERRUPTED_BY_USER_MARKER.to_string();
                         let persisted_interruption = error
                             .downcast_ref::<crate::agent::loop_::StreamCancelledAfterOutput>()
                             .map(|cancelled| format!("{}\n\n{marker}", cancelled.partial_text));
@@ -849,9 +848,7 @@ impl Agent {
                         // Mark the interruption only when nothing was committed —
                         // prior-round text must round-trip unmodified.
                         if committed_response.is_empty() {
-                            committed_response.push_str(&crate::i18n::get_required_cli_string(
-                                "turn-stream-interrupted",
-                            ));
+                            committed_response.push_str(crate::agent::STREAM_INTERRUPTED_MARKER);
                         }
                         error
                     };

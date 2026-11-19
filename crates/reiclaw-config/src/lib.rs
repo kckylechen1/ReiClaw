@@ -21,8 +21,6 @@ pub mod domain_matcher;
 pub mod env_overrides;
 pub mod generate;
 pub mod helpers;
-#[cfg(feature = "i18n")]
-pub mod i18n;
 mod install;
 mod load;
 pub mod multi_agent;

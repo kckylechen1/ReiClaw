@@ -146,15 +146,10 @@ fn context_window_diagnostics_distinguish_unset_explicit_and_zero_profiles() {
 
     let mut unset_items = Vec::new();
     check_config_semantics(&unset, &mut unset_items);
-    let unset_message = crate::i18n::get_required_cli_string_with_args(
-        "cli-doctor-context-window-unset",
-        &[
-            ("provider_ref", "ollama.local"),
-            (
-                "fallback",
-                &UNCONFIGURED_CONTEXT_WINDOW_FALLBACK.to_string(),
-            ),
-        ],
+    let unset_message = format!(
+        "{provider_ref}: no context_window set — will use {fallback} token fallback when selected; likely far below this model's real limit; set context_window on this profile",
+        fallback = UNCONFIGURED_CONTEXT_WINDOW_FALLBACK.to_string(),
+        provider_ref = "ollama.local"
     );
     let unset_item = unset_items
         .iter()
@@ -171,12 +166,10 @@ fn context_window_diagnostics_distinguish_unset_explicit_and_zero_profiles() {
         .context_window = Some(32_000);
     let mut explicit_items = Vec::new();
     check_config_semantics(&explicit, &mut explicit_items);
-    let explicit_message = crate::i18n::get_required_cli_string_with_args(
-        "cli-doctor-context-window-ok",
-        &[
-            ("provider_ref", "ollama.local"),
-            ("context_window", "32000"),
-        ],
+    let explicit_message = format!(
+        "{provider_ref}: context window: {context_window} tokens",
+        context_window = "32000",
+        provider_ref = "ollama.local"
     );
     let explicit_item = explicit_items
         .iter()
@@ -206,9 +199,9 @@ fn context_window_diagnostics_distinguish_unset_explicit_and_zero_profiles() {
         .context_window = Some(0);
     let mut zero_items = Vec::new();
     check_config_semantics(&zero, &mut zero_items);
-    let zero_message = crate::i18n::get_required_cli_string_with_args(
-        "cli-doctor-context-window-zero",
-        &[("provider_ref", "ollama.local")],
+    let zero_message = format!(
+        "{provider_ref}: context_window is 0 (invalid; set it to the model's real context limit)",
+        provider_ref = "ollama.local"
     );
     let zero_item = zero_items
         .iter()
@@ -971,16 +964,15 @@ fn check_workspace_writable_probe_is_cleaned_up_and_preserves_files() {
 
 #[test]
 fn diagnose_flags_web_dist_dir_with_tilde() {
-    // Asserts the localized Fluent message resolves and inlines the path +
-    // the tilde reason — the diagnostic now goes through Fluent per
-    // AGENTS.mdRound 3).
+    // Asserts the diagnostic inlines the path and the tilde reason.
     let mut config = Config::default();
     config.gateway.web_dist_dir = Some("~/web-dist".to_string());
 
-    let expected_reason = crate::i18n::get_required_cli_string("cli-web-dist-dir-reason-tilde");
-    let expected_message = crate::i18n::get_required_cli_string_with_args(
-        "cli-doctor-web-dist-dir-expansion-warning",
-        &[("path", "~/web-dist"), ("reason", expected_reason.as_str())],
+    let expected_reason = "starts with `~` which is not expanded".to_string();
+    let expected_message = format!(
+        "gateway.web_dist_dir = \"{path}\" — {reason}; gateway.web_dist_dir is read verbatim, so expand the value yourself (e.g. an absolute path)",
+        path = "~/web-dist",
+        reason = expected_reason.as_str()
     );
 
     let results = diagnose(&config);
@@ -1000,13 +992,11 @@ fn diagnose_flags_web_dist_dir_with_env_var() {
     let mut config = Config::default();
     config.gateway.web_dist_dir = Some("$HOME/web-dist".to_string());
 
-    let expected_reason = crate::i18n::get_required_cli_string("cli-web-dist-dir-reason-dollar");
-    let expected_message = crate::i18n::get_required_cli_string_with_args(
-        "cli-doctor-web-dist-dir-expansion-warning",
-        &[
-            ("path", "$HOME/web-dist"),
-            ("reason", expected_reason.as_str()),
-        ],
+    let expected_reason = "contains `$` which is not expanded".to_string();
+    let expected_message = format!(
+        "gateway.web_dist_dir = \"{path}\" — {reason}; gateway.web_dist_dir is read verbatim, so expand the value yourself (e.g. an absolute path)",
+        path = "$HOME/web-dist",
+        reason = expected_reason.as_str()
     );
 
     let results = diagnose(&config);
@@ -1087,21 +1077,21 @@ fn codex_wiring_silent_when_codex_unused() {
 }
 
 #[test]
-fn web_dist_dir_expansion_reason_key_detects_tilde_and_env() {
+fn web_dist_dir_expansion_reason_detects_tilde_and_env() {
     assert_eq!(
-        web_dist_dir_expansion_reason_key("~/web-dist"),
-        Some("cli-web-dist-dir-reason-tilde")
+        web_dist_dir_expansion_reason("~/web-dist"),
+        Some("starts with `~` which is not expanded")
     );
     assert_eq!(
-        web_dist_dir_expansion_reason_key("$HOME/web-dist"),
-        Some("cli-web-dist-dir-reason-dollar")
+        web_dist_dir_expansion_reason("$HOME/web-dist"),
+        Some("contains `$` which is not expanded")
     );
     assert_eq!(
-        web_dist_dir_expansion_reason_key("${HOME}/web-dist"),
-        Some("cli-web-dist-dir-reason-dollar")
+        web_dist_dir_expansion_reason("${HOME}/web-dist"),
+        Some("contains `$` which is not expanded")
     );
-    assert!(web_dist_dir_expansion_reason_key("/srv/zeroclaw/web-dist").is_none());
-    assert!(web_dist_dir_expansion_reason_key("./dist").is_none());
+    assert!(web_dist_dir_expansion_reason("/srv/zeroclaw/web-dist").is_none());
+    assert!(web_dist_dir_expansion_reason("./dist").is_none());
 }
 
 #[test]

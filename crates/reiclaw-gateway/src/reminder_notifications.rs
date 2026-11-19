@@ -69,10 +69,7 @@ pub(crate) fn reconcile_pass(data_dir: &Path, now: i64) -> anyhow::Result<usize>
         // enqueue, where the DELIVERY claim gate makes the final call.
         let claimed =
             sessions.with_reminder_gate(&occurrence.occurrence_id, now, |description| {
-                let content = reiclaw_runtime::i18n::get_required_cli_string_with_args(
-                    "task-reminder-notice",
-                    &[("task", description)],
-                );
+                let content = format!("Reminder: {description}");
                 outbox
                     .enqueue_source_deadline(
                         &occurrence.bridge,

@@ -673,9 +673,7 @@ impl AnthropicModelProvider {
 
     /// Note appended to text when an image reference could not be sent.
     ///
-    /// This is prompt text the model reads as fact, not user-facing UI text, so
-    /// it stays an English literal rather than going through the Fluent
-    /// catalogue.
+    /// This is prompt text the model reads as fact, not user-facing UI text.
     fn image_omission_note(count: usize) -> String {
         format!("[{count} image(s) omitted: unsupported or oversized image reference]")
     }

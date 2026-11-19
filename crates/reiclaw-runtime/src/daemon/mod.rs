@@ -5,7 +5,6 @@ use tokio::task::JoinHandle;
 use tokio::time::Duration;
 use tokio_util::task::TaskTracker;
 
-use crate::i18n::get_required_cli_string_with_args;
 use crate::tools::task_context::TaskIdentity;
 
 mod registry;
@@ -508,9 +507,7 @@ async fn stop_components(
         // A synchronous section can defer Tokio cancellation. Do not return
         // Reload: main's existing error propagation then prevents a new
         // scheduler from clearing locks while old jobs can still act.
-        anyhow::bail!(crate::i18n::get_required_cli_string(
-            "daemon-cron-shutdown-incomplete"
-        ));
+        anyhow::bail!("Cron tasks did not stop before the shutdown deadline. Reload is stopped to prevent overlapping scheduled jobs; restart the daemon process.".to_string());
     }
     Ok(())
 }
@@ -1616,19 +1613,15 @@ fn resolve_heartbeat_delivery(config: &Config) -> Result<Option<(String, String)
             Ok(Some((channel.to_string(), target.to_string())))
         }
         // Only one set — error.
-        (Some(_), None) => anyhow::bail!(get_required_cli_string_with_args(
-            "heartbeat-delivery-missing-field",
-            &[
-                ("required", "heartbeat.to"),
-                ("configured", "heartbeat.target")
-            ],
+        (Some(_), None) => anyhow::bail!(format!(
+            "{required} is required when {configured} is set.",
+            configured = "heartbeat.target",
+            required = "heartbeat.to"
         )),
-        (None, Some(_)) => anyhow::bail!(get_required_cli_string_with_args(
-            "heartbeat-delivery-missing-field",
-            &[
-                ("required", "heartbeat.target"),
-                ("configured", "heartbeat.to")
-            ],
+        (None, Some(_)) => anyhow::bail!(format!(
+            "{required} is required when {configured} is set.",
+            configured = "heartbeat.to",
+            required = "heartbeat.target"
         )),
         // Native channel entries and inbound peers do not identify a bridge's
         // outbound recipient; never infer delivery from them.
@@ -1662,19 +1655,15 @@ fn resolve_heartbeat_deadman_delivery(
             validate_heartbeat_bridge(config, channel, "heartbeat.deadman_channel")?;
             Ok(Some((channel.to_string(), target.to_string())))
         }
-        (Some(_), None) => anyhow::bail!(get_required_cli_string_with_args(
-            "heartbeat-delivery-missing-field",
-            &[
-                ("required", "heartbeat.deadman_to"),
-                ("configured", "heartbeat.deadman_channel"),
-            ],
+        (Some(_), None) => anyhow::bail!(format!(
+            "{required} is required when {configured} is set.",
+            configured = "heartbeat.deadman_channel",
+            required = "heartbeat.deadman_to"
         )),
-        (None, Some(_)) => anyhow::bail!(get_required_cli_string_with_args(
-            "heartbeat-delivery-missing-field",
-            &[
-                ("required", "heartbeat.deadman_channel"),
-                ("configured", "heartbeat.deadman_to"),
-            ],
+        (None, Some(_)) => anyhow::bail!(format!(
+            "{required} is required when {configured} is set.",
+            configured = "heartbeat.deadman_to",
+            required = "heartbeat.deadman_channel"
         )),
         (None, None) => Ok(None),
     }
@@ -1869,17 +1858,15 @@ fn load_jsonl_messages(path: &std::path::Path) -> Vec<reiclaw_providers::traits:
 
 fn validate_heartbeat_bridge(config: &Config, channel: &str, field: &str) -> Result<()> {
     let Some(bridge) = config.gateway.bridges.get(channel) else {
-        anyhow::bail!(get_required_cli_string_with_args(
-            "heartbeat-delivery-bridge-required",
-            &[("field", field), ("bridge", channel)],
+        anyhow::bail!(format!(
+            "{field} names '{channel}', but no [gateway.bridges.{channel}] is configured. Heartbeat delivery requires an explicit gateway bridge and recipient; legacy [channels.*] entries no longer provide outbound delivery. Register the delivery bridge with rei gateway bridge add, then set the bridge name and recipient in [heartbeat]."
         ));
     };
     // Device and owner credentials can use scoped chat, but /ws/bridge
     // rejects them. Enqueuing to one would leave the message undrainable.
     if bridge.scoped() {
-        anyhow::bail!(get_required_cli_string_with_args(
-            "heartbeat-delivery-scoped-bridge",
-            &[("field", field), ("bridge", channel)],
+        anyhow::bail!(format!(
+            "{field} names scoped bridge '{channel}', which cannot connect to /ws/bridge or receive outbox deliveries. Select a delivery bridge without a device or owner scope; keep the scoped credential's permissions unchanged."
         ));
     }
     Ok(())

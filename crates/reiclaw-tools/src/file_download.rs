@@ -4,13 +4,11 @@ use reiclaw_api::tool::{Tool, ToolOutput, ToolResult, with_ephemeral_workspace_w
 use reiclaw_config::schema::FileDownloadConfig;
 use reiclaw_policy::SecurityPolicy;
 use serde_json::json;
-use std::sync::{Arc, OnceLock};
+use std::sync::Arc;
 use std::time::Duration;
 use tokio::io::AsyncWriteExt;
 
 const RESPONSE_BODY_LIMIT_BYTES: usize = 4 * 1024;
-const TOOL_DESCRIPTION_KEY: &str = "tool-file-download";
-static TOOL_DESCRIPTION: OnceLock<String> = OnceLock::new();
 
 pub struct FileDownloadTool {
     security: Arc<SecurityPolicy>,
@@ -56,40 +54,24 @@ impl FileDownloadTool {
         let mut stream = response.bytes_stream();
         let mut written: u64 = 0;
         while let Some(chunk) = stream.next().await {
-            let chunk = chunk.map_err(|e| {
-                Self::tool_msg_with_args(
-                    "tool-file-download-error-read-body",
-                    &[("err", &e.to_string())],
-                )
-            })?;
+            let chunk =
+                chunk.map_err(|e| format!("Failed while reading response body: {err}", err = e))?;
             written = written.saturating_add(chunk.len() as u64);
             if written > max_bytes {
                 let limit = max_bytes.to_string();
-                return Err(Self::tool_msg_with_args(
-                    "tool-file-download-error-too-large-stream",
-                    &[("limit", &limit)],
+                return Err(format!(
+                    "Download too large: exceeded limit of {limit} bytes"
                 ));
             }
-            file.write_all(&chunk).await.map_err(|e| {
-                Self::tool_msg_with_args(
-                    "tool-file-download-error-write-body",
-                    &[("err", &e.to_string())],
-                )
-            })?;
+            file.write_all(&chunk)
+                .await
+                .map_err(|e| format!("Failed while writing downloaded bytes: {err}", err = e))?;
         }
 
-        file.flush().await.map_err(|e| {
-            Self::tool_msg_with_args("tool-file-download-error-flush", &[("err", &e.to_string())])
-        })?;
+        file.flush()
+            .await
+            .map_err(|e| format!("Failed to flush downloaded file: {err}", err = e))?;
         Ok(written)
-    }
-
-    fn tool_msg(key: &str) -> String {
-        crate::i18n::get_required_tool_string(key)
-    }
-
-    fn tool_msg_with_args(key: &str, args: &[(&str, &str)]) -> String {
-        crate::i18n::get_required_tool_string_with_args(key, args)
     }
 }
 
@@ -100,9 +82,7 @@ impl Tool for FileDownloadTool {
     }
 
     fn description(&self) -> &str {
-        TOOL_DESCRIPTION
-            .get_or_init(|| crate::i18n::get_required_tool_string(TOOL_DESCRIPTION_KEY))
-            .as_str()
+        "Download a file from the configured remote endpoint and write it to the agent's workspace. Supply the identifier of the document to fetch and a workspace-relative destination path; the endpoint URL is fixed by host config and is never model-controlled. Bytes are streamed straight to disk and are not loaded into model context. Returns the HTTP status, the number of bytes written, and the destination path."
     }
 
     fn parameters_schema(&self) -> serde_json::Value {
@@ -111,11 +91,11 @@ impl Tool for FileDownloadTool {
             "properties": {
                 "document_id": {
                     "type": "string",
-                    "description": Self::tool_msg("tool-file-download-param-document-id")
+                    "description": "Identifier of the document to fetch from the configured endpoint."
                 },
                 "dest_path": {
                     "type": "string",
-                    "description": Self::tool_msg("tool-file-download-param-dest-path")
+                    "description": "Workspace-relative path to write the file to. The parent directory must already exist."
                 }
             },
             "required": ["document_id", "dest_path"]
@@ -133,7 +113,9 @@ impl Tool for FileDownloadTool {
             return Ok(ToolResult {
                 success: false,
                 output: ToolOutput::default(),
-                error: Some(Self::tool_msg("tool-file-download-error-disabled")),
+                error: Some(
+                    "file_download is disabled: [file_download].url is not configured".to_string(),
+                ),
             });
         };
 
@@ -141,7 +123,7 @@ impl Tool for FileDownloadTool {
             return Ok(ToolResult {
                 success: false,
                 output: ToolOutput::default(),
-                error: Some(Self::tool_msg("tool-file-download-error-read-only")),
+                error: Some("Action blocked: autonomy is read-only".to_string()),
             });
         }
 
@@ -149,7 +131,7 @@ impl Tool for FileDownloadTool {
             return Ok(ToolResult {
                 success: false,
                 output: ToolOutput::default(),
-                error: Some(Self::tool_msg("tool-file-download-error-rate-limited-hour")),
+                error: Some("Rate limit exceeded: too many actions in the last hour".to_string()),
             });
         }
 
@@ -166,9 +148,7 @@ impl Tool for FileDownloadTool {
                         .with_attrs(::serde_json::json!({"param": "document_id"})),
                     "file_download: missing document_id parameter"
                 );
-                anyhow::Error::msg(Self::tool_msg(
-                    "tool-file-download-error-missing-document-id",
-                ))
+                anyhow::Error::msg("Missing 'document_id' parameter".to_string())
             })?;
 
         let dest_path = args
@@ -184,7 +164,7 @@ impl Tool for FileDownloadTool {
                         .with_attrs(::serde_json::json!({"param": "dest_path"})),
                     "file_download: missing dest_path parameter"
                 );
-                anyhow::Error::msg(Self::tool_msg("tool-file-download-error-missing-dest-path"))
+                anyhow::Error::msg("Missing 'dest_path' parameter".to_string())
             })?;
 
         // The downloaded bytes are attacker-influenceable, so the write target
@@ -197,9 +177,8 @@ impl Tool for FileDownloadTool {
                 return Ok(ToolResult {
                     success: false,
                     output: ToolOutput::default(),
-                    error: Some(Self::tool_msg_with_args(
-                        "tool-file-download-error-invalid-file-name",
-                        &[("dest_path", dest_path)],
+                    error: Some(format!(
+                        "Invalid dest_path '{dest_path}': must end in a concrete file name"
                     )),
                 });
             }
@@ -209,9 +188,8 @@ impl Tool for FileDownloadTool {
             return Ok(ToolResult {
                 success: false,
                 output: ToolOutput::default(),
-                error: Some(Self::tool_msg_with_args(
-                    "tool-file-download-error-no-parent",
-                    &[("dest_path", dest_path)],
+                error: Some(format!(
+                    "Invalid dest_path '{dest_path}': has no parent directory"
                 )),
             });
         };
@@ -225,9 +203,9 @@ impl Tool for FileDownloadTool {
                 return Ok(ToolResult {
                     success: false,
                     output: ToolOutput::default(),
-                    error: Some(Self::tool_msg_with_args(
-                        "tool-file-download-error-resolve-dir",
-                        &[("dest_path", dest_path), ("err", &e.to_string())],
+                    error: Some(format!(
+                        "Cannot resolve destination directory for '{dest_path}': {err}",
+                        err = e
                     )),
                 });
             }
@@ -267,9 +245,7 @@ impl Tool for FileDownloadTool {
             return Ok(ToolResult {
                 success: false,
                 output: ToolOutput::default(),
-                error: Some(Self::tool_msg(
-                    "tool-file-download-error-rate-limited-budget",
-                )),
+                error: Some("Rate limit exceeded: action budget exhausted".to_string()),
             });
         }
 
@@ -287,10 +263,7 @@ impl Tool for FileDownloadTool {
                 return Ok(ToolResult {
                     success: false,
                     output: ToolOutput::default(),
-                    error: Some(Self::tool_msg_with_args(
-                        "tool-file-download-error-client-build",
-                        &[("err", &e.to_string())],
-                    )),
+                    error: Some(format!("Failed to build download client: {err}", err = e)),
                 });
             }
         };
@@ -306,10 +279,7 @@ impl Tool for FileDownloadTool {
                 return Ok(ToolResult {
                     success: false,
                     output: ToolOutput::default(),
-                    error: Some(Self::tool_msg_with_args(
-                        "tool-file-download-error-request",
-                        &[("err", &e.to_string())],
-                    )),
+                    error: Some(format!("Download request failed: {err}", err = e)),
                 });
             }
         };
@@ -327,9 +297,9 @@ impl Tool for FileDownloadTool {
             return Ok(ToolResult {
                 success: false,
                 output: preview.into(),
-                error: Some(Self::tool_msg_with_args(
-                    "tool-file-download-error-status",
-                    &[("status", &status.to_string())],
+                error: Some(format!(
+                    "Download endpoint returned status {status}",
+                    status = status
                 )),
             });
         }
@@ -342,12 +312,10 @@ impl Tool for FileDownloadTool {
             return Ok(ToolResult {
                 success: false,
                 output: ToolOutput::default(),
-                error: Some(Self::tool_msg_with_args(
-                    "tool-file-download-error-too-large-reported",
-                    &[
-                        ("len", &len.to_string()),
-                        ("limit", &self.config.max_file_size_bytes.to_string()),
-                    ],
+                error: Some(format!(
+                    "Download too large: endpoint reports {len} bytes (limit: {limit} bytes)",
+                    len = len,
+                    limit = self.config.max_file_size_bytes
                 )),
             });
         }
@@ -370,9 +338,9 @@ impl Tool for FileDownloadTool {
                 return Ok(ToolResult {
                     success: false,
                     output: ToolOutput::default(),
-                    error: Some(Self::tool_msg_with_args(
-                        "tool-file-download-error-temp-create",
-                        &[("err", &error.to_string())],
+                    error: Some(format!(
+                        "Failed to create temporary download file: {err}",
+                        err = error
                     )),
                 });
             }
@@ -384,13 +352,10 @@ impl Tool for FileDownloadTool {
             // after cancellation. persist consumes the cleanup owner on success.
             Ok(written) => match temp_path.persist(&dest) {
                 Ok(()) => {
-                    let output = Self::tool_msg_with_args(
-                        "tool-file-download-success",
-                        &[
-                            ("written", &written.to_string()),
-                            ("dest_path", dest_path),
-                            ("status", &status.to_string()),
-                        ],
+                    let output = format!(
+                        "Downloaded {written} bytes to {dest_path} ({status})",
+                        status = status,
+                        written = written
                     );
                     // The download landed in an ephemeral workspace and will not
                     // reach the host — warn loudly rather than report a bare
@@ -409,9 +374,9 @@ impl Tool for FileDownloadTool {
                 Err(e) => Ok(ToolResult {
                     success: false,
                     output: ToolOutput::default(),
-                    error: Some(Self::tool_msg_with_args(
-                        "tool-file-download-error-move",
-                        &[("err", &e.error.to_string())],
+                    error: Some(format!(
+                        "Failed to move downloaded file into place: {err}",
+                        err = e.error
                     )),
                 }),
             },
@@ -493,7 +458,7 @@ mod tests {
         assert!(required.contains(&serde_json::Value::String("dest_path".into())));
         assert_eq!(
             schema["properties"]["document_id"]["description"],
-            crate::i18n::get_required_tool_string("tool-file-download-param-document-id")
+            "Identifier of the document to fetch from the configured endpoint.".to_string()
         );
     }
 

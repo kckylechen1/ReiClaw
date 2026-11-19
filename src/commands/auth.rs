@@ -7,7 +7,6 @@ use crate::AuthCommands;
 use crate::auth;
 use crate::cli_input;
 use crate::config::Config;
-use crate::gateway_helpers::{t, ta};
 
 // Interactive CLI input helpers used by `auth paste-token` /
 // `auth setup-token` / `auth paste-redirect`. The dialoguer dep belongs
@@ -107,31 +106,16 @@ pub(crate) async fn run_inline_provider_auth(auth: InlineProviderAuth, config: &
     let (prompt, skip_hint) = match &auth {
         InlineProviderAuth::Codex => (
             if codex_import.is_some() {
-                t(
-                    "cli-quickstart-auth-codex-import-prompt",
-                    "Found an existing Codex login (~/.codex/auth.json) — import it now?",
-                )
+                "Found an existing Codex login (~/.codex/auth.json) — import it now?".to_string()
             } else {
-                t(
-                    "cli-quickstart-auth-codex-prompt",
-                    "Sign in to OpenAI Codex with your ChatGPT account now?",
-                )
+                "Sign in to OpenAI Codex with your ChatGPT account now?".to_string()
             },
-            t(
-                "cli-quickstart-auth-codex-skip-hint",
-                "  Finish later with: rei auth login --model-provider openai-codex",
-            ),
+            "  Finish later with: rei auth login --model-provider openai-codex".to_string(),
         ),
         InlineProviderAuth::AnthropicSetupToken { alias } => (
-            ta(
-                "cli-quickstart-auth-anthropic-prompt",
-                &[("alias", alias)],
-                "Run `claude setup-token` for this Anthropic provider now?",
-            ),
-            ta(
-                "cli-quickstart-auth-anthropic-skip-hint",
-                &[("alias", alias)],
-                "  Finish later with: claude setup-token",
+            format!("Run `claude setup-token` for Anthropic provider `{alias}` now?"),
+            format!(
+                "  Finish later with: claude setup-token, then rei config set providers.models.anthropic.{alias}.api_key <token>"
             ),
         ),
     };
@@ -161,14 +145,7 @@ pub(crate) async fn run_inline_provider_auth(auth: InlineProviderAuth, config: &
     };
     if let Err(error) = result {
         let error = error.to_string();
-        eprintln!(
-            "{}",
-            ta(
-                "cli-quickstart-auth-failed",
-                &[("error", &error)],
-                "  Auth setup didn't complete.",
-            )
-        );
+        eprintln!("  Auth setup didn't complete: {error}");
         println!("{skip_hint}");
     }
 }
@@ -184,10 +161,7 @@ async fn run_anthropic_setup_token_inline(alias: &str, config: &mut Config) -> R
         bail!("`claude setup-token` exited with status {status}");
     }
 
-    let token = read_auth_input(&t(
-        "cli-quickstart-auth-anthropic-token-prompt",
-        "Paste the token from `claude setup-token`",
-    ))?;
+    let token = read_auth_input("Paste the token from `claude setup-token`")?;
     if token.trim().is_empty() {
         bail!("Token cannot be empty");
     }
@@ -195,14 +169,7 @@ async fn run_anthropic_setup_token_inline(alias: &str, config: &mut Config) -> R
     let path = format!("providers.models.anthropic.{alias}.api_key");
     config.set_prop_persistent(&path, token.trim())?;
     Box::pin(config.save_dirty()).await?;
-    println!(
-        "{}",
-        ta(
-            "cli-quickstart-auth-anthropic-saved",
-            &[("alias", alias)],
-            "  Saved Claude setup token.",
-        )
-    );
+    println!("  Saved Claude setup token for anthropic.{alias}");
     Ok(())
 }
 
@@ -210,9 +177,6 @@ async fn run_anthropic_setup_token_inline(alias: &str, config: &mut Config) -> R
 #[cfg(feature = "agent-runtime")]
 pub async fn handle_auth_command(auth_command: AuthCommands, config: &Config) -> Result<()> {
     let auth_service = auth::AuthService::from_config(config);
-    let auth_cli_formatter =
-        |key: &str, args: &[(&str, &str)], fallback: &str| ta(key, args, fallback);
-
     match auth_command {
         AuthCommands::Login {
             model_provider,
@@ -226,7 +190,6 @@ pub async fn handle_auth_command(auth_command: AuthCommands, config: &Config) ->
                 config,
                 auth_service: &auth_service,
                 client: &client,
-                format_cli: &auth_cli_formatter,
             };
             provider
                 .flow()
@@ -245,7 +208,6 @@ pub async fn handle_auth_command(auth_command: AuthCommands, config: &Config) ->
                 config,
                 auth_service: &auth_service,
                 client: &client,
-                format_cli: &auth_cli_formatter,
             };
             let input_str: Option<String> = match input {
                 Some(value) => Some(value),
@@ -282,18 +244,8 @@ pub async fn handle_auth_command(auth_command: AuthCommands, config: &Config) ->
             auth_service
                 .store_model_provider_token(&model_provider, &profile, &token, metadata, true)
                 .await?;
-            println!(
-                "{}",
-                ta("cli-auth-saved", &[("profile", &profile)], "Saved profile")
-            );
-            println!(
-                "{}",
-                ta(
-                    "cli-auth-active-for",
-                    &[("provider", &model_provider), ("profile", &profile)],
-                    "Active profile"
-                )
-            );
+            println!("Saved profile {profile}");
+            println!("Active profile for {model_provider}: {profile}");
             Ok(())
         }
 
@@ -317,18 +269,8 @@ pub async fn handle_auth_command(auth_command: AuthCommands, config: &Config) ->
             auth_service
                 .store_model_provider_token(&model_provider, &profile, &token, metadata, true)
                 .await?;
-            println!(
-                "{}",
-                ta("cli-auth-saved", &[("profile", &profile)], "Saved profile")
-            );
-            println!(
-                "{}",
-                ta(
-                    "cli-auth-active-for",
-                    &[("provider", &model_provider), ("profile", &profile)],
-                    "Active profile"
-                )
-            );
+            println!("Saved profile {profile}");
+            println!("Active profile for {model_provider}: {profile}");
             Ok(())
         }
 
@@ -342,7 +284,6 @@ pub async fn handle_auth_command(auth_command: AuthCommands, config: &Config) ->
                 config,
                 auth_service: &auth_service,
                 client: &client,
-                format_cli: &auth_cli_formatter,
             };
             let status = provider
                 .flow()
@@ -350,14 +291,7 @@ pub async fn handle_auth_command(auth_command: AuthCommands, config: &Config) ->
                 .await?;
             match status {
                 auth::RefreshStatus::Refreshed { profile } => {
-                    println!(
-                        "{}",
-                        ta(
-                            "cli-auth-refresh-ok",
-                            &[("profile", &profile)],
-                            "Token refresh OK"
-                        )
-                    );
+                    println!("✓ Token refresh OK (profile {profile})");
                     Ok(())
                 }
                 auth::RefreshStatus::NoProfile => {
@@ -377,23 +311,9 @@ pub async fn handle_auth_command(auth_command: AuthCommands, config: &Config) ->
                 .remove_profile(&model_provider, &profile)
                 .await?;
             if removed {
-                println!(
-                    "{}",
-                    ta(
-                        "cli-auth-removed",
-                        &[("provider", &model_provider), ("profile", &profile)],
-                        "Removed auth profile"
-                    )
-                );
+                println!("Removed auth profile {model_provider}:{profile}");
             } else {
-                println!(
-                    "{}",
-                    ta(
-                        "cli-auth-not-found",
-                        &[("provider", &model_provider), ("profile", &profile)],
-                        "Auth profile not found"
-                    )
-                );
+                println!("Auth profile not found: {model_provider}:{profile}");
             }
             Ok(())
         }
@@ -406,21 +326,14 @@ pub async fn handle_auth_command(auth_command: AuthCommands, config: &Config) ->
             auth_service
                 .set_active_profile(&model_provider, &profile)
                 .await?;
-            println!(
-                "{}",
-                ta(
-                    "cli-auth-active-for",
-                    &[("provider", &model_provider), ("profile", &profile)],
-                    "Active profile"
-                )
-            );
+            println!("Active profile for {model_provider}: {profile}");
             Ok(())
         }
 
         AuthCommands::List => {
             let data = auth_service.load_profiles().await?;
             if data.profiles.is_empty() {
-                println!("{}", t("cli-auth-none", "No auth profiles configured."));
+                println!("No auth profiles configured.");
                 return Ok(());
             }
 
@@ -439,7 +352,7 @@ pub async fn handle_auth_command(auth_command: AuthCommands, config: &Config) ->
         AuthCommands::Status => {
             let data = auth_service.load_profiles().await?;
             if data.profiles.is_empty() {
-                println!("{}", t("cli-auth-none", "No auth profiles configured."));
+                println!("No auth profiles configured.");
                 return Ok(());
             }
 
@@ -460,7 +373,7 @@ pub async fn handle_auth_command(auth_command: AuthCommands, config: &Config) ->
             }
 
             println!();
-            println!("{}", t("cli-auth-active", "Active profiles:"));
+            println!("Active profiles:");
             for (model_provider, profile_id) in &data.active_profiles {
                 println!("  {model_provider}: {profile_id}");
             }

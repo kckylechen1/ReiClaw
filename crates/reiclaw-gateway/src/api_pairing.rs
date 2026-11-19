@@ -394,7 +394,7 @@ pub async fn submit_pairing_enhanced(
             StatusCode::TOO_MANY_REQUESTS,
             Json(serde_json::json!({
                 "paired": false,
-                "error": reiclaw_runtime::i18n::get_required_cli_string("gateway-pair-request-limit"),
+                "error": "Too many pairing requests. Please retry later.",
                 "retry_after": super::RATE_LIMIT_WINDOW_SECS,
             })),
         )
@@ -405,7 +405,7 @@ pub async fn submit_pairing_enhanced(
             StatusCode::TOO_MANY_REQUESTS,
             Json(serde_json::json!({
                 "paired": false,
-                "error": reiclaw_runtime::i18n::get_required_cli_string("gateway-pair-auth-limit"),
+                "error": "Too many authentication attempts. Please retry later.",
                 "retry_after": e.retry_after_secs,
             })),
         )

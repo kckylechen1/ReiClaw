@@ -33,7 +33,7 @@ fn operator_configuration_required() -> Response {
         StatusCode::FORBIDDEN,
         axum::Json(serde_json::json!({
             "code": "VOICE_CONSENT_OPERATOR_CONFIG_REQUIRED",
-            "message": reiclaw_runtime::i18n::get_required_cli_string("gateway-voice-consent-operator-config-required"),
+            "message": "Configure gateway.operator.token_hashes with an independent operator token before reading or changing voice export consent.",
         })),
     )
         .into_response()

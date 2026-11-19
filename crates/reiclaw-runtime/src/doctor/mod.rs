@@ -180,21 +180,18 @@ fn codex_auth_wiring_items(codex_profile_present: bool, config: &Config) -> Vec<
         // operator wires a slot and points an agent at it.
         (true, true) => items.push(DiagItem::warn(
             CAT,
-            crate::i18n::get_required_cli_string("cli-doctor-codex-auth-profile-no-slot"),
+            "OpenAI Codex credentials are signed in but no model provider slot uses them. Set `requires_openai_auth = true` on an OpenAI provider slot and point an agent's `model_provider` at it, or run `rei quickstart`.".to_string(),
         )),
         // Slot opts into Codex auth, but no credential is signed in — fails at
         // the first model call.
         (false, false) => items.push(DiagItem::warn(
             CAT,
-            crate::i18n::get_required_cli_string_with_args(
-                "cli-doctor-codex-auth-slot-no-profile",
-                &[("slots", &auth_slots.join(", "))],
-            ),
+            format!("OpenAI slot(s) {slots} set `requires_openai_auth = true` but no OpenAI Codex credentials are signed in. Run `rei auth login --provider openai-codex`.", slots = auth_slots.join(", ")),
         )),
         // Both present — wiring is consistent.
         (true, false) => items.push(DiagItem::ok(
             CAT,
-            crate::i18n::get_required_cli_string("cli-doctor-codex-auth-ok"),
+            "OpenAI Codex credentials are signed in and referenced by a model provider slot.".to_string(),
         )),
         // Codex unused on both sides — stay silent (no noise for users who
         // never touch Codex).
@@ -583,14 +580,9 @@ pub async fn update_context_windows(
         // Skip if already has context_window set
         if let Some(ctx) = existing_context_window {
             println!(
-                "{}",
-                crate::i18n::get_required_cli_string_with_args(
-                    "cli-doctor-ctxwin-already-set",
-                    &[
-                        ("provider_ref", provider_ref.as_str()),
-                        ("ctx", ctx.to_string().as_str())
-                    ],
-                )
+                "{provider_ref}: already has context_window = {ctx}",
+                ctx = ctx.to_string().as_str(),
+                provider_ref = provider_ref.as_str()
             );
             continue;
         }
@@ -598,11 +590,8 @@ pub async fn update_context_windows(
         // Skip if no model configured
         if model.is_empty() {
             println!(
-                "{}",
-                crate::i18n::get_required_cli_string_with_args(
-                    "cli-doctor-ctxwin-no-model",
-                    &[("provider_ref", provider_ref.as_str())],
-                )
+                "{provider_ref}: no model configured, skipping",
+                provider_ref = provider_ref.as_str()
             );
             continue;
         }
@@ -618,14 +607,9 @@ pub async fn update_context_windows(
             Some(ctx) => {
                 if dry_run {
                     println!(
-                        "{}",
-                        crate::i18n::get_required_cli_string_with_args(
-                            "cli-doctor-ctxwin-would-set",
-                            &[
-                                ("provider_ref", provider_ref.as_str()),
-                                ("ctx", ctx.to_string().as_str())
-                            ],
-                        )
+                        "{provider_ref}: would set context_window = {ctx} (dry run)",
+                        ctx = ctx.to_string().as_str(),
+                        provider_ref = provider_ref.as_str()
                     );
                 } else {
                     let path = format!("providers.models.{provider_type}.{alias}.context_window");
@@ -633,26 +617,16 @@ pub async fn update_context_windows(
                         Ok(_) => {
                             updated += 1;
                             println!(
-                                "{}",
-                                crate::i18n::get_required_cli_string_with_args(
-                                    "cli-doctor-ctxwin-set",
-                                    &[
-                                        ("provider_ref", provider_ref.as_str()),
-                                        ("ctx", ctx.to_string().as_str())
-                                    ],
-                                )
+                                "{provider_ref}: set context_window = {ctx}",
+                                ctx = ctx.to_string().as_str(),
+                                provider_ref = provider_ref.as_str()
                             );
                         }
                         Err(e) => {
                             println!(
-                                "{}",
-                                crate::i18n::get_required_cli_string_with_args(
-                                    "cli-doctor-ctxwin-write-failed",
-                                    &[
-                                        ("provider_ref", provider_ref.as_str()),
-                                        ("error", &e.to_string()),
-                                    ],
-                                )
+                                "{provider_ref}: failed to write context_window: {error}",
+                                error = e.to_string(),
+                                provider_ref = provider_ref.as_str()
                             );
                         }
                     }
@@ -660,11 +634,8 @@ pub async fn update_context_windows(
             }
             None => {
                 println!(
-                    "{}",
-                    crate::i18n::get_required_cli_string_with_args(
-                        "cli-doctor-ctxwin-fetch-failed",
-                        &[("provider_ref", provider_ref.as_str())],
-                    )
+                    "{provider_ref}: provider does not expose context window or fetch failed",
+                    provider_ref = provider_ref.as_str()
                 );
             }
         }
@@ -673,22 +644,16 @@ pub async fn update_context_windows(
     if !dry_run && updated > 0 {
         config.save().await?;
         println!(
-            "\n{}",
-            crate::i18n::get_required_cli_string_with_args(
-                "cli-doctor-ctxwin-saved",
-                &[("updated", &updated.to_string())],
-            )
+            "\nSaved {updated} updates to config.toml",
+            updated = updated.to_string()
         );
     } else if dry_run {
         println!(
             "\n{}",
-            crate::i18n::get_required_cli_string("cli-doctor-ctxwin-dry-run")
+            "Dry run complete — no changes written. Run without --dry-run to apply.".to_string()
         );
     } else {
-        println!(
-            "\n{}",
-            crate::i18n::get_required_cli_string("cli-doctor-ctxwin-none")
-        );
+        println!("\n{}", "No updates needed.".to_string());
     }
 
     Ok(updated)
@@ -912,19 +877,13 @@ fn check_degraded_sections(config: &Config, items: &mut Vec<DiagItem>) {
     for path in &config.degraded_security {
         items.push(DiagItem::error(
             cat,
-            crate::i18n::get_required_cli_string_with_args(
-                "cli-doctor-degraded-security",
-                &[("path", path.as_str())],
-            ),
+            format!("SECURITY-CRITICAL config section `{path}` is invalid and was reset to its default so the daemon can boot; the running posture may be WEAKER than intended. Run `rei config validate` to see the parse error, then repair the file.", path = path.as_str()),
         ));
     }
     for path in &config.degraded_sections {
         items.push(DiagItem::warn(
             cat,
-            crate::i18n::get_required_cli_string_with_args(
-                "cli-doctor-degraded-section",
-                &[("path", path.as_str())],
-            ),
+            format!("config section `{path}` is malformed and was reset to defaults; values in that section are NOT in effect. Run `rei config validate` to see the parse error, then repair the file.", path = path.as_str()),
         ));
     }
 }
@@ -991,33 +950,15 @@ fn check_config_semantics(config: &Config, items: &mut Vec<DiagItem>) {
             match entry.context_window {
                 Some(0) => items.push(DiagItem::error(
                     cat,
-                    crate::i18n::get_required_cli_string_with_args(
-                        "cli-doctor-context-window-zero",
-                        &[("provider_ref", &label)],
-                    ),
+                    format!("{label}: context_window is 0 (invalid; set it to the model's real context limit)"),
                 )),
                 Some(context_window) => items.push(DiagItem::ok(
                     cat,
-                    crate::i18n::get_required_cli_string_with_args(
-                        "cli-doctor-context-window-ok",
-                        &[
-                            ("provider_ref", &label),
-                            ("context_window", &context_window.to_string()),
-                        ],
-                    ),
+                    format!("{label}: context window: {context_window} tokens", context_window = context_window.to_string()),
                 )),
                 None => items.push(DiagItem::warn(
                     cat,
-                    crate::i18n::get_required_cli_string_with_args(
-                        "cli-doctor-context-window-unset",
-                        &[
-                            ("provider_ref", &label),
-                            (
-                                "fallback",
-                                &UNCONFIGURED_CONTEXT_WINDOW_FALLBACK.to_string(),
-                            ),
-                        ],
-                    ),
+                    format!("{label}: no context_window set — will use {fallback} token fallback when selected; likely far below this model's real limit; set context_window on this profile", fallback = UNCONFIGURED_CONTEXT_WINDOW_FALLBACK.to_string()),
                 )),
             }
 
@@ -1207,13 +1148,11 @@ fn check_web_dist_dir(config: &Config, items: &mut Vec<DiagItem>) {
     let cat = "config";
     match config.gateway.web_dist_dir.as_deref() {
         None => {}
-        Some(value) => match web_dist_dir_expansion_reason_key(value) {
+        Some(value) => match web_dist_dir_expansion_reason(value) {
             None => {}
-            Some(reason_key) => {
-                let reason = crate::i18n::get_required_cli_string(reason_key);
-                let message = crate::i18n::get_required_cli_string_with_args(
-                    "cli-doctor-web-dist-dir-expansion-warning",
-                    &[("path", value), ("reason", reason.as_str())],
+            Some(reason) => {
+                let message = format!(
+                    "gateway.web_dist_dir = \"{value}\" — {reason}; gateway.web_dist_dir is read verbatim, so expand the value yourself (e.g. an absolute path)"
                 );
                 items.push(DiagItem::warn(cat, message));
             }
@@ -1221,14 +1160,14 @@ fn check_web_dist_dir(config: &Config, items: &mut Vec<DiagItem>) {
     }
 }
 
-/// Return the Fluent reason key when `value` looks like it expects
-/// shell expansion the gateway will not perform. `None` means the value
-/// is a literal path that the gateway can resolve as-is.
-fn web_dist_dir_expansion_reason_key(value: &str) -> Option<&'static str> {
+/// Explain why `value` looks like it expects shell expansion the gateway
+/// will not perform. `None` means the value is a literal path that the
+/// gateway can resolve as-is.
+fn web_dist_dir_expansion_reason(value: &str) -> Option<&'static str> {
     if value.starts_with('~') {
-        Some("cli-web-dist-dir-reason-tilde")
+        Some("starts with `~` which is not expanded")
     } else if value.contains('$') {
-        Some("cli-web-dist-dir-reason-dollar")
+        Some("contains `$` which is not expanded")
     } else {
         None
     }
@@ -1348,15 +1287,8 @@ fn check_personality_truncation(config: &Config, items: &mut Vec<DiagItem>) {
                 let discarded_str = discarded.to_string();
                 // Describe potential discard without claiming actual injection:
                 // doctor runs offline and cannot know if or when a session injects.
-                let message = crate::i18n::get_required_cli_string_with_args(
-                    "cli-doctor-personality-file-truncated",
-                    &[
-                        ("alias", alias),
-                        ("filename", filename),
-                        ("cap", &cap_str),
-                        ("total", &total_str),
-                        ("discarded", &discarded_str),
-                    ],
+                let message = format!(
+                    "{alias}/{filename}: personality cap {cap_str} vs {total_str} chars ({discarded_str} would be discarded)"
                 );
                 items.push(DiagItem::warn(cat, message));
             }
@@ -1387,10 +1319,7 @@ fn check_soul_check_hint(config: &Config, items: &mut Vec<DiagItem>) {
     for alias in aliases {
         items.push(DiagItem::ok(
             "agent.soul",
-            crate::i18n::get_required_cli_string_with_args(
-                "cli-doctor-soul-check-hint",
-                &[("alias", alias)],
-            ),
+            format!("Agent {alias} has a Soul. After changing its provider or model, run `rei soul check --agent {alias}` to confirm it still behaves like itself."),
         ));
     }
 }
@@ -1701,20 +1630,19 @@ fn check_environment(items: &mut Vec<DiagItem>) {
 fn systemd_linger_diag_item(status: crate::service::SystemdUserLinger) -> DiagItem {
     let cat = "environment";
     match status {
-        crate::service::SystemdUserLinger::Enabled => DiagItem::ok(
-            cat,
-            crate::i18n::get_required_cli_string("cli-doctor-systemd-linger-enabled"),
-        ),
+        crate::service::SystemdUserLinger::Enabled => {
+            DiagItem::ok(cat, "systemd user lingering enabled".to_string())
+        }
         crate::service::SystemdUserLinger::Disabled { user } => DiagItem::warn(
             cat,
-            crate::i18n::get_required_cli_string_with_args(
-                "cli-doctor-systemd-linger-disabled",
-                &[("user", user.as_str())],
+            format!(
+                "systemd user lingering disabled; user service may stop after logout. Enable with: loginctl enable-linger {user}",
+                user = user.as_str()
             ),
         ),
         crate::service::SystemdUserLinger::Unknown => DiagItem::warn(
             cat,
-            crate::i18n::get_required_cli_string("cli-doctor-systemd-linger-unknown"),
+            "systemd user lingering could not be checked with loginctl".to_string(),
         ),
     }
 }

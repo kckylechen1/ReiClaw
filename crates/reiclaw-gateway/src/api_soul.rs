@@ -42,7 +42,7 @@ fn soul_error(err: &SoulProfileError) -> Response {
                 "code": "invalid",
                 "field": field,
                 "reason": key,
-                "error": crate::i18n::get_required_cli_string(key),
+                "error": SoulProfileError::tone_validation_text(key),
             })),
         )
             .into_response(),
@@ -52,13 +52,7 @@ fn soul_error(err: &SoulProfileError) -> Response {
                 "code": "tone_dial_cooldown",
                 "dial": key,
                 "until_unix": until_unix,
-                "error": crate::i18n::get_required_cli_string_with_args(
-                    "soul-tone-dial-cooldown",
-                    &[
-                        ("dial", key.as_str()),
-                        ("days", &(SOUL_TONE_DIAL_COOLDOWN_SECS / (24 * 60 * 60)).to_string()),
-                    ],
-                ),
+                "error": format!("The {dial} dial was changed by an approved proposal less than {days} days ago, so it cannot be proposed again yet.", days = (SOUL_TONE_DIAL_COOLDOWN_SECS / (24 * 60 * 60)).to_string(), dial = key.as_str()),
             })),
         )
             .into_response(),
@@ -951,7 +945,7 @@ mod tests {
             assert_eq!(body["code"], "invalid");
             assert_eq!(body["field"], field);
             assert_eq!(body["reason"], key);
-            assert_eq!(body["error"], crate::i18n::get_required_cli_string(key));
+            assert_eq!(body["error"], SoulProfileError::tone_validation_text(key));
             assert_ne!(body["error"], key);
         }
     }

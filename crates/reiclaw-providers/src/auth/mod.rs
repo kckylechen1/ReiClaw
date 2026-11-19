@@ -685,13 +685,10 @@ pub fn clear_pending_oauth_login(config: &Config, model_provider: &str) {
 /// Shared context for auth-flow trait methods. Carries the runtime
 /// dependencies each flow needs (config for OAuth client creds, auth
 /// service for token storage, http client for OAuth round-trips).
-type CliFormatter = dyn Fn(&str, &[(&str, &str)], &str) -> String + Send + Sync;
-
 pub struct AuthFlowContext<'a> {
     pub config: &'a Config,
     pub auth_service: &'a AuthService,
     pub client: &'a reqwest::Client,
-    pub format_cli: &'a CliFormatter,
 }
 
 /// Result of [`AuthProviderFlow::refresh_status`] — caller renders the

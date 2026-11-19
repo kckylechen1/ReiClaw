@@ -2,7 +2,6 @@
 
 pub mod attribution;
 pub mod helpers;
-pub(crate) mod i18n;
 pub mod util_helpers;
 
 pub mod ask_user;

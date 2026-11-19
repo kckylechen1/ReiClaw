@@ -2,37 +2,8 @@
 pub use reiclaw_runtime::skills::*;
 
 use anyhow::{Context, Result};
-use reiclaw_runtime::i18n::{get_required_cli_string, get_required_cli_string_with_args};
 use reiclaw_runtime::skills::{ScaffoldOptions, SkillFrontmatter, SkillsService};
 use std::path::{Path, PathBuf};
-
-/// Resolve a `cli-*` Fluent key for skill-bundle CLI output. Under `agent-runtime`
-/// (default + what CI/release build) this routes through Fluent; without it the
-/// runtime i18n crate is absent, so the English `fallback` is used.
-#[allow(unused_variables)]
-fn mt(key: &str, fallback: &str) -> String {
-    #[cfg(feature = "agent-runtime")]
-    {
-        reiclaw_runtime::i18n::get_required_cli_string(key)
-    }
-    #[cfg(not(feature = "agent-runtime"))]
-    {
-        fallback.to_string() // i18n-exempt: English fallback when Fluent (agent-runtime) is disabled
-    }
-}
-
-/// `mt` with `{$name}` arguments.
-#[allow(unused_variables)]
-fn mta(key: &str, args: &[(&str, &str)], fallback: &str) -> String {
-    #[cfg(feature = "agent-runtime")]
-    {
-        reiclaw_runtime::i18n::get_required_cli_string_with_args(key, args)
-    }
-    #[cfg(not(feature = "agent-runtime"))]
-    {
-        fallback.to_string() // i18n-exempt: English fallback when Fluent (agent-runtime) is disabled
-    }
-}
 
 pub mod creator {
     #[allow(unused_imports)]
@@ -70,10 +41,7 @@ pub async fn handle_command(
                     reiclaw_config::skill_bundles::resolve_directory(config, &install_root, b)
                         .map_err(anyhow::Error::msg)?;
                 rendered.push((
-                    get_required_cli_string_with_args(
-                        "cli-skills-list-group-bundle",
-                        &[("alias", b)],
-                    ),
+                    format!("bundle: {b}"),
                     load_skills_from_directory(&dir, allow_scripts).0,
                 ));
             } else if let Some(ref a) = agent {
@@ -81,24 +49,12 @@ pub async fn handle_command(
                 // agent boot/loop uses (workspace + open-skills +
                 // assigned bundles), so `list --agent` mirrors runtime behavior.
                 if config.agent(a).is_none() {
-                    anyhow::bail!(
-                        "{}",
-                        get_required_cli_string_with_args(
-                            "cli-skills-agent-not-configured",
-                            &[("alias", a)],
-                        )
-                    );
+                    anyhow::bail!("agent '{a}' is not configured");
                 }
                 let (skills, dropped, _shadowed) =
                     load_skills_for_agent_from_config_audited(config, a);
                 skipped.extend(dropped);
-                rendered.push((
-                    get_required_cli_string_with_args(
-                        "cli-skills-list-group-agent",
-                        &[("alias", a)],
-                    ),
-                    skills,
-                ));
+                rendered.push((format!("loaded by agent '{a}'"), skills));
             } else {
                 // Full inventory: every bundle, then the agent-agnostic sources
                 // (global dir + open-skills). `load_skills_with_config`
@@ -111,10 +67,7 @@ pub async fn handle_command(
                         alias,
                     ) {
                         rendered.push((
-                            get_required_cli_string_with_args(
-                                "cli-skills-list-group-bundle",
-                                &[("alias", alias)],
-                            ),
+                            format!("bundle: {alias}"),
                             load_skills_from_directory(&dir, allow_scripts).0,
                         ));
                     }
@@ -122,7 +75,7 @@ pub async fn handle_command(
                 let (skills, dropped) = load_skills_with_config_audited(&config.data_dir, config);
                 skipped.extend(dropped);
                 rendered.push((
-                    get_required_cli_string("cli-skills-list-group-global"),
+                    "global / open-skills / plugins (not from a bundle)".to_string(),
                     skills,
                 ));
             }
@@ -130,18 +83,12 @@ pub async fn handle_command(
             let total: usize = rendered.iter().map(|(_, s)| s.len()).sum();
 
             if total == 0 {
-                println!("{}", get_required_cli_string("cli-skills-none-installed"));
+                println!("No skills installed.");
                 println!();
-                println!("{}", get_required_cli_string("cli-skills-create-hint"));
-                println!("{}", get_required_cli_string("cli-skills-install-hint"));
+                println!("  Create one: rei skills add my-skill --bundle <alias>");
+                println!("  Or install: rei skills install <source>");
             } else {
-                println!(
-                    "{}",
-                    get_required_cli_string_with_args(
-                        "cli-skills-installed-header",
-                        &[("count", &total.to_string())],
-                    )
-                );
+                println!("Installed skills ({count}):", count = total);
                 println!();
                 for (label, skills) in &rendered {
                     if skills.is_empty() {
@@ -156,13 +103,7 @@ pub async fn handle_command(
             }
             if !skipped.is_empty() {
                 println!();
-                println!(
-                    "{}",
-                    get_required_cli_string_with_args(
-                        "cli-skills-skipped-header",
-                        &[("count", &skipped.len().to_string())],
-                    )
-                );
+                println!("Skipped ({count}):", count = skipped.len());
                 println!();
                 for entry in &skipped {
                     let (reason, scripts_blocked) = match &entry.reason {
@@ -175,17 +116,10 @@ pub async fn handle_command(
                         }
                     };
                     println!("  {}", console::style(&entry.name).yellow().bold());
-                    println!(
-                        "{}",
-                        get_required_cli_string_with_args(
-                            "cli-skills-skipped-reason",
-                            &[("reason", &reason)],
-                        )
-                    );
+                    println!("    Reason: {reason}");
                     if scripts_blocked && !config.skills.allow_scripts {
                         println!(
-                            "{}",
-                            get_required_cli_string("cli-skills-skipped-scripts-hint")
+                            "    Set `skills.allow_scripts = true` in your rei config to enable it."
                         );
                     }
                 }
@@ -225,7 +159,7 @@ pub async fn handle_command(
             for finding in report.findings {
                 println!("    - {finding}");
             }
-            anyhow::bail!(get_required_cli_string("cli-skills-audit-failed"));
+            anyhow::bail!("Skill audit failed.".to_string());
         }
         crate::SkillCommands::Install {
             source,
@@ -234,13 +168,7 @@ pub async fn handle_command(
             no_tier_banner,
             skill,
         } => {
-            println!(
-                "{}",
-                get_required_cli_string_with_args(
-                    "cli-skills-install-start",
-                    &[("source", &source)]
-                )
-            );
+            println!("Installing skill from: {source}");
 
             let location = resolve_install_location(config, agent.as_deref(), bundle.as_deref())?;
             let skills_path = location.dir().to_path_buf();
@@ -248,9 +176,8 @@ pub async fn handle_command(
 
             let (installed_dir, files_scanned) = if let Some(skill_name) = skill.as_deref() {
                 if !is_git_source(&source) {
-                    anyhow::bail!(get_required_cli_string_with_args(
-                        "cli-skills-install-skill-requires-git",
-                        &[("source", &source)]
+                    anyhow::bail!(format!(
+                        "--skill <name> requires a git repository URL as the source (got '{source}')"
                     ));
                 }
                 install_git_catalog_skill_source(
@@ -261,27 +188,13 @@ pub async fn handle_command(
                     workspace_dir,
                 )
                 .with_context(|| {
-                    get_required_cli_string_with_args(
-                        "cli-skills-install-catalog-failed",
-                        &[("skill", skill_name), ("source", &source)],
-                    )
+                    format!("failed to install skill '{skill_name}' from catalog {source}")
                 })?
             } else if is_git_source(&source) {
                 install_git_skill_source(&source, &skills_path, config.skills.allow_scripts)
-                    .with_context(|| {
-                        get_required_cli_string_with_args(
-                            "cli-skills-install-git-failed",
-                            &[("source", &source)],
-                        )
-                    })?
+                    .with_context(|| format!("failed to install git skill source: {source}"))?
             } else if is_registry_source(&source) {
-                println!(
-                    "{}",
-                    get_required_cli_string_with_args(
-                        "cli-skills-install-resolving-registry",
-                        &[("source", &source)]
-                    )
-                );
+                println!("  Resolving '{source}' from skills registry...");
                 install_registry_skill_source(
                     &source,
                     &skills_path,
@@ -290,12 +203,7 @@ pub async fn handle_command(
                     config.skills.registry_url.as_deref(),
                     no_tier_banner,
                 )
-                .with_context(|| {
-                    get_required_cli_string_with_args(
-                        "cli-skills-install-registry-failed",
-                        &[("source", &source)],
-                    )
-                })?
+                .with_context(|| format!("failed to install skill from registry: {source}"))?
             } else if is_extra_registry_source(&source) {
                 // `is_extra_registry_source` is `parse_extra_registry_source(..).is_some()`,
                 // so this re-parse always succeeds. `unwrap_or_default` only guards an
@@ -303,13 +211,7 @@ pub async fn handle_command(
                 let registry_label = parse_extra_registry_source(&source)
                     .map(|(name, _)| name)
                     .unwrap_or_default();
-                println!(
-                    "{}",
-                    get_required_cli_string_with_args(
-                        "cli-skills-install-resolving-extra-registry",
-                        &[("source", &source), ("registry", &registry_label)]
-                    )
-                );
+                println!("  Resolving '{source}' from registry '{registry_label}'...");
                 install_extra_registry_skill_source(
                     &source,
                     &skills_path,
@@ -318,53 +220,27 @@ pub async fn handle_command(
                     &config.skills.extra_registries,
                     no_tier_banner,
                 )
-                .with_context(|| {
-                    get_required_cli_string_with_args(
-                        "cli-skills-install-extra-registry-failed",
-                        &[("source", &source)],
-                    )
-                })?
+                .with_context(|| format!("failed to install skill from extra registry: {source}"))?
             } else {
                 install_local_skill_source(&source, &skills_path, config.skills.allow_scripts)
-                    .with_context(|| {
-                        get_required_cli_string_with_args(
-                            "cli-skills-install-local-failed",
-                            &[("source", &source)],
-                        )
-                    })?
+                    .with_context(|| format!("failed to install local skill source: {source}"))?
             };
             let status = console::style("✓").green().bold().to_string();
             let installed_path = installed_dir.display().to_string();
             let files_scanned = files_scanned.to_string();
             println!(
-                "{}",
-                get_required_cli_string_with_args(
-                    "cli-skills-install-installed-audited",
-                    &[
-                        ("status", &status),
-                        ("path", &installed_path),
-                        ("files", &files_scanned)
-                    ]
-                )
+                "  {status} Skill installed and audited: {installed_path} ({files_scanned} files scanned)"
             );
 
-            println!(
-                "{}",
-                get_required_cli_string("cli-skills-install-security-audit-completed")
-            );
+            println!("  Security audit completed successfully.");
 
             // Tell the user whether the skill is in a loadable location.
             match &location {
                 SkillLocation::Bundle { alias, .. } => println!(
-                    "{}",
-                    get_required_cli_string_with_args(
-                        "cli-skills-install-into-bundle",
-                        &[("alias", alias)],
-                    )
+                    "  Installed into bundle '{alias}'. Agents that list this bundle in skill_bundles will load it."
                 ),
                 SkillLocation::Global { .. } => println!(
-                    "{}",
-                    get_required_cli_string("cli-skills-install-global-note")
+                    "  Note: installed into the global skills dir, which no agent loads automatically. Re-run with --bundle <alias>, or assign a bundle to an agent, to make it loadable."
                 ),
             }
             Ok(())
@@ -383,13 +259,7 @@ pub async fn handle_command(
             if let Some(ref a) = agent
                 && config.agent(a).is_none()
             {
-                anyhow::bail!(
-                    "{}",
-                    get_required_cli_string_with_args(
-                        "cli-skills-agent-not-configured",
-                        &[("alias", a)],
-                    )
-                );
+                anyhow::bail!("agent '{a}' is not configured");
             }
 
             // Explicit bundle: archive through the service (recoverable).
@@ -402,11 +272,7 @@ pub async fn handle_command(
                     .remove_skill(&target, reiclaw_runtime::skills::RemoveMode::Archive)
                     .map_err(anyhow::Error::msg)?;
                 println!(
-                    "{}",
-                    get_required_cli_string_with_args(
-                        "cli-skills-removed-archived",
-                        &[("status", &status), ("name", &name), ("bundle", b)],
-                    )
+                    "  {status} Skill '{name}' removed from bundle '{b}' (archived under shared/skills/_deleted/)."
                 );
                 return Ok(());
             }
@@ -425,11 +291,7 @@ pub async fn handle_command(
                             .remove_skill(&target, reiclaw_runtime::skills::RemoveMode::Archive)
                             .map_err(anyhow::Error::msg)?;
                         println!(
-                            "{}",
-                            get_required_cli_string_with_args(
-                                "cli-skills-removed-archived",
-                                &[("status", &status), ("name", &name), ("bundle", alias)],
-                            )
+                            "  {status} Skill '{name}' removed from bundle '{alias}' (archived under shared/skills/_deleted/)."
                         );
                     } else {
                         // Global dir: plain delete with a containment guard.
@@ -442,13 +304,7 @@ pub async fn handle_command(
                             anyhow::bail!("Skill path escapes skills directory: {name}");
                         }
                         std::fs::remove_dir_all(dir)?;
-                        println!(
-                            "{}",
-                            get_required_cli_string_with_args(
-                                "cli-skills-removed-global",
-                                &[("status", &status), ("name", &name)],
-                            )
-                        );
+                        println!("  {status} Skill '{name}' removed from the global skills dir.");
                     }
                 }
                 many => {
@@ -458,11 +314,7 @@ pub async fn handle_command(
                         .collect::<Vec<_>>()
                         .join(", ");
                     anyhow::bail!(
-                        "{}",
-                        get_required_cli_string_with_args(
-                            "cli-skills-multiple-locations-bundle",
-                            &[("name", &name), ("locations", &locs)],
-                        )
+                        "skill '{name}' exists in multiple locations ({locs}); pass --bundle to choose one"
                     );
                 }
             }
@@ -580,19 +432,13 @@ fn resolve_install_location(
     if let Some(a) = agent
         && config.agent(a).is_none()
     {
-        anyhow::bail!(
-            "{}",
-            get_required_cli_string_with_args("cli-skills-agent-not-configured", &[("alias", a)],)
-        );
+        anyhow::bail!("agent '{a}' is not configured");
     }
 
     // 1. An explicit bundle wins outright (mirrors `skills add`/`edit`).
     if let Some(alias) = bundle {
         if !config.skill_bundles.contains_key(alias) {
-            anyhow::bail!(
-                "{}",
-                get_required_cli_string_with_args("cli-bundle-not-configured", &[("alias", alias)])
-            );
+            anyhow::bail!("skill bundle '{alias}' is not configured");
         }
         let dir = reiclaw_config::skill_bundles::resolve_directory(config, &install_root, alias)
             .map_err(anyhow::Error::msg)?;
@@ -626,11 +472,8 @@ fn resolve_install_location(
             many => {
                 let bundles = many.join(", ");
                 anyhow::bail!(
-                    "{}",
-                    get_required_cli_string_with_args(
-                        "cli-skills-agent-multiple-bundles",
-                        &[("alias", alias), ("bundles", bundles.as_str())],
-                    )
+                    "agent '{alias}' has multiple skill bundles ({bundles}); pass --bundle to choose one",
+                    bundles = bundles.as_str()
                 );
             }
         }
@@ -694,11 +537,7 @@ fn locate_installed_skill_dir(config: &crate::config::Config, name: &str) -> Res
                 .collect::<Vec<_>>()
                 .join(", ");
             anyhow::bail!(
-                "{}",
-                get_required_cli_string_with_args(
-                    "cli-skills-multiple-locations-path",
-                    &[("name", name), ("locations", &locs)],
-                )
+                "skill '{name}' exists in multiple locations ({locs}); pass an explicit path to disambiguate"
             )
         }
     }
@@ -714,7 +553,7 @@ fn print_skill(skill: &Skill) {
     );
     if !skill.tools.is_empty() {
         println!(
-            "    Tools: {}", // i18n-exempt: "Tools" label mirrors existing list output
+            "    Tools: {}",
             skill
                 .tools
                 .iter()
@@ -724,13 +563,7 @@ fn print_skill(skill: &Skill) {
         );
     }
     if !skill.tags.is_empty() {
-        println!(
-            "    {}",
-            get_required_cli_string_with_args(
-                "cli-skills-tags",
-                &[("tags", &skill.tags.join(", "))],
-            )
-        );
+        println!("    Tags:  {tags}", tags = skill.tags.join(", "));
     }
 }
 
@@ -778,14 +611,9 @@ fn handle_add(
     )?;
 
     println!(
-        "{}",
-        reiclaw_runtime::i18n::get_required_cli_string_with_args(
-            "cli-skills-add-scaffolded",
-            &[
-                ("target", &target.to_string()),
-                ("dir", &skill_dir.display().to_string()),
-            ],
-        )
+        "Scaffolded skill {target} at {dir}",
+        dir = skill_dir.display(),
+        target = target
     );
 
     if edit {
@@ -846,12 +674,8 @@ async fn handle_bundle_add(
         .map_err(anyhow::Error::msg)?
     {
         println!(
-            "{}",
-            mta(
-                "cli-bundle-exists",
-                &[("alias", alias.as_str())],
-                "skill bundle '{$alias}' already exists (no change)"
-            )
+            "skill bundle '{alias}' already exists (no change)",
+            alias = alias.as_str()
         );
         return Ok(());
     }
@@ -867,23 +691,17 @@ async fn handle_bundle_add(
             tokio::fs::create_dir_all(&dir).await.ok();
             let d = dir.display().to_string();
             println!(
-                "{}",
-                mta(
-                    "cli-bundle-created",
-                    &[("alias", alias.as_str()), ("dir", d.as_str())],
-                    "created skill_bundles.{$alias} (dir: {$dir})"
-                )
+                "created skill_bundles.{alias} (dir: {dir})",
+                alias = alias.as_str(),
+                dir = d.as_str()
             );
         }
         Err(e) => {
             let es = e.to_string();
             println!(
-                "{}",
-                mta(
-                    "cli-bundle-created-warn",
-                    &[("alias", alias.as_str()), ("error", es.as_str())],
-                    "created skill_bundles.{$alias} (warning: dir resolve failed: {$error})"
-                )
+                "created skill_bundles.{alias} (warning: dir resolve failed: {error})",
+                alias = alias.as_str(),
+                error = es.as_str()
             );
         }
     }
@@ -905,35 +723,22 @@ async fn handle_bundle_remove(
         .is_some_and(|k| k.contains(&alias));
     if !exists {
         anyhow::bail!(
-            "{}",
-            mta(
-                "cli-bundle-not-configured",
-                &[("alias", alias.as_str())],
-                "skill bundle '{$alias}' is not configured"
-            )
+            "skill bundle '{alias}' is not configured",
+            alias = alias.as_str()
         );
     }
     let refs = reiclaw_config::alias_refs::find_bundle_refs(config, &alias);
     if !yes {
         let count = refs.len().to_string();
         println!(
-            "{}",
-            mta(
-                "cli-bundle-impact-header",
-                &[("alias", alias.as_str()), ("count", count.as_str())],
-                "deleting skill_bundles.{$alias} would strip it from {$count} agent reference(s):"
-            )
+            "deleting skill_bundles.{alias} would strip it from {count} agent reference(s):",
+            alias = alias.as_str(),
+            count = count.as_str()
         );
         for r in &refs {
             println!("  • {}", r.path);
         }
-        println!(
-            "\n{}",
-            mt(
-                "cli-bundle-no-changes",
-                "No changes made. Re-run with --yes to apply."
-            )
-        );
+        println!("\nNo changes made. Re-run with --yes to apply.");
         return Ok(());
     }
     let mut working = config.clone();
@@ -975,36 +780,22 @@ async fn handle_bundle_remove(
         match tokio::fs::rename(&dir, &archive).await {
             Ok(()) => {
                 let p = archive.display().to_string();
-                println!(
-                    "{}",
-                    mta(
-                        "cli-bundle-archived",
-                        &[("path", p.as_str())],
-                        "archived bundle directory → {$path}"
-                    )
-                );
+                println!("archived bundle directory → {path}", path = p.as_str());
             }
             Err(e) => {
                 let es = e.to_string();
                 eprintln!(
-                    "{}",
-                    mta(
-                        "cli-bundle-warn-archive",
-                        &[("error", es.as_str())],
-                        "warning: bundle directory archive failed: {$error}"
-                    )
+                    "warning: bundle directory archive failed: {error}",
+                    error = es.as_str()
                 );
             }
         }
     }
     let count = refs.len().to_string();
     println!(
-        "{}",
-        mta(
-            "cli-bundle-deleted",
-            &[("alias", alias.as_str()), ("count", count.as_str())],
-            "deleted skill_bundles.{$alias} (stripped from {$count} agent(s))"
-        )
+        "deleted skill_bundles.{alias} (stripped from {count} agent(s))",
+        alias = alias.as_str(),
+        count = count.as_str()
     );
     Ok(())
 }
@@ -1024,23 +815,12 @@ async fn handle_bundle_rename(
     match working.rename_map_key("skill_bundles", &from, &to) {
         Ok(true) => {}
         Ok(false) => anyhow::bail!(
-            "{}",
-            mta(
-                "cli-bundle-not-configured",
-                &[("alias", from.as_str())],
-                "skill bundle '{$alias}' is not configured"
-            )
+            "skill bundle '{alias}' is not configured",
+            alias = from.as_str()
         ),
         Err(e) => {
             let es = e.to_string();
-            anyhow::bail!(
-                "{}",
-                mta(
-                    "cli-bundle-rename-failed",
-                    &[("error", es.as_str())],
-                    "rename failed: {$error}"
-                )
-            )
+            anyhow::bail!("rename failed: {error}", error = es.as_str())
         }
     }
     let mut dirty = reiclaw_config::alias_refs::rewrite_bundle_refs(&mut working, &from, &to);
@@ -1070,44 +850,25 @@ async fn handle_bundle_rename(
         if let Err(e) = tokio::fs::rename(&old, &new).await {
             let es = e.to_string();
             eprintln!(
-                "{}",
-                mta(
-                    "cli-bundle-warn-move",
-                    &[("error", es.as_str())],
-                    "warning: bundle directory move failed: {$error}"
-                )
+                "warning: bundle directory move failed: {error}",
+                error = es.as_str()
             );
         }
     }
     println!(
-        "{}",
-        mta(
-            "cli-bundle-renamed",
-            &[("from", from.as_str()), ("to", to.as_str())],
-            "renamed skill_bundles.{$from} → skill_bundles.{$to}"
-        )
+        "renamed skill_bundles.{from} → skill_bundles.{to}",
+        from = from.as_str(),
+        to = to.as_str()
     );
     Ok(())
 }
 
 fn print_bundle_include_exclude(include: &[String], exclude: &[String]) {
     if !include.is_empty() {
-        println!(
-            "  {}",
-            reiclaw_runtime::i18n::get_required_cli_string_with_args(
-                "cli-skills-bundle-include",
-                &[("values", &include.join(", "))],
-            )
-        );
+        println!("  include: {values}", values = include.join(", "));
     }
     if !exclude.is_empty() {
-        println!(
-            "  {}",
-            reiclaw_runtime::i18n::get_required_cli_string_with_args(
-                "cli-skills-bundle-exclude",
-                &[("values", &exclude.join(", "))],
-            )
-        );
+        println!("  exclude: {values}", values = exclude.join(", "));
     }
 }
 
@@ -1117,28 +878,16 @@ fn handle_bundle_list(config: &crate::config::Config) -> Result<()> {
     let bundles = service.list_bundles()?;
     if bundles.is_empty() {
         println!(
-            "{}",
-            reiclaw_runtime::i18n::get_required_cli_string("cli-skills-bundle-list-empty")
+            "No skill bundles configured.\n  Create one: rei config set skill-bundles.default.directory shared/skills/default"
         );
         return Ok(());
     }
-    println!(
-        "{}",
-        reiclaw_runtime::i18n::get_required_cli_string_with_args(
-            "cli-skills-bundle-list-header",
-            &[("count", &bundles.len().to_string())],
-        )
-    );
+    println!("Skill bundles ({count}):", count = bundles.len());
     for b in &bundles {
         println!(
-            "  {}",
-            reiclaw_runtime::i18n::get_required_cli_string_with_args(
-                "cli-skills-bundle-entry",
-                &[
-                    ("alias", &b.alias),
-                    ("dir", &b.directory.display().to_string()),
-                ],
-            )
+            "  {alias} -> {dir}",
+            alias = b.alias,
+            dir = b.directory.display()
         );
         print_bundle_include_exclude(&b.include, &b.exclude);
     }
@@ -1164,41 +913,22 @@ fn handle_bundle_show(config: &crate::config::Config, alias: String) -> Result<(
         })?;
 
     println!(
-        "{}",
-        reiclaw_runtime::i18n::get_required_cli_string_with_args(
-            "cli-skills-bundle-entry",
-            &[
-                ("alias", &bundle.alias),
-                ("dir", &bundle.directory.display().to_string()),
-            ],
-        )
+        "{alias} -> {dir}",
+        alias = bundle.alias,
+        dir = bundle.directory.display()
     );
     print_bundle_include_exclude(&bundle.include, &bundle.exclude);
 
     let skills = service.list_skills(Some(&alias))?;
     if skills.is_empty() {
-        println!(
-            "  {}",
-            reiclaw_runtime::i18n::get_required_cli_string("cli-skills-bundle-show-no-skills")
-        );
+        println!("  (no skills installed)");
     } else {
-        println!(
-            "  {}",
-            reiclaw_runtime::i18n::get_required_cli_string_with_args(
-                "cli-skills-bundle-show-skills-header",
-                &[("count", &skills.len().to_string())],
-            )
-        );
+        println!("  skills ({count}):", count = skills.len());
         for s in &skills {
             println!(
-                "    {}",
-                reiclaw_runtime::i18n::get_required_cli_string_with_args(
-                    "cli-skills-bundle-show-skill",
-                    &[
-                        ("name", s.r#ref.name()),
-                        ("description", &s.frontmatter.description),
-                    ],
-                )
+                "    {name}: {description}",
+                description = s.frontmatter.description,
+                name = s.r#ref.name()
             );
         }
     }
@@ -1283,33 +1013,6 @@ mod install_location_tests {
         AliasedAgentConfig {
             skill_bundles: bundles.iter().map(|s| (*s).to_string()).collect(),
             ..AliasedAgentConfig::default()
-        }
-    }
-
-    /// The `skills install`/`audit` error strings route through Fluent. Assert
-    /// the new `cli-skills-*` keys resolve (not the `{key}` missing-marker) and
-    /// interpolate their `{$source}` argument, so a code/ftl key rename can't
-    /// silently degrade these user-facing errors to a literal key. Uses the
-    /// locale-independent argument value as the resolution signal.
-    #[test]
-    fn install_error_strings_resolve_through_fluent() {
-        use reiclaw_runtime::i18n::{get_required_cli_string, get_required_cli_string_with_args};
-        let audit = get_required_cli_string("cli-skills-audit-failed");
-        assert!(
-            !audit.starts_with('{') && audit.contains("audit"),
-            "cli-skills-audit-failed did not resolve: {audit}"
-        );
-        for key in [
-            "cli-skills-install-git-failed",
-            "cli-skills-install-registry-failed",
-            "cli-skills-install-extra-registry-failed",
-            "cli-skills-install-local-failed",
-        ] {
-            let msg = get_required_cli_string_with_args(key, &[("source", "acme/widget")]);
-            assert!(
-                msg.contains("failed to install") && msg.contains("acme/widget"),
-                "{key} did not resolve/interpolate: {msg}"
-            );
         }
     }
 

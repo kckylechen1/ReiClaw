@@ -732,7 +732,7 @@ async fn history_trims_after_max_messages() {
         let _ = agent.turn(&format!("msg {i}")).await.unwrap();
     }
 
-    let breadcrumb = crate::i18n::get_required_cli_string("history-trim-breadcrumb");
+    let breadcrumb = "[earlier turns omitted to fit the context window]".to_string();
     let retained_messages: Vec<_> = agent
         .history()
         .iter()

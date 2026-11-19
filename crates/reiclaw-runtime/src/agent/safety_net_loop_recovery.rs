@@ -284,8 +284,8 @@ async fn repeated_failures_close_both_agent_apis_after_correction_and_preserve_p
             let (mut agent, requests) = agent_for(script(8), tool, Some(Default::default()));
             let (response, events) = run(&mut agent, streamed).await;
             assert_eq!(calls.load(Ordering::SeqCst), 4);
-            let correction = crate::i18n::get_required_cli_string("turn-repeated-failure-recovery");
-            let stop = crate::i18n::get_required_cli_string("turn-repeated-failure-exhausted");
+            let correction = "The same tool call failed with the same result repeatedly. Change the approach or explain the blocker. One further identical retry is available before this turn stops.".to_string();
+            let stop = "The recovery retry failed with the same result, so this turn has stopped. Completed tool results have been preserved. You can retry in a new turn.".to_string();
             let requests = requests.lock();
             assert_eq!(requests.len(), 4, "no summary request after exhaustion");
             assert!(requests[..3].iter().all(|request| {
@@ -358,9 +358,7 @@ async fn warning_batch_does_not_consume_recovery_and_final_batch_results_survive
         let (response, events) = run(&mut agent, true).await;
         assert_eq!(calls.load(Ordering::SeqCst), 6);
         assert_eq!(requests.lock().len(), 2);
-        assert!(response.contains(&crate::i18n::get_required_cli_string(
-            "turn-repeated-failure-exhausted"
-        )));
+        assert!(response.contains("The recovery retry failed with the same result, so this turn has stopped. Completed tool results have been preserved. You can retry in a new turn."));
         assert_eq!(
             result_ids(&agent.agent).len(),
             8,
@@ -368,7 +366,7 @@ async fn warning_batch_does_not_consume_recovery_and_final_batch_results_survive
         );
         assert_eq!(counts.before.load(Ordering::SeqCst), 8);
         assert_eq!(counts.after.load(Ordering::SeqCst), 6);
-        let skipped = crate::i18n::get_required_cli_string("turn-repeated-failure-retry-skipped");
+        let skipped = "Skipped an additional identical call in this recovery batch. Only one recovery retry is available.".to_string();
         assert_eq!(
             events
                 .iter()
@@ -406,9 +404,7 @@ async fn recovery_retry_changed_url_and_other_useful_batch_work_continue() {
                 agent.config.resolved.parallel_tools = parallel;
                 let (response, _) = run(&mut agent, streamed).await;
                 assert!(response.ends_with("recovered"));
-                assert!(!response.contains(&crate::i18n::get_required_cli_string(
-                    "turn-repeated-failure-exhausted"
-                )));
+                assert!(!response.contains("The recovery retry failed with the same result, so this turn has stopped. Completed tool results have been preserved. You can retry in a new turn."));
                 assert_eq!(requests.lock().len(), 5);
                 assert_eq!(
                     calls.load(Ordering::SeqCst),
@@ -443,7 +439,7 @@ async fn successful_polling_is_advisory_and_changing_results_continue() {
                 }),
             );
             let (response, _) = run(&mut agent, streamed).await;
-            let advisory = crate::i18n::get_required_cli_string("turn-repeated-success-advisory");
+            let advisory = "The same tool call returned the same successful result repeatedly. Reconsider whether another call will help. Polling may continue when needed.".to_string();
             assert_eq!(
                 response.matches(&advisory).count(),
                 usize::from(!changing_output)
@@ -482,11 +478,9 @@ async fn cancellation_during_recovery_preserves_results_without_claiming_exhaust
     assert!(
         !error
             .committed_response
-            .contains(&crate::i18n::get_required_cli_string(
-                "turn-repeated-failure-exhausted"
-            ))
+            .contains("The recovery retry failed with the same result, so this turn has stopped. Completed tool results have been preserved. You can retry in a new turn.")
     );
-    let interrupted = crate::i18n::get_required_cli_string("turn-tool-interrupted-before-result");
+    let interrupted = "[interrupted by user before this tool produced a result]".to_string();
     assert!(agent.history.iter().any(|message| match message {
         ConversationMessage::ToolResults(results) => results.iter().any(|result| {
             result.tool_call_id == "unrun" && result.content.contains(&interrupted)
@@ -513,9 +507,7 @@ async fn new_turn_replenishes_recovery_and_keeps_prior_success_receipt() {
         );
         assert_eq!(calls.load(Ordering::SeqCst), 5);
         let second = run(&mut agent, streamed).await.0;
-        assert!(second.contains(&crate::i18n::get_required_cli_string(
-            "turn-repeated-failure-exhausted"
-        )));
+        assert!(second.contains("The recovery retry failed with the same result, so this turn has stopped. Completed tool results have been preserved. You can retry in a new turn."));
         assert_eq!(
             calls.load(Ordering::SeqCst),
             9,
@@ -554,9 +546,7 @@ async fn disabled_and_standalone_pacing_preserve_chains_and_live_policy_refreshe
             if !standalone {
                 live.write().pacing.loop_detection_enabled = true;
                 let response = run(&mut agent, streamed).await.0;
-                assert!(response.contains(&crate::i18n::get_required_cli_string(
-                    "turn-repeated-failure-exhausted"
-                )));
+                assert!(response.contains("The recovery retry failed with the same result, so this turn has stopped. Completed tool results have been preserved. You can retry in a new turn."));
                 assert_eq!(
                     calls.load(Ordering::SeqCst),
                     9,
@@ -640,9 +630,7 @@ async fn streaming_exhaustion_is_terminal_despite_queued_steering() {
     assert!(
         result
             .response
-            .contains(&crate::i18n::get_required_cli_string(
-                "turn-repeated-failure-exhausted"
-            ))
+            .contains("The recovery retry failed with the same result, so this turn has stopped. Completed tool results have been preserved. You can retry in a new turn.")
     );
     assert_eq!(calls.load(Ordering::SeqCst), 4);
     assert_eq!(
@@ -685,7 +673,7 @@ async fn steering_reentry_preserves_advisory_and_failed_recovery_evidence() {
         );
         if success {
             assert_eq!(calls.load(Ordering::SeqCst), 6);
-            let advisory = crate::i18n::get_required_cli_string("turn-repeated-success-advisory");
+            let advisory = "The same tool call returned the same successful result repeatedly. Reconsider whether another call will help. Polling may continue when needed.".to_string();
             assert_eq!(result.response.matches(&advisory).count(), 1);
             assert_eq!(requests.lock().len(), 8);
         } else {
@@ -697,9 +685,7 @@ async fn steering_reentry_preserves_advisory_and_failed_recovery_evidence() {
             assert!(
                 result
                     .response
-                    .contains(&crate::i18n::get_required_cli_string(
-                        "turn-repeated-failure-exhausted"
-                    ))
+                    .contains("The recovery retry failed with the same result, so this turn has stopped. Completed tool results have been preserved. You can retry in a new turn.")
             );
             assert_eq!(requests.lock().len(), 5);
         }
@@ -776,11 +762,9 @@ async fn activated_aliases_share_recovery_admission_and_canonical_ignore() {
                     "canonical ignore covers short aliases too"
                 );
             } else {
-                assert!(response.contains(&crate::i18n::get_required_cli_string(
-                    "turn-repeated-failure-exhausted"
-                )));
+                assert!(response.contains("The recovery retry failed with the same result, so this turn has stopped. Completed tool results have been preserved. You can retry in a new turn."));
                 let skipped =
-                    crate::i18n::get_required_cli_string("turn-repeated-failure-retry-skipped");
+                    "Skipped an additional identical call in this recovery batch. Only one recovery retry is available.".to_string();
                 assert_eq!(
                     events.iter().filter(|event| {
                         matches!(event, TurnEvent::ToolResult { output, .. } if output == &skipped)
@@ -794,8 +778,8 @@ async fn activated_aliases_share_recovery_admission_and_canonical_ignore() {
 
 #[tokio::test]
 async fn repeated_failures_with_volatile_telemetry_close_while_distinct_failure_reasons_continue() {
-    let correction = crate::i18n::get_required_cli_string("turn-repeated-failure-recovery");
-    let stop = crate::i18n::get_required_cli_string("turn-repeated-failure-exhausted");
+    let correction = "The same tool call failed with the same result repeatedly. Change the approach or explain the blocker. One further identical retry is available before this turn stops.".to_string();
+    let stop = "The recovery retry failed with the same result, so this turn has stopped. Completed tool results have been preserved. You can retry in a new turn.".to_string();
 
     for streamed in [false, true] {
         for return_error in [false, true] {
@@ -845,8 +829,8 @@ async fn repeated_failures_with_volatile_telemetry_close_while_distinct_failure_
 #[tokio::test]
 async fn repeated_failure_warning_survives_mid_turn_reported_budget_trim_and_context_overflow_recovery()
  {
-    let correction = crate::i18n::get_required_cli_string("turn-repeated-failure-recovery");
-    let stop = crate::i18n::get_required_cli_string("turn-repeated-failure-exhausted");
+    let correction = "The same tool call failed with the same result repeatedly. Change the approach or explain the blocker. One further identical retry is available before this turn stops.".to_string();
+    let stop = "The recovery retry failed with the same result, so this turn has stopped. Completed tool results have been preserved. You can retry in a new turn.".to_string();
 
     for streamed in [false, true] {
         for overflow_recovery in [false, true] {

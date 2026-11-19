@@ -104,7 +104,7 @@ pub(crate) async fn try_recover_context_overflow(
                     })),
                 "Context recovery: dropped oldest whole turns, retrying"
             );
-            let reason = crate::i18n::get_required_cli_string("history-trim-reason-budget");
+            let reason = super::CONTEXT_BUDGET_TRIM_REASON.to_string();
             if let Some(tx) = event_tx {
                 let _ = tx
                     .send(reiclaw_api::agent::TurnEvent::HistoryTrimmed {
@@ -184,7 +184,7 @@ mod tests {
         assert!(recovered, "an overflowing history must trim and recover");
         // The retried history must carry the model-visible breadcrumb after the
         // leading system messages, matching the turn-boundary contract.
-        let breadcrumb_text = crate::i18n::get_required_cli_string("history-trim-breadcrumb");
+        let breadcrumb_text = "[earlier turns omitted to fit the context window]".to_string();
         assert!(
             history.iter().any(|m| m.content == breadcrumb_text),
             "recovery must insert the breadcrumb so the model sees the trim"
@@ -198,10 +198,7 @@ mod tests {
             } => {
                 assert!(dropped_messages > 0, "must report dropped messages");
                 assert!(kept_turns >= 1, "must keep at least the current turn");
-                assert_eq!(
-                    reason,
-                    crate::i18n::get_required_cli_string("history-trim-reason-budget")
-                );
+                assert_eq!(reason, "context token budget exceeded".to_string());
             }
             other => panic!("expected HistoryTrimmed, got {other:?}"),
         }
@@ -361,7 +358,7 @@ mod tests {
         ];
         let err = anyhow::Error::msg("maximum context length exceeded");
         let observer = NoopObserver;
-        let breadcrumb_text = crate::i18n::get_required_cli_string("history-trim-breadcrumb");
+        let breadcrumb_text = "[earlier turns omitted to fit the context window]".to_string();
 
         let first =
             try_recover_context_overflow(&mut history, &err, 1, None, &observer, 32_000).await;

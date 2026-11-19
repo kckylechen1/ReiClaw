@@ -1032,11 +1032,7 @@ async fn safety_net_streaming_tool_results_input_order_and_midbatch_cancel() {
         "calls after the cancel point must not execute"
     );
     assert!(
-        err.committed_response
-            .contains(&crate::i18n::get_english_cli_string_with_args(
-                "turn-interrupted-by-user",
-                &[]
-            )),
+        err.committed_response.contains("[interrupted by user]"),
         "unexpected committed_response: {}",
         err.committed_response
     );
@@ -1511,10 +1507,7 @@ async fn safety_net_cancel_after_streamed_output_persists_partial() {
 
     assert_eq!(
         err.committed_response,
-        format!(
-            "partial answer\n\n{}",
-            crate::i18n::get_english_cli_string_with_args("turn-interrupted-by-user", &[])
-        ),
+        format!("partial answer\n\n{}", "[interrupted by user]".to_string()),
         "committed_response must carry the watched partial with the marker"
     );
     let interruption_messages: Vec<&ConversationMessage> = err
@@ -1525,7 +1518,7 @@ async fn safety_net_cancel_after_streamed_output_persists_partial() {
                 m,
                 ConversationMessage::Chat(c)
                     if c.role == "assistant"
-                    && c.content.contains(&crate::i18n::get_english_cli_string_with_args("turn-interrupted-by-user", &[]))
+                    && c.content.contains("[interrupted by user]")
             )
         })
         .collect();
@@ -1579,7 +1572,7 @@ async fn safety_net_stream_error_persists_only_forwarded_text() {
 
     assert_eq!(
         err.committed_response,
-        crate::i18n::get_english_cli_string_with_args("turn-stream-interrupted", &[]),
+        "[stream interrupted]".to_string(),
         "nothing was forwarded, so nothing may be committed as delivered"
     );
     assert!(

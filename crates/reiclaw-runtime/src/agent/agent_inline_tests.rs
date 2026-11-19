@@ -2859,7 +2859,7 @@ fn clear_history_resets_trim_breadcrumb_provenance_before_reuse() {
     agent.clear_history();
     assert!(!agent.history_has_trim_breadcrumb);
 
-    let breadcrumb = crate::i18n::get_required_cli_string("history-trim-breadcrumb");
+    let breadcrumb = "[earlier turns omitted to fit the context window]".to_string();
     agent.seed_history(&[
         ChatMessage::user(breadcrumb.clone()),
         ChatMessage::assistant("user-authored marker reply"),
@@ -2907,7 +2907,7 @@ fn append_seed_history_preserves_existing_trim_breadcrumb_provenance() {
         ChatMessage::assistant("appended assistant"),
     ]);
 
-    let breadcrumb = crate::i18n::get_required_cli_string("history-trim-breadcrumb");
+    let breadcrumb = "[earlier turns omitted to fit the context window]".to_string();
     assert!(agent.history_has_trim_breadcrumb);
     assert_eq!(
         agent
@@ -2944,7 +2944,7 @@ fn append_conversation_seed_preserves_existing_trim_breadcrumb_provenance() {
         ConversationMessage::Chat(ChatMessage::assistant("appended assistant")),
     ]);
 
-    let breadcrumb = crate::i18n::get_required_cli_string("history-trim-breadcrumb");
+    let breadcrumb = "[earlier turns omitted to fit the context window]".to_string();
     assert!(agent.history_has_trim_breadcrumb);
     assert_eq!(
         agent
@@ -3957,7 +3957,7 @@ fn trim_history_drops_old_turn_with_breadcrumb_and_observer_event() {
 
     let _ = agent.trim_history(None);
 
-    let breadcrumb = crate::i18n::get_required_cli_string("history-trim-breadcrumb");
+    let breadcrumb = "[earlier turns omitted to fit the context window]".to_string();
     assert!(matches!(
         agent.history.first(),
         Some(ConversationMessage::Chat(message))
@@ -4015,7 +4015,7 @@ fn trim_history_drops_old_turn_with_breadcrumb_and_observer_event() {
     assert_eq!(trim_events[0].1, 1);
     assert_eq!(
         trim_events[0].2,
-        crate::i18n::get_required_cli_string("history-trim-reason-message-cap")
+        "history message limit exceeded".to_string()
     );
 }
 
@@ -4305,7 +4305,7 @@ async fn trim_history_streamed_turn_forwards_single_hard_cap_event() {
     assert_eq!(trim_events[0].1, 1);
     assert_eq!(
         trim_events[0].2,
-        crate::i18n::get_required_cli_string("history-trim-reason-message-cap")
+        "history message limit exceeded".to_string()
     );
     assert!(capturing.events.lock().iter().any(|event| matches!(
         event,
@@ -4334,8 +4334,8 @@ async fn trim_history_cancel_before_output_retains_synthesized_newest_turn() {
         .await
         .expect_err("pre-cancelled streamed turn should return cancellation");
 
-    let breadcrumb = crate::i18n::get_required_cli_string("history-trim-breadcrumb");
-    let interruption = crate::i18n::get_required_cli_string("turn-interrupted-by-user");
+    let breadcrumb = "[earlier turns omitted to fit the context window]".to_string();
+    let interruption = "[interrupted by user]".to_string();
     assert!(crate::agent::loop_::is_tool_loop_cancelled(&error.error));
     assert_eq!(error.committed_response, interruption);
     assert_eq!(agent.history.len(), 4);
@@ -5172,7 +5172,7 @@ async fn turn_streamed_error_before_visible_output_falls_back_to_chat() {
         );
     assert!(
             !outcome.new_messages.iter().any(|msg| {
-                matches!(msg, ConversationMessage::Chat(message) if message.role == "assistant" && message.content.contains(&crate::i18n::get_english_cli_string_with_args("turn-stream-interrupted", &[])))
+                matches!(msg, ConversationMessage::Chat(message) if message.role == "assistant" && message.content.contains("[stream interrupted]"))
             }),
             "successful fallback should not persist interrupted stream text"
         );
@@ -5244,11 +5244,7 @@ async fn turn_streamed_error_after_delta_preserves_visible_partial() {
         err.error
     );
     assert!(
-        err.committed_response
-            .contains(&crate::i18n::get_english_cli_string_with_args(
-                "turn-stream-interrupted",
-                &[]
-            )),
+        err.committed_response.contains("[stream interrupted]"),
         "persisted partial text should mark that the visible stream was interrupted"
     );
     assert!(
@@ -5310,13 +5306,10 @@ async fn turn_streamed_error_before_visible_output_fallback_can_be_cancelled() {
         "unexpected error: {}",
         err.error
     );
-    assert_eq!(
-        err.committed_response,
-        crate::i18n::get_english_cli_string_with_args("turn-interrupted-by-user", &[])
-    );
+    assert_eq!(err.committed_response, "[interrupted by user]".to_string());
     assert!(
             err.new_messages.iter().any(|msg| {
-                matches!(msg, ConversationMessage::Chat(message) if message.role == "assistant" && message.content == crate::i18n::get_english_cli_string_with_args("turn-interrupted-by-user", &[]))
+                matches!(msg, ConversationMessage::Chat(message) if message.role == "assistant" && message.content == "[interrupted by user]")
             }),
             "pre-output fallback cancellation should include an interruption marker"
         );
@@ -5366,13 +5359,10 @@ async fn turn_streamed_cancel_before_output_returns_interruption_message() {
         "unexpected error: {}",
         err.error
     );
-    assert_eq!(
-        err.committed_response,
-        crate::i18n::get_english_cli_string_with_args("turn-interrupted-by-user", &[])
-    );
+    assert_eq!(err.committed_response, "[interrupted by user]".to_string());
     assert!(
             err.new_messages.iter().any(|msg| {
-                matches!(msg, ConversationMessage::Chat(message) if message.role == "assistant" && message.content == crate::i18n::get_english_cli_string_with_args("turn-interrupted-by-user", &[]))
+                matches!(msg, ConversationMessage::Chat(message) if message.role == "assistant" && message.content == "[interrupted by user]")
             }),
             "cancelled turn should include an assistant interruption marker for persistence"
         );
@@ -5417,12 +5407,7 @@ async fn turn_streamed_stream_error_after_delta_emits_llm_response_failure() {
 
     assert!(
         err.committed_response.contains("draft")
-            && err
-                .committed_response
-                .contains(&crate::i18n::get_english_cli_string_with_args(
-                    "turn-stream-interrupted",
-                    &[]
-                )),
+            && err.committed_response.contains("[stream interrupted]"),
         "unexpected committed_response: {}",
         err.committed_response
     );

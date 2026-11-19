@@ -908,14 +908,10 @@ pub(crate) async fn reconcile_with_deps(
                                             let round_str = new_count.to_string();
                                             let max_str =
                                                 MAX_PROXY_CONTINUATIONS_PER_DISPATCH.to_string();
-                                            let content = reiclaw_runtime::i18n::get_required_cli_string_with_args(
-                                                "delegation-proxy-continued-notice",
-                                                &[
-                                                    ("request", short(&row.request_id)),
-                                                    ("dispatch", short(&row.dispatch_id)),
-                                                    ("round", &round_str),
-                                                    ("max", &max_str),
-                                                ],
+                                            let content = format!(
+                                                "Delegated task {request} (dispatch {dispatch}) requested input and was automatically continued (round {round_str}/{max_str}).",
+                                                dispatch = short(&row.dispatch_id),
+                                                request = short(&row.request_id)
                                             );
                                             if let Err(error) = enqueue_deduped_notice(
                                                 &outbox,
@@ -1017,13 +1013,10 @@ pub(crate) async fn reconcile_with_deps(
                     Ok(None) => continue,
                     Err(_) => break,
                 };
-                let content = reiclaw_runtime::i18n::get_required_cli_string_with_args(
-                    "delegation-input-required-notice",
-                    &[
-                        ("request", short(&row.request_id)),
-                        ("dispatch", short(&row.dispatch_id)),
-                        ("reason", &reason),
-                    ],
+                let content = format!(
+                    "Delegated task {request} (dispatch {dispatch}) requires your input or confirmation ({reason}).",
+                    dispatch = short(&row.dispatch_id),
+                    request = short(&row.request_id)
                 );
                 if let Err(error) = enqueue_deduped_notice(
                     &outbox,
@@ -1114,13 +1107,10 @@ pub(crate) async fn reconcile_with_deps(
             // thread. Do not guess that an old notification was never attempted.
             continue;
         }
-        let content = reiclaw_runtime::i18n::get_required_cli_string_with_args(
-            "delegation-result-notice",
-            &[
-                ("request", short(&row.request_id)),
-                ("outcome", outcome),
-                ("dispatch", short(&row.dispatch_id)),
-            ],
+        let content = format!(
+            "Delegated task {request} finished with outcome {outcome}. Ask the agent or query tachi_result for dispatch {dispatch}.",
+            dispatch = short(&row.dispatch_id),
+            request = short(&row.request_id)
         );
         // An enqueue failure (e.g. outbox capacity) must not discard the
         // markers of rows already enqueued this pass: record the error, stop

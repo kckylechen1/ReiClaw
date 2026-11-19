@@ -192,19 +192,12 @@ jobs:
           exit "$cargo_status"
         env:
           RUST_CACHE_HIT: ${{ steps.rust-cache.outputs.cache-hit }}
-      # The architecture guards (config-write isolation, Fluent coverage) are
+      # The architecture guards (config-write isolation, duplicate state) are
       # ordinary tests in the root `architecture` test target, so the
       # `Test (app)` leg already runs them under nextest. Running them here
       # too cost a second debug build of the root package on the critical path.
       - name: Provider dispatch gate (no direct ModelProvider method calls outside ProviderDispatch)
         run: bash scripts/ci/provider_dispatch_gate.sh
-      # Fluent catalog syntax gate. Locales drift silently otherwise — the
-      # runtime embeds en and falls back to it, so a broken translated
-      # catalog only shows at runtime. It builds xtask in the dev profile,
-      # which no test phase reuses, so it lives here instead of serially
-      # extending a test leg on the critical path.
-      - name: Fluent catalog syntax gate
-        run: cargo fluent check
 
 
 

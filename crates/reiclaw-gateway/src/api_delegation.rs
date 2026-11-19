@@ -111,9 +111,7 @@ fn refused(
         request_id,
         false,
         json!({"code":code}),
-        Some(reiclaw_runtime::i18n::get_required_cli_string(
-            "gateway-bridge-access-denied",
-        )),
+        Some("This bridge is not authorized for the requested binding or operation.".to_string()),
     )
 }
 

@@ -13,7 +13,6 @@
   - [Quickstart](./getting-started/quickstart.md)
   - [YOLO mode](./getting-started/yolo.md)
   - [Multi-model setup](./getting-started/multi-model-setup.md)
-  - [Language & translations](./getting-started/language.md)
 - [Installation](./setup/index.md)
   - [Linux](./setup/linux.md)
   - [macOS](./setup/macos.md)

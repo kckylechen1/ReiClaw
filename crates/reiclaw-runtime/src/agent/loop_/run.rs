@@ -331,14 +331,6 @@ pub async fn run(
             Some(turn_id.clone()),
         );
 
-        // ── Initialize locale-aware tool descriptions ──────────────────
-        let _i18n_locale = config
-            .locale
-            .as_deref()
-            .filter(|s| !s.is_empty())
-            .map(ToString::to_string)
-            .unwrap_or_else(crate::i18n::detect_locale);
-
         let mut tool_descs: Vec<(&str, &str)> = vec![
             (
                 "shell",

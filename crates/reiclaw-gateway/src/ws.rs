@@ -297,7 +297,7 @@ pub async fn handle_ws_chat(
         Err(()) => {
             return (
                 axum::http::StatusCode::BAD_REQUEST,
-                reiclaw_runtime::i18n::get_required_cli_string("gateway-invalid-surface"),
+                "Invalid chat surface. Use web, telegram or cli; query and connect values must agree.".to_string(),
             )
                 .into_response();
         }
@@ -598,7 +598,7 @@ async fn handle_socket(
                     // surface switch would bypass the projection admission.
                     let err = serde_json::json!({
                         "type": "error", "code": "VOICE_QUERY_REQUIRED",
-                        "message": reiclaw_runtime::i18n::get_required_cli_string("gateway-voice-projection-unavailable"),
+                        "message": "Voice could not start. Check the carrier provider and the owner's governed identity, then reconnect.",
                     });
                     let _ = sender.send(Message::Text(err.to_string().into())).await;
                     return;
@@ -609,7 +609,7 @@ async fn handle_socket(
                 {
                     let err = serde_json::json!({
                         "type": "error",
-                        "message": reiclaw_runtime::i18n::get_required_cli_string("gateway-invalid-surface"),
+                        "message": "Invalid chat surface. Use web, telegram or cli; query and connect values must agree.",
                         "code": "INVALID_SURFACE"
                     });
                     let _ = sender.send(Message::Text(err.to_string().into())).await;
@@ -1477,12 +1477,20 @@ fn cancel_control(
     } else {
         conversation.cancel_turn(target)
     };
-    let key = format!("gateway-cancel-{}", status.replace('_', "-"));
+    let message = match status {
+        "requested" => "Stop requested for that turn; it has not yet confirmed cancellation.",
+        "stale" => "That turn has ended. The newer turn was not stopped.",
+        "no_active" => "That turn is no longer running.",
+        "unauthorized" => {
+            "Current device or scoped bridge authority is required to stop this turn."
+        }
+        _ => "This stop request has no supported version or valid turn target.",
+    };
     (
         Some(serde_json::json!({
             "type":"cancel_ack", "control_version":1, "id":id, "turn_id":target,
             "status":status,
-            "message":reiclaw_runtime::i18n::get_required_cli_string(&key),
+            "message":message,
         })),
         None,
     )
@@ -1569,16 +1577,14 @@ fn handle_message_frame(
                 .collect::<Option<Vec<_>>>()
             else {
                 return reject(
-                    &reiclaw_runtime::i18n::get_required_cli_string(
-                        "gateway-attachment-invalid-ids",
-                    ),
+                    "Attachments must be opaque upload IDs",
                     "INVALID_ATTACHMENTS",
                 );
             };
             let unique: std::collections::HashSet<_> = ids.iter().collect();
             if unique.len() != ids.len() {
                 return reject(
-                    &reiclaw_runtime::i18n::get_required_cli_string("gateway-attachment-repeated"),
+                    "Repeated attachment IDs are not allowed",
                     "INVALID_ATTACHMENTS",
                 );
             }
@@ -1586,14 +1592,14 @@ fn handle_message_frame(
         }
         Some(_) => {
             return reject(
-                &reiclaw_runtime::i18n::get_required_cli_string("gateway-attachment-count"),
+                "At most four upload IDs may accompany a message",
                 "INVALID_ATTACHMENTS",
             );
         }
     };
     if !ids.is_empty() && !question_answer_authorized(state, scope) {
         return reject(
-            &reiclaw_runtime::i18n::get_required_cli_string("gateway-attachment-unauthorized"),
+            "Attachments require current device or bridge authority",
             "UNAUTHORIZED_ATTACHMENTS",
         );
     }
@@ -1637,7 +1643,7 @@ fn handle_message_frame(
     if !ids.is_empty() {
         let Some((_, agent)) = conversation.key().rsplit_once('\u{1f}') else {
             return reject(
-                &reiclaw_runtime::i18n::get_required_cli_string("gateway-attachment-unavailable"),
+                "Attachment is expired, unavailable or outside this session",
                 "ATTACHMENT_UNAVAILABLE",
             );
         };
@@ -1651,7 +1657,7 @@ fn handle_message_frame(
                 set_request_state(state, conversation, &scope.session_key, id, "rejected");
             }
             return reject(
-                &reiclaw_runtime::i18n::get_required_cli_string("gateway-attachment-unauthorized"),
+                "Attachments require current device or bridge authority",
                 "UNAUTHORIZED_ATTACHMENTS",
             );
         }
@@ -1667,9 +1673,7 @@ fn handle_message_frame(
                         set_request_state(state, conversation, &scope.session_key, id, "rejected");
                     }
                     return reject(
-                        &reiclaw_runtime::i18n::get_required_cli_string(
-                            "gateway-attachment-unavailable",
-                        ),
+                        "Attachment is expired, unavailable or outside this session",
                         "ATTACHMENT_UNAVAILABLE",
                     );
                 }
@@ -1681,7 +1685,7 @@ fn handle_message_frame(
                 set_request_state(state, conversation, &scope.session_key, id, "rejected");
             }
             return reject(
-                &reiclaw_runtime::i18n::get_required_cli_string("gateway-attachment-unauthorized"),
+                "Attachments require current device or bridge authority",
                 "UNAUTHORIZED_ATTACHMENTS",
             );
         }
@@ -2152,7 +2156,7 @@ async fn run_ws_turns(
             } else {
                 intake::release(&state, claim);
                 conversation.publish(&serde_json::json!({"type":"error","id":request_id,"code":"SOURCE_NOT_STARTED",
-                    "message":reiclaw_runtime::i18n::get_required_cli_string("gateway-intake-unavailable")}));
+                    "message":"The input could not be safely resumed. Reconnect to check its durable receipt before sending it again."}));
             }
         } else if let Some(id) = &request_id {
             set_request_state(&state, &conversation, &scope.session_key, id, outcome);
@@ -2294,20 +2298,20 @@ fn resolve_session_cwd(
         );
         anyhow::Error::msg(format!(
             "{}: {e}",
-            reiclaw_runtime::i18n::get_required_cli_string("gateway-cwd-workspace-unavailable")
+            "Agent workspace is not a usable directory".to_string()
         ))
     })?;
     anyhow::ensure!(
         resolved.is_dir() && workspace.is_dir(),
         "{}",
-        reiclaw_runtime::i18n::get_required_cli_string("gateway-cwd-not-directory")
+        "cwd is not a usable directory".to_string()
     );
     // Compare canonical path components, not string prefixes: a remote cwd
     // becomes the Agent policy root and must never widen its configured scope.
     anyhow::ensure!(
         resolved.starts_with(&workspace),
         "{}",
-        reiclaw_runtime::i18n::get_required_cli_string("gateway-cwd-outside-workspace")
+        "cwd must be within the configured agent workspace".to_string()
     );
     Ok(resolved)
 }
@@ -2706,11 +2710,9 @@ async fn process_chat_message(
                             owner_ingress().as_ref(),
                         );
                         if !has_assistant_chat_message(&error.new_messages) {
-                            let marker = reiclaw_runtime::i18n::get_required_cli_string(
-                                "turn-interrupted-by-user",
-                            );
+                            let marker = reiclaw_runtime::agent::INTERRUPTED_BY_USER_MARKER;
                             let truncated = if accumulated_text.is_empty() {
-                                marker
+                                marker.to_string()
                             } else {
                                 format!("{accumulated_text}\n\n{marker}")
                             };
@@ -2726,11 +2728,9 @@ async fn process_chat_message(
                         }
                     }
                     _ => {
-                        let marker = reiclaw_runtime::i18n::get_required_cli_string(
-                            "turn-interrupted-by-user",
-                        );
+                        let marker = reiclaw_runtime::agent::INTERRUPTED_BY_USER_MARKER;
                         let truncated = if accumulated_text.is_empty() {
-                            marker
+                            marker.to_string()
                         } else {
                             format!("{accumulated_text}\n\n{marker}")
                         };

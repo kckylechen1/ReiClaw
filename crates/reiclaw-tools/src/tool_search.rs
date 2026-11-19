@@ -150,9 +150,7 @@ impl Tool for ToolSearchTool {
             return Ok(ToolResult {
                 success: false,
                 output: ToolOutput::default(),
-                error: Some(crate::i18n::get_required_tool_string(
-                    "tool-mcp-search-query-required",
-                )),
+                error: Some("query parameter is required".to_string()),
             });
         }
 
@@ -181,9 +179,9 @@ impl Tool for ToolSearchTool {
             (results.len(), names)
         };
         if matched == 0 {
-            return Ok(ToolResult::ok(crate::i18n::get_required_tool_string(
-                "tool-mcp-search-no-matches",
-            )));
+            return Ok(ToolResult::ok(
+                "No matching deferred tools found.".to_string(),
+            ));
         }
         let names: Vec<&str> = names.iter().map(String::as_str).collect();
         self.select_tools(&names)
@@ -211,14 +209,7 @@ impl ToolSearchTool {
         }
         output.push_str("</functions>\n");
         if !not_found.is_empty() {
-            let _ = write!(
-                output,
-                "\n{}",
-                crate::i18n::get_required_tool_string_with_args(
-                    "tool-mcp-search-not-found",
-                    &[("names", &not_found.join(", "))],
-                )
-            );
+            let _ = write!(output, "\nNot found: {names}", names = not_found.join(", "));
         }
         Ok(ToolResult::ok(output))
     }

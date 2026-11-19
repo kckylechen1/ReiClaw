@@ -232,22 +232,18 @@ impl GitOperationsTool {
         let status = match output.outcome {
             ProcessOutcome::Exited(status) => status,
             ProcessOutcome::TimedOut => anyhow::bail!(
-                "{}",
-                crate::i18n::get_required_tool_string_with_args(
-                    "tool-git-operations-error-timeout",
-                    &[("seconds", &self.security.shell_timeout_secs.to_string())],
-                )
+                "Git command timed out after {seconds}s and was stopped; repository state may have changed. Inspect it before retrying.",
+                seconds = self.security.shell_timeout_secs
             ),
             ProcessOutcome::OutputLimit => anyhow::bail!(
-                "{}",
-                crate::i18n::get_required_tool_string("tool-git-operations-error-output-stopped",)
+                "Git command was stopped at its output limit; inspect repository state before retrying."
             ),
         };
 
         if !status.success() {
             let stderr = String::from_utf8_lossy(&output.stderr);
             let suffix = if output.stderr_truncated {
-                crate::i18n::get_required_tool_string("tool-process-stderr-truncated")
+                "[stderr truncated]".to_string()
             } else {
                 String::new()
             };
@@ -261,17 +257,12 @@ impl GitOperationsTool {
                 .is_some_and(|operation| self.requires_write_access(operation))
             {
                 anyhow::bail!(
-                    "{}",
-                    crate::i18n::get_required_tool_string_with_args(
-                        "tool-git-operations-error-incomplete-output",
-                        &[("bytes", &MAX_GIT_OUTPUT_BYTES.to_string())],
-                    )
+                    "Git command completed but its output was truncated at {bytes} bytes. Narrow the query; this is not a complete repository result.",
+                    bytes = MAX_GIT_OUTPUT_BYTES
                 );
             }
             stdout.push('\n');
-            stdout.push_str(&crate::i18n::get_required_tool_string(
-                "tool-git-operations-completed-truncated",
-            ));
+            stdout.push_str("[Git command completed; output truncated]");
         }
         Ok(stdout)
     }
@@ -1024,9 +1015,8 @@ impl Tool for GitOperationsTool {
 
             if !found_git {
                 let path_display = working_dir.display().to_string();
-                let error_msg = crate::i18n::get_required_tool_string_with_args(
-                    "tool-git-operations-error-not-in-repo",
-                    &[("path", &path_display)],
+                let error_msg = format!(
+                    "Not in a Git repository at '{path_display}'. Choose a path inside a Git worktree, pass 'path' for a repository subdirectory, or initialize a repository before running git_operations."
                 );
                 return Ok(ToolResult {
                     success: false,

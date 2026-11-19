@@ -7,17 +7,13 @@ use reiclaw_infra::session_backend::{SessionBackend, SessionMetadata, SessionWin
 use serde_json::json;
 use std::collections::{BTreeMap, HashMap};
 use std::fmt::Write;
-use std::sync::{Arc, OnceLock};
+use std::sync::Arc;
 
 const DEFAULT_SEARCH_LIMIT: usize = 10;
 const MAX_SEARCH_LIMIT: usize = 50;
 /// Bounded safely below SQLite's 30,000-key `IN (...)` limit in `search_session_fts`.
 const MAX_ADMITTED_KEYS: usize = 10_000;
 const FALLBACK_SNIPPET_MAX_CHARS: usize = 320;
-
-fn tool_text(key: &str) -> String {
-    crate::i18n::get_required_tool_string(key)
-}
 
 fn sanitize_snippet(raw: &str, max_chars: usize) -> String {
     let collapsed = raw.split_whitespace().collect::<Vec<_>>().join(" ");
@@ -103,8 +99,7 @@ impl Tool for SessionSearchTool {
     }
 
     fn description(&self) -> &str {
-        static DESCRIPTION: OnceLock<String> = OnceLock::new();
-        DESCRIPTION.get_or_init(|| tool_text("tool-session-search"))
+        "Search this agent's own persisted session transcripts by keyword. Returns matching snippets with message_id, timestamp, and chronology warnings when newer turns exist so you verify final outcomes instead of intermediate attempts."
     }
 
     fn parameters_schema(&self) -> serde_json::Value {
@@ -113,15 +108,15 @@ impl Tool for SessionSearchTool {
             "properties": {
                 "query": {
                     "type": "string",
-                    "description": tool_text("tool-session-search-param-query")
+                    "description": "Keywords to search for in your own persisted session transcripts."
                 },
                 "session_key": {
                     "type": "string",
-                    "description": tool_text("tool-session-search-param-session-key")
+                    "description": "Optional session key owned by this agent to narrow the search."
                 },
                 "limit": {
                     "type": "integer",
-                    "description": tool_text("tool-session-search-param-limit")
+                    "description": "Max hits to return (default: 10, max: 50)."
                 }
             },
             "required": ["query"]

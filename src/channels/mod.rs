@@ -14,7 +14,6 @@ pub use reiclaw_config::multi_agent::{
 
 use crate::config::Config;
 use anyhow::{Context, Result};
-use reiclaw_runtime::i18n::{get_required_cli_string, get_required_cli_string_with_args};
 use std::path::PathBuf;
 use std::process::Command;
 
@@ -32,8 +31,8 @@ pub async fn handle_command(command: crate::ChannelCommands, config: &Config) ->
             anyhow::bail!("Doctor must be handled in main.rs (requires async runtime)")
         }
         crate::ChannelCommands::List => {
-            println!("{}", get_required_cli_string("cli-channels-header"));
-            println!("{}", get_required_cli_string("cli-channels-cli-always"));
+            println!("Channels:");
+            println!("  ✅ CLI (always available)");
             for entry in listing::compiled_channels(&config.channels) {
                 println!(
                     "  {} {}",
@@ -44,40 +43,30 @@ pub async fn handle_command(command: crate::ChannelCommands, config: &Config) ->
             let uncompiled = listing::configured_uncompiled_channels(&config.channels);
             if !uncompiled.is_empty() {
                 println!();
-                println!(
-                    "{}",
-                    get_required_cli_string("cli-channels-not-compiled-header")
-                );
+                println!("  Configured but not compiled in this binary:");
                 for entry in &uncompiled {
-                    println!(
-                        "{}",
-                        get_required_cli_string_with_args(
-                            "cli-channels-not-compiled-entry",
-                            &[("name", entry.name)]
-                        )
-                    );
+                    println!("  🚫 {name} (configured, not compiled)", name = entry.name);
                 }
-                println!("{}", get_required_cli_string("cli-channels-build-hint"));
+                println!(
+                    "  Build from source with `./install.sh --source --preset full`, `--features channels-full`, or the specific `channel-*` feature."
+                );
             }
             let retired = listing::configured_retired_channels(&config.channels);
             if !retired.is_empty() {
                 println!();
-                println!("{}", get_required_cli_string("cli-channels-retired-header"));
+                println!("  Configured sections of retired transports (no runner exists):");
                 for entry in &retired {
                     println!(
-                        "{}",
-                        get_required_cli_string_with_args(
-                            "cli-channels-retired-entry",
-                            &[("name", entry.name)]
-                        )
+                        "  ⚠️ {name} (section parses, nothing runs; remove it)",
+                        name = entry.name
                     );
                 }
-                println!("{}", get_required_cli_string("cli-channels-retired-hint"));
+                println!("  Live surfaces: Telegram bridge, webhook ingress.");
             }
             println!();
-            println!("{}", get_required_cli_string("cli-channels-start-hint"));
-            println!("{}", get_required_cli_string("cli-channels-doctor-hint"));
-            println!("{}", get_required_cli_string("cli-channels-configure-hint"));
+            println!("To start channels: rei channel start");
+            println!("To check health:    rei channel doctor");
+            println!("To configure:      rei config set channels.<name>.<field>=<value>");
             Ok(())
         }
         crate::ChannelCommands::Add {
@@ -109,19 +98,15 @@ pub async fn bind_telegram_identity(config: &Config, identity: &str, alias: &str
     let mut updated = config.clone();
 
     if !bind_channel_identity_into(&mut updated, "telegram", alias, identity)? {
-        // i18n-exempt: moved from retired zeroclaw-channels orchestrator; compiles without agent-runtime Fluent catalog
         println!("✅ Telegram identity already bound to telegram.{alias}: {normalized}");
         return Ok(());
     }
 
     Box::pin(updated.save()).await?;
-    // i18n-exempt: moved from retired zeroclaw-channels orchestrator; compiles without agent-runtime Fluent catalog
     println!("✅ Bound Telegram identity {normalized} to telegram.{alias}");
-    // i18n-exempt: moved from retired zeroclaw-channels orchestrator; compiles without agent-runtime Fluent catalog
     println!("   Saved to {}", updated.config_path.display());
     match maybe_restart_managed_daemon_service() {
         Ok(true) => {
-            // i18n-exempt: moved from retired zeroclaw-channels orchestrator; compiles without agent-runtime Fluent catalog
             println!("🔄 Detected running managed daemon service; reloaded automatically.");
         }
         Ok(false) => {
@@ -244,7 +229,6 @@ pub async fn send_channel_message(
             config, channel_id, recipient, None, message,
         )
         .with_context(|| format!("Failed to enqueue message for bridge {channel_id}"))?;
-        // i18n-exempt: operator bridge queue diagnostic
         println!("Message queued for bridge {channel_id}.");
         return Ok(());
     }
@@ -308,15 +292,12 @@ pub async fn start_channels(
 #[allow(clippy::unused_async)]
 pub async fn doctor_channels(config: Config) -> Result<()> {
     if config.gateway.bridges.is_empty() {
-        // i18n-exempt: moved from retired zeroclaw-channels orchestrator; compiles without agent-runtime Fluent catalog
         println!("No gateway bridges configured. Run `rei quickstart` to set one up.");
         return Ok(());
     }
-    // i18n-exempt: moved from retired zeroclaw-channels orchestrator; compiles without agent-runtime Fluent catalog
     println!("🩺 ReiClaw Channel Bridge Doctor");
     println!();
     for name in config.gateway.bridges.keys() {
-        // i18n-exempt: moved from retired zeroclaw-channels orchestrator; compiles without agent-runtime Fluent catalog
         println!("  ✅ {name:<9} bridge configured (`[gateway.bridges.{name}]`)");
     }
     Ok(())
