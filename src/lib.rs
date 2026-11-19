@@ -40,8 +40,6 @@ use serde::{Deserialize, Serialize};
 #[cfg(feature = "agent-runtime")]
 pub mod agent;
 #[cfg(feature = "agent-runtime")]
-pub(crate) mod approval;
-#[cfg(feature = "agent-runtime")]
 pub mod auth;
 #[cfg(feature = "agent-runtime")]
 pub mod channels;
@@ -65,27 +63,15 @@ pub(crate) mod doctor;
 #[cfg(feature = "gateway")]
 pub mod gateway;
 #[cfg(feature = "agent-runtime")]
-pub(crate) mod health;
-#[cfg(feature = "agent-runtime")]
-pub(crate) mod heartbeat;
-#[cfg(feature = "agent-runtime")]
 pub mod hooks;
 pub mod memory;
 #[cfg(feature = "agent-runtime")]
-pub(crate) mod multimodal;
-#[cfg(feature = "agent-runtime")]
-pub mod nodes;
-#[cfg(feature = "agent-runtime")]
 pub mod observability;
-#[cfg(feature = "agent-runtime")]
-pub mod platform;
 pub mod providers;
 #[cfg(feature = "agent-runtime")]
 pub(crate) mod security;
 #[cfg(feature = "agent-runtime")]
 pub mod tools;
-#[cfg(feature = "agent-runtime")]
-pub(crate) mod tunnel;
 
 pub use config::Config;
 
