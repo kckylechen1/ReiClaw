@@ -89,7 +89,6 @@ reiclaw-tools = { workspace = true, optional = true }
 reiclaw-runtime = { workspace = true, optional = true }
 reiclaw-gateway = { workspace = true, optional = true }
 reiclaw-gateway-client = { workspace = true, optional = true }
-reiclaw-tool-call-parser.workspace = true
 reiclaw-macros.workspace = true
 # CLI - minimal and fast
 clap = { version = "4.5", features = ["derive"] }

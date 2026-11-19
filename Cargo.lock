@@ -2691,7 +2691,6 @@ dependencies = [
  "reiclaw-runtime",
  "reiclaw-schema-markdown",
  "reiclaw-spawn",
- "reiclaw-tool-call-parser",
  "reiclaw-tools",
  "reqwest",
  "rusqlite",

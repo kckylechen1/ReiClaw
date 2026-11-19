@@ -170,8 +170,6 @@ fn print_no_command_help(cmd: clap::Command) -> Result<()> {
 mod agent;
 mod alias_cli;
 #[cfg(feature = "agent-runtime")]
-mod approval;
-#[cfg(feature = "agent-runtime")]
 mod auth;
 #[cfg(feature = "agent-runtime")]
 mod browse;
@@ -193,26 +191,16 @@ mod doctor;
 mod gateway;
 mod gateway_helpers;
 #[cfg(feature = "agent-runtime")]
-mod health;
-#[cfg(feature = "agent-runtime")]
-mod heartbeat;
-#[cfg(feature = "agent-runtime")]
 mod hooks;
 #[cfg(feature = "agent-runtime")]
 mod i18n;
-#[cfg(feature = "agent-runtime")]
-mod identity;
 #[cfg(feature = "agent-runtime")]
 mod integrations;
 mod memory;
 #[cfg(feature = "agent-runtime")]
 mod migration;
 #[cfg(feature = "agent-runtime")]
-mod multimodal;
-#[cfg(feature = "agent-runtime")]
 mod observability;
-#[cfg(feature = "agent-runtime")]
-mod platform;
 mod providers;
 #[cfg(feature = "agent-runtime")]
 mod security;
@@ -224,10 +212,6 @@ mod service;
 mod skills;
 #[cfg(feature = "agent-runtime")]
 mod tools;
-#[cfg(feature = "agent-runtime")]
-mod tunnel;
-#[cfg(feature = "agent-runtime")]
-mod util;
 
 use config::Config;
 
@@ -978,63 +962,6 @@ enum LocalesCommands {
 enum DeprecatedPropsCommands {
     #[command(external_subcommand)]
     Any(Vec<String>),
-}
-
-#[cfg(feature = "agent-runtime")]
-fn runtime_dir_env_is_explicit(name: &str, value: &str) -> bool {
-    match name {
-        "REI_CONFIG_DIR" | "REICLAW_CONFIG_DIR" | "REI_DATA_DIR" => !value.trim().is_empty(),
-        "REI_WORKSPACE" => !value.is_empty(),
-        _ => false,
-    }
-}
-
-#[cfg(feature = "agent-runtime")]
-fn resolve_homebrew_onboard_config_dir(
-    exe: &Path,
-    env_lookup: impl Fn(&str) -> Option<String>,
-) -> Option<PathBuf> {
-    let explicit_runtime_dir = [
-        "REI_CONFIG_DIR",
-        "REICLAW_CONFIG_DIR",
-        "REI_DATA_DIR",
-        "REI_WORKSPACE",
-    ]
-    .iter()
-    .any(|name| env_lookup(name).is_some_and(|value| runtime_dir_env_is_explicit(name, &value)));
-
-    if explicit_runtime_dir {
-        return None;
-    }
-
-    reiclaw_runtime::service::homebrew_var_dir_from_exe(exe)
-}
-
-#[cfg(feature = "agent-runtime")]
-fn apply_homebrew_onboard_config_dir_with(
-    exe: &Path,
-    env_lookup: impl Fn(&str) -> Option<String>,
-    mut set_env: impl FnMut(&'static str, &Path),
-) -> Option<PathBuf> {
-    let config_dir = resolve_homebrew_onboard_config_dir(exe, env_lookup)?;
-    set_env("REI_CONFIG_DIR", &config_dir);
-    Some(config_dir)
-}
-
-#[cfg(feature = "agent-runtime")]
-fn apply_homebrew_onboard_config_dir() {
-    let Ok(exe) = std::env::current_exe() else {
-        return;
-    };
-
-    apply_homebrew_onboard_config_dir_with(
-        &exe,
-        |name| std::env::var(name).ok(),
-        |name, value| {
-            // SAFETY: called early in the onboard command path before new threads are spawned.
-            unsafe { std::env::set_var(name, value) };
-        },
-    );
 }
 
 #[derive(Subcommand, Debug)]
