@@ -246,7 +246,7 @@ jobs:
           save-if: ${{ github.ref == 'refs/heads/master' }}
       - name: Install mold linker
         if: runner.os == 'Linux'
-        run: bash scripts/ci/apt_install.sh mold
+        run: bash scripts/ci/install_mold.sh
       - name: Ensure web/dist placeholder exists
         shell: bash
         run: mkdir -p web/dist && touch web/dist/.gitkeep
@@ -378,7 +378,7 @@ jobs:
       - name: Ensure web/dist placeholder exists
         run: mkdir -p web/dist && touch web/dist/.gitkeep
       - name: Install mold linker
-        run: bash scripts/ci/apt_install.sh mold
+        run: bash scripts/ci/install_mold.sh
       - name: Install cargo-nextest
         run: |
           download_dir="$(mktemp -d)"
