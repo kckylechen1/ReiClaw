@@ -44,6 +44,7 @@ struct EnvVarFile {
 }
 
 /// `supports <renderer>`: every renderer is supported (we only touch content).
+#[expect(clippy::exit, reason = "mdbook reads the preprocessor's exit status")]
 pub fn supports() -> ! {
     std::process::exit(0);
 }

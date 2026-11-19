@@ -21,3 +21,6 @@ uuid = { version = "1.22", default-features = false, features = ["v4", "std"] }
 
 [dev-dependencies]
 tokio = { version = "1.50", features = ["rt-multi-thread", "macros", "net"] }
+
+[lints]
+workspace = true

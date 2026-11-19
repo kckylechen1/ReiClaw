@@ -123,6 +123,12 @@ jobs:
       - name: Check formatting
         if: steps.scope.outputs.full == 'true'
         run: cargo fmt --all -- --check
+      # Orphaned sources, module-wide dead-code silencing, and the approved
+      # crate list with workspace-lint opt-in. Pure Python, so it reports
+      # within the first minute; it runs even when formatting failed.
+      - name: Source tree gate
+        if: ${{ !cancelled() && steps.scope.outputs.full == 'true' }}
+        run: python3 scripts/ci/source_tree_gate.py
 
   # ── Required quality gate ─────────────────────────────────────────────────
 

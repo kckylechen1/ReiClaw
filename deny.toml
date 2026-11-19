@@ -56,6 +56,12 @@ exceptions = [
 multiple-versions = "deny"
 wildcards = "deny"
 
+# Crates a completed migration retired. Each entry keeps the old dependency
+# from flowing back in; add one when a migration finishes.
+deny = [
+    { crate = "chrono", reason = "time handling moved to jiff; use the workspace jiff dependency" },
+]
+
 # Reviewed exceptions for specific transitive versions in the selected graph.
 # A skip removes that version from the multiple-versions check; it does not
 # designate another version as canonical or necessarily skip the oldest one.

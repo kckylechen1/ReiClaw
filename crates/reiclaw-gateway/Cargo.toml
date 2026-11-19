@@ -102,3 +102,6 @@ embedded-web = ["dep:include_dir"]
 [[test]]
 name = "nodes_mdns"
 required-features = ["nodes"]
+
+[lints]
+workspace = true

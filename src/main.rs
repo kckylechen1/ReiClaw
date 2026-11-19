@@ -34,6 +34,7 @@
     unused_variables,
     unused_imports
 )]
+#![allow(clippy::exit, reason = "the CLI binary owns the process exit status")]
 
 use anyhow::{Context, Result, bail};
 use clap::{CommandFactory, FromArgMatches, Parser, Subcommand, ValueEnum};

@@ -12,3 +12,6 @@ serde_json = { version = "1.0", default-features = false, features = ["std"] }
 [dev-dependencies]
 schemars = "1.2"
 reiclaw-config = { workspace = true, features = ["schema-export"] }
+
+[lints]
+workspace = true

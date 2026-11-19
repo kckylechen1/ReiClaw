@@ -35,6 +35,21 @@ directories = "6.0"
 sys-locale = "0.3"
 reiclaw-policy = { path = "crates/reiclaw-policy", version = "0.8.3" }
 
+# Lint levels every workspace package inherits through `[lints] workspace = true`
+# (scripts/ci/source_tree_gate.py fails a package that does not opt in). When
+# review catches the same class of mistake twice, the fix PR adds a rule here,
+# in clippy.toml or deny.toml, or in the source tree gate (AGENTS.md rule 10).
+# CI runs clippy with `-D warnings`, so "warn" fails CI without blocking local
+# iteration.
+[workspace.lints.clippy]
+# The kernel is embedded by other processes (desktop and mobile workbenches,
+# the gateway), so library code returns errors instead of ending the host
+# process. CLI entry points that own the exit status opt out explicitly.
+exit = "warn"
+# No placeholder bodies on any path.
+todo = "warn"
+unimplemented = "warn"
+
 [patch.crates-io]
 # Upstream PR #558's unmerged candidate: rand update plus released protocol fixes.
 # Replace this exact pin with a coordinated Axum/WebSocket release (#432/#647).
@@ -342,3 +357,6 @@ required-features = ["gateway", "nodes", "agent-runtime"]
 [[test]]
 name = "node_v2_process"
 required-features = ["gateway", "nodes", "agent-runtime"]
+
+[lints]
+workspace = true

@@ -106,5 +106,5 @@ wiremock = "0.6"
 # the helper is unreachable from production builds.
 reiclaw-tools = { workspace = true, features = ["test-helpers"] }
 
-[lints.rust]
-unexpected_cfgs = { level = "warn", check-cfg = ['cfg(zeroclaw_root_crate)'] }
+[lints]
+workspace = true

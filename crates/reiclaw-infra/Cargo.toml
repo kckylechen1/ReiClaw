@@ -26,3 +26,6 @@ libc = "0.2"
 
 [dev-dependencies]
 tokio = { version = "1.50", features = ["rt-multi-thread", "macros"] }
+
+[lints]
+workspace = true

@@ -43,3 +43,6 @@ clap = ["dep:clap"]
 i18n = ["dep:fluent", "dep:sys-locale"]
 # Deterministic English formatter for downstream tests, not production callers.
 test-helpers = ["i18n"]
+
+[lints]
+workspace = true

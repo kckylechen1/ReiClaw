@@ -27,7 +27,7 @@ def validate(needs: dict, event_name: str) -> list[str]:
     if event_name not in {"pull_request", "push", "merge_group"}:
         return [f"Unsupported event: {event_name}"]
     if needs["changes"].get("result") != "success":
-        return ["Change classification or formatting did not succeed"]
+        return ["Change classification, formatting or the source tree gate did not succeed"]
     try:
         changes = needs["changes"]
         full = boolean_output(changes, "full")
