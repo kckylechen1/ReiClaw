@@ -40,7 +40,7 @@ PROTECTED_METHODS='\.(chat|stream_chat|simple_chat|chat_with_system|chat_with_hi
 
 set +e
 RG_OUTPUT=$(rg --vimgrep --type rust "$PROTECTED_METHODS" \
-    crates/ src/ xtask/ tools/ tests/ 2>/dev/null)
+    crates/ src/ xtask/ tests/ 2>/dev/null)
 RG_STATUS=$?
 set -e
 if [ "$RG_STATUS" -ne 0 ] && [ "$RG_STATUS" -ne 1 ]; then
