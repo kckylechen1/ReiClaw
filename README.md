@@ -299,10 +299,6 @@ Good places to start:
 <!-- BEGIN:RECENT_CONTRIBUTORS -->
 <!-- END:RECENT_CONTRIBUTORS -->
 
-## Security
-
-Do not file public issues for security vulnerabilities. See [SECURITY.md](SECURITY.md) for the policy.
-
 ## Official upstream and fork identity
 
 ReiClaw (`rei`) is originally forked from

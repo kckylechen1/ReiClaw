@@ -24,7 +24,6 @@ This fork is maintained by `kckylechen1`; review routing is in [CODEOWNERS](../C
 |---|---|---|
 | `ci.yml` | `pull_request` → any base; `push` → `master`; `merge_group` (reserved) | Scope classification, docs validation, selected Rust/build checks, and the aggregate result; trusted code pushes also warm Rust caches. The reserved trigger does not enable a queue. |
 | `cross-platform-clippy.yml` | `pull_request` when runtime, infra, or this workflow changes; `workflow_dispatch`; weekly schedule | Advisory full-workspace macOS Clippy, including test targets; outside the required PR gate |
-| `docs-deploy.yml` | `push` → `master` (book, `xtask/`, `locales.toml` paths); tag push `v*`; nightly schedule; `workflow_dispatch` | Build and publish the versioned mdBook + rustdoc site to `gh-pages` |
 
 ---
 
@@ -34,7 +33,7 @@ This fork is maintained by `kckylechen1`; review routing is in [CODEOWNERS](../C
 |---|---|
 | PR opened or updated against `master` or a temporary parent branch | `ci.yml`; applicable docs/code checks and aggregate policy are described below. Runtime, infra, or cross-platform workflow changes also trigger `cross-platform-clippy.yml`. |
 | `merge_group` | Reserved CI compatibility only. GitHub's merge-queue eligibility does not currently include this user-owned repository. |
-| Push to `master` | `ci.yml` (scope-selected checks and docs style; code changes also warm trusted Rust caches; repository structure steps remain PR-only) and, when the book changes, `docs-deploy.yml` |
+| Push to `master` | `ci.yml` (scope-selected checks and docs style; code changes also warm trusted Rust caches; repository structure steps remain PR-only) |
 | Manual dispatch | `cross-platform-clippy.yml` |
 
 ReiClaw has no release pipeline. `ci.yml` runs after trusted `master` pushes
