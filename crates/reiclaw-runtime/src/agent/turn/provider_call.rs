@@ -87,6 +87,7 @@ async fn run_provider_future_with_estop<F, T>(
     ctx: &TurnCtx<'_>,
     provider: &dyn ModelProvider,
     model: &str,
+    cancel_token: Option<&tokio_util::sync::CancellationToken>,
     step_timeout: Option<Duration>,
     fut: F,
 ) -> Result<T>
@@ -104,7 +105,7 @@ where
         tokio::select! {
             biased;
             () = async {
-                if let Some(token) = ctx.cancellation_token {
+                if let Some(token) = cancel_token {
                     token.cancelled().await;
                 } else {
                     std::future::pending::<()>().await;
@@ -326,10 +327,14 @@ pub(crate) async fn call_provider(
                     ctx.event_tx,
                     ctx.strict_tool_parsing,
                 );
+                // Let `consume_provider_streaming_response` handle `ctx.cancellation_token`
+                // directly so cancel after streamed deltas returns `StreamCancelledAfterOutput`
+                // instead of being preempted by bare `ToolLoopCancelled`.
                 match run_provider_future_with_estop(
                     ctx,
                     active_model_provider,
                     active_model,
+                    None,
                     None,
                     stream_future,
                 )
@@ -393,6 +398,7 @@ pub(crate) async fn call_provider(
                             ctx,
                             active_model_provider,
                             active_model,
+                            ctx.cancellation_token,
                             None,
                             chat_future,
                         )
@@ -429,6 +435,7 @@ pub(crate) async fn call_provider(
                     ctx,
                     active_model_provider,
                     active_model,
+                    ctx.cancellation_token,
                     step_timeout,
                     chat_future,
                 )
