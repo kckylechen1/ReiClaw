@@ -29,7 +29,7 @@ TOML schema and its validation. Handles:
 - Current-schema admission and normalization
 - Stateless encoding/comparison for persisted token hashes (`tokens`); runtime owns the pairing guard and its live state
 
-All user-facing config keys are documented in [Reference → Config](../reference/config.md), which is generated from this crate.
+All user-facing config keys are documented by `rei markdown-schema`, which renders the config reference from this crate.
 
 ### `reiclaw-api`
 
@@ -109,7 +109,7 @@ remain with their existing owners.
 ### `reiclaw-schema-markdown`
 
 Stateless Markdown and HTML field rendering from a supplied JSON Schema value.
-The CLI's optional `schema-export` feature and the mdBook preprocessor use it;
+The CLI's optional `schema-export` feature uses it;
 the config, API and runtime crates do not depend on the renderer. Its normal
 dependency is `serde_json`; real-config integration tests use config and
 schemars as development dependencies. The schema remains config-owned.

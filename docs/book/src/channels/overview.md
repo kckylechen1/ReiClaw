@@ -43,7 +43,7 @@ channels; the live surface set is the table above.
 
 Channel instances are configured under `[channels.<type>.<alias>]`, with `default` as the common first alias. Set them through any config surface:
 
-{{#config-where channels}}
+Open [`/config/channels`](http://127.0.0.1:42617/config/channels) in the web dashboard.
 
 Secrets (bot tokens, API keys, passwords) are stored encrypted; set them through the gateway or `zeroclaw config set` (masked), never in plaintext. The `channels` entry on an agent binds a channel alias to that agent. Field names differ per channel; `zeroclaw config schema` is the authoritative list. Fields that recur across many channels:
 

@@ -123,4 +123,4 @@ Because the model sees receipts in its context, it may echo them when describing
 
 - [Security → Overview](./overview.md)
 - [Autonomy levels](./autonomy.md): the policy layer that decides whether a receipt-worthy call happens
-- [Reference → Config](../reference/config.md): generated config reference
+- `rei markdown-schema`: generated config reference

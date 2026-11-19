@@ -44,7 +44,6 @@ jobs:
     timeout-minutes: 10
     outputs:
       full: ${{ steps.scope.outputs.full }}
-      docs_build: ${{ steps.scope.outputs.docs_build }}
       base_sha: ${{ steps.scope.outputs.base_sha }}
       test_matrix: ${{ steps.test-matrix.outputs.matrix }}
       installer: ${{ steps.scope.outputs.installer }}
@@ -437,41 +436,19 @@ jobs:
     timeout-minutes: 30
     steps:
       - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
-      - name: Guard declared submodules
+      - name: Guard against submodules
         if: ${{ !cancelled() && github.event_name != 'push' }}
         shell: bash
         run: |
           set -euo pipefail
 
-          gitlinks="$(mktemp)"
-          declared="$(mktemp)"
-          allowed="$(mktemp)"
-
-          git ls-files -s | awk '$1 == "160000" { print $4 }' | sort > "$gitlinks"
-          { git config --file .gitmodules --get-regexp '^submodule\..*\.path$' 2>/dev/null || true; } \
-            | awk '{ print $2 }' | sort > "$declared"
-          printf '%s\n' 'docs/book/po' > "$allowed"
-
-          if ! cmp -s "$gitlinks" "$declared"; then
-            echo "::error::Gitlink paths must exactly match .gitmodules paths."
+          gitlinks="$(git ls-files -s | awk '$1 == "160000" { print $4 }')"
+          if [ -n "$gitlinks" ] || [ -e .gitmodules ]; then
+            echo "::error::Submodules are not allowed; remove the gitlink and .gitmodules."
             echo "Index gitlinks:"
-            sed 's/^/  /' "$gitlinks"
-            echo ".gitmodules paths:"
-            sed 's/^/  /' "$declared"
+            printf '%s\n' "$gitlinks" | sed 's/^/  /'
             exit 1
           fi
-
-          if ! cmp -s "$gitlinks" "$allowed"; then
-            echo "::error::Unexpected submodule path. Update this guard when adding an intentional submodule."
-            echo "Allowed submodule paths:"
-            sed 's/^/  /' "$allowed"
-            echo "Actual gitlink paths:"
-            sed 's/^/  /' "$gitlinks"
-            exit 1
-          fi
-      - name: Test translation release submodule handling
-        if: ${{ !cancelled() && github.event_name != 'push' }}
-        run: scripts/release/refresh-translations.test.sh
       - uses: actions/setup-node@48b55a011bda9f5d6aeb4c2d9c7362e8dae4041e # v6.4.0
         if: ${{ !cancelled() && needs.changes.outputs.web == 'true' }}
         with:
@@ -580,50 +557,6 @@ jobs:
           BASE_SHA: ${{ needs.changes.outputs.base_sha }}
         run: bash scripts/ci/docs_links_gate.sh
 
-  # Navigation, renderer, generator and build changes must prove the real
-  # publication build. Ordinary prose uses the source/link gate above.
-  docs-build:
-    name: Docs Build
-    needs: [changes, docs-style]
-    if: needs.changes.outputs.docs_build == 'true'
-    runs-on: ubuntu-24.04-arm
-    timeout-minutes: 35
-    steps:
-      - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
-        with:
-          submodules: recursive
-      - name: Install mdBook
-        env:
-          MDBOOK_BIN_VERSION: v0.5.0
-        run: |
-          download_dir="$(mktemp -d)"
-          trap 'rm -rf -- "$download_dir"' EXIT
-          bash scripts/ci/download_tool.sh \
-            "https://github.com/rust-lang/mdBook/releases/download/${MDBOOK_BIN_VERSION}/mdbook-${MDBOOK_BIN_VERSION}-aarch64-unknown-linux-musl.tar.gz" \
-            "$download_dir/mdbook.tar.gz"
-          sudo tar -xzf "$download_dir/mdbook.tar.gz" -C /usr/local/bin
-      - name: Install Rust toolchain
-        uses: dtolnay/rust-toolchain@631a55b12751854ce901bb631d5902ceb48146f7 # stable
-      - name: Rust build cache
-        uses: Swatinem/rust-cache@c19371144df3bb44fab255c43d04cbc2ab54d1c4 # v2.9.1
-        with:
-          shared-key: docs-deploy
-          cache-all-crates: true
-          cache-on-failure: true
-          save-if: ${{ github.ref == 'refs/heads/master' }}
-      - name: Install gettext
-        run: bash scripts/ci/apt_install.sh gettext
-      - name: Validate translation formats
-        run: |
-          failed=0
-          for po in docs/book/po/*.po; do
-            [ -f "$po" ] || continue
-            msgfmt --check-format "$po" -o /dev/null || failed=1
-          done
-          exit "$failed"
-      - name: Build references, rustdoc and all locales without publishing
-        run: cargo mdbook build
-
   installer-drift:
     name: Installer Drift
     needs: [changes]
@@ -653,7 +586,7 @@ jobs:
   gate:
     name: CI Required Gate
     if: always()
-    needs: [changes, lint, build, check, test, policy, docs-style, docs-build, installer-drift]
+    needs: [changes, lint, build, check, test, policy, docs-style, installer-drift]
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2

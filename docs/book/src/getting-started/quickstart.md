@@ -6,7 +6,57 @@ dashboard's Config page edits the same config afterward.
 
 ## Install
 
-{{#include ../_snippets/install.md}}
+<div class="os-tabs-src">
+
+### Linux
+
+**Piped noninteractive install (`install.sh` via curl):**
+
+```sh
+curl -fsSL https://raw.githubusercontent.com/zeroclaw-labs/zeroclaw/master/install.sh | sh
+```
+
+The piped path chooses a prebuilt binary when one is available and falls back to a source build otherwise. It skips the setup prompt and prints `zeroclaw quickstart` as the next step.
+
+**Guided install from a clone:**
+
+```sh
+./install.sh
+```
+
+When the platform maps to a supported prebuilt target, run this path in an interactive terminal to choose prebuilt or source; other platforms build from source. The source path also lets you select apps and optional features. For an unconfigured install, the installer then offers CLI or browser-based setup.
+
+**Homebrew (Linuxbrew):**
+
+```sh
+brew install zeroclaw
+```
+
+### macOS
+
+**Piped noninteractive install (`install.sh` via curl):**
+
+```sh
+curl -fsSL https://raw.githubusercontent.com/zeroclaw-labs/zeroclaw/master/install.sh | sh
+```
+
+The piped path chooses a prebuilt binary when one is available and falls back to a source build otherwise. It skips the setup prompt and prints `zeroclaw quickstart` as the next step.
+
+**Guided install from a clone:**
+
+```sh
+./install.sh
+```
+
+When the platform maps to a supported prebuilt target, run this path in an interactive terminal to choose prebuilt or source; other platforms build from source. The source path also lets you select apps and optional features. For an unconfigured install, the installer then offers CLI or browser-based setup.
+
+**Homebrew:**
+
+```sh
+brew install zeroclaw
+```
+
+</div>
 
 ## The steps
 
@@ -14,7 +64,22 @@ dashboard's Config page edits the same config afterward.
 > [Getting Started → Concepts](./concepts.md) first. It defines model
 > provider, risk profile, alias, and the rest in one place.
 
-{{#include ../_snippets/quickstart-steps.md}}
+Every surface walks the same checklist and writes the same config. Required
+steps must be satisfied before the agent can be created; optional steps can be
+skipped.
+
+| Step | Required | What it sets |
+|---|---|---|
+| **Model provider** | yes | Provider family (Anthropic, OpenAI, Ollama, …), its API key or endpoint, and the model. |
+| **Risk profile** | yes | Autonomy and sandbox posture. Pick a preset or reuse an existing `[risk_profiles.<alias>]`. |
+| **Memory** | yes | Memory backend (`tachi`, `markdown`, or `none`). |
+| **Channels** | optional | Live surfaces (Telegram bridge, webhook ingress). The built-in `cli` channel always works; add others here or later. |
+| **Peer groups** | optional | Multi-agent peer membership for the channels you configured. |
+| **Agent** | yes | Agent alias, system prompt, and any personality files. |
+
+> The runtime profile is set automatically. Quickstart installs the
+> `unbounded` preset for the new agent. Tune budgets and timeouts afterward by
+> editing `[runtime_profiles.<alias>]` (`rei markdown-schema` lists its fields).
 
 ## CLI
 
@@ -97,4 +162,4 @@ under **Config** in the dashboard or directly in `config.toml`.
 - **Quick one-off from the shell:** `zeroclaw agent -a <alias> -m "your message"`.
 - **Run always-on:** `zeroclaw service install && zeroclaw service start`.
 - **Add channels later:** [Channels → Overview](../channels/overview.md).
-- **Tune autonomy and budgets:** [Reference → Config](../reference/config.md).
+- **Tune autonomy and budgets:** `rei markdown-schema` lists every config field.

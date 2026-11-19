@@ -12,7 +12,7 @@ Providers are typed by family, addressed as `providers.models.<type>.<alias>`. `
 
 `<alias>` is your operator-assigned instance name, and you can define **as many aliases per type as you want**. Run several profiles of the same vendor family side by side: same `type`, different aliases, each with its own key, model, and settings. For example, two Anthropic accounts as `anthropic.personal` and `anthropic.work` (each with its own `api_key` and `model`), where an agent picks one with `model_provider = "anthropic.personal"` (or `"anthropic.work"`). Add and edit these through the surfaces below, not by hand:
 
-{{#config-where providers.models}}
+Open [`/config/providers.models`](http://127.0.0.1:42617/config/providers.models) in the web dashboard.
 
 See [Configuration](./configuration.md) for the full schema and [Catalog](./catalog.md) for a worked example per family.
 

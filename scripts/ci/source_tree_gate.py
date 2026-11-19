@@ -51,7 +51,6 @@ APPROVED_CRATES = frozenset(
         "crates/reiclaw-runtime",
         "crates/reiclaw-tool-call-parser",
         "crates/reiclaw-tools",
-        "tools/fill-translations",
         "xtask",
     }
 )

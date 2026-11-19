@@ -15,7 +15,7 @@ Throughout this walkthrough the existing single agent is called `primary` (subst
 
 Add another agent through the gateway dashboard or `zeroclaw config set`. The runtime creates `<install>/agents/<alias>/workspace/` on first agent-loop entry. On every start the agent loop injects the workspace identity files that exist into the system prompt: `SOUL.md`, `IDENTITY.md`, `USER.md`, then `BOOTSTRAP.md` (first run only). The model-writable notes `AGENTS.md`, `TOOLS.md`, and `MEMORY.md` (main session only) follow the persona under a fixed `## Notes you wrote` heading. `SOUL.md` and `IDENTITY.md` stop being injected once the owner writes a Soul Identity, and `USER.md` once the User Model has an owner-authorized active revision. `HEARTBEAT.md` is also a workspace personality file but it is read by the heartbeat engine, not injected into the prompt. The dashboard's personality editor exposes `SOUL.md`, `IDENTITY.md`, `USER.md`, `AGENTS.md`, `TOOLS.md`, `HEARTBEAT.md`, and `MEMORY.md` for editing. Create and edit those files to give the agent its persona. (`BOOTSTRAP.md` is a first-run scaffold the agent reads once and removes; the editor does not expose it.)
 
-{{#config-where agents}}
+Open [`/config/agents`](http://127.0.0.1:42617/config/agents) in the web dashboard.
 
 ## Bind a channel
 
@@ -52,7 +52,7 @@ The schema validator at config load enforces:
 
 Every configured agent lives under an `agents.<alias>` entry with its risk profile, model provider, memory backend, and channel set.
 
-{{#config-where agents}}
+Open [`/config/agents`](http://127.0.0.1:42617/config/agents) in the web dashboard.
 
 > The `zeroclaw agents` lifecycle commands perform the full owned-state cascade only in builds with `gateway` and `agent-runtime` enabled, including the standard distributed binary. A reduced-feature CLI still changes config but prints that owned state was not cascaded. Use the gateway dashboard or a binary with both features enabled for the operations below when owned state exists.
 

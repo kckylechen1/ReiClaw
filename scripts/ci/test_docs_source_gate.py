@@ -35,7 +35,6 @@ class BookFixture(unittest.TestCase):
         self.temporary = tempfile.TemporaryDirectory()
         self.addCleanup(self.temporary.cleanup)
         self.repo = Path(self.temporary.name)
-        self.write("docs/book/book.toml", '[book]\nsrc = "src"\n')
         self.write("docs/book/src/intro.md", "# Intro\n")
         self.summary("intro.md")
 
@@ -85,81 +84,14 @@ class SourceGateTests(BookFixture):
         readme = self.write("README.md", "[Edge](crates/edge/README.md)\n")
         BookSources(self.repo).check_document(readme, in_book=False)
 
-    def test_shared_snippet_links_resolve_from_each_host(self):
-        self.write("docs/book/src/sop/fan-in/one.md", "{{#include ../../_snippets/shared.md}}\n")
-        self.write("docs/book/src/sop/fan-in/two.md", "{{#include ../../_snippets/shared.md}}\n")
-        self.write("docs/book/src/_snippets/shared.md", "[Syntax](../syntax.md)\n")
-        self.write("docs/book/src/sop/syntax.md", "# Syntax\n")
-        self.summary("sop/fan-in/one.md", "sop/fan-in/two.md", "sop/syntax.md")
-        self.assertEqual(self.validate().checked_links, 2)
-        self.write("docs/book/src/intro.md", "{{#include _snippets/shared.md}}\n")
-        self.summary("intro.md", "sop/fan-in/one.md", "sop/syntax.md")
-        with self.assertRaisesRegex(DocsError, "escapes published book"):
-            self.validate()
-
-    def test_nested_include_path_is_relative_to_including_file(self):
-        self.write("docs/book/src/intro.md", "{{#include _snippets/outer.md}}\n")
-        self.write("docs/book/src/_snippets/outer.md", "{{#include nested/inner.md}}\n")
-        self.write("docs/book/src/_snippets/nested/inner.md", "[Intro](intro.md)\n")
-        self.assertEqual(self.validate().checked_links, 1)
-
-    def test_include_missing_cycle_and_anchor_errors_fail(self):
-        self.write("docs/book/src/intro.md", "{{#include missing.md}}\n")
-        with self.assertRaisesRegex(DocsError, "Missing include"):
-            self.validate()
-        self.write("docs/book/src/intro.md", "{{#include intro.md}}\n")
-        with self.assertRaisesRegex(DocsError, "Recursive include"):
-            self.validate()
-        self.write("docs/book/src/intro.md", "{{#include _snippets/part.md:absent}}\n")
-        self.write("docs/book/src/_snippets/part.md", "<!-- ANCHOR: present -->\ntext\n<!-- ANCHOR_END: present -->\n")
-        with self.assertRaisesRegex(DocsError, "include anchor"):
-            self.validate()
-
-    def test_valid_include_anchor_excludes_other_sections(self):
-        self.write("docs/book/src/intro.md", "{{#include _snippets/part.md:chosen}}\n")
-        self.write("docs/book/src/_snippets/part.md", "[Broken outside selected section](missing.md)\n<!-- ANCHOR: chosen -->\n[Intro](intro.md)\n<!-- ANCHOR_END: chosen -->\n")
-        self.assertEqual(self.validate().checked_links, 1)
-
-    def test_include_matches_mdbook_whitespace_attributes_and_comments(self):
-        for directive in (
-            "{{ #include absent.md}}", "{{#include absent.md ignored-property}}",
-            "{{#playground absent.rs editable}}", "<!-- {{#include absent.md}} -->",
-        ):
+    def test_mdbook_directives_are_rejected_outside_code(self):
+        for directive in ("{{#include absent.md}}", "{{ #config-fields agents}}", "- item\n  {{#peer-group telegram}}"):
             with self.subTest(directive=directive):
-                self.write("docs/book/src/intro.md", directive)
-                with self.assertRaisesRegex(DocsError, "Missing include"):
+                self.write("docs/book/src/intro.md", directive + "\n")
+                with self.assertRaisesRegex(DocsError, "mdBook directive"):
                     self.validate()
-
-    def test_playground_does_not_parse_code_strings_as_links(self):
-        self.write("docs/book/src/intro.md", "{{#playground ../../../example.rs editable}}\n")
-        self.write("example.rs", 'fn main() { println!("[code example](absent.md)"); }\n')
+        self.write("docs/book/src/intro.md", "`{{#if x}}`\n\n```hbs\n{{#each items}}\n```\n")
         self.validate()
-
-    def test_rustdoc_include_checks_hidden_nested_includes(self):
-        self.write("docs/book/src/intro.md", "```rust\n{{#rustdoc_include part.rs:1}}\n```\n")
-        self.write("docs/book/src/part.rs", "fn main() {}\n// {{#include absent.rs}}\n")
-        with self.assertRaisesRegex(DocsError, "Missing include"):
-            self.validate()
-
-    def test_include_c_comment_anchors_are_supported(self):
-        self.write("docs/book/src/intro.md", "{{#include snippet.md:selected}}\n")
-        self.write("docs/book/src/snippet.md", "/* ANCHOR: selected */\n[Intro](intro.md)\n/* ANCHOR_END: selected */\n")
-        self.assertEqual(self.validate().checked_links, 1)
-
-    def test_full_include_keeps_links_on_anchor_marker_lines(self):
-        self.write("docs/book/src/intro.md", "{{#include snippet.md}}\n")
-        self.write("docs/book/src/snippet.md", '<!-- ANCHOR: part --> <a href="missing.md">Broken</a>\n<!-- ANCHOR_END: part -->\n')
-        with self.assertRaises(DocsError):
-            self.validate()
-
-    def test_generated_exemptions_are_exact_and_reported(self):
-        self.summary("intro.md", "reference/config.md")
-        self.write("docs/book/src/intro.md", "[Config](reference/config.md)\n{{#include _snippets/feature-matrix-tools.md}}\n")
-        book = self.validate()
-        self.assertTrue(any("reference/config.md" in item for item in book.deferred))
-        self.write("docs/book/src/intro.md", "{{#include _snippets/feature-matrix-typo.md}}\n")
-        with self.assertRaisesRegex(DocsError, "Missing include"):
-            self.validate()
 
     def test_commonmark_examples_are_not_links_but_reference_links_are(self):
         content = "```md\n[example](absent.md)\n```\n\n`[example](absent.md)`\n\n[real][target]\n\n[target]: intro.md\n<!-- [comment](absent.md) -->\n"

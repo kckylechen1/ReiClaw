@@ -42,10 +42,9 @@ The three roots map to three scopes:
 
 ## Workspace
 
-The workspace is the agent's filesystem sandbox. The fields below are generated
-from the schema:
-
-{{#config-fields agents.workspace}}
+The workspace is the agent's filesystem sandbox, configured under
+`[agents.<alias>.workspace]`. `rei markdown-schema` lists its fields in the
+`agents` section.
 
 Two things worth calling out:
 
@@ -60,7 +59,8 @@ Two things worth calling out:
 
 Shared install-wide MemoryCore storage lives in `data/memory/memorycore.db` with per-agent scoping, while Markdown storage lives under each agent's workspace (`agents/<alias>/workspace/memory/`). The backend is selected per agent:
 
-{{#config-fields agents.memory}}
+The fields live under `[agents.<alias>.memory]`; `rei markdown-schema` lists them
+in the `agents` section.
 
 The backend defaults to `memorycore` for a new agent, and once the agent has written
 on-disk data the value is locked, so you cannot silently swap a backend out from
@@ -73,7 +73,8 @@ workspace `read_memory_from` allowlist. For the memory model itself, see
 
 An agent's identity (its personality) is sourced per agent:
 
-{{#config-fields agents.identity}}
+The fields live under `[agents.<alias>.identity]`; `rei markdown-schema` lists
+them in the `agents` section.
 
 The `format` selects how the identity is loaded. The default reads the
 project's personality files; the alternative loads an AIEOS JSON definition,

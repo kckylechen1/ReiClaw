@@ -2,7 +2,7 @@
 """Collect links from changed Markdown files, or all tracked docs without a valid base.
 
 The full-book source gate handles old inbound links after deletes/renames. This
-command also checks source-relative links in repository Markdown outside mdBook.
+command also checks source-relative links in repository Markdown outside docs/book/src/
 Whole changed documents are parsed so reference definitions and code fences have
 their real CommonMark context. HTTP URLs are collected, never fetched here.
 """

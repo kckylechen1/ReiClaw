@@ -27,26 +27,6 @@ INSTALLER_PATH = re.compile(
 WEB_PATH = re.compile(
     r"^package\.json$|^package-lock\.json$|^npm-shrinkwrap\.json$|^pnpm-lock\.yaml$|^yarn\.lock$|^\.npmrc$|^web/|^\.nvmrc$|^crates/reiclaw-gateway/|^\.github/workflows/ci\.yml$"
 )
-DOC_BUILD_FILES = {
-    "Cargo.toml",
-    "Cargo.lock",
-    ".cargo/config.toml",
-    ".github/workflows/ci.yml",
-    "docs/book/book.toml",
-    "docs/book/src/SUMMARY.md",
-    "locales.toml",
-    "src/main.rs",
-    "web/src/contexts/themes.json",
-}
-DOC_BUILD_PREFIXES = (
-    "xtask/",
-    "docs/book/theme/",
-    "docs/book/po/",
-    "crates/reiclaw-config/",
-    "scripts/ci/docs",
-    "scripts/ci/test_docs_",
-    "scripts/ci/collect_changed_links.py",
-)
 
 
 def git(*args: str, cwd: Path) -> bytes:
@@ -86,31 +66,6 @@ def prose_path(path: str) -> bool:
     return path in PROSE_FILES or (
         path.startswith("docs/book/src/") and parsed.suffix in {".md", ".mdx"}
     )
-
-
-def build_path(path: str) -> bool:
-    return (
-        path in DOC_BUILD_FILES
-        or path.startswith(DOC_BUILD_PREFIXES)
-        or (path.startswith("docs/book/") and not prose_path(path))
-    )
-
-
-def contains_preprocessor_input(path: str, base: str, cwd: Path) -> bool:
-    # The source gate does not execute mdBook's custom preprocessors. Inspect
-    # both versions so adding, editing or deleting a directive reaches the real
-    # renderer; never implement a second, partial peer-groups DSL here.
-    if not path.startswith("docs/book/src/") or not prose_path(path):
-        return False
-    for ref in (base, "HEAD"):
-        present = subprocess.run(
-            ["git", "cat-file", "-e", f"{ref}:{path}"], cwd=cwd, capture_output=True
-        )
-        if present.returncode != 0:
-            continue  # Additions/deletions legitimately exist at only one end.
-        if re.search(rb"\{\{\s*#", git("show", f"{ref}:{path}", cwd=cwd)):
-            return True
-    return False
 
 
 def parse_change_records(raw: bytes) -> list[tuple[str, str, str, str]]:
@@ -161,7 +116,6 @@ def classify(event_name: str, event: dict, cwd: Path) -> dict[str, str]:
     # payloads and incomplete clones. Never turn a diff error into docs-only.
     result = {
         "full": "true",
-        "docs_build": "true",
         "base_sha": "",
         "installer": "true",
         "web": "true",
@@ -179,10 +133,6 @@ def classify(event_name: str, event: dict, cwd: Path) -> dict[str, str]:
             not prose_path(path) or old not in REGULAR_MODES or new not in REGULAR_MODES
             for path, old, new in changes
         )
-        docs_build = any(
-            build_path(path) or contains_preprocessor_input(path, base, cwd)
-            for path, _, _ in changes
-        )
         if event_name == "pull_request":
             installer = any(INSTALLER_PATH.search(path) for path, _, _ in changes)
             web = any(WEB_PATH.search(path) for path, _, _ in changes)
@@ -191,15 +141,13 @@ def classify(event_name: str, event: dict, cwd: Path) -> dict[str, str]:
             web = True
         result.update(
             full=str(full).lower(),
-            docs_build=str(docs_build).lower(),
             base_sha=base,
             installer=str(installer).lower(),
             web=str(web).lower(),
         )
         print(
             f"Changed paths: {len(changes)}; full={result['full']}; "
-            f"docs_build={result['docs_build']}; installer={result['installer']}; "
-            f"web={result['web']}"
+            f"installer={result['installer']}; web={result['web']}"
         )
     except (KeyError, TypeError, ValueError, UnicodeError, subprocess.CalledProcessError) as error:
         print(f"Scope could not be established; running full validation: {error}", file=sys.stderr)

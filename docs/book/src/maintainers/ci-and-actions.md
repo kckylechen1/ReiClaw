@@ -18,13 +18,12 @@ The workflow starts on PRs targeting any branch, pushes to `master`, and `merge_
 
 Only ordinary, non-executable files in a narrow prose allowlist can skip the runtime matrix: root `README.md` and Markdown or MDX under `docs/book/src/`. Renames are evaluated as deletion plus addition. Mixed changes, paths outside that allowlist, symlinks, submodules, and executable-mode changes retain the full runtime lane. Runtime prompts, personality templates, fixtures, agent instructions, CI files, and build configuration do not become prose merely because their filename ends in `.md`.
 
-An unavailable, invalid, empty, or unresolvable comparison retains full runtime validation and the real docs build. It never becomes an empty successful docs-only result.
+An unavailable, invalid, empty, or unresolvable comparison retains full runtime validation. It never becomes an empty successful docs-only result.
 
 | Selected work | Coverage |
 |---|---|
 | Every run | Scope-policy checks, workflow validation, `Docs Style`, and `CI Required Gate` |
 | Full runtime lane | Rust formatting; workspace Clippy with `ci-all` and `-D warnings`; provider-dispatch guard; Linux build and macOS check; no-default, minimal-companion, slim-control and i686 checks; parallel nextest jobs, one per partition phase; dependency security; Web regressions/build; applicable repository, Nix and installer checks |
-| Docs Build | Real references, rustdoc, preprocessors, translation checks and all locales through `cargo mdbook build`, without publishing |
 
 The test partitions and their feature-specific runs come from `dev/ci/test-partition.json`; each leg's main run and each extra run is its own parallel job (`scripts/dev/leg.sh --matrix`). Formatting precedes the runtime fan-out; documentation checks depend on scope classification and run independently of Rust formatting.
 
@@ -34,11 +33,9 @@ Master pushes use the same classifier. A prose merge therefore skips the runtime
 
 `Docs Style` installs the pinned parser from `scripts/ci/docs-requirements.txt` and runs the document-gate regressions. `docs_quality_gate.sh` checks changed book/README lines for Markdown style and prose punctuation when a valid base is available. A missing or invalid base checks the full supported style scope and may expose existing issues.
 
-`docs_links_gate.sh` checks the complete published book navigation, included sources, and local target paths, plus tracked repository Markdown outside the book. This catches old incoming links after a page or asset is renamed or deleted, including an unchanged README that links to it. Book-relative links must resolve within the published book; links to repository source outside that boundary need an explicit source URL.
+`docs_links_gate.sh` checks the complete `SUMMARY.md` index and local target paths, plus tracked repository Markdown outside `docs/book/src/`. This catches old incoming links after a page or asset is renamed or deleted, including an unchanged README that links to it. Links from `docs/book/src/` must resolve within it; links to repository source outside that boundary need an explicit source URL.
 
-The source gate reports the exact known generated pages and snippets it defers. It does not prove custom preprocessor output, rendered anchors, HTTP availability, or a successful publication build. HTTP links are collected without network requests.
-
-`Docs Build` runs when navigation, book configuration, themes, translations, generator dependencies, or documentation CI/build inputs change. Changes to a book source containing preprocessor input in either the base or head also select the real build. The exact input list belongs to `change_scope.py`. Ordinary prose without those inputs uses the source checks and avoids workspace rustdoc.
+Nothing renders the docs: they are plain Markdown read in the repository, so the source gate rejects mdBook directives such as `{{#include}}` outside code. It does not prove rendered anchors or HTTP availability. HTTP links are collected without network requests.
 
 ### Aggregate and cloud protection
 
@@ -147,7 +144,7 @@ Rust compilation jobs in `ci.yml` use `Swatinem/rust-cache@v2`; scope checks, fo
 |---|---|
 | `Release Stable` dies at `startup_failure` with zero jobs after a `uses:` ref changed | Check the run summary and the target repository's [Actions policy](#allowed-actions). A selected-actions rejection names a policy mismatch; a generic startup failure does not establish its cause |
 | `CI Required Gate` red | Read `Change Scope` and the aggregate's expected-versus-actual result first, then the failing or unexpectedly skipped job |
-| Prose change starts a Rust or docs build | Check both sides of the diff, file modes, actual event base, and whether the page contains preprocessor input |
+| Prose change starts a Rust build | Check both sides of the diff, file modes, and the actual event base |
 | Docs source gate fails after a deletion or rename | Check unchanged incoming links, SUMMARY membership, include hosts, and repository README links |
 | Release `validate` failed | `Cargo.toml` version doesn't match the workflow input, or the tag already exists |
 | Release build leg failed | The specific target's job log. Android is `experimental` and runs with `continue-on-error` |
@@ -205,7 +202,7 @@ Any PR that adds or changes a `uses:` action source should state its allowlist i
 - Keep `CI Required Gate` deterministic and small. A new job needs a clear quality argument and a matching expected-result policy.
 - All third-party action refs must be pinned to a full commit SHA (per the allowlist policy above).
 - Keep scope decisions and expected job results in `scripts/ci/`. Call shared helpers from workflows and local entrypoints instead of copying their decisions. Review changes to the classifier and aggregate together.
-- Run both docs gates with an explicit valid base before pushing committed documentation changes. Preserve the source gate's stated coverage limits and use the real docs build for selected rendering inputs.
+- Run both docs gates with an explicit valid base before pushing committed documentation changes. Preserve the source gate's stated coverage limits.
 
 ## Emergency rollback
 

@@ -42,7 +42,6 @@ The core binary is statically linked where possible. Some features require syste
 
 | Feature | Package (Debian/Ubuntu) | Package (Arch) | Package (Fedora) |
 |---|---|---|---|
-| Docs translation (`cargo mdbook sync`) | `gettext` | `gettext` | `gettext` |
 | Browser tool (playwright) | `libnss3`, `libatk1.0-0`, `libcups2` (see `playwright --help`) | `nss`, `atk`, `cups` | `nss`, `atk`, `cups` |
 | Audio (TTS, voice channels) | `libasound2-dev` | `alsa-lib` | `alsa-lib-devel` |
 

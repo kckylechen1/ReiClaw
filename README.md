@@ -118,7 +118,7 @@ Clone this fork and use its installer in source mode (upstream prebuilt
 releases do not certify this fork's code):
 
 ```bash
-git clone --recurse-submodules https://github.com/kckylechen1/ReiClaw.git
+git clone https://github.com/kckylechen1/ReiClaw.git
 cd ReiClaw
 ./install.sh --source
 ```
@@ -149,13 +149,8 @@ When run from a clone in an interactive terminal, `./install.sh --source` lets y
 apps and optional features. For an unconfigured install, it then offers CLI or
 browser-based Quickstart. Use `--skip-quickstart` when you only want to install.
 
-> **Working on the docs?** The translated documentation catalogues live in a
-> git submodule (`docs/book/po`). The Rust build does not need it, but building
-> or syncing the docs does:
->
-> ```bash
-> git submodule update --init docs/book/po   # existing clone
-> ```
+> **Working on the docs?** The docs are plain Markdown under `docs/book/src/`,
+> indexed by `docs/book/src/SUMMARY.md`; nothing builds or publishes them.
 
 Flags:
 

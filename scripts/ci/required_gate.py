@@ -13,7 +13,7 @@ FULL_JOBS = {"lint", "build", "check", "test", "policy"}
 TARGETED_JOBS = {"installer-drift": "installer"}
 # Full-lane selection outputs consumed by conditional steps inside `policy`.
 FULL_SELECTION_OUTPUTS = ("web",)
-ALL_JOBS = FULL_JOBS | set(TARGETED_JOBS) | {"changes", "docs-style", "docs-build"}
+ALL_JOBS = FULL_JOBS | set(TARGETED_JOBS) | {"changes", "docs-style"}
 
 
 def boolean_output(job: dict, name: str) -> bool:
@@ -33,7 +33,6 @@ def validate(needs: dict, event_name: str) -> list[str]:
     try:
         changes = needs["changes"]
         full = boolean_output(changes, "full")
-        docs_build = boolean_output(changes, "docs_build")
         targeted = {
             job for job, output in TARGETED_JOBS.items()
             if full and boolean_output(changes, output)
@@ -47,8 +46,6 @@ def validate(needs: dict, event_name: str) -> list[str]:
     expected.update({"changes": "success", "docs-style": "success"})
     if full:
         expected.update({job: "success" for job in FULL_JOBS | targeted})
-    if docs_build:
-        expected["docs-build"] = "success"
     return [
         f"{job}: expected {wanted}, got {needs[job].get('result', 'missing')}"
         for job, wanted in sorted(expected.items())

@@ -38,12 +38,29 @@ the retired native `/api/chat` options.
 
 ## All slots
 
-Every canonical slot, its default endpoint, whether it runs locally, and its
-full config field set, generated from the provider registry and the config
-schema. Click a slot to expand its fields; click a field to see how to set it.
-Slots with no fixed default need `uri` set on the alias entry (`custom` and multi-region families).
+Every canonical slot, its default endpoint, and whether it runs locally. Slots
+with no fixed default need `uri` set on the alias entry (`custom` and
+multi-region families).
 
-{{#model-provider-fields}}
+| Group | Slot | Default endpoint | Local |
+|---|---|---|:---:|
+| Primary | `anthropic` | `https://api.anthropic.com` | |
+| Primary | `openai` | `https://api.openai.com/v1` | |
+| Primary | `ollama` | `http://localhost:11434` | ✓ |
+| Primary | `gemini` | `https://generativelanguage.googleapis.com/v1beta` | |
+| OpenAI-compatible | `minimax` | no fixed default | |
+| OpenAI-compatible | `qwen` | no fixed default | |
+| OpenAI-compatible | `groq` | no fixed default | |
+| OpenAI-compatible | `lmstudio` | no fixed default | ✓ |
+| OpenAI-compatible | `llamacpp` | no fixed default | ✓ |
+| OpenAI-compatible | `osaurus` | no fixed default | ✓ |
+| OpenAI-compatible | `custom` | no fixed default | |
+| Cloud AI endpoints | `ovh` | no fixed default | |
+
+`reiclaw_providers::list_model_providers()` is the source of this list. For the
+field set, run `rei markdown-schema`; it renders the live config schema as
+Markdown, and the `providers` section lists every field with its type, default,
+and description.
 
 For a worked example per family, see [Configuration](./configuration.md). If your vendor isn't listed, use the `custom` slot ([Custom providers](./custom.md)).
 

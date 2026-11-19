@@ -41,7 +41,7 @@ The tunnel forwards from a public URL to the gateway on `127.0.0.1`. No router c
 | `openvpn` | Your own OpenVPN egress | Self-hosted | Existing VPN infra |
 | `custom` | A command under `[tunnel.custom]` | Depends | Anything else |
 
-`tunnel_provider = "none"` (the default) keeps the gateway local with no tunnel. See the [Config reference](../reference/config.md#tunnel) for each provider's `[tunnel.<provider>]` fields.
+`tunnel_provider = "none"` (the default) keeps the gateway local with no tunnel. `rei markdown-schema` lists, in its `tunnel` section, each provider's `[tunnel.<provider>]` fields.
 
 ### Option 3: Reverse proxy
 

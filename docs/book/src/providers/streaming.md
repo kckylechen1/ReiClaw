@@ -39,10 +39,11 @@ fn supports_multi_message_streaming(&self) -> bool; // split one reply into many
 A channel's capability follows from its config: a channel with the
 `stream_mode` enum (off / partial / multi_message) supports both draft updates
 and multi-message; a channel with the `stream_drafts` boolean supports draft
-updates only. This table is generated from the channel config schema, so it
-stays correct as channels gain or lose streaming support:
+updates only. Of the retained channels, only Telegram streams:
 
-{{#channel-streaming-matrix}}
+| Channel | Draft updates | Multi-message |
+|---|:---:|:---:|
+| `telegram` | ✓ | ✓ |
 
 When both the provider and the channel support streaming, the flow is: provider emits `TextDelta` → runtime passes to channel → channel edits the sent message. The edit cadence is bounded by that channel's `draft_update_interval_ms` setting to avoid rate-limiting; defaults vary by channel.
 

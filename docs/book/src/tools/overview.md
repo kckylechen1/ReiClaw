@@ -86,9 +86,7 @@ Register via the runtime's tool factory. Capabilities that should live outside t
 
 ## Describing tools to the model
 
-Tool descriptions are [Mozilla Fluent](https://projectfluent.org/) strings: one per tool, localised per locale. This keeps tool descriptions terse in the model's context window while allowing UI localisation.
-
-Source of truth: `crates/zeroclaw-runtime/locales/en/tools.ftl`. Translations are generated and maintained via `cargo fluent fill --locale <code>` (see [Maintainers → Docs & Translations](../maintainers/docs-and-translations.md)).
+Tool descriptions are plain English literals: each tool returns its own from `Tool::description()` (`crates/reiclaw-api/src/tool.rs`). Keep them terse; they sit in the model's context window.
 
 ## Risk and approval
 

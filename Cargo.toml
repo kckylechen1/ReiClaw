@@ -1,6 +1,6 @@
 [workspace]
 # The root package is an implicit member; an explicit "." defeats path exclusions.
-members = ["crates/reiclaw-api", "crates/reiclaw-infra", "crates/reiclaw-config", "crates/reiclaw-http", "crates/reiclaw-policy", "crates/reiclaw-log", "crates/reiclaw-providers", "crates/reiclaw-provider-dispatch", "crates/reiclaw-memory", "crates/reiclaw-tools", "crates/reiclaw-runtime", "crates/reiclaw-eval", "crates/reiclaw-gateway", "crates/reiclaw-gateway-client", "bridges/acp", "bridges/telegram", "crates/reiclaw-tool-call-parser", "crates/reiclaw-macros", "tools/fill-translations", "xtask"]
+members = ["crates/reiclaw-api", "crates/reiclaw-infra", "crates/reiclaw-config", "crates/reiclaw-http", "crates/reiclaw-policy", "crates/reiclaw-log", "crates/reiclaw-providers", "crates/reiclaw-provider-dispatch", "crates/reiclaw-memory", "crates/reiclaw-tools", "crates/reiclaw-runtime", "crates/reiclaw-eval", "crates/reiclaw-gateway", "crates/reiclaw-gateway-client", "bridges/acp", "bridges/telegram", "crates/reiclaw-tool-call-parser", "crates/reiclaw-macros", "xtask"]
 resolver = "2"
 
 [workspace.package]

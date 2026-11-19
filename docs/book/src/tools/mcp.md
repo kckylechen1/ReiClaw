@@ -59,15 +59,15 @@ Two surfaces edit the same `[[mcp.servers]]` table:
 
 ## Server fields
 
-Per-server fields (`[[mcp.servers]]`), generated from the schema:
-
-{{#config-fields mcp.servers}}
+Per-server fields live in each `[[mcp.servers]]` entry; `rei markdown-schema`
+lists them with type, default, and description in the `mcp` section.
 
 `tool_timeout_secs` is an optional per-call timeout; it must be greater than 0 and is capped at 600 seconds.
 
 ## Top-level fields
 
-{{#config-fields mcp}}
+Top-level fields live under `[mcp]`, in the same `mcp` section of
+`rei markdown-schema`.
 
 ## Deferred loading
 
@@ -156,7 +156,7 @@ auto_approve = ["filesystem__read_file"]
 
 `auto_approve` alone does not hide a tool from the model; it only answers the approval question after the model selects that tool. Use `tool_filter_groups` to reduce prompt noise and `allowed_tools` / `excluded_tools` to enforce a capability boundary.
 
-See [Autonomy levels](../security/autonomy.md) for the full per-profile field surface, and the [Config reference](../reference/config.md#mcp) for every MCP field and default.
+See [Autonomy levels](../security/autonomy.md) for the full per-profile field surface, and `rei markdown-schema` (the `mcp` section) for every MCP field and default.
 
 ## MCP Resources and Prompts
 

@@ -18,8 +18,8 @@ zeroclaw agent -a <alias> -m "hello"
 </div>
 
 The alias is the `<alias>` half of an `[agents.<alias>]` block. For the full CLI
-surface and every flag, see the generated
-[CLI reference](../reference/cli.md).
+surface and every flag, run `rei --help` (or `rei markdown-help` for the whole
+command tree as Markdown).
 
 ## Chatting through the gateway
 

@@ -42,10 +42,9 @@ channel page states the identifier shape it expects.
 
 ## Example
 
-{{#peer-group-example telegram}}
+A telegram peer group named e.g. `my_telegram_group` sets `channel = "telegram"`, allows `111111111` in `external_peers`, names peer agents researcher, summariser, and blocks `222222222` via `ignore`. Set it through the gateway dashboard or `rei config set`.
 
-Each channel page shows the directive form with that channel's sender-identifier
-shape.
+Each channel page states that channel's sender-identifier shape.
 
 ## Admin agent-scope authorization
 

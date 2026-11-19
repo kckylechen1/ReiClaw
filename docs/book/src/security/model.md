@@ -123,8 +123,8 @@ high_entropy_tokens = true
 deterministic credential patterns still run. `sensitivity` accepts `0.0`
 through `1.0`; higher values are more aggressive.
 
-The complete field table and defaults are in the
-[Config reference](../reference/config.md#securityleak_detection).
+The complete field table and defaults are in the `security` section of
+`rei markdown-schema`.
 
 ## When things go wrong
 

@@ -6,9 +6,9 @@ The `webhook` channel is a generic inbound/outbound HTTP adapter. It runs its ow
 
 ## Configuration
 
-{{#config-fields channels.webhook}}
-
-Full field reference: [config reference](../reference/config.md#channels).
+The channel is configured under `[channels.webhook.<alias>]`; `rei markdown-schema`
+lists every field with its type, default, and description in the `channels`
+section.
 
 ## Inbound
 

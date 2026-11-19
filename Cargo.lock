@@ -942,19 +942,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "fill-translations"
-version = "0.8.3"
-dependencies = [
- "anyhow",
- "clap",
- "reiclaw-api",
- "reiclaw-providers",
- "serde_json",
- "tokio",
- "xtask",
-]
-
-[[package]]
 name = "find-msvc-tools"
 version = "0.1.12"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -4563,21 +4550,12 @@ name = "xtask"
 version = "0.8.3"
 dependencies = [
  "anyhow",
- "axum",
  "cargo_metadata",
  "clap",
- "reiclaw-api",
  "reiclaw-config",
- "reiclaw-providers",
- "reqwest",
- "schemars",
- "serde",
  "serde_json",
- "shlex",
  "tempfile",
- "tokio",
  "toml",
- "tower-http",
 ]
 
 [[package]]

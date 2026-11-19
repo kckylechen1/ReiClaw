@@ -113,10 +113,10 @@ fi
 
 echo "Linting docs files: ${EXISTING_FILES[*]}"
 
-# OS-tabs are an mdBook theme construct (see docs/book/theme/pc-enhance.js):
-# a `<div class="os-tabs-src">` wraps one ATX heading per OS/shell that the
-# preprocessor turns into tab labels at render time. Those headings are widget
-# markup, not document structure, so they trip MD024/MD001/MD022. Lint a
+# OS-tabs come from the retired docs site's theme: a `<div class="os-tabs-src">`
+# wraps one ATX heading per OS/shell, which the site turned into tab labels.
+# Those headings label alternatives, not document structure, so they trip
+# MD024/MD001/MD022. Lint a
 # line-preserving mirror where headings inside those divs are rewritten to HTML
 # comments; everything else (including real prose headings) is linted as-is.
 MIRROR_ROOT="$(mktemp -d)"
