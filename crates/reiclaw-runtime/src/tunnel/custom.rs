@@ -210,22 +210,10 @@ mod tests {
         assert!(!tunnel.health_check().await);
     }
 
-    #[cfg(windows)]
-    fn long_running_command() -> String {
-        "cmd /C ping -n 2 127.0.0.1".into()
-    }
-
-    #[cfg(not(windows))]
     fn long_running_command() -> String {
         "sleep 1".into()
     }
 
-    #[cfg(windows)]
-    fn echo_command(message: &str) -> String {
-        format!("cmd /C echo {message}")
-    }
-
-    #[cfg(not(windows))]
     fn echo_command(message: &str) -> String {
         format!("echo {message}")
     }

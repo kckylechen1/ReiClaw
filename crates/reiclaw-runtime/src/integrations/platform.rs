@@ -5,5 +5,4 @@
 pub const PLATFORMS: &[(&str, bool)] = &[
     ("macOS", cfg!(target_os = "macos")),
     ("Linux", cfg!(target_os = "linux")),
-    ("Windows", cfg!(target_os = "windows")),
 ];

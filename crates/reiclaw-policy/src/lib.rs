@@ -414,16 +414,7 @@ impl Default for SecurityPolicy {
 }
 
 fn home_dir() -> Option<PathBuf> {
-    #[cfg(not(target_os = "windows"))]
-    {
-        std::env::var_os("HOME").map(PathBuf::from)
-    }
-    #[cfg(target_os = "windows")]
-    {
-        std::env::var_os("USERPROFILE")
-            .or_else(|| std::env::var_os("HOME"))
-            .map(PathBuf::from)
-    }
+    std::env::var_os("HOME").map(PathBuf::from)
 }
 
 fn expand_user_path(path: &str) -> PathBuf {
@@ -523,16 +514,7 @@ fn resolve_symlinked_path(path: &Path) -> Option<PathBuf> {
 }
 
 fn is_null_device(path: &Path) -> bool {
-    #[cfg(not(target_os = "windows"))]
-    {
-        path == Path::new("/dev/null")
-    }
-    #[cfg(target_os = "windows")]
-    {
-        let s = path.to_string_lossy();
-        let lower = s.to_ascii_lowercase();
-        lower == "nul" || lower == r"\\.\nul"
-    }
+    path == Path::new("/dev/null")
 }
 
 fn rootless_path(path: &Path) -> Option<PathBuf> {
@@ -718,7 +700,7 @@ fn command_segments(command: &str) -> Vec<CommandSegment> {
                 quote = QuoteState::Double;
                 current.push(ch);
             }
-            '#' if !cfg!(windows) && starts_word => {
+            '#' if starts_word => {
                 // Comment text must not introduce phantom heredocs that hide
                 // commands following the real body.
                 while chars.peek().is_some_and(|c| *c != '\n') {
@@ -845,10 +827,7 @@ fn stdin_interpreter(segment: &CommandSegment) -> bool {
     let raw = command.split_whitespace().next().unwrap_or("");
     let executable = strip_wrapping_quotes(raw.split(['<', '>']).next().unwrap_or(""));
     let base = command_basename(executable).to_ascii_lowercase();
-    matches!(
-        strip_windows_exe_suffix(&base),
-        "python" | "python3" | "node"
-    )
+    matches!(base.as_str(), "python" | "python3" | "node")
 }
 
 /// Detect a single unquoted `&` operator (background/chain). `&&` is allowed.
@@ -1093,12 +1072,6 @@ fn looks_like_path(candidate: &str) -> bool {
         || candidate == "."
         || candidate == ".."
         || candidate.contains('/')
-        // Windows path patterns: drive letters (C:\, D:\) and UNC paths (\\server\share)
-        || (cfg!(target_os = "windows")
-            && (candidate
-                .get(1..3)
-                .is_some_and(|s| s == ":\\" || s == ":/")
-                || candidate.starts_with("\\\\")))
 }
 
 fn attached_short_option_value(token: &str) -> Option<&str> {
@@ -1171,20 +1144,6 @@ fn command_basename(raw: &str) -> &str {
     after_fwd.rsplit('\\').next().unwrap_or(after_fwd)
 }
 
-/// Strip common Windows executable suffixes (.exe, .cmd, .bat) for uniform
-/// matching against allowlists and risk tables. On non-Windows platforms this
-/// is a no-op that returns the input unchanged.
-fn strip_windows_exe_suffix(name: &str) -> &str {
-    if cfg!(target_os = "windows") {
-        name.strip_suffix(".exe")
-            .or_else(|| name.strip_suffix(".cmd"))
-            .or_else(|| name.strip_suffix(".bat"))
-            .unwrap_or(name)
-    } else {
-        name
-    }
-}
-
 /// Compare two bare command names using the same semantics everywhere a
 /// command allowlist is interpreted. Path-like entries are handled by their
 /// callers and deliberately do not pass through this case-folding rule.
@@ -1193,20 +1152,6 @@ fn command_names_equivalent(left: &str, right: &str) -> bool {
     let right_lower = right.to_ascii_lowercase();
     if left_lower == right_lower {
         return true;
-    }
-
-    // On Windows, an omitted executable suffix does not distinguish command
-    // names (for example, `git` and `git.exe` grant the same command access).
-    #[cfg(target_os = "windows")]
-    {
-        for ext in &[".exe", ".cmd", ".bat"] {
-            if right_lower == format!("{left_lower}{ext}") {
-                return true;
-            }
-            if left_lower == format!("{right_lower}{ext}") {
-                return true;
-            }
-        }
     }
 
     false
@@ -1275,7 +1220,7 @@ impl SecurityPolicy {
             };
 
             let base_owned = command_basename(base_raw).to_ascii_lowercase();
-            let base = strip_windows_exe_suffix(&base_owned);
+            let base = base_owned.as_str();
 
             let args: Vec<String> = words.map(|w| w.to_ascii_lowercase()).collect();
             let joined_segment = cmd_part.to_ascii_lowercase();
@@ -1436,7 +1381,7 @@ impl SecurityPolicy {
                 raw_executable
             };
             let base_cmd_owned = command_basename(executable).to_ascii_lowercase();
-            let base_cmd = strip_windows_exe_suffix(&base_cmd_owned);
+            let base_cmd = base_cmd_owned.as_str();
 
             if base_cmd.is_empty() {
                 return false;
@@ -1536,7 +1481,7 @@ impl SecurityPolicy {
                 raw_executable
             };
             let base_cmd_owned = command_basename(executable).to_ascii_lowercase();
-            let base_cmd = strip_windows_exe_suffix(&base_cmd_owned);
+            let base_cmd = base_cmd_owned.as_str();
 
             if base_cmd.is_empty() {
                 return false;

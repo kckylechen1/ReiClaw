@@ -51,7 +51,7 @@ pub async fn handle_spa_fallback(State(state): State<AppState>, uri: Uri) -> Res
             StatusCode::SERVICE_UNAVAILABLE,
             "Web dashboard not available. Reinstall with the supported installer \
              so the dashboard is built and placed where the gateway looks for it: \
-             `./install.sh --source` on Linux/macOS, or `setup.bat` on Windows. \
+             `./install.sh --source`. \
              The daemon's API endpoints remain reachable independently of the \
              dashboard.",
         )

@@ -1173,7 +1173,7 @@ pub async fn run_gateway(
             ::reiclaw_log::Event::new(module_path!(), ::reiclaw_log::Action::Note),
             "Web dashboard: not available — configured gateway.web_dist_dir is missing on \
              this machine and no fallback location was found. Reinstall with the supported \
-             installer (`./install.sh --source` on Linux/macOS, `setup.bat` on Windows) to \
+             installer (`./install.sh --source`) to \
              build and place the dashboard where the gateway looks for it."
         );
     } else {
@@ -1181,7 +1181,7 @@ pub async fn run_gateway(
             INFO,
             ::reiclaw_log::Event::new(module_path!(), ::reiclaw_log::Action::Note),
             "Web dashboard: not available — no web/dist found. Reinstall with the supported \
-             installer (`./install.sh --source` on Linux/macOS, `setup.bat` on Windows) to \
+             installer (`./install.sh --source`) to \
              build and place the dashboard where the gateway looks for it."
         );
     }
@@ -1196,7 +1196,7 @@ pub async fn run_gateway(
     } else {
         println!(
             "  ⚠️  Web Dashboard: not available — reinstall with the supported installer \
-             (`./install.sh --source` on Linux/macOS, `setup.bat` on Windows) to build it"
+             (`./install.sh --source`) to build it"
         );
     }
     // Start this run's admin-token generation. The pairing-code admin routes

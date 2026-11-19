@@ -298,12 +298,6 @@ mod tests {
         FileEditTool::new(security)
     }
 
-    #[cfg(target_os = "windows")]
-    fn absolute_path_outside_workspace() -> &'static str {
-        r"C:\Windows\win.ini"
-    }
-
-    #[cfg(not(target_os = "windows"))]
     fn absolute_path_outside_workspace() -> &'static str {
         "/etc/passwd"
     }

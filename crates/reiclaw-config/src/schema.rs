@@ -7181,9 +7181,8 @@ pub struct RuntimeConfig {
     /// instead); a bare name not found on `PATH`; and a path that does not
     /// exist or is not executable.
     ///
-    /// **Ignored on Windows and Android** (and not validated there): Windows
-    /// always uses `cmd.exe`, and Android always uses `/system/bin/sh`
-    /// (its shell is not on `PATH` for spawned processes).
+    /// **Ignored on Android** (and not validated there): Android always uses
+    /// `/system/bin/sh` (its shell is not on `PATH` for spawned processes).
     ///
     /// **Examples:**
     /// ```toml

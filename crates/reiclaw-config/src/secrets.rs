@@ -235,100 +235,6 @@ impl SecretStore {
                 fs::set_permissions(&self.key_path, fs::Permissions::from_mode(0o600))
                     .context("Failed to set key file permissions")?;
             }
-            #[cfg(windows)]
-            {
-                // On Windows, use icacls to restrict permissions to current user only
-                // Use whoami command to get full user identity (COMPUTER\User or DOMAIN\User)
-                // which is required by icacls for correct parsing
-                let username = std::process::Command::new("whoami")
-                    .output()
-                    .ok()
-                    .filter(|o| o.status.success())
-                    .map(|o| String::from_utf8_lossy(&o.stdout).trim().to_string())
-                    .unwrap_or_else(|| std::env::var("USERNAME").unwrap_or_default());
-                let Some(grant_arg) = build_windows_icacls_grant_arg(&username) else {
-                    ::reiclaw_log::record!(
-                        WARN,
-                        ::reiclaw_log::Event::new(module_path!(), ::reiclaw_log::Action::Note)
-                            .with_outcome(::reiclaw_log::EventOutcome::Unknown),
-                        "USERNAME environment variable is empty; \
-                         cannot restrict key file permissions via icacls"
-                    );
-                    return Ok(key);
-                };
-
-                // First, ensure the current user owns the file. Without this,
-                // Windows may assign an invalid SID as owner, making the file
-                // unreadable for subsequent commands.
-                match std::process::Command::new("takeown")
-                    .arg("/F")
-                    .arg(&self.key_path)
-                    .output()
-                {
-                    Ok(o) if !o.status.success() => {
-                        ::reiclaw_log::record!(
-                            WARN,
-                            ::reiclaw_log::Event::new(module_path!(), ::reiclaw_log::Action::Note)
-                                .with_outcome(::reiclaw_log::EventOutcome::Unknown),
-                            &format!(
-                                "Failed to take ownership of key file via takeown (exit code {:?})",
-                                o.status.code()
-                            )
-                        );
-                    }
-                    Err(e) => {
-                        ::reiclaw_log::record!(
-                            WARN,
-                            ::reiclaw_log::Event::new(module_path!(), ::reiclaw_log::Action::Note)
-                                .with_outcome(::reiclaw_log::EventOutcome::Unknown)
-                                .with_attrs(::serde_json::json!({"error": format!("{}", e)})),
-                            "Could not take ownership of key file"
-                        );
-                    }
-                    _ => {
-                        ::reiclaw_log::record!(
-                            DEBUG,
-                            ::reiclaw_log::Event::new(module_path!(), ::reiclaw_log::Action::Note),
-                            "Key file ownership set to current user via takeown"
-                        );
-                    }
-                }
-
-                match std::process::Command::new("icacls")
-                    .arg(&self.key_path)
-                    .args(["/inheritance:r", "/grant:r"])
-                    .arg(grant_arg)
-                    .output()
-                {
-                    Ok(o) if !o.status.success() => {
-                        ::reiclaw_log::record!(
-                            WARN,
-                            ::reiclaw_log::Event::new(module_path!(), ::reiclaw_log::Action::Note)
-                                .with_outcome(::reiclaw_log::EventOutcome::Unknown),
-                            &format!(
-                                "Failed to set key file permissions via icacls (exit code {:?})",
-                                o.status.code()
-                            )
-                        );
-                    }
-                    Err(e) => {
-                        ::reiclaw_log::record!(
-                            WARN,
-                            ::reiclaw_log::Event::new(module_path!(), ::reiclaw_log::Action::Note)
-                                .with_outcome(::reiclaw_log::EventOutcome::Unknown)
-                                .with_attrs(::serde_json::json!({"error": format!("{}", e)})),
-                            "Could not set key file permissions"
-                        );
-                    }
-                    _ => {
-                        ::reiclaw_log::record!(
-                            DEBUG,
-                            ::reiclaw_log::Event::new(module_path!(), ::reiclaw_log::Action::Note),
-                            "Key file permissions restricted via icacls"
-                        );
-                    }
-                }
-            }
 
             Ok(key)
         }
@@ -362,17 +268,6 @@ fn hex_encode(data: &[u8]) -> String {
         let _ = write!(s, "{b:02x}");
     }
     s
-}
-
-/// Build the `/grant` argument for `icacls` using a normalized username.
-/// Returns `None` when the username is empty or whitespace-only.
-#[cfg(any(windows, test))]
-fn build_windows_icacls_grant_arg(username: &str) -> Option<String> {
-    let normalized = username.trim();
-    if normalized.is_empty() {
-        return None;
-    }
-    Some(format!("{normalized}:F"))
 }
 
 /// Hex-decode a hex string to bytes.
@@ -1866,28 +1761,6 @@ exit 65
     }
 
     #[test]
-    fn windows_icacls_grant_arg_rejects_empty_username() {
-        assert_eq!(build_windows_icacls_grant_arg(""), None);
-        assert_eq!(build_windows_icacls_grant_arg("   \t\n"), None);
-    }
-
-    #[test]
-    fn windows_icacls_grant_arg_trims_username() {
-        assert_eq!(
-            build_windows_icacls_grant_arg("  alice  "),
-            Some("alice:F".to_string())
-        );
-    }
-
-    #[test]
-    fn windows_icacls_grant_arg_preserves_valid_characters() {
-        assert_eq!(
-            build_windows_icacls_grant_arg("DOMAIN\\svc-user"),
-            Some("DOMAIN\\svc-user:F".to_string())
-        );
-    }
-
-    #[test]
     fn generate_random_key_correct_length() {
         let key = generate_random_key();
         assert_eq!(key.len(), KEY_LEN);
@@ -1952,29 +1825,6 @@ exit 65
             perms.mode() & 0o777,
             0o600,
             "Key file must be owner-only (0600)"
-        );
-    }
-
-    /// Document the expected ordering on Windows: `takeown` runs before `icacls`.
-    ///
-    /// Without `takeown`, the file owner may be an invalid SID, causing `icacls`
-    /// grants to succeed against an unowned file that later becomes unreadable.
-    /// This test verifies the code structure expectation.
-    #[test]
-    fn takeown_runs_before_icacls_on_windows() {
-        // Read the source to confirm `takeown` appears before `icacls` in the
-        // Windows cfg block of `load_or_create_key`. This is a structural
-        // documentation test — the actual commands are Windows-only.
-        let source = include_str!("secrets.rs");
-        let takeown_pos = source
-            .find("Command::new(\"takeown\")")
-            .expect("takeown call must exist in secrets.rs");
-        let icacls_pos = source
-            .find("Command::new(\"icacls\")")
-            .expect("icacls call must exist in secrets.rs");
-        assert!(
-            takeown_pos < icacls_pos,
-            "takeown must run before icacls to fix file ownership first (issue #4532)"
         );
     }
 }

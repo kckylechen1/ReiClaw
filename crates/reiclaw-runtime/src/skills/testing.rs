@@ -1,7 +1,5 @@
 use anyhow::{Context, Result};
 use regex::Regex;
-#[cfg(windows)]
-use reiclaw_platform::native::windows_std_cmd_shell_command;
 use std::path::{Path, PathBuf};
 use std::process::Command;
 
@@ -140,14 +138,6 @@ fn run_test_case(case: &TestCase, skill_dir: &Path, verbose: bool) -> Option<Tes
     }
 }
 
-#[cfg(windows)]
-fn build_test_command(command: &str, skill_dir: &Path) -> Command {
-    let mut cmd = windows_std_cmd_shell_command(command);
-    cmd.current_dir(skill_dir);
-    cmd
-}
-
-#[cfg(not(windows))]
 fn build_test_command(command: &str, skill_dir: &Path) -> Command {
     let mut cmd = Command::new("sh");
     cmd.arg("-c").arg(command);
@@ -451,12 +441,6 @@ mod tests {
         assert_eq!(result.failures[0].actual_exit, 1);
     }
 
-    #[cfg(windows)]
-    fn failing_command() -> &'static str {
-        "exit /B 1"
-    }
-
-    #[cfg(not(windows))]
     fn failing_command() -> &'static str {
         "false"
     }

@@ -56,30 +56,8 @@ impl Drop for ChildGroupGuard {
 
 /// Environment variables safe to pass to shell commands.
 /// Only functional variables are included — never API keys or secrets.
-#[cfg(not(target_os = "windows"))]
 const SAFE_ENV_VARS: &[&str] = &[
     "PATH", "HOME", "TERM", "LANG", "LC_ALL", "LC_CTYPE", "USER", "SHELL", "TMPDIR",
-];
-
-/// Environment variables safe to pass to shell commands on Windows.
-/// Includes Windows-specific variables needed for cmd.exe and program resolution.
-#[cfg(target_os = "windows")]
-const SAFE_ENV_VARS: &[&str] = &[
-    "PATH",
-    "PATHEXT",
-    "HOME",
-    "USERPROFILE",
-    "HOMEDRIVE",
-    "HOMEPATH",
-    "SYSTEMROOT",
-    "SYSTEMDRIVE",
-    "WINDIR",
-    "COMSPEC",
-    "TEMP",
-    "TMP",
-    "TERM",
-    "LANG",
-    "USERNAME",
 ];
 
 /// Shell command execution tool with sandboxing
@@ -145,52 +123,6 @@ impl ShellTool {
     }
 }
 
-#[cfg(target_os = "windows")]
-fn decode_output(bytes: &[u8]) -> String {
-    use windows::Win32::Globalization::GetACP;
-    use windows::Win32::System::Console::GetConsoleOutputCP;
-
-    let cp = unsafe { GetConsoleOutputCP() };
-    let cp = if cp == 0 { unsafe { GetACP() } } else { cp };
-
-    decode_output_with_code_page(bytes, cp)
-}
-
-#[cfg(any(target_os = "windows", test))]
-fn decode_output_with_code_page(bytes: &[u8], cp: u32) -> String {
-    let encoding = windows_code_page_to_encoding(cp);
-    if std::ptr::eq(encoding, encoding_rs::UTF_8) {
-        String::from_utf8_lossy(bytes).into_owned()
-    } else {
-        let (cow, _enc_used, _had_errors) = encoding.decode(bytes);
-        cow.into_owned()
-    }
-}
-
-/// Map a Windows code page identifier to an `encoding_rs` `Encoding`.
-/// Falls back to UTF-8 (lossy) for unknown code pages.
-#[cfg(any(target_os = "windows", test))]
-fn windows_code_page_to_encoding(cp: u32) -> &'static encoding_rs::Encoding {
-    match cp {
-        932 => encoding_rs::SHIFT_JIS,
-        936 | 54936 => encoding_rs::GBK,
-        949 => encoding_rs::EUC_KR,
-        950 => encoding_rs::BIG5,
-        1250 => encoding_rs::WINDOWS_1250,
-        1251 => encoding_rs::WINDOWS_1251,
-        1252 => encoding_rs::WINDOWS_1252,
-        1253 => encoding_rs::WINDOWS_1253,
-        1254 => encoding_rs::WINDOWS_1254,
-        1255 => encoding_rs::WINDOWS_1255,
-        1256 => encoding_rs::WINDOWS_1256,
-        1257 => encoding_rs::WINDOWS_1257,
-        1258 => encoding_rs::WINDOWS_1258,
-        20127 | 65001 => encoding_rs::UTF_8,
-        _ => encoding_rs::UTF_8,
-    }
-}
-
-#[cfg(not(target_os = "windows"))]
 fn decode_output(bytes: &[u8]) -> String {
     String::from_utf8_lossy(bytes).into_owned()
 }
@@ -645,32 +577,14 @@ mod tests {
         Arc::new(NativeRuntime::new())
     }
 
-    #[cfg(windows)]
-    fn stdin_reader_command() -> &'static str {
-        "more"
-    }
-
-    #[cfg(not(windows))]
     fn stdin_reader_command() -> &'static str {
         "cat"
     }
 
-    #[cfg(windows)]
-    fn success_with_stderr_command() -> &'static str {
-        "echo out && echo warn 1>&2"
-    }
-
-    #[cfg(not(windows))]
     fn success_with_stderr_command() -> &'static str {
         "echo out; echo warn >&2"
     }
 
-    #[cfg(windows)]
-    fn medium_risk_write_command() -> &'static str {
-        "copy /Y NUL zeroclaw_shell_approval_test"
-    }
-
-    #[cfg(not(windows))]
     fn medium_risk_write_command() -> &'static str {
         "touch zeroclaw_shell_approval_test"
     }
@@ -1141,7 +1055,6 @@ mod tests {
     }
 
     #[tokio::test]
-    #[cfg(not(target_os = "windows"))]
     async fn shell_blocks_input_redirection_path_bypass() {
         let tool = ShellTool::new(test_security(AutonomyLevel::Supervised), test_runtime());
         let result = tool
@@ -1177,32 +1090,14 @@ mod tests {
         })
     }
 
-    #[cfg(target_os = "windows")]
-    fn env_print_command() -> &'static str {
-        "set"
-    }
-
-    #[cfg(not(target_os = "windows"))]
     fn env_print_command() -> &'static str {
         "env"
     }
 
-    #[cfg(target_os = "windows")]
-    fn home_env_key() -> &'static str {
-        "USERPROFILE"
-    }
-
-    #[cfg(not(target_os = "windows"))]
     fn home_env_key() -> &'static str {
         "HOME"
     }
 
-    #[cfg(target_os = "windows")]
-    fn absolute_path_outside_workspace() -> &'static str {
-        r"C:\Windows\win.ini"
-    }
-
-    #[cfg(not(target_os = "windows"))]
     fn absolute_path_outside_workspace() -> &'static str {
         "/etc/passwd"
     }
@@ -1221,12 +1116,6 @@ mod tests {
         })
     }
 
-    #[cfg(target_os = "windows")]
-    fn env_key_eq(actual: &str, expected: &str) -> bool {
-        actual.eq_ignore_ascii_case(expected)
-    }
-
-    #[cfg(not(target_os = "windows"))]
     fn env_key_eq(actual: &str, expected: &str) -> bool {
         actual == expected
     }
@@ -1300,7 +1189,6 @@ mod tests {
     }
 
     #[tokio::test]
-    #[cfg(not(target_os = "windows"))]
     async fn shell_blocks_plain_variable_expansion() {
         let tool = ShellTool::new(test_security_with_env_cmd(), test_runtime());
         let result = tool
@@ -1674,7 +1562,6 @@ mod tests {
     // ── Non-UTF8 binary output tests ────────────────────
 
     #[test]
-    #[cfg(not(target_os = "windows"))]
     fn decode_output_valid_utf8_roundtrips() {
         let input = "hello 世界 🌍".as_bytes();
         assert_eq!(super::decode_output(input), "hello 世界 🌍");
@@ -1685,7 +1572,7 @@ mod tests {
         // 0xFF is not valid UTF-8
         let input = b"hello\xFF world";
         let result = super::decode_output(input);
-        // Must not panic; non-UTF-8 bytes become replacement characters on non-Windows
+        // Must not panic; non-UTF-8 bytes become replacement characters
         assert!(result.contains("hello"));
         assert!(result.contains("world"));
     }
@@ -1693,37 +1580,6 @@ mod tests {
     #[test]
     fn decode_output_empty_bytes_returns_empty_string() {
         assert_eq!(super::decode_output(b""), "");
-    }
-
-    #[test]
-    fn windows_code_page_mapping_covers_cjk() {
-        use super::windows_code_page_to_encoding;
-        assert_eq!(windows_code_page_to_encoding(936), encoding_rs::GBK);
-        assert_eq!(windows_code_page_to_encoding(932), encoding_rs::SHIFT_JIS);
-        assert_eq!(windows_code_page_to_encoding(949), encoding_rs::EUC_KR);
-        assert_eq!(windows_code_page_to_encoding(950), encoding_rs::BIG5);
-    }
-
-    #[test]
-    fn windows_code_page_mapping_utf8_variants() {
-        use super::windows_code_page_to_encoding;
-        assert_eq!(windows_code_page_to_encoding(65001), encoding_rs::UTF_8);
-        assert_eq!(windows_code_page_to_encoding(20127), encoding_rs::UTF_8);
-    }
-
-    #[test]
-    fn windows_code_page_mapping_unknown_falls_back_to_utf8() {
-        use super::windows_code_page_to_encoding;
-        assert_eq!(windows_code_page_to_encoding(99999), encoding_rs::UTF_8);
-    }
-
-    #[test]
-    fn decode_output_with_cp936_gbk_bytes_transcodes_to_utf8() {
-        // GBK encoding of "你好" is [0xC4, 0xE3, 0xBA, 0xC3]
-        let gbk_bytes: &[u8] = &[0xC4, 0xE3, 0xBA, 0xC3];
-        let decoded = super::decode_output_with_code_page(gbk_bytes, 936);
-        assert_eq!(decoded, "你好");
-        assert!(!decoded.contains('\u{FFFD}'));
     }
 
     #[test]

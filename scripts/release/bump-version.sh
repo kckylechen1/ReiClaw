@@ -49,12 +49,6 @@ for readme in README.md docs/i18n/*/README.md; do
     "version-v${VERSION}-blue\" alt=\"Version v${VERSION}\""
 done
 
-# ── Windows installer (setup.bat) ──────────────────────────────────
-echo "Windows setup.bat..."
-bump "setup.bat" \
-  'set "VERSION=[0-9]+\.[0-9]+\.[0-9]+([.-][0-9A-Za-z.-]*)?"' \
-  "set \"VERSION=${VERSION}\""
-
 # ── Workspace Cargo.toml ───────────────────────────────────────────
 # Bumps [workspace.package] version (the root version inherited by every child
 # crate via `version.workspace = true`) and the version pins on every path dep
@@ -171,8 +165,7 @@ fi
 # ── Generated install surfaces (single source of truth) ───────────
 # After the workspace version is bumped, regenerate every spec-driven install
 # surface so version and feature sets stay canonical. This OWNS the version and
-# feature content of setup.bat, dist/aur/PKGBUILD, dist/scoop/zeroclaw.json,
-# flake.nix and
+# feature content of install.sh, dist/aur/PKGBUILD, flake.nix and
 # dev/ci/docker-tags.toml. No per-file sed hacks for those. CI's Installer
 # Drift gate fails if this is skipped.
 echo "Generated install surfaces (cargo generate installers)..."

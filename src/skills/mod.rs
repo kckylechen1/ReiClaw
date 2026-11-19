@@ -1261,11 +1261,7 @@ fn executable_on_path(name: &str) -> bool {
 }
 
 fn fallback_editors() -> &'static [&'static str] {
-    if cfg!(windows) {
-        &["notepad.exe", "nano", "vim"]
-    } else {
-        &["nano", "vi", "vim", "editor"]
-    }
+    &["nano", "vi", "vim", "editor"]
 }
 
 #[cfg(test)]

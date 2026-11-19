@@ -15,28 +15,8 @@ const SKILL_SHELL_TIMEOUT_SECS: u64 = 60;
 /// Maximum output size in bytes (1 MB).
 const MAX_OUTPUT_BYTES: usize = 1_048_576;
 
-#[cfg(not(target_os = "windows"))]
 const SAFE_ENV_VARS: &[&str] = &[
     "PATH", "HOME", "TERM", "LANG", "LC_ALL", "LC_CTYPE", "USER", "SHELL", "TMPDIR",
-];
-
-#[cfg(target_os = "windows")]
-const SAFE_ENV_VARS: &[&str] = &[
-    "PATH",
-    "PATHEXT",
-    "HOME",
-    "USERPROFILE",
-    "HOMEDRIVE",
-    "HOMEPATH",
-    "SYSTEMROOT",
-    "SYSTEMDRIVE",
-    "WINDIR",
-    "COMSPEC",
-    "TEMP",
-    "TMP",
-    "TERM",
-    "LANG",
-    "USERNAME",
 ];
 
 const MAX_TOOL_NAME_LEN: usize = 64;

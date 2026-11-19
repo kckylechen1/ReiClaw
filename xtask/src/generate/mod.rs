@@ -1,4 +1,4 @@
-//! `cargo generate installers` - render install surfaces (setup.bat,
+//! `cargo generate installers` - render install surfaces (install.sh,
 //! native packages, ...) from the canonical spec.
 //! install.sh@HEAD is the behavioral reference. The spec is the single source
 //! of truth; surfaces are derived and drift-checked. Surfaces are registered in
@@ -6,7 +6,6 @@
 pub mod flake;
 pub mod install_sh;
 pub mod packaging;
-pub mod setup_bat;
 pub mod spec;
 
 use spec::Selection as Sel;
@@ -33,19 +32,9 @@ fn registry() -> Vec<Surface> {
             render: |root, cur| install_sh::render_file(root, cur),
         },
         Surface {
-            name: "setup-bat",
-            file: "setup.bat",
-            render: |root, cur| setup_bat::render_file(root, cur),
-        },
-        Surface {
             name: "pkgbuild",
             file: "dist/aur/PKGBUILD",
             render: |root, cur| packaging::render_pkgbuild(root, cur),
-        },
-        Surface {
-            name: "scoop",
-            file: "dist/scoop/reiclaw.json",
-            render: |root, cur| packaging::render_scoop(root, cur),
         },
         Surface {
             name: "flake",

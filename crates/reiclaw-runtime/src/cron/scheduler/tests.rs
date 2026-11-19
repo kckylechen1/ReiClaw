@@ -257,7 +257,6 @@ fn cron_agent_run_security_policy_respects_explicit_allowed_tools() {
 }
 
 #[tokio::test]
-#[cfg(not(target_os = "windows"))]
 async fn run_job_command_success() {
     let tmp = TempDir::new().unwrap();
     let config = test_config(&tmp).await;
@@ -340,7 +339,6 @@ async fn run_manual_job_persists_history_and_broadcasts() {
 }
 
 #[tokio::test]
-#[cfg(not(target_os = "windows"))]
 async fn run_job_command_failure() {
     let tmp = TempDir::new().unwrap();
     let config = test_config(&tmp).await;
@@ -356,7 +354,6 @@ async fn run_job_command_failure() {
 }
 
 #[tokio::test]
-#[cfg(not(target_os = "windows"))]
 async fn run_job_command_times_out() {
     let tmp = TempDir::new().unwrap();
     let mut config = test_config(&tmp).await;
@@ -463,7 +460,6 @@ async fn run_job_command_blocks_forbidden_short_option_attached_path_argument() 
 }
 
 #[tokio::test]
-#[cfg(not(target_os = "windows"))]
 async fn run_job_command_blocks_tilde_user_path_argument() {
     let tmp = TempDir::new().unwrap();
     let mut config = test_config(&tmp).await;
@@ -485,7 +481,6 @@ async fn run_job_command_blocks_tilde_user_path_argument() {
 }
 
 #[tokio::test]
-#[cfg(not(target_os = "windows"))]
 async fn run_job_command_blocks_input_redirection_path_bypass() {
     let tmp = TempDir::new().unwrap();
     let mut config = test_config(&tmp).await;
@@ -545,18 +540,11 @@ async fn run_job_command_blocks_rate_limited() {
     assert!(output.contains("rate limit exceeded"));
 }
 
-#[cfg(target_os = "windows")]
-fn absolute_path_outside_workspace() -> &'static str {
-    r"C:\Windows\win.ini"
-}
-
-#[cfg(not(target_os = "windows"))]
 fn absolute_path_outside_workspace() -> &'static str {
     "/etc/passwd"
 }
 
 #[tokio::test]
-#[cfg(not(target_os = "windows"))]
 async fn execute_job_with_retry_recovers_after_first_failure() {
     let tmp = TempDir::new().unwrap();
     let mut config = test_config(&tmp).await;
@@ -590,7 +578,6 @@ async fn execute_job_with_retry_recovers_after_first_failure() {
 }
 
 #[tokio::test]
-#[cfg(not(target_os = "windows"))]
 async fn execute_job_with_retry_exhausts_attempts() {
     let tmp = TempDir::new().unwrap();
     let mut config = test_config(&tmp).await;

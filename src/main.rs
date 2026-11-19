@@ -76,16 +76,6 @@ fn read_capped_line<R: std::io::BufRead>(reader: R, cap: usize) -> std::io::Resu
     Ok(CappedLine::Line(String::from_utf8_lossy(&raw).into_owned()))
 }
 
-/// Truncate `line` in place to at most `cap` bytes, rounding the cut down to a
-/// UTF-8 char boundary. `String::truncate` panics when the byte index lands
-/// inside a multi-byte character, so a raw `line.truncate(cap)` on piped input
-/// is a latent panic. No-op when the string already fits.
-fn cap_line_utf8_safe(line: &mut String, cap: usize) {
-    if line.len() > cap {
-        line.truncate(line.floor_char_boundary(cap));
-    }
-}
-
 /// Discard bytes from `reader` until the next `\n` or EOF, using only
 /// `BufRead::fill_buf` / `consume`. This avoids the unbounded allocation
 /// that `read_until(..., &mut Vec::new())` would incur on an oversized
@@ -173,31 +163,7 @@ fn print_no_command_help(cmd: clap::Command) -> Result<()> {
     cmd.print_help()?;
     println!();
 
-    #[cfg(windows)]
-    pause_after_no_command_help();
-
     Ok(())
-}
-
-#[cfg(windows)]
-fn pause_after_no_command_help() {
-    println!();
-    print!("{}", t("cli-press-enter", "Press Enter to exit..."));
-    let _ = std::io::stdout().flush();
-    // Cap the read so a piped-in flood (e.g. `dir | rei` with no
-    // command) cannot blow up RSS in this trivial one-Enter prompt.
-    // See module-level `STDIN_LINE_CAP` for rationale.
-    let mut line = String::new();
-    let _ = std::io::stdin()
-        .lock()
-        .take((STDIN_LINE_CAP + 1) as u64)
-        .read_line(&mut line);
-    if line.len() > STDIN_LINE_CAP {
-        // Round down to a UTF-8 char boundary before truncating: a piped
-        // multi-byte payload can land the byte cap inside a character, and
-        // `String::truncate` panics on a non-boundary index.
-        cap_line_utf8_safe(&mut line, STDIN_LINE_CAP);
-    }
 }
 
 #[cfg(feature = "agent-runtime")]
@@ -949,7 +915,7 @@ Examples (Unix shells):
   rei completions zsh > ~/.zfunc/_rei
   rei completions fish > ~/.config/fish/completions/rei.fish
 
-Examples (Windows PowerShell):
+Examples (PowerShell):
   rei completions powershell | Out-String | Invoke-Expression
   rei completions powershell > $PROFILE.CurrentUserAllHosts")]
     Completions {
@@ -2292,9 +2258,7 @@ async fn async_main(command: clap::Command) -> Result<()> {
                     .map(|u| u.home_dir().to_path_buf())
                     .is_some_and(|home| exe.starts_with(&home));
                 if under_home {
-                    let install_hint = if cfg!(windows) {
-                        "Consider installing to a system-wide location (e.g. C:\\Program Files\\ReiClaw) for service use."
-                    } else if cfg!(target_os = "macos") {
+                    let install_hint = if cfg!(target_os = "macos") {
                         "Consider installing to /usr/local/bin or /opt/homebrew/bin for system-wide service."
                     } else {
                         "Consider installing to /usr/local/bin for system-wide service."

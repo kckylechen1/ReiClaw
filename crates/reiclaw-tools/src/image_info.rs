@@ -570,11 +570,6 @@ mod tests {
 
         #[cfg(unix)]
         let target = "/etc/passwd";
-        #[cfg(windows)]
-        let target = {
-            let sysroot = std::env::var("SystemRoot").unwrap_or_else(|_| r"C:\Windows".to_string());
-            format!(r"{sysroot}\System32\drivers\etc\hosts")
-        };
 
         let result = tool.execute(json!({"path": target})).await.unwrap();
         assert!(!result.success, "external path must be blocked");
