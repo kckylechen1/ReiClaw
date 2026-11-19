@@ -1,12 +1,10 @@
 //! Unified log emission surface for the ZeroClaw workspace.
 
 pub mod broadcast;
-pub mod chain;
 pub mod config;
 pub mod event;
 pub mod layer;
 pub mod migrate;
-pub mod observer_bridge;
 pub mod reader;
 mod subscriber;
 pub mod tool_io;
@@ -27,7 +25,6 @@ pub use broadcast::{
     LogBroadcastSender, clear_broadcast_hook, current_broadcast_hook, set_broadcast_hook,
     subscribe, subscribe_or_install,
 };
-pub use chain::display_chain;
 pub use config::{LlmRequestPayloadPolicy, LogConfig, ResolvedPolicy, StoragePolicy, ToolIoPolicy};
 pub use event::{
     ATTRIBUTION_FIELDS, Action, COMPOSITE_PREFIXES, Event, EventCategory, EventOutcome, LogEvent,
@@ -61,7 +58,6 @@ pub mod field {
 }
 
 pub use migrate::migrate_legacy_jsonl_in_place;
-pub use observer_bridge::{clear_observer_bridge, set_observer_bridge};
 pub use reader::{LogFilter, LogPage, current_log_path, find_event_by_id, load_page};
 pub use subscriber::{install_global_subscriber, try_install_capture_subscriber};
 pub use tool_io::{ToolIoCapture, capture_llm_request, capture_tool_input, capture_tool_output};

@@ -1,7 +1,5 @@
 //! Security subsystem for policy enforcement, sandboxing, and secret management.
 
-pub mod audit;
-pub mod auth_provider;
 #[cfg(feature = "sandbox-bubblewrap")]
 pub mod bubblewrap;
 pub mod detect;
@@ -19,14 +17,11 @@ pub mod otp;
 pub mod outbound;
 pub mod pairing;
 pub mod policy;
-pub mod prompt_guard;
 #[cfg(target_os = "macos")]
 pub mod seatbelt;
 pub mod secrets;
 pub mod traits;
 
-#[allow(unused_imports)]
-pub use audit::{AuditEvent, AuditEventType, AuditLogger};
 #[allow(unused_imports)]
 pub use detect::create_sandbox;
 pub use detect::linux_memcg_available;
@@ -46,8 +41,6 @@ pub use traits::{NoopSandbox, Sandbox};
 // Prompt injection defense exports
 #[allow(unused_imports)]
 pub use leak_detector::{LeakDetector, LeakResult};
-#[allow(unused_imports)]
-pub use prompt_guard::{GuardAction, GuardResult, PromptGuard};
 use reiclaw_config::schema::LeakDetectionConfig;
 
 /// Scrub credential leaks from arbitrary text before it crosses into a log

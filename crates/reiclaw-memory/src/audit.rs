@@ -998,52 +998,37 @@ mod tests {
 
     #[allow(clippy::await_holding_lock)]
     #[tokio::test]
-    async fn audited_ops_emit_memory_audit_events_via_bridge() {
-        use reiclaw_api::observability_traits::{Observer, ObserverEvent, ObserverMetric};
-        use std::any::Any;
-        use std::sync::{Arc as StdArc, Mutex as StdMutex};
-
+    async fn audited_ops_emit_memory_audit_log_events() {
         let _writer_guard = reiclaw_log::__private_test_writer_lock();
         let _hook_guard = reiclaw_log::__private_test_hook_lock();
         reiclaw_log::try_install_capture_subscriber();
 
-        #[derive(Default)]
-        struct CapturingObserver {
-            events: StdMutex<Vec<ObserverEvent>>,
-        }
-
-        impl Observer for CapturingObserver {
-            fn record_event(&self, event: &ObserverEvent) {
-                self.events.lock().unwrap().push(event.clone());
-            }
-            fn record_metric(&self, _metric: &ObserverMetric) {}
-            fn name(&self) -> &str {
-                "capturing"
-            }
-            fn as_any(&self) -> &dyn Any {
-                self
-            }
-        }
+        let mut rx = reiclaw_log::subscribe_or_install();
+        while rx.try_recv().is_ok() {}
 
         let tmp = TempDir::new().unwrap();
         let audited = AuditedMemory::new(NoneMemory::new("none"), tmp.path()).unwrap();
 
-        let observer = StdArc::new(CapturingObserver::default());
-        ::reiclaw_log::set_observer_bridge(observer.clone());
         audited
             .store("bridge_key", "v", MemoryCategory::Core, None)
             .await
             .unwrap();
-        ::reiclaw_log::clear_observer_bridge();
 
-        let events = observer.events.lock().unwrap();
+        let mut events = Vec::new();
+        while let Ok(frame) = rx.try_recv() {
+            events.push(frame);
+        }
+
         assert!(
-            events.iter().any(|e| matches!(
-                e,
-                ObserverEvent::MemoryAudit { action, backend, success, .. }
-                    if action == "store" && backend == "none" && *success
-            )),
-            "expected a MemoryAudit store event via the observer bridge"
+            events.iter().any(|frame| {
+                let attrs = &frame["attributes"];
+                frame["event"]["action"].as_str() == Some("memory_audit")
+                    && frame["event"]["category"].as_str() == Some("memory")
+                    && attrs["memory_action"].as_str() == Some("store")
+                    && attrs["backend"].as_str() == Some("none")
+                    && attrs["success"].as_bool() == Some(true)
+            }),
+            "expected a memory_audit store event on the log broadcast stream; got: {events:?}"
         );
     }
 }
