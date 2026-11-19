@@ -94,7 +94,7 @@ Trait contracts live in `zeroclaw-api`; the trait definitions in `crates/zerocla
 - **`Memory`**: implement for a memory backend that preserves agent/session scoping.
 - **`Peripheral`**: a device surface contract kept for Node-side hardware; in-process hardware left the body (ADR-017), so devices join as gateway Nodes.
 
-Other public traits, including `Observer` and `RuntimeAdapter`, are lower-level contracts. Use the [architecture map](../contributing/architecture-map.md) and [RFC process](../contributing/rfcs.md) before changing them.
+Other public traits, including `Observer` and `RuntimeAdapter`, are lower-level contracts. Use the [architecture map](../contributing/architecture-map.md) and record an ADR before changing them.
 
 New implementations should stay behind the `zeroclaw-api` trait contracts and wire through the owning factory, registry, or feature gate for that surface. RFC #5574 continues shrinking runtime implementation dependencies, so avoid adding new concrete runtime dependencies unless the design requires them.
 

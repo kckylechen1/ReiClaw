@@ -135,7 +135,7 @@ A plain `tar czf zeroclaw-$(date +%F).tar.gz ~/.zeroclaw` covers everything. Res
 
 ## Updates
 
-The service does not auto-update. Subscribe to the release feed (GitHub releases or the Discord `#releases` channel: see [Contributing → Communication](../contributing/communication.md)). Typical update cadence:
+The service does not auto-update. Watch the GitHub release feed. Typical update cadence:
 
 1. Read the release notes
 2. Back up `~/.zeroclaw/`

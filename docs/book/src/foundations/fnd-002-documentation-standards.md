@@ -443,7 +443,7 @@ Implementations are registered by the binary crate, not by the kernel.
 
 ### 7.4 The AGENTS.md Hierarchy
 
-The root `AGENTS.md` sets the compact project-wide policy. The [architecture and contribution map](../contributing/architecture-map.md) routes tasks to maintained architecture, foundation, testing, security, and maintainer sources. [Coding agent guidelines](../contributing/agent-guidelines.md) provide detailed project-wide examples and registries that are useful on demand but are not part of the always-loaded bootstrap.
+The root `AGENTS.md` sets the compact project-wide policy. The [architecture and contribution map](../contributing/architecture-map.md) routes tasks to maintained architecture, foundation, testing, security, and maintainer sources.
 
 Crate-level `AGENTS.md` files narrow that policy for their specific scope. When an AI tool reads a file in `crates/zeroclaw-api/`, it should read the root contract, follow the architecture map for the task, and read `crates/zeroclaw-api/AGENTS.md` when present. Crate policy is more specific and takes precedence within its scope, but it cannot weaken project-wide safety, privacy, or authorization requirements.
 
@@ -478,9 +478,7 @@ docs/book/src/
 ├── contributing/
 │   ├── index.md
 │   ├── architecture-map.md
-│   ├── rfcs.md
-│   ├── testing.md
-│   └── pr-review-protocol.md
+│   └── testing.md
 │
 ├── reference/
 │   ├── index.md
@@ -503,9 +501,7 @@ docs/book/src/
 └── foundations/
     ├── fnd-001-intentional-architecture.md
     ├── fnd-002-documentation-standards.md
-    ├── fnd-003-governance.md
     ├── fnd-004-engineering-infrastructure.md
-    ├── fnd-005-contribution-culture.md
     └── fnd-006-zero-compromise-in-practice.md
 ```
 

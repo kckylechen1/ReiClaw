@@ -7,7 +7,7 @@ description: "Prepare and squash-merge an explicitly authorized ZeroClaw PR or n
 
 Land a reviewed PR through GitHub's squash-merge operation. The user's task defines the repository and the authorized work. A request to inspect or review a PR alone does not authorize merging it. An explicit request to review, repair, and merge suitable named PRs authorizes that bounded workflow without another ritual yes/no prompt.
 
-Read `AGENTS.md` and `docs/book/src/maintainers/pr-workflow.md` first. They own this fork's validation, authorization, repository binding, and stacked-PR policy. Keep actual GitHub protections, final-head matching, and unresolved substantive review concerns intact.
+Read `AGENTS.md` first. They own this fork's validation, authorization, repository binding, and stacked-PR policy. Keep actual GitHub protections, final-head matching, and unresolved substantive review concerns intact.
 
 ## 1. Bind the task to one repository
 
@@ -34,7 +34,7 @@ For implementation work, read the linked issue, use a separate branch/worktree, 
 
 Open or update the PR with the repository template. Use `Closes #N` only when it fully resolves that issue. Public review/comment publication and unrelated issue or milestone edits need authorization for those actions; merge authorization alone does not authorize speaking to other people.
 
-For a stack, follow the restacking procedure in `pr-workflow.md`: land parents first, replay only the child's increment after a parent squash, retarget, and inspect the final diff before using the resulting head's checks. Do not merge a child into its temporary parent as a substitute for landing it in `master`.
+For a stack, follow the restacking rule in `AGENTS.md` (rule 9): land parents first, replay only the child's increment after a parent squash, retarget, and inspect the final diff before using the resulting head's checks. Do not merge a child into its temporary parent as a substitute for landing it in `master`.
 
 Resolve routine conflicts within the authorized scope, then review and validate the changed result. An unresolved conflict, draft state, missing permission, or new scope is a real blocker; do not bypass it. Poll an unknown GitHub mergeability result for a bounded interval before reporting a provider-side blocker.
 

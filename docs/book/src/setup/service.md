@@ -193,7 +193,7 @@ The output includes the config file path it resolved against.
 
 ## Auto-update
 
-The service does **not** auto-update. That's deliberate; you pick when to take new code. Subscribe to the GitHub release feed or the Discord `#releases` channel (see [Contributing → Communication](../contributing/communication.md)).
+The service does **not** auto-update. That's deliberate; you pick when to take new code. Watch the GitHub release feed.
 
 ## See also
 

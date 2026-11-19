@@ -49,9 +49,7 @@ the [Architecture and contribution map](../contributing/architecture-map.md).
 |---|----------|-----------------|-------------------|
 | 1 | [Intentional Architecture: Microkernel Transition](./fnd-001-intentional-architecture.md) | What are we building, and what shape should it take? | [#5574](https://github.com/zeroclaw-labs/zeroclaw/issues/5574) |
 | 2 | [Documentation Standards and Knowledge Architecture](./fnd-002-documentation-standards.md) | How do we record and transfer what we know? | [#5576](https://github.com/zeroclaw-labs/zeroclaw/issues/5576) |
-| 3 | [Team Organization and Project Governance](./fnd-003-governance.md) | How do we coordinate and make decisions together? | [#5577](https://github.com/zeroclaw-labs/zeroclaw/issues/5577) |
 | 4 | [Engineering Infrastructure: CI/CD Pipeline](./fnd-004-engineering-infrastructure.md) | How do we build, test, and ship reliably? | [#5579](https://github.com/zeroclaw-labs/zeroclaw/issues/5579) |
-| 5 | [Contribution Culture: Human Collaboration and AI Partnership](./fnd-005-contribution-culture.md) | How do we work together and grow? | [#5615](https://github.com/zeroclaw-labs/zeroclaw/issues/5615) |
 | 6 | [Zero Compromise in Practice: Code Health, Error Discipline, and the Production Readiness Standard](./fnd-006-zero-compromise-in-practice.md) | How do we write code that lasts? | [#5653](https://github.com/zeroclaw-labs/zeroclaw/issues/5653) |
 
 The first five documents answer structural and human questions. The sixth answers the
