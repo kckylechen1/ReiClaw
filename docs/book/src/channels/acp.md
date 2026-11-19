@@ -288,7 +288,8 @@ Returns `SESSION_NOT_FOUND` (`-32000`) if the session is not currently active (i
 
 ## Configuration
 
-{{#config-fields acp}}
+The channel is configured under `[acp]`; `rei markdown-schema` lists every field
+with its type, default, and description in the `acp` section.
 
 `default_agent` is consulted when `session/new` omits `agentAlias` and more than one agent is configured; if it is absent and exactly one `[agents.<alias>]` entry exists, that agent is auto-selected.
 

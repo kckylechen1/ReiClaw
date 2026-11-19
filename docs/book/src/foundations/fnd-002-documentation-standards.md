@@ -187,8 +187,6 @@ A setup guide for configuring the Telegram channel describes steps a user takes 
 | `docs/book/src/maintainers/` | Considerations + Standards | Release runbook, reviewer playbook, label policy |
 | `docs/book/src/security/` | Considerations + Designs | Security policy, sandboxing design, audit logging |
 | `docs/book/src/hardware/` | (none) | Retired with the hardware subsystem (#418) |
-| `docs/book/src/reference/config.md` | Designs | Config reference (generated from code) |
-| `docs/book/src/reference/cli.md` | Designs | CLI reference (generated from code) |
 | `docs/book/src/foundations/` | Considerations | Ratified RFCs that shape everything else |
 
 **Moves to the GitHub Wiki (proposed; not yet executed):**
@@ -541,7 +539,7 @@ No language variants. No duplicated READMEs. One authoritative English README th
 
 The legacy `docs/contributing/docs-contract.md` encoded an i18n parity requirement and a directory structure that this RFC supersedes. It has been removed; this section is its replacement.
 
-The replacement governs three things: artifact classification, the repo/wiki split, and ADR governance. It says nothing about i18n: locale parity is now handled by the [Maintainers → Docs & Translations](../maintainers/docs-and-translations.md) page.
+The replacement governs three things: artifact classification, the repo/wiki split, and ADR governance. It says nothing about i18n: the docs are English only.
 
 **Replacement docs-contract:**
 

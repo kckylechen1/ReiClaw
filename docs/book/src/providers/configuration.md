@@ -4,7 +4,7 @@ Every model provider lives at `[providers.models.<type>.<alias>]`. `<type>` is a
 
 ## Minimal working example
 
-The smallest config that loads clean has four section headers: a provider entry, an agent that references it, and a risk profile the agent gates against. Configure them through the gateway or `zeroclaw config set`; the [config reference](../reference/config.md#providers) has the full field index.
+The smallest config that loads clean has four section headers: a provider entry, an agent that references it, and a risk profile the agent gates against. Configure them through the gateway or `zeroclaw config set`; `rei markdown-schema` prints the full field index (the `providers` section).
 
 ## Field reference: provider entry
 
@@ -64,7 +64,9 @@ Several providers accept OAuth or subscription-style tokens instead of raw API k
 
 When ZeroClaw runs inside a container and a provider is on the host (e.g. Ollama), set `uri` to a host-reachable address. The generic env-override mechanism (`ZEROCLAW_<dotted_path_with_double_underscores>=<value>`) can set the same field at runtime without editing config:
 
-{{#env-var container}}
+```sh
+REI_providers__models__ollama__home__uri=http://ollama:11434 rei agent -a assistant
+```
 
 The `__` is the path separator; the example above sets `providers.models.ollama.home.uri`. See [Environment variables](../reference/env-vars.md) for the full grammar.
 

@@ -1,6 +1,6 @@
 # Privacy and PII Discipline
 
-ZeroClaw artifacts are public, git history, releases, fixtures, snapshots, the docs book, every rendered locale. Anything you commit ships with the project forever. Treat privacy as a merge gate, not best-effort.
+ZeroClaw artifacts are public, git history, releases, fixtures, snapshots, the docs. Anything you commit ships with the project forever. Treat privacy as a merge gate, not best-effort.
 
 ## Never commit any of these
 

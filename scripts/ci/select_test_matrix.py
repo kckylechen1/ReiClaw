@@ -116,7 +116,6 @@ def select_matrix(
         git("merge-base", "--is-ancestor", base_sha, "HEAD", cwd=cwd)
         changes = collect_diff_changes(base_sha, cwd)
 
-        has_book_change = any(path.startswith("docs/book/") for path, _, _ in changes)
         relevant = [
             path
             for path, old, new in changes
@@ -137,8 +136,6 @@ def select_matrix(
 
         sorted_members = sorted(member_dirs.items(), key=lambda item: len(item[1]), reverse=True)
         changed_members: set[str] = set()
-        if has_book_change:
-            changed_members.add("xtask")
         for path in relevant:
             match = next(
                 ((name, mdir) for name, mdir in sorted_members if path.startswith(f"{mdir}/")),
@@ -151,8 +148,6 @@ def select_matrix(
             if rel_in_member in {"Cargo.toml", "build.rs"}:
                 raise ValueError(f"build/manifest input changed: {path}")
             changed_members.add(pkg_name)
-            if "/locales/" in path or rel_in_member.startswith("locales/"):
-                changed_members.add("xtask")
             # Root `tests/architecture` (app leg) cross-scans `bridges/**` and
             # all `.rs` files across workspace crates (`crates/**`, `bridges/**`).
             if path.startswith("bridges/") or path.endswith(".rs"):

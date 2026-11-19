@@ -2,7 +2,7 @@
 
 The gateway daemon ships its HTTP API in the binary, but the web dashboard
 HTML/JS/CSS lives on disk in a `web/dist/` directory produced by Vite. The
-`gateway.web_dist_dir` setting (and its {{#env-var-name gateway.web_dist_dir}}
+`gateway.web_dist_dir` setting (and its `REI_gateway__web_dist_dir`
 schema-mirror env-var override) tells the daemon where that directory is.
 When neither the setting nor a known fallback location contains a built
 `index.html`, the gateway boots in **API-only mode** and the dashboard URL
@@ -10,7 +10,10 @@ returns a "not available" message.
 
 ## TL;DR
 
-{{#env-var web_dist}}
+```sh
+# Equivalent env-var override (in-memory only, never persisted)
+export REI_gateway__web_dist_dir="/absolute/path/to/reiclaw/web/dist"
+```
 
 Then build the bundle once:
 
@@ -113,7 +116,7 @@ The official Docker image places the bundle at `/reiclaw-data/web/dist`
 
 The value is resolved with the standard config-layer order:
 
-1. {{#env-var-name gateway.web_dist_dir}} (schema-mirror env var, see
+1. `REI_gateway__web_dist_dir` (schema-mirror env var, see
    [Environment variables](../reference/env-vars.md))
 2. The configured `gateway.web_dist_dir`
 3. Auto-detect (the five candidates above)
@@ -140,7 +143,7 @@ Env var:    ZEROCLAW_gateway__web_dist_dir
 
 The same three steps produce env-var names for every other gateway knob,
 e.g. `gateway.request_timeout_secs` becomes
-{{#env-var-name gateway.request_timeout_secs}}.
+`REI_gateway__request_timeout_secs`.
 
 ## Common pitfalls
 
@@ -148,7 +151,9 @@ e.g. `gateway.request_timeout_secs` becomes
 
 A literal tilde is **not** expanded by the gateway; use an absolute path for `gateway.web_dist_dir`. Shell variables (`$HOME`, `%USERPROFILE%`) are likewise not expanded; pre-expand them in the env var if you set the value that way:
 
-{{#env-var web_dist_home}}
+```sh
+export REI_gateway__web_dist_dir="$HOME/rei/web/dist"   # shell expands $HOME
+```
 
 Companion [PR #6961](https://github.com/zeroclaw-labs/zeroclaw/pull/6961) adds
 the targeted "looks like an unexpanded `~` / `$VAR`,

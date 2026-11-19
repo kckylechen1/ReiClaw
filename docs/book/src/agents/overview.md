@@ -5,7 +5,9 @@ providers, the channels, the security profiles, the skills, the memory, exists
 so that an agent can use it. This section is the showcase; the rest of the docs
 are the credits.
 
-{{#include ../_snippets/concept-multi-agent.md}}
+ZeroClaw runs many agents from one install; see
+[Getting Started → Concepts](../getting-started/concepts.md) for the multi-agent
+model in one paragraph.
 
 ## An agent is a join
 

@@ -164,7 +164,6 @@ class TestMatrixSelectionTests(unittest.TestCase):
         self.write("crates/reiclaw-eval/tests/cli.rs", "fn cli() {}\n")
         self.write("crates/reiclaw-eval/fixtures/trace.json", "{}\n")
         self.write("crates/reiclaw-gateway/build.rs", "fn main() {}\n")
-        self.write("crates/reiclaw-runtime/locales/en/cli.ftl", "hello = Hello\n")
 
         self.partition_file = Path(self.temp.name) / "test-partition.json"
         self.partition_file.write_text(json.dumps(PARTITION), encoding="utf-8")
@@ -250,24 +249,6 @@ class TestMatrixSelectionTests(unittest.TestCase):
             ["channels", "channels / voice-surface", "app", "tail"],
         )
 
-    def test_locales_change_adds_xtask_tail_leg(self):
-        self.write("crates/reiclaw-runtime/locales/en/cli.ftl", "hello = Updated\n")
-        self.commit()
-        # runtime -> app (via root), plus xtask -> tail (via locales rule)
-        self.assertEqual(
-            self.leg_names(self.select()),
-            ["runtime", "runtime / landlock", "app", "tail"],
-        )
-
-    def test_mixed_book_and_code_selects_xtask_tail_leg(self):
-        self.write("crates/reiclaw-eval/src/lib.rs", "pub fn eval_only() {}\n")
-        self.write("docs/book/src/reference/index.md", "# Reference\n")
-        self.commit()
-        self.assertEqual(
-            self.leg_names(self.select()),
-            ["runtime", "runtime / landlock", "app", "tail"],
-        )
-
     def test_prose_alongside_member_change_does_not_force_extra_legs(self):
         self.write("crates/reiclaw-eval/src/lib.rs", "pub fn eval_only() {}\n")
         self.write("README.md", "updated\n")
@@ -292,7 +273,6 @@ class TestMatrixSelectionTests(unittest.TestCase):
             "Cargo.lock",
             "scripts/ci/change_scope.py",
             "dev/ci/test-partition.json",
-            "locales.toml",
             ".github/workflows/ci.yml",
             "unknown_root_file.txt",
         ):

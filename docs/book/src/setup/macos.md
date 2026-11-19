@@ -56,7 +56,6 @@ Most features work with a stock macOS install. Optional extras:
 
 | Feature | Install |
 |---|---|
-| Docs translation | `brew install gettext` |
 | Browser tool | Playwright pulls Chromium automatically on first use |
 | iMessage channel | Requires macOS 11+. See [Channels → Other chat platforms](../channels/chat-others.md) |
 

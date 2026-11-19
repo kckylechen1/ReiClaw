@@ -396,4 +396,4 @@ Sanitise `zeroclaw-log.txt` (redact channel tokens if any slipped through, they 
 - [Logs & observability](./observability.md)
 - [Service & daemon](./service.md)
 - [Setup → Service management](../setup/service.md)
-- [Reference → Config](../reference/config.md)
+- `rei markdown-schema`: the full config field reference

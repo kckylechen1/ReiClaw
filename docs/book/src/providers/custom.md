@@ -28,10 +28,10 @@ llama-server -hf ggml-org/gpt-oss-20b-GGUF --jinja -c 133000 --host 127.0.0.1 --
 
 </div>
 
-**Optional fields** apply to any compat-slot family (including `llamacpp`). The
-full set, derived from the schema:
-
-{{#config-fields providers.models.custom}}
+**Optional fields** apply to any compat-slot family (including `llamacpp`). For the
+full set, run `rei markdown-schema`; it renders the live config schema as
+Markdown, and the `providers` section lists every field with its type, default,
+and description.
 
 **Controlling thinking mode** varies by model family. `think = false` sets the top-level `enable_thinking` field in the request. Some models (e.g. Qwen3) read this flag from the Jinja template via `chat_template_kwargs` instead:
 

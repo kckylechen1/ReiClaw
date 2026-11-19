@@ -5,7 +5,6 @@
 # third-party deps already in target/debug (a separate named profile would
 # duplicate all of them on disk), and the tasks are I/O bound anyway.
 [alias]
-mdbook = "run -p xtask --bin mdbook --"
 web = "run -p xtask --bin web --"
 generate = "run -p xtask --bin generate --"
 # The Quality Gate's clippy command; run once before pushing.

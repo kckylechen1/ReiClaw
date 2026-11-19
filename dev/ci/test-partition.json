@@ -12,7 +12,6 @@
       "reiclaw-config"
     ],
     "tail": [
-      "fill-translations",
       "xtask",
       "reiclaw-api",
       "reiclaw-bridge-acp",

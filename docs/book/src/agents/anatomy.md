@@ -2,10 +2,9 @@
 
 An agent is configured as a single `[agents.<alias>]` block. Every field is
 either a reference to something configured elsewhere or a per-agent override.
-The table below is generated from the config schema, so it always matches the
-running build. Click a field to expand it; click again to see how to set it.
-
-{{#config-fields agents}}
+The config schema is the field reference, so it always matches the running
+build: `rei markdown-schema` renders it as Markdown, and its `agents` section
+lists every field with its type, default, and description.
 
 ## Where the references point
 

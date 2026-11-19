@@ -3,11 +3,10 @@ import unittest
 from required_gate import ALL_JOBS, FULL_JOBS, FULL_SELECTION_OUTPUTS, TARGETED_JOBS, validate
 
 
-def result_set(full=False, docs_build=False, installer=False, web=False):
+def result_set(full=False, installer=False, web=False):
     needs = {job: {"result": "skipped", "outputs": {}} for job in ALL_JOBS}
     needs["changes"] = {"result": "success", "outputs": {
         "full": str(full).lower(),
-        "docs_build": str(docs_build).lower(),
         "installer": str(installer).lower(),
         "web": str(web).lower(),
     }}
@@ -17,17 +16,15 @@ def result_set(full=False, docs_build=False, installer=False, web=False):
             needs[job]["result"] = "success"
         if installer:
             needs["installer-drift"]["result"] = "success"
-    if docs_build:
-        needs["docs-build"]["result"] = "success"
     return needs
 
 
 class GateTests(unittest.TestCase):
     def test_accepts_prose_and_code_expected_results_on_each_event(self):
         for event in ("pull_request", "push", "merge_group"):
-            for full, build in ((False, False), (False, True), (True, False), (True, True)):
-                with self.subTest(event=event, full=full, build=build):
-                    self.assertEqual(validate(result_set(full, build), event), [])
+            for full in (False, True):
+                with self.subTest(event=event, full=full):
+                    self.assertEqual(validate(result_set(full), event), [])
 
     def test_accepts_selected_targeted_jobs(self):
         needs = result_set(full=True, installer=True)
@@ -46,9 +43,6 @@ class GateTests(unittest.TestCase):
                     self.assertTrue(validate(needs, "pull_request"))
 
     def test_selected_jobs_are_required(self):
-        needs = result_set(docs_build=True)
-        needs["docs-build"]["result"] = "skipped"
-        self.assertTrue(validate(needs, "pull_request"))
         for job in TARGETED_JOBS:
             with self.subTest(job=job):
                 needs = result_set(full=True, installer=True)
@@ -60,11 +54,10 @@ class GateTests(unittest.TestCase):
             needs = result_set()
             needs["changes"]["result"] = status
             self.assertTrue(validate(needs, "pull_request"))
-        for output in ("full", "docs_build"):
-            for value in (None, "", "True", True):
-                needs = result_set()
-                needs["changes"]["outputs"][output] = value
-                self.assertTrue(validate(needs, "pull_request"))
+        for value in (None, "", "True", True):
+            needs = result_set()
+            needs["changes"]["outputs"]["full"] = value
+            self.assertTrue(validate(needs, "pull_request"))
 
     def test_targeted_selection_output_is_required_for_full_lane(self):
         for output in (*TARGETED_JOBS.values(), *FULL_SELECTION_OUTPUTS):

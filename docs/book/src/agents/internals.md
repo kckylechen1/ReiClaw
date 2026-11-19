@@ -3,8 +3,8 @@
 This page is the architecture-depth companion to the rest of the Agents
 section: how the runtime enforces per-agent permissions, scopes memory, and
 attributes logs. For configuring and running agents, start at
-[Agents](./overview.md); for the schema-level field reference, see
-[Config](../reference/config.md); for live setup steps, see
+[Agents](./overview.md); for the schema-level field reference, run
+`rei markdown-schema`; for live setup steps, see
 [Multi-agent setup](../contributing/multi-agent-setup.md).
 
 ## Turn input preparation

@@ -10,14 +10,12 @@ gateway config editor, env-var overrides, `zeroclaw config set`,
 `zeroclaw config patch`, and Quickstart all route through that same typed
 schema.
 
-For the build order, tracked-output rules, and drift checks that turn the typed schema into the config reference, see [Generated documentation pipeline](./generated-documentation-pipeline.md).
-
 ## What owns what
 
 | Surface | Owner | Persistence boundary | Runtime apply boundary |
 | --- | --- | --- | --- |
 | Config schema | `crates/zeroclaw-config/src/schema.rs` plus `Configurable` derives | Code, not generated docs | New binary build |
-| Generated reference | `cargo mdbook refs` / `markdown-schema` | `docs/book/src/reference/config.md` at build time | Documentation only |
+| Generated reference | `rei markdown-schema` | Stdout only | Documentation only |
 | Bootstrap location | `ZEROCLAW_CONFIG_DIR`, `ZEROCLAW_DATA_DIR`, deprecated `ZEROCLAW_WORKSPACE` | Environment only | Before `Config` exists |
 | Schema-mirror overrides | `ZEROCLAW_<lowercase_path>` with `__` for dots | In-memory only | Each `Config::load_or_init()` |
 | CLI config writes | `zeroclaw config set`, `config patch`, aliases, model helpers | `save_dirty()` to `config.toml` | Next load/reload unless the current command uses the new in-memory value |
@@ -124,7 +122,7 @@ reload, persistence or revocation behavior.
 `zeroclaw-config` owns the typed schema and its `schema-export` feature.
 `zeroclaw-schema-markdown` renders an in-memory JSON Schema into Markdown and
 HTML field views. It has no normal dependency on config or the agent runtime;
-the CLI and mdBook preprocessor supply the canonical schema at each call.
+the CLI supplies the canonical schema at each call.
 The CLI enables the renderer only through `schema-export`, including builds
 without `agent-runtime`. Generated reference text and config persistence are
 unchanged.
@@ -173,7 +171,7 @@ consumer census; a module's size alone is not permission to remove it.
 | Pairing and token helpers | Stateful pairing moved to the existing runtime owner. Config keeps paired-token/bridge settings and stateless digest/comparison helpers in `tokens`; the same helpers serve runtime authentication and device registration. |
 | Secrets | Retained encryption and credential paths are used by config loading, saving and editing. They are not retired settings. |
 | Channel/provider schema sections | Retained listeners and inference clients still read them. Remove exclusive config only after the corresponding #378/#382 consumer replacement or retirement. |
-| Schema Markdown rendering | Moved to `zeroclaw-schema-markdown`; CLI and mdBook consume JSON Schema without placing presentation code on every config consumer. Config still owns schema generation. |
+| Schema Markdown rendering | Moved to `zeroclaw-schema-markdown`; the CLI consumes JSON Schema without placing presentation code on every config consumer. Config still owns schema generation. |
 | Config-list field visibility | The Gateway's private `api_config::field_visibility` owns its existing HTTP list filters. Config retains schema and persistence ownership. The canonical retention setting (`conversation_retention_days`) remains in `MemoryConfig` and is visible when `memory.backend = "tachi"`. This move does not change visibility, validation, write access or authorization. |
 | Quickstart preset selection | Risk/runtime catalogues, factories and provider recommendations moved to the existing Quickstart runtime owner. Config keeps submission DTOs and canonical profile types/defaults. |
 | Shared config metadata | Moved to `zeroclaw-api::config_metadata`; config keeps derive generation and compatibility re-exports. Config-specific traits, coercion, validation and writes remain config-owned. |
@@ -366,4 +364,4 @@ For config-schema, env-var, default, or reload changes, ask:
 - Gateway config API and reload banner: `crates/zeroclaw-gateway/src/api_config.rs`
 - Reload endpoint and access gate: `crates/zeroclaw-gateway/src/lib.rs`
 - Gateway bearer auth helper: `crates/zeroclaw-gateway/src/api.rs`
-- Generated reference pipeline: `xtask/src/cmd/mdbook/refs.rs`
+- Generated reference: `crates/reiclaw-config/src/schema_markdown.rs`

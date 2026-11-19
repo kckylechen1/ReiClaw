@@ -14,11 +14,36 @@ REI_<dotted_path_with_double_underscores>=<value>
 
 ## Examples
 
-{{#env-var example}}
+```sh
+# Inject a typed-family alias credential
+REI_providers__models__anthropic__home__api_key=sk-ant-...
+
+# Set a model on a non-default Anthropic alias (alias with underscore is fine)
+REI_providers__models__anthropic__prod_v2__model=claude-sonnet-4-6
+REI_providers__models__anthropic__prod_v2__api_key=sk-ant-...
+
+# Toggle and configure a channel
+REI_channels__telegram__home__enabled=true
+REI_channels__telegram__home__mention_only=true
+
+# Override gateway runtime knobs
+REI_gateway__request_timeout_secs=120
+REI_gateway__long_running_request_timeout_secs=900
+
+# Point the gateway at a built web dashboard (absolute path; no ~ / $HOME)
+REI_gateway__web_dist_dir=/srv/reiclaw/web/dist
+
+# Inject webhook signing secrets
+REI_channels__webhook__home__secret=...
+```
 
 The mapping from env-var name to TOML path is mechanical:
 
-{{#env-var-table}}
+| TOML | Env var |
+|---|---|
+| `[providers.models.anthropic.home] api_key = "..."` | `REI_providers__models__anthropic__home__api_key=...` |
+| `[gateway] request_timeout_secs = "..."` | `REI_gateway__request_timeout_secs=...` |
+| `[gateway] web_dist_dir = "..."` | `REI_gateway__web_dist_dir=...` |
 
 The `<alias>` segments above (`home`, `prod_v2`) are operator-chosen, substitute whatever names your config actually uses.
 
@@ -39,7 +64,7 @@ REI_WORKSPACE=/srv/reiclaw          # DEPRECATED — alias for REI_DATA_DIR
 </div>
 
 The gateway's web-dashboard location is configured via the standard
-schema-mirror form {{#env-var-name gateway.web_dist_dir}}, see
+schema-mirror form `REI_gateway__web_dist_dir`, see
 [Web dashboard (web_dist_dir)](../gateway/web-dashboard.md) for the full
 setting reference.
 
@@ -88,7 +113,27 @@ For example, `[providers.models.anthropic.home] api_key = "sk-..."` lives at the
 
 The schema-mirror grammar is the canonical way to inject values, but `ANTHROPIC_API_KEY` / `OPENROUTER_API_KEY` / etc. are still common names in `.env` files and CI configs. One-line shell expansions point a schema-mirror name at the ecosystem-default value:
 
-{{#env-var-bridge}}
+<div class="os-tabs-src">
+
+#### sh
+
+```sh
+# POSIX (bash, zsh, sh): drop into ~/.bashrc / ~/.zshrc / .env / Dockerfile
+export REI_providers__models__anthropic__home__api_key="$ANTHROPIC_API_KEY"
+export REI_providers__models__openai__home__api_key="$OPENAI_API_KEY"
+export REI_providers__models__groq__home__api_key="$GROQ_API_KEY"
+export REI_gateway__request_timeout_secs="$GATEWAY_TIMEOUT_SECS"
+```
+
+#### PowerShell
+
+```powershell
+# PowerShell: drop into $PROFILE
+$env:REI_providers__models__anthropic__home__api_key = $env:ANTHROPIC_API_KEY
+$env:REI_providers__models__openai__home__api_key = $env:OPENAI_API_KEY
+```
+
+</div>
 
 Substitute the alias name in place of `home` to match your config. For multiple aliases on the same family, repeat the line with each alias.
 

@@ -14,7 +14,22 @@ Leftover sections tombstone at load with a structured warning.
   URL required. Streaming draft edits are supported but capped by Telegram's
   rate limit; tune `draft_update_interval_ms` if you see "Too Many Requests".
 
-  {{#peer-group telegram}}
+  Inbound senders are gated against the **peer set** resolved for the bound
+  agent, drawn from the `peer_groups` config the agent belongs to. Matching strips
+  a leading `@` and is case-insensitive against the channel's native sender
+  identifier. An **empty** set denies everyone; a set containing `"*"` accepts
+  anyone; otherwise only the listed external peers (and peer agents) are accepted.
+  This is separate from gateway pairing (`gateway.require_pairing`), which
+  authenticates HTTP/WebSocket clients, not chat-channel senders.
+
+  A peer group for telegram sets `channel` to `telegram`, lists the allowed senders in
+  `external_peers` (for telegram, the Telegram user ID or @username; `["*"]` accepts anyone), optionally
+  names peer `agents` for cross-agent dispatch, an `ignore` blocklist, and an
+  `output_modality` (`mirror`, `voice`, or `text`). See [Peer Groups](peer-groups.md)
+  for the field reference.
+
+  Set it in the web dashboard at
+  [`/config/peer_groups`](http://127.0.0.1:42617/config/peer_groups).
 
 - **Webhook**; gateway ingress; see [Webhooks](./webhook.md).
 - **CLI / ACP**; always-on local surfaces.

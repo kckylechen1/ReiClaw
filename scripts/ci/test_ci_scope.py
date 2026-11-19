@@ -47,9 +47,9 @@ class ScopeTests(unittest.TestCase):
         self.write("docs/book/src/architecture/decisions/ADR-fixture.md", "proposal\n")
         self.commit()
         expected = {
-            "pull_request": {"full": "false", "docs_build": "false", "base_sha": self.base, "installer": "false", "web": "false"},
-            "push": {"full": "false", "docs_build": "false", "base_sha": self.base, "installer": "true", "web": "true"},
-            "merge_group": {"full": "false", "docs_build": "false", "base_sha": self.base, "installer": "true", "web": "true"},
+            "pull_request": {"full": "false", "base_sha": self.base, "installer": "false", "web": "false"},
+            "push": {"full": "false", "base_sha": self.base, "installer": "true", "web": "true"},
+            "merge_group": {"full": "false", "base_sha": self.base, "installer": "true", "web": "true"},
         }
         for event, want in expected.items():
             with self.subTest(event=event):
@@ -64,7 +64,6 @@ class ScopeTests(unittest.TestCase):
                 for event in ("pull_request", "push", "merge_group"):
                     scope = self.scope(event, base=base)
                     self.assertEqual(scope["full"], "false")
-                    self.assertEqual(scope["docs_build"], "false")
                     if event == "pull_request":
                         self.assertEqual(scope["installer"], "false")
                         self.assertEqual(scope["web"], "false")
@@ -76,40 +75,19 @@ class ScopeTests(unittest.TestCase):
                 for event in ("pull_request", "push", "merge_group"):
                     self.assertEqual(
                         self.scope(event, base=sym_base),
-                        {"full": "true", "docs_build": "true", "base_sha": "", "installer": "true", "web": "true"},
+                        {"full": "true", "base_sha": "", "installer": "true", "web": "true"},
                     )
 
-    def test_summary_requires_render_without_unrelated_runtime_matrix(self):
+    def test_summary_stays_in_documentation_lane(self):
         self.write("docs/book/src/SUMMARY.md", "# Summary\n")
         self.commit()
         self.assertEqual(self.scope()["full"], "false")
-        self.assertEqual(self.scope()["docs_build"], "true")
 
     def test_mixed_code_and_docs_keep_full_lane(self):
         self.write("README.md", "updated\n")
         self.write("src/lib.rs", "fn changed() {}\n")
         self.commit()
         self.assertEqual(self.scope()["full"], "true")
-
-    def test_book_generator_inputs_require_real_render(self):
-        for path in ("docs/book/peer-groups.toml", "docs/book/feature-matrix-parity.toml", "docs/book/env-vars.toml", "src/main.rs", "web/src/contexts/themes.json"):
-            with self.subTest(path=path):
-                base = self.git("rev-parse", "HEAD")
-                self.write(path, "changed\n")
-                self.commit()
-                self.assertEqual(self.scope(base=base)["docs_build"], "true")
-
-    def test_added_and_removed_custom_directives_reach_real_renderer(self):
-        for directive in ("{{#peer-group definitely_missing}}", "{{ #include snippet.md}}"):
-            with self.subTest(directive=directive):
-                base = self.git("rev-parse", "HEAD")
-                self.write("docs/book/src/page.md", directive + "\n")
-                directive_commit = self.commit()
-                self.assertEqual(self.scope(base=base)["full"], "false")
-                self.assertEqual(self.scope(base=base)["docs_build"], "true")
-                self.write("docs/book/src/page.md", "plain prose again\n")
-                self.commit()
-                self.assertEqual(self.scope(base=directive_commit)["docs_build"], "true")
 
     def test_runtime_markdown_and_unknown_paths_are_not_prose(self):
         for path in (
@@ -148,7 +126,7 @@ class ScopeTests(unittest.TestCase):
                 with self.subTest(base=base, event=event):
                     self.assertEqual(
                         self.scope(event, base=base),
-                        {"full": "true", "docs_build": "true", "base_sha": "", "installer": "true", "web": "true"},
+                        {"full": "true", "base_sha": "", "installer": "true", "web": "true"},
                     )
 
     def test_targeted_selection_on_pull_request_push_and_merge_group(self):
@@ -191,7 +169,7 @@ class ScopeTests(unittest.TestCase):
         self.commit()
         self.assertEqual(
             self.scope("pull_request", base=base_mv),
-            {"full": "true", "docs_build": "true", "base_sha": "", "installer": "true", "web": "true"},
+            {"full": "true", "base_sha": "", "installer": "true", "web": "true"},
         )
 
         # Dissimilar deletion + addition (even across unrelated paths) also fails closed.
@@ -201,7 +179,7 @@ class ScopeTests(unittest.TestCase):
         self.commit()
         self.assertEqual(
             self.scope("pull_request", base=base_da),
-            {"full": "true", "docs_build": "true", "base_sha": "", "installer": "true", "web": "true"},
+            {"full": "true", "base_sha": "", "installer": "true", "web": "true"},
         )
 
     def test_unsafe_path_in_diff_fails_closed(self):
@@ -211,7 +189,7 @@ class ScopeTests(unittest.TestCase):
             for event in ("pull_request", "push", "merge_group"):
                 self.assertEqual(
                     self.scope(event),
-                    {"full": "true", "docs_build": "true", "base_sha": "", "installer": "true", "web": "true"},
+                    {"full": "true", "base_sha": "", "installer": "true", "web": "true"},
                 )
 
     def test_symlink_or_executable_markdown_is_not_exempt(self):
