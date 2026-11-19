@@ -23,13 +23,11 @@ struct Surface {
 
 /// The surface registry. Adding a generated surface = one row here.
 fn registry() -> Vec<Surface> {
-    vec![
-        Surface {
-            name: "install-sh",
-            file: "install.sh",
-            render: |root, cur| install_sh::render_file(root, cur),
-        },
-    ]
+    vec![Surface {
+        name: "install-sh",
+        file: "install.sh",
+        render: |root, cur| install_sh::render_file(root, cur),
+    }]
 }
 
 fn workspace_root() -> PathBuf {
