@@ -504,6 +504,7 @@ async fn persist_and_swap(
             && !e.is::<reiclaw_config::current::UnsupportedSchemaError>()
             && !e.is::<reiclaw_config::providers::RetiredModelProviderError>()
             && !e.is::<reiclaw_config::current::RetiredChannelConfigError>()
+            && !e.is::<reiclaw_config::current::RetiredSecurityConfigError>()
         {
             if let Some(prev) = snapshot {
                 let _ = tokio::fs::write(&config_path, prev).await;

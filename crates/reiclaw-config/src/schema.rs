@@ -167,12 +167,6 @@ pub struct Config {
     #[group = "Operations"]
     pub observability: ObservabilityConfig,
 
-    /// Trust scoring and regression detection configuration (`[trust]`).
-    #[serde(default)]
-    #[nested]
-    #[group = "Operations"]
-    pub trust: crate::scattered_types::TrustConfig,
-
     /// Security subsystem configuration (`[security]`).
     #[serde(default)]
     #[nested]
@@ -253,12 +247,6 @@ pub struct Config {
     #[nested]
     pub cron: HashMap<String, CronJobDecl>,
 
-    /// ACP (Agent Client Protocol) server configuration (`[acp]`).
-    #[serde(default)]
-    #[nested]
-    #[group = "Integrations"]
-    pub acp: AcpConfig,
-
     /// Durable task-list behavior (`[tasks]`, #568): the owner-selected
     /// reminder destination armed occurrences copy at creation.
     #[serde(default, skip_serializing_if = "crate::tasks::TasksConfig::is_unset")]
@@ -310,23 +298,11 @@ pub struct Config {
     #[group = "Tools"]
     pub multimodal: MultimodalConfig,
 
-    /// Automatic media understanding pipeline (`[media_pipeline]`).
-    #[serde(default)]
-    #[nested]
-    #[group = "Tools"]
-    pub media_pipeline: MediaPipelineConfig,
-
     /// Web fetch tool configuration (`[web_fetch]`).
     #[serde(default)]
     #[nested]
     #[group = "Tools"]
     pub web_fetch: WebFetchConfig,
-
-    /// Link enricher configuration (`[link_enricher]`).
-    #[serde(default)]
-    #[nested]
-    #[group = "Tools"]
-    pub link_enricher: LinkEnricherConfig,
 
     /// Web search tool configuration (`[web_search]`).
     #[serde(default)]
@@ -469,12 +445,6 @@ pub struct Config {
     #[serde(default)]
     #[nested]
     pub onboard_state: OnboardStateConfig,
-
-    /// Secure inter-node transport configuration (`[node_transport]`).
-    #[serde(default)]
-    #[nested]
-    #[group = "Network"]
-    pub node_transport: NodeTransportConfig,
 
     /// Standalone image generation tool configuration (`[image_gen]`).
     #[serde(default)]
@@ -1467,9 +1437,8 @@ pub struct AliasedAgentConfig {
     /// return promptly. Enable it when this agent must call its `mcp_bundles`
     /// tools over ACP; `session/new` then pays the one-time MCP connection cost
     /// (bounded and non-fatal per server). Set per agent so each ACP profile
-    /// opts in independently; when this agent is the ACP default
-    /// (`acp.default_agent`, or the sole configured agent), the flag is picked
-    /// up automatically for sessions that omit `agentAlias`.
+    /// opts in independently. The standalone ACP bridge selects its agent
+    /// explicitly; there is no kernel-wide ACP default agent.
     #[tab(Bundles)]
     #[serde(default)]
     pub acp_enable_mcp: bool,
@@ -4170,46 +4139,6 @@ impl Default for MultimodalConfig {
     }
 }
 
-// ── Media Pipeline ──────────────────────────────────────────────
-
-/// Automatic media understanding pipeline configuration (`[media_pipeline]`).
-///
-/// When enabled, inbound channel messages with media attachments are
-/// pre-processed before reaching the agent: audio is transcribed, images are
-/// annotated, and videos are summarised.
-#[allow(clippy::struct_excessive_bools)]
-#[derive(Debug, Clone, Serialize, Deserialize, Configurable)]
-#[cfg_attr(feature = "schema-export", derive(schemars::JsonSchema))]
-#[prefix = "media_pipeline"]
-pub struct MediaPipelineConfig {
-    /// Master toggle for the media pipeline (default: false).
-    #[serde(default)]
-    pub enabled: bool,
-
-    /// Transcribe audio attachments using the configured transcription model_provider.
-    #[serde(default = "default_true")]
-    pub transcribe_audio: bool,
-
-    /// Add image descriptions when a vision-capable model is active.
-    #[serde(default = "default_true")]
-    pub describe_images: bool,
-
-    /// Summarize video attachments (placeholder — requires external API).
-    #[serde(default = "default_true")]
-    pub summarize_video: bool,
-}
-
-impl Default for MediaPipelineConfig {
-    fn default() -> Self {
-        Self {
-            enabled: false,
-            transcribe_audio: true,
-            describe_images: true,
-            summarize_video: true,
-        }
-    }
-}
-
 // ── Identity (AIEOS / OpenClaw format) ──────────────────────────
 
 /// Identity format configuration (`[identity]` section).
@@ -4874,72 +4803,6 @@ impl Default for GatewayClientAuthConfig {
     }
 }
 
-/// Secure transport configuration for inter-node communication (`[node_transport]`).
-#[derive(Debug, Clone, Serialize, Deserialize, Configurable)]
-#[cfg_attr(feature = "schema-export", derive(schemars::JsonSchema))]
-#[prefix = "node_transport"]
-pub struct NodeTransportConfig {
-    /// Enable the secure transport layer.
-    #[serde(default = "default_node_transport_enabled")]
-    pub enabled: bool,
-    /// Shared secret for HMAC authentication between nodes.
-    #[serde(default)]
-    #[secret]
-    #[credential_class = "encrypted_secret"]
-    #[cfg_attr(feature = "schema-export", schemars(extend("x-secret" = true)))]
-    pub shared_secret: String,
-    /// Maximum age of signed requests in seconds (replay protection).
-    #[serde(default = "default_max_request_age")]
-    pub max_request_age_secs: i64,
-    /// Require HTTPS for all node communication.
-    #[serde(default = "default_require_https")]
-    pub require_https: bool,
-    /// Allow specific node IPs/CIDRs.
-    #[serde(default)]
-    pub allowed_peers: Vec<String>,
-    /// Path to TLS certificate file.
-    #[serde(default)]
-    pub tls_cert_path: Option<String>,
-    /// Path to TLS private key file.
-    #[serde(default)]
-    pub tls_key_path: Option<String>,
-    /// Require client certificates (mutual TLS).
-    #[serde(default)]
-    pub mutual_tls: bool,
-    /// Maximum number of connections per peer.
-    #[serde(default = "default_connection_pool_size")]
-    pub connection_pool_size: usize,
-}
-
-fn default_node_transport_enabled() -> bool {
-    true
-}
-fn default_max_request_age() -> i64 {
-    300
-}
-fn default_require_https() -> bool {
-    true
-}
-fn default_connection_pool_size() -> usize {
-    4
-}
-
-impl Default for NodeTransportConfig {
-    fn default() -> Self {
-        Self {
-            enabled: default_node_transport_enabled(),
-            shared_secret: String::new(),
-            max_request_age_secs: default_max_request_age(),
-            require_https: default_require_https(),
-            allowed_peers: Vec::new(),
-            tls_cert_path: None,
-            tls_key_path: None,
-            mutual_tls: false,
-            connection_pool_size: default_connection_pool_size(),
-        }
-    }
-}
-
 // ── Secrets (encrypted credential store) ────────────────────────
 
 /// Secrets encryption configuration (`[secrets]` section).
@@ -5165,47 +5028,6 @@ impl Default for WebFetchConfig {
             max_response_size: default_web_fetch_max_response_size(),
             timeout_secs: default_web_fetch_timeout_secs(),
             firecrawl: FirecrawlConfig::default(),
-        }
-    }
-}
-
-// ── Link enricher ─────────────────────────────────────────────────
-
-/// Automatic link understanding for inbound channel messages (`[link_enricher]`).
-///
-/// When enabled, URLs in incoming messages are automatically fetched and
-/// summarised. The summary is prepended to the message before the agent
-/// processes it, giving the LLM context about linked pages without an
-/// explicit tool call.
-#[derive(Debug, Clone, Serialize, Deserialize, Configurable)]
-#[cfg_attr(feature = "schema-export", derive(schemars::JsonSchema))]
-#[prefix = "link_enricher"]
-pub struct LinkEnricherConfig {
-    /// Enable the link enricher pipeline stage (default: false)
-    #[serde(default)]
-    pub enabled: bool,
-    /// Maximum number of links to fetch per message (default: 3)
-    #[serde(default = "default_link_enricher_max_links")]
-    pub max_links: usize,
-    /// Per-link fetch timeout in seconds (default: 10)
-    #[serde(default = "default_link_enricher_timeout_secs")]
-    pub timeout_secs: u64,
-}
-
-fn default_link_enricher_max_links() -> usize {
-    3
-}
-
-fn default_link_enricher_timeout_secs() -> u64 {
-    10
-}
-
-impl Default for LinkEnricherConfig {
-    fn default() -> Self {
-        Self {
-            enabled: false,
-            max_links: default_link_enricher_max_links(),
-            timeout_secs: default_link_enricher_timeout_secs(),
         }
     }
 }
@@ -7788,45 +7610,6 @@ fn default_max_run_history() -> u32 {
     50
 }
 
-// ── ACP ──────────────────────────────────────────────────────────
-
-/// ACP (Agent Client Protocol) server configuration (`[acp]` section).
-#[derive(Debug, Clone, Serialize, Deserialize, Configurable)]
-#[cfg_attr(feature = "schema-export", derive(schemars::JsonSchema))]
-#[prefix = "acp"]
-pub struct AcpConfig {
-    /// Agent alias to use when `session/new` omits `agentAlias` and more than
-    /// one agent is configured. When exactly one agent exists it is
-    /// auto-selected regardless of this field.
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub default_agent: Option<String>,
-    /// Maximum number of concurrent ACP sessions. Default: `10`.
-    #[serde(default = "default_acp_max_sessions")]
-    pub max_sessions: usize,
-    /// Idle session timeout in seconds. Sessions with no activity for this
-    /// duration are eligible for eviction. Default: `3600` (1 hour).
-    #[serde(default = "default_acp_session_timeout_secs")]
-    pub session_timeout_secs: u64,
-}
-
-fn default_acp_max_sessions() -> usize {
-    10
-}
-
-fn default_acp_session_timeout_secs() -> u64 {
-    3600
-}
-
-impl Default for AcpConfig {
-    fn default() -> Self {
-        Self {
-            default_agent: None,
-            max_sessions: default_acp_max_sessions(),
-            session_timeout_secs: default_acp_session_timeout_secs(),
-        }
-    }
-}
-
 // ── Tunnel ──────────────────────────────────────────────────────
 
 /// Tunnel configuration for exposing the gateway publicly (`[tunnel]` section).
@@ -8073,9 +7856,6 @@ pub fn is_retired_transport(kind: &str) -> bool {
 #[cfg_attr(feature = "schema-export", derive(schemars::JsonSchema))]
 #[prefix = "channels"]
 pub struct ChannelsConfig {
-    /// Enable the CLI interactive channel. Default: `true`.
-    #[serde(default = "default_true")]
-    pub cli: bool,
     /// Telegram bot channel instances (`[channels.telegram.<alias>]`).
     #[serde(default, skip_serializing_if = "HashMap::is_empty")]
     #[nested]
@@ -8104,23 +7884,6 @@ pub struct ChannelsConfig {
     )]
     #[cfg_attr(feature = "schema-export", schemars(skip))]
     pub filesystem: HashMap<String, ()>,
-    /// Base timeout in seconds for processing a single channel message (LLM + tools).
-    /// Runtime uses this as a per-turn budget that scales with tool-loop depth
-    /// (up to 4x, capped) so one slow/retried model call does not consume the
-    /// entire conversation budget.
-    /// Default: 300s for on-device LLMs (Ollama) which are slower than cloud APIs.
-    #[serde(default = "default_channel_message_timeout_secs")]
-    pub message_timeout_secs: u64,
-    /// Per-channel multiplier for the global channel message in-flight budget.
-    /// Runtime multiplies this value by the configured channel count, then
-    /// applies its global minimum and maximum bounds to one shared dispatcher
-    /// semaphore. Default: `4`.
-    #[serde(default = "default_channel_max_concurrent_per_channel")]
-    pub max_concurrent_per_channel: usize,
-    /// Whether to add acknowledgement reactions (👀 on receipt, ✅/⚠️ on
-    /// completion) to incoming channel messages. Default: `true`.
-    #[serde(default = "default_true")]
-    pub ack_reactions: bool,
     /// Whether to send tool-call notification messages (e.g. `🔧 web_search_tool: …`)
     /// to channel users. When `false`, tool calls are still logged server-side but
     /// not forwarded as individual channel messages. Default: `false`.
@@ -8137,11 +7900,6 @@ pub struct ChannelsConfig {
     /// Auto-archive stale sessions older than this many hours. `0` disables. Default: `0`.
     #[serde(default)]
     pub session_ttl_hours: u32,
-    /// Inbound message debounce window in milliseconds. When a sender fires
-    /// multiple messages within this window, they are accumulated and dispatched
-    /// as a single concatenated message. `0` disables debouncing. Default: `0`.
-    #[serde(default)]
-    pub debounce_ms: u64,
 }
 
 // ── Retired SOP run-side config keys ────────────────────────────────────────
@@ -8274,14 +8032,6 @@ impl ChannelsConfig {
     }
 }
 
-fn default_channel_message_timeout_secs() -> u64 {
-    300
-}
-
-fn default_channel_max_concurrent_per_channel() -> usize {
-    4
-}
-
 fn default_session_backend() -> String {
     "sqlite".into()
 }
@@ -8289,19 +8039,14 @@ fn default_session_backend() -> String {
 impl Default for ChannelsConfig {
     fn default() -> Self {
         Self {
-            cli: true,
             telegram: HashMap::new(),
             webhook: HashMap::new(),
             mqtt: HashMap::new(),
             filesystem: HashMap::new(),
-            message_timeout_secs: default_channel_message_timeout_secs(),
-            max_concurrent_per_channel: default_channel_max_concurrent_per_channel(),
-            ack_reactions: true,
             show_tool_calls: false,
             session_persistence: true,
             session_backend: default_session_backend(),
             session_ttl_hours: 0,
-            debounce_ms: 0,
         }
     }
 }
@@ -8579,7 +8324,7 @@ impl_reply_pacing!(TelegramConfig, WebhookConfig);
 
 // ── Security Config ─────────────────────────────────────────────────
 
-/// Security configuration for audit logging, OTP, e-stop, IAM/SSO, and WebAuthn.
+/// Security configuration for audit logging, credential redaction, OTP, and e-stop.
 ///
 /// Sandbox backend and resource limits live on per-agent risk profiles
 /// (see `RiskProfileConfig::sandbox_*` and `RiskProfileConfig::max_*`); the
@@ -8608,16 +8353,6 @@ pub struct SecurityConfig {
     #[serde(default)]
     #[nested]
     pub estop: EstopConfig,
-
-    /// Nevis IAM integration for SSO/MFA authentication and role-based access.
-    #[serde(default)]
-    #[nested]
-    pub nevis: NevisConfig,
-
-    /// WebAuthn / FIDO2 hardware key authentication configuration.
-    #[serde(default)]
-    #[nested]
-    pub webauthn: WebAuthnConfig,
 }
 
 /// Outbound credential leak detection configuration.
@@ -8664,51 +8399,6 @@ impl Default for LeakDetectionConfig {
             high_entropy_tokens: default_leak_detection_high_entropy_tokens(),
         }
     }
-}
-
-/// WebAuthn / FIDO2 hardware key authentication configuration (`[security.webauthn]`).
-///
-/// Enables registration and authentication via hardware security keys
-/// (YubiKey, SoloKey, etc.) and platform authenticators (Touch ID, Windows Hello).
-#[derive(Debug, Clone, Serialize, Deserialize, Configurable)]
-#[cfg_attr(feature = "schema-export", derive(schemars::JsonSchema))]
-#[prefix = "security.webauthn"]
-pub struct WebAuthnConfig {
-    /// Enable WebAuthn authentication. Default: false.
-    #[serde(default)]
-    pub enabled: bool,
-    /// Relying Party ID (domain name, e.g. "example.com"). Default: "localhost".
-    #[serde(default = "default_webauthn_rp_id")]
-    pub rp_id: String,
-    /// Relying Party origin URL (e.g. `"https://example.com"`). Default: `"http://localhost:42617"`.
-    #[serde(default = "default_webauthn_rp_origin")]
-    pub rp_origin: String,
-    /// Relying Party display name. Default: "ReiClaw".
-    #[serde(default = "default_webauthn_rp_name")]
-    pub rp_name: String,
-}
-
-impl Default for WebAuthnConfig {
-    fn default() -> Self {
-        Self {
-            enabled: false,
-            rp_id: default_webauthn_rp_id(),
-            rp_origin: default_webauthn_rp_origin(),
-            rp_name: default_webauthn_rp_name(),
-        }
-    }
-}
-
-fn default_webauthn_rp_id() -> String {
-    "localhost".into()
-}
-
-fn default_webauthn_rp_origin() -> String {
-    "http://localhost:42617".into()
-}
-
-fn default_webauthn_rp_name() -> String {
-    "ReiClaw".into()
 }
 
 /// OTP validation strategy.
@@ -8848,125 +8538,6 @@ impl Default for EstopConfig {
             require_otp_to_resume: true,
         }
     }
-}
-
-/// Nevis IAM integration configuration.
-///
-/// When `enabled` is true, ZeroClaw validates incoming requests against a Nevis
-/// Security Suite instance and maps Nevis roles to tool/workspace permissions.
-#[derive(Clone, Serialize, Deserialize, Configurable)]
-#[cfg_attr(feature = "schema-export", derive(schemars::JsonSchema))]
-#[prefix = "security.nevis"]
-#[serde(deny_unknown_fields)]
-pub struct NevisConfig {
-    /// Enable Nevis IAM integration. Defaults to false for backward compatibility.
-    #[serde(default)]
-    pub enabled: bool,
-
-    /// Base URL of the Nevis instance (e.g. `https://nevis.example.com`).
-    #[serde(default)]
-    pub instance_url: String,
-
-    /// Nevis realm to authenticate against.
-    #[serde(default = "default_nevis_realm")]
-    pub realm: String,
-
-    /// OAuth2 client ID registered in Nevis.
-    #[serde(default)]
-    pub client_id: String,
-
-    /// OAuth2 client secret. Encrypted via SecretStore when stored on disk.
-    #[serde(default)]
-    #[secret]
-    #[credential_class = "encrypted_secret"]
-    #[cfg_attr(feature = "schema-export", schemars(extend("x-secret" = true)))]
-    pub client_secret: Option<String>,
-
-    /// Token validation strategy: `"local"` (JWKS) or `"remote"` (introspection).
-    #[serde(default = "default_nevis_token_validation")]
-    pub token_validation: String,
-
-    /// JWKS endpoint URL for local token validation.
-    #[serde(default)]
-    pub jwks_url: Option<String>,
-
-    /// Nevis role to ZeroClaw permission mappings.
-    #[serde(default)]
-    pub role_mapping: Vec<NevisRoleMappingConfig>,
-
-    /// Require MFA verification for all Nevis-authenticated requests.
-    #[serde(default)]
-    pub require_mfa: bool,
-
-    /// Session timeout in seconds.
-    #[serde(default = "default_nevis_session_timeout_secs")]
-    pub session_timeout_secs: u64,
-}
-
-impl std::fmt::Debug for NevisConfig {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        f.debug_struct("NevisConfig")
-            .field("enabled", &self.enabled)
-            .field("instance_url", &self.instance_url)
-            .field("realm", &self.realm)
-            .field("client_id", &self.client_id)
-            .field(
-                "client_secret",
-                &self.client_secret.as_ref().map(|_| "[REDACTED]"),
-            )
-            .field("token_validation", &self.token_validation)
-            .field("jwks_url", &self.jwks_url)
-            .field("role_mapping", &self.role_mapping)
-            .field("require_mfa", &self.require_mfa)
-            .field("session_timeout_secs", &self.session_timeout_secs)
-            .finish()
-    }
-}
-
-fn default_nevis_realm() -> String {
-    "master".into()
-}
-
-fn default_nevis_token_validation() -> String {
-    "local".into()
-}
-
-fn default_nevis_session_timeout_secs() -> u64 {
-    3600
-}
-
-impl Default for NevisConfig {
-    fn default() -> Self {
-        Self {
-            enabled: false,
-            instance_url: String::new(),
-            realm: default_nevis_realm(),
-            client_id: String::new(),
-            client_secret: None,
-            token_validation: default_nevis_token_validation(),
-            jwks_url: None,
-            role_mapping: Vec::new(),
-            require_mfa: false,
-            session_timeout_secs: default_nevis_session_timeout_secs(),
-        }
-    }
-}
-
-/// Maps a Nevis role to ZeroClaw tool permissions and workspace access.
-#[derive(Debug, Clone, Serialize, Deserialize)]
-#[cfg_attr(feature = "schema-export", derive(schemars::JsonSchema))]
-#[serde(deny_unknown_fields)]
-pub struct NevisRoleMappingConfig {
-    /// Nevis role name (case-insensitive).
-    pub nevis_role: String,
-
-    /// Tool names this role can access. Use `"all"` for unrestricted tool access.
-    #[serde(default)]
-    pub zeroclaw_permissions: Vec<String>,
-
-    /// Workspace names this role can access. Use `"all"` for unrestricted.
-    #[serde(default)]
-    pub workspace_access: Vec<String>,
 }
 
 /// Sandbox configuration for OS-level isolation
@@ -9159,7 +8730,6 @@ impl Default for Config {
             model_routes: Vec::new(),
             embedding_routes: Vec::new(),
             observability: ObservabilityConfig::default(),
-            trust: crate::scattered_types::TrustConfig::default(),
             backup: BackupConfig::default(),
             data_retention: DataRetentionConfig::default(),
             security: SecurityConfig::default(),
@@ -9172,7 +8742,6 @@ impl Default for Config {
             pipeline: PipelineConfig::default(),
             heartbeat: HeartbeatConfig::default(),
             cron: HashMap::new(),
-            acp: AcpConfig::default(),
             channels: ChannelsConfig::default(),
             memory: MemoryConfig::default(),
             storage: StorageConfig::default(),
@@ -9181,9 +8750,7 @@ impl Default for Config {
             secrets: SecretsConfig::default(),
             http_request: HttpRequestConfig::default(),
             multimodal: MultimodalConfig::default(),
-            media_pipeline: MediaPipelineConfig::default(),
             web_fetch: WebFetchConfig::default(),
-            link_enricher: LinkEnricherConfig::default(),
             web_search: WebSearchConfig::default(),
             proxy: ProxyConfig::default(),
             cost: CostConfig::default(),
@@ -9204,7 +8771,6 @@ impl Default for Config {
             tachi: crate::tachi::TachiConfig::default(),
             nodes: NodesConfig::default(),
             onboard_state: OnboardStateConfig::default(),
-            node_transport: NodeTransportConfig::default(),
             image_gen: ImageGenConfig::default(),
             file_upload: FileUploadConfig::default(),
             file_upload_bundle: FileUploadBundleConfig::default(),

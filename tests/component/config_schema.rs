@@ -345,56 +345,27 @@ fn config_memory_defaults_when_section_absent() {
 }
 
 #[test]
-fn config_channels_without_cli_field() {
-    let toml_str = r#"
+fn config_channels_retired_cli_flag_preserves_live_channel_settings() {
+    let raw = r#"
 schema_version = 3
-
+[channels]
+cli = false
+show_tool_calls = true
 [channels.telegram.default]
 bot_token = "telegram-test-token"
-allowed_users = ["@user:example.com"]
+ack_reactions = false
+debounce_ms = 15
 "#;
-    let parsed: Config = toml::from_str(toml_str)
-        .expect("channels with only a Telegram section (no explicit cli field) should parse");
+    let parsed = current::parse_current(raw).expect("retired scalar is ignored");
+    assert!(parsed.channels.show_tool_calls);
+    let telegram = &parsed.channels.telegram["default"];
+    assert_eq!(telegram.ack_reactions, Some(false));
+    assert_eq!(telegram.debounce_ms, Some(15));
     assert!(
-        parsed.channels.cli,
-        "cli should default to true when omitted"
+        reiclaw_config::validation_warnings::retired_field_tombstones(raw)
+            .iter()
+            .any(|warning| warning.path == "channels.cli")
     );
-    assert!(!parsed.channels.telegram.is_empty());
-}
-
-// ─────────────────────────────────────────────────────────────────────────────
-// – top-level [cli] section must not clash with channels.cli
-// ─────────────────────────────────────────────────────────────────────────────
-
-#[test]
-fn config_toplevel_cli_section_with_whatsapp_parses() {
-    // The WhatsApp schema retired (#584): the section tombstones at load
-    // instead of failing the parse, and the top-level [cli] section still
-    // applies.
-    let toml_str = r#"
-[cli]
-
-[channels.whatsapp.default]
-session_path = "~/.zeroclaw/state/whatsapp-web/session.db"
-"#;
-    let parsed: Config = toml::from_str(toml_str)
-        .expect("top-level [cli] section with a retired [channels.whatsapp] should parse");
-    assert!(parsed.channels.cli);
-}
-
-#[test]
-fn config_channels_explicit_cli_true_with_whatsapp() {
-    let toml_str = r#"
-[channels]
-cli = true
-
-[channels.whatsapp.default]
-session_path = "~/.zeroclaw/state/whatsapp-web/session.db"
-allowed_numbers = ["*"]
-"#;
-    let parsed: Config =
-        toml::from_str(toml_str).expect("explicit channels.cli=true with whatsapp should parse");
-    assert!(parsed.channels.cli);
 }
 
 #[test]

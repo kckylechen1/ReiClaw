@@ -13,7 +13,6 @@ fn empty_config() -> Config {
     c.escalation.alert_channels.clear();
     c.heartbeat.enabled = false;
     c.heartbeat.agent.clear();
-    c.acp.default_agent = None;
     c
 }
 
@@ -144,7 +143,6 @@ fn agent_refs_heartbeat_hard_when_enabled() {
     let mut cfg = empty_config();
     cfg.heartbeat.enabled = true;
     cfg.heartbeat.agent = "bot".to_string();
-    cfg.acp.default_agent = Some("bot".to_string());
     let mut referrer = AliasedAgentConfig {
         ..Default::default()
     };
@@ -163,10 +161,10 @@ fn agent_refs_heartbeat_hard_when_enabled() {
     cfg.peer_groups.insert("crew".to_string(), group);
 
     let report = plan_delete(&cfg, &AliasKind::Agent, "bot");
-    // heartbeat (hard) + access + read_memory_from + peer member + acp
+    // heartbeat (hard) + access + read_memory_from + peer member; ACP is retired.
     assert_eq!(report.blockers.len(), 1);
     assert_eq!(report.blockers[0].path, "heartbeat.agent");
-    assert_eq!(report.scrubs.len(), 4);
+    assert_eq!(report.scrubs.len(), 3);
     assert!(!report.allowed);
 }
 
@@ -257,7 +255,6 @@ fn agent_ref_trimming_mirrors_validate() {
     // TRIM-matched refs (validate trims): padded values must be FOUND.
     cfg.heartbeat.enabled = false;
     cfg.heartbeat.agent = "  bot  ".to_string();
-    cfg.acp.default_agent = Some(" bot ".to_string());
     cfg.agents.insert(
         "lead".to_string(),
         AliasedAgentConfig {
@@ -276,7 +273,6 @@ fn agent_ref_trimming_mirrors_validate() {
     let sites = find_all_references(&cfg, &AliasKind::Agent, "bot");
     let paths: Vec<_> = sites.iter().map(|s| s.path.as_str()).collect();
     assert!(paths.contains(&"heartbeat.agent"));
-    assert!(paths.contains(&"acp.default_agent"));
     assert!(
         !paths.iter().any(|p| p.contains("read_memory_from")),
         "padded read_memory_from is raw-matched, must NOT match (mirror validate)"
@@ -768,7 +764,6 @@ fn cascade_agent_scrubs_all_soft_refs_and_removes() {
         .insert("bot".to_string(), AliasedAgentConfig::default());
     cfg.heartbeat.enabled = false; // disabled → heartbeat.agent is a SOFT ref
     cfg.heartbeat.agent = "bot".to_string();
-    cfg.acp.default_agent = Some("bot".to_string());
     let mut lead = AliasedAgentConfig {
         ..Default::default()
     };
@@ -792,11 +787,14 @@ fn cascade_agent_scrubs_all_soft_refs_and_removes() {
         CascadePolicy::RefuseOnHard,
     )
     .expect("soft-only agent delete succeeds");
-    assert_eq!(report.applied.len(), 5);
+    assert_eq!(
+        report.applied.len(),
+        4,
+        "heartbeat + access + memory + peer group"
+    );
     assert_eq!(report.deleted_entry.as_deref(), Some("agents.bot"));
     assert!(!cfg.agents.contains_key("bot"));
     assert!(cfg.heartbeat.agent.is_empty());
-    assert!(cfg.acp.default_agent.is_none());
     assert!(cfg.agents["lead"].workspace.access.is_empty());
     assert!(cfg.agents["lead"].workspace.read_memory_from.is_empty());
     assert!(cfg.peer_groups["crew"].agents.is_empty());
@@ -805,14 +803,13 @@ fn cascade_agent_scrubs_all_soft_refs_and_removes() {
 
 #[test]
 fn cascade_agent_scrub_trim_split_mirrors_find() {
-    // Trimmed sites (heartbeat/acp) scrub a padded ref; raw sites
+    // The trimmed heartbeat site scrubs a padded ref; raw sites
     // (read_memory_from) do not — exactly as find/validate.
     let mut cfg = empty_config();
     cfg.agents
         .insert("bot".to_string(), AliasedAgentConfig::default());
     cfg.heartbeat.enabled = false;
     cfg.heartbeat.agent = "  bot  ".to_string();
-    cfg.acp.default_agent = Some(" bot ".to_string());
     let mut lead = AliasedAgentConfig {
         ..Default::default()
     };
@@ -828,9 +825,8 @@ fn cascade_agent_scrub_trim_split_mirrors_find() {
         CascadePolicy::RefuseOnHard,
     )
     .expect("padded trimmed refs scrubbed, post-condition passes");
-    assert_eq!(report.applied.len(), 2, "heartbeat + acp (trimmed)");
+    assert_eq!(report.applied.len(), 1, "heartbeat (trimmed)");
     assert!(cfg.heartbeat.agent.is_empty());
-    assert!(cfg.acp.default_agent.is_none());
     // raw read_memory_from did not match " bot " != "bot" → untouched.
     assert_eq!(cfg.agents["lead"].workspace.read_memory_from.len(), 1);
 }
@@ -840,13 +836,13 @@ fn cascade_agent_dry_run_mutates_nothing() {
     let mut cfg = empty_config();
     cfg.agents
         .insert("bot".to_string(), AliasedAgentConfig::default());
-    cfg.acp.default_agent = Some("bot".to_string());
+    cfg.heartbeat.agent = "bot".to_string();
     let report =
         delete_with_cascade(&mut cfg, &AliasKind::Agent, "bot", CascadePolicy::DryRun).unwrap();
     assert!(report.deleted_entry.is_none());
     assert_eq!(report.plan.scrubs.len(), 1);
     assert!(cfg.agents.contains_key("bot"));
-    assert_eq!(cfg.acp.default_agent.as_deref(), Some("bot"));
+    assert_eq!(cfg.heartbeat.agent, "bot");
 }
 
 #[test]
@@ -1097,7 +1093,6 @@ fn rename_agent_rewrites_every_ref_kind() {
     let mut cfg = empty_config();
     cfg.heartbeat.enabled = true;
     cfg.heartbeat.agent = "bot".to_string(); // HARD ref — rename rewrites it
-    cfg.acp.default_agent = Some("bot".to_string());
     let mut bot = AliasedAgentConfig {
         ..Default::default()
     };
@@ -1126,7 +1121,6 @@ fn rename_agent_rewrites_every_ref_kind() {
     assert!(cfg.agents.contains_key("bot2"));
     // every ref now names bot2
     assert_eq!(cfg.heartbeat.agent, "bot2");
-    assert_eq!(cfg.acp.default_agent.as_deref(), Some("bot2"));
     assert!(
         cfg.agents["bot2"]
             .workspace
@@ -1153,7 +1147,6 @@ fn rename_agent_rewrites_every_ref_kind() {
     // the surface persists exactly what changed (and nothing stays stale).
     for expected in [
         "heartbeat.agent",
-        "acp.default_agent",
         "agents.bot", // old entry removed on disk
         "agents.bot2",
         "agents.lead",
@@ -1452,7 +1445,6 @@ fn dirty_entry_for_truncates_ref_paths_to_persistable_entries() {
     );
     // scalars / whole-vector fields → the field/section, index stripped.
     assert_eq!(dirty_entry_for("heartbeat.agent"), "heartbeat.agent");
-    assert_eq!(dirty_entry_for("acp.default_agent"), "acp.default_agent");
     assert_eq!(
         dirty_entry_for("escalation.alert_channels[3]"),
         "escalation.alert_channels"
