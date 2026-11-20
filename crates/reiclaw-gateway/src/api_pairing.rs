@@ -3,7 +3,7 @@
 use super::AppState;
 use axum::{
     extract::{ConnectInfo, State},
-    http::{HeaderMap, StatusCode, header},
+    http::{HeaderMap, StatusCode},
     response::{IntoResponse, Json},
 };
 use parking_lot::Mutex;
@@ -333,21 +333,14 @@ impl PairingStore {
     }
 }
 
-fn extract_bearer(headers: &HeaderMap) -> Option<&str> {
-    headers
-        .get(header::AUTHORIZATION)
-        .and_then(|v| v.to_str().ok())
-        .and_then(|auth| auth.strip_prefix("Bearer "))
-}
+pub(crate) use crate::auth::bearer_token as extract_bearer;
 
 fn require_auth(state: &AppState, headers: &HeaderMap) -> Result<(), (StatusCode, &'static str)> {
-    if state.pairing.require_pairing() {
-        let token = extract_bearer(headers).unwrap_or("");
-        if !state.pairing.is_authenticated(token) {
-            return Err((StatusCode::UNAUTHORIZED, "Unauthorized"));
-        }
+    if crate::auth::paired_authenticates(state, headers) {
+        Ok(())
+    } else {
+        Err((StatusCode::UNAUTHORIZED, "Unauthorized"))
     }
-    Ok(())
 }
 
 /// POST /api/pairing/initiate — initiate a new pairing session

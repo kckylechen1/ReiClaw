@@ -104,7 +104,7 @@ pub async fn handle_ws_bridge(
     headers: HeaderMap,
     ws: WebSocketUpgrade,
 ) -> impl IntoResponse {
-    let token = crate::ws::extract_ws_token(&headers, query.token.as_deref()).unwrap_or("");
+    let token = crate::auth::ws_bearer_token(&headers, query.token.as_deref()).unwrap_or("");
     let (bridge, data_dir) = {
         let config = state.config.read();
         let bridge = config

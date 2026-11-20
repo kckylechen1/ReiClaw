@@ -160,9 +160,9 @@ To see what's available: `GET /api/tools` (REST) lists all registered tools with
 Edit `~/.zeroclaw/config.toml` directly, use `zeroclaw config set <key>=<value>` for one field at a time, or delete `~/.zeroclaw/` and re-run `zeroclaw quickstart` for a fresh setup.
 
 **REST:**
-- `GET /api/config`: compatibility whole-config read (secrets masked as `***MASKED***`)
+- `GET /api/config/list`: enumerate current fields and metadata; secret fields expose only whether they are populated
 - `PATCH /api/config`: atomically update config with an RFC 6902 JSON Patch document
-- `OPTIONS /api/config`: get the whole-config JSON Schema; its current `Allow` header still lists legacy `PUT`, which the router does not register
+- `OPTIONS /api/config`: get the whole-config JSON Schema (`Allow: PATCH, OPTIONS`)
 
 ### Providers & Models
 

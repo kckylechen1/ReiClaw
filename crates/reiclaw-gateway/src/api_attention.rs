@@ -1,15 +1,15 @@
 //! Owner-only controls over the existing bridge outbox; never source execution.
 use crate::AppState;
+use crate::operator_auth::OperatorAuth;
 use axum::{
     Router,
     body::Bytes,
-    extract::{ConnectInfo, Path, Query, State},
-    http::{HeaderMap, StatusCode},
+    extract::{Path, Query, State},
+    http::StatusCode,
     response::{IntoResponse, Response},
     routing::get,
 };
 use reiclaw_infra::bridge_outbox::BridgeOutbox;
-use std::net::SocketAddr;
 
 pub(crate) fn routes() -> Router<AppState> {
     Router::new()
@@ -40,14 +40,10 @@ struct ListQuery {
 
 async fn list(
     State(state): State<AppState>,
-    ConnectInfo(peer): ConnectInfo<SocketAddr>,
     Path(bridge): Path<String>,
-    headers: HeaderMap,
+    _auth: OperatorAuth,
     Query(query): Query<ListQuery>,
 ) -> Response {
-    if let Some(error) = crate::operator_auth::gate_operator_identity(&state, peer, &headers) {
-        return error;
-    }
     let data_dir = state.config.read().data_dir.clone();
     match BridgeOutbox::shared(&data_dir).and_then(|outbox| {
         Ok((
@@ -67,13 +63,9 @@ async fn list(
 
 async fn inspect(
     State(state): State<AppState>,
-    ConnectInfo(peer): ConnectInfo<SocketAddr>,
     Path((bridge, id)): Path<(String, String)>,
-    headers: HeaderMap,
+    _auth: OperatorAuth,
 ) -> Response {
-    if let Some(error) = crate::operator_auth::gate_operator_identity(&state, peer, &headers) {
-        return error;
-    }
     let data_dir = state.config.read().data_dir.clone();
     match BridgeOutbox::shared(&data_dir).and_then(|outbox| outbox.inspect(&bridge, &id)) {
         Ok(Some(item)) => axum::Json(item).into_response(),
@@ -87,19 +79,14 @@ async fn inspect(
 
 async fn act(
     State(state): State<AppState>,
-    ConnectInfo(peer): ConnectInfo<SocketAddr>,
     Path((bridge, id)): Path<(String, String)>,
-    headers: HeaderMap,
+    auth: OperatorAuth,
     body: Bytes,
 ) -> Response {
-    if let Some(error) = crate::operator_auth::gate_operator_identity(&state, peer, &headers) {
-        return error;
-    }
     let Ok(action) = serde_json::from_slice::<Action>(&body) else {
         return failure(StatusCode::BAD_REQUEST, "attention_invalid_action");
     };
-    let token = crate::operator_auth::extract_bearer(&headers).unwrap_or("");
-    let owner = reiclaw_runtime::security::pairing::PairingGuard::token_hash(token);
+    let owner = reiclaw_runtime::security::pairing::PairingGuard::token_hash(auth.token());
     let data_dir = state.config.read().data_dir.clone();
     let outbox = match BridgeOutbox::shared(&data_dir) {
         Ok(outbox) => outbox,
@@ -134,6 +121,7 @@ async fn act(
 mod tests {
     use super::*;
     use reiclaw_runtime::security::pairing::PairingGuard;
+    use std::net::SocketAddr;
     use std::sync::Arc;
     use tokio::io::{AsyncReadExt, AsyncWriteExt};
 

@@ -4,17 +4,17 @@
 //! persist to `memorycore.db` via the gateway's `Memory` handle.
 
 use crate::AppState;
+use crate::operator_auth::OperatorAuth;
 use axum::{
     Router,
     body::Bytes,
-    extract::{ConnectInfo, Path, State},
-    http::{HeaderMap, StatusCode, Uri},
+    extract::{Path, State},
+    http::{StatusCode, Uri},
     response::{IntoResponse, Response},
     routing::{get, post, put},
 };
 use reiclaw_api::memory_traits::{ActionCandidateStatus, validate_agent_id, validate_non_soul_key};
 use reiclaw_memory::companion::{SoulProfileStore, UserModelStore};
-use std::net::SocketAddr;
 
 const DAILY_DIGEST_INBOX_LIMIT: usize = 14;
 const DAILY_DIGEST_LOOKUP_LIMIT: usize = 60;
@@ -67,15 +67,7 @@ fn clean_string_list(items: Vec<String>) -> Vec<String> {
         .collect()
 }
 
-pub async fn inbox(
-    State(state): State<AppState>,
-    ConnectInfo(peer): ConnectInfo<SocketAddr>,
-    headers: HeaderMap,
-    uri: Uri,
-) -> Response {
-    if let Some(err) = crate::operator_auth::gate_operator_identity(&state, peer, &headers) {
-        return err;
-    }
+pub async fn inbox(State(state): State<AppState>, _auth: OperatorAuth, uri: Uri) -> Response {
     let query = match axum::extract::Query::<InboxQuery>::try_from_uri(&uri) {
         Ok(query) => query.0,
         Err(err) => return error(StatusCode::BAD_REQUEST, "bad_query", &err.to_string()),
@@ -236,14 +228,10 @@ struct UpdateDailyDigestRequest {
 
 pub async fn update_daily_digest(
     State(state): State<AppState>,
-    ConnectInfo(peer): ConnectInfo<SocketAddr>,
-    headers: HeaderMap,
+    _auth: OperatorAuth,
     Path((agent, day_key)): Path<(String, String)>,
     body: Bytes,
 ) -> Response {
-    if let Some(err) = crate::operator_auth::gate_operator_identity(&state, peer, &headers) {
-        return err;
-    }
     if state.config.read().agent(&agent).is_none() {
         return error(
             StatusCode::NOT_FOUND,
@@ -328,14 +316,10 @@ struct ResolveActionCandidateRequest {
 
 pub async fn resolve_action_candidate(
     State(state): State<AppState>,
-    ConnectInfo(peer): ConnectInfo<SocketAddr>,
-    headers: HeaderMap,
+    _auth: OperatorAuth,
     Path((agent, day_key)): Path<(String, String)>,
     body: Bytes,
 ) -> Response {
-    if let Some(err) = crate::operator_auth::gate_operator_identity(&state, peer, &headers) {
-        return err;
-    }
     if state.config.read().agent(&agent).is_none() {
         return error(
             StatusCode::NOT_FOUND,

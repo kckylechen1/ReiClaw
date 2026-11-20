@@ -2,10 +2,11 @@
 //! Wraps the broadcast channel in AppState to deliver events to web dashboard clients.
 
 use super::AppState;
+use crate::auth::PairedAuth;
 use axum::{
     Json,
     extract::State,
-    http::{HeaderMap, StatusCode, header},
+    http::{HeaderMap, StatusCode},
     response::{
         IntoResponse,
         sse::{Event, KeepAlive, Sse},
@@ -66,20 +67,12 @@ pub async fn handle_sse_events(
     // whether broadcast-only pairing secrets may ride the stream (see
     // `sse_frame_for_stream`).
     let auth_enforced = state.pairing.require_pairing();
-    if auth_enforced {
-        let token = headers
-            .get(header::AUTHORIZATION)
-            .and_then(|v| v.to_str().ok())
-            .and_then(|auth| auth.strip_prefix("Bearer "))
-            .unwrap_or("");
-
-        if !state.pairing.is_authenticated(token) {
-            return (
-                StatusCode::UNAUTHORIZED,
-                "Unauthorized — provide Authorization: Bearer <token>",
-            )
-                .into_response();
-        }
+    if !crate::auth::paired_authenticates(&state, &headers) {
+        return (
+            StatusCode::UNAUTHORIZED,
+            "Unauthorized — provide Authorization: Bearer <token>",
+        )
+            .into_response();
     }
 
     let rx = state.event_tx.subscribe();
@@ -131,11 +124,8 @@ fn sse_frame_for_stream(
 /// GET /api/events/history — return buffered recent events as JSON.
 pub async fn handle_events_history(
     State(state): State<AppState>,
-    headers: HeaderMap,
+    _auth: PairedAuth,
 ) -> impl IntoResponse {
-    if let Err(e) = super::api::require_auth(&state, &headers) {
-        return e.into_response();
-    }
     Json(history_events_payload(&state.event_buffer)).into_response()
 }
 

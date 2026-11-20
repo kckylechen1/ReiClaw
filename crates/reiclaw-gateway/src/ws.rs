@@ -5,6 +5,7 @@
 //! transport forwards the summary without rebuilding it from raw arguments.
 
 use super::AppState;
+use crate::auth::ws_bearer_token as extract_ws_token;
 use crate::ws_approval::{PendingApprovals, WsApprovalChannel};
 use crate::ws_conversation::{Conversation, FrameSink, Seed, Submitted, TurnClaim};
 use axum::{
@@ -12,7 +13,7 @@ use axum::{
         Query, State, WebSocketUpgrade,
         ws::{Message, WebSocket},
     },
-    http::{HeaderMap, header},
+    http::HeaderMap,
     response::IntoResponse,
 };
 use futures_util::{SinkExt, StreamExt};
@@ -72,9 +73,6 @@ struct ConnectParams {
 /// The sub-protocol we support for the chat WebSocket.
 const WS_PROTOCOL: &str = "reiclaw.v1";
 
-/// Prefix used in `Sec-WebSocket-Protocol` to carry a bearer token.
-const BEARER_SUBPROTO_PREFIX: &str = "bearer.";
-
 #[derive(Deserialize)]
 pub struct WsQuery {
     pub token: Option<String>,
@@ -93,45 +91,6 @@ pub struct WsQuery {
     pub surface: Option<String>,
     #[cfg(feature = "voice-surface")]
     pub voice_provider: Option<String>,
-}
-
-pub(crate) fn extract_ws_token<'a>(
-    headers: &'a HeaderMap,
-    query_token: Option<&'a str>,
-) -> Option<&'a str> {
-    // 1. Authorization header
-    if let Some(t) = headers
-        .get(header::AUTHORIZATION)
-        .and_then(|v| v.to_str().ok())
-        .and_then(|auth| auth.strip_prefix("Bearer "))
-        && !t.is_empty()
-    {
-        return Some(t);
-    }
-
-    // 2. Sec-WebSocket-Protocol: bearer.<token>
-    if let Some(t) = headers
-        .get("sec-websocket-protocol")
-        .and_then(|v| v.to_str().ok())
-        .and_then(|protos| {
-            protos
-                .split(',')
-                .map(|p| p.trim())
-                .find_map(|p| p.strip_prefix(BEARER_SUBPROTO_PREFIX))
-        })
-        && !t.is_empty()
-    {
-        return Some(t);
-    }
-
-    // 3. ?token= query parameter
-    if let Some(t) = query_token
-        && !t.is_empty()
-    {
-        return Some(t);
-    }
-
-    None
 }
 
 fn client_offers_chat_protocol(headers: &HeaderMap) -> bool {

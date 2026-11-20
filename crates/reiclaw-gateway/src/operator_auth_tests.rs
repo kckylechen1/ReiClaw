@@ -87,6 +87,11 @@ fn router(state: AppState) -> Router {
 fn operations() -> Vec<(Method, &'static str)> {
     vec![
         (Method::GET, "/api/review/inbox"),
+        (Method::PUT, "/api/review/daily-digest/missing/2026-01-01"),
+        (
+            Method::POST,
+            "/api/review/action-candidates/missing/2026-01-01/resolve",
+        ),
         (Method::GET, "/api/attention/missing"),
         (Method::GET, "/api/attention/missing/missing"),
         (Method::POST, "/api/attention/missing/missing"),

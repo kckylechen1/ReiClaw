@@ -16,7 +16,7 @@
 # Prerequisites:
 #   - Gateway running on localhost:42617
 #   - API_KEY set (or no auth required)
-#   - curl and websocat (or wscat) available
+#   - curl, python3, and websocat (or wscat) available
 # =============================================================================
 
 set -euo pipefail
@@ -185,29 +185,44 @@ fi
 echo ""
 echo "=== Test 8: Config Verification ==="
 
-CONFIG_RESP=$(curl -sf "$BASE_URL/api/config" 2>&1) || true
+CONFIG_AUTH=()
+if [ -n "${API_KEY:-}" ]; then
+    CONFIG_AUTH=(-H "Authorization: Bearer $API_KEY")
+fi
+if CONFIG_RESULT=$(curl -sS -w '\n%{http_code}' "${CONFIG_AUTH[@]}" "$BASE_URL/api/config/list"); then
+    CONFIG_STATUS="${CONFIG_RESULT##*$'\n'}"
+    CONFIG_RESP="${CONFIG_RESULT%$'\n'*}"
+    if [ "$CONFIG_STATUS" != "200" ]; then
+        fail "Config list request" "HTTP $CONFIG_STATUS"
+    elif CHECKS=$(printf '%s' "$CONFIG_RESP" | python3 -c '
+import json
+import sys
 
-CHECKS=0
-if echo "$CONFIG_RESP" | grep -q "max_tool_result_chars"; then
-    CHECKS=$((CHECKS + 1))
-fi
-if echo "$CONFIG_RESP" | grep -q "max_context_tokens"; then
-    CHECKS=$((CHECKS + 1))
-fi
-if echo "$CONFIG_RESP" | grep -q "context_compression"; then
-    CHECKS=$((CHECKS + 1))
-fi
-if echo "$CONFIG_RESP" | grep -qi "memory"; then
-    CHECKS=$((CHECKS + 1))
-fi
-
-if [ "$CHECKS" -ge 3 ]; then
-    pass "Config shows harness features enabled ($CHECKS/4 fields found)"
-elif [ "$CHECKS" -ge 1 ]; then
-    pass "Config shows some harness features ($CHECKS/4 fields found)"
+try:
+    result = json.load(sys.stdin)
+    entries = result["entries"]
+    if not isinstance(entries, list) or not all(
+        isinstance(entry, dict) and isinstance(entry.get("path"), str)
+        for entry in entries
+    ):
+        raise ValueError("invalid config list entries")
+    paths = [entry["path"] for entry in entries]
+    print(sum(any(field in path for path in paths) for field in (
+        "max_tool_result_chars", "max_context_tokens", "context_compression", "memory"
+    )))
+except (ValueError, KeyError, TypeError):
+    sys.exit(1)
+'); then
+        if [ "$CHECKS" -ge 1 ]; then
+            pass "Config list exposes harness settings ($CHECKS/4 fields found)"
+        else
+            fail "Config list exposes harness settings" "No expected fields found"
+        fi
+    else
+        fail "Config list response" "Expected valid JSON with an entries array"
+    fi
 else
-    info "Config response: $(echo "$CONFIG_RESP" | head -c 500)"
-    skip "Could not verify harness config fields"
+    fail "Config list request" "Transport failure"
 fi
 
 # ═══════════════════════════════════════════════════════════════════════

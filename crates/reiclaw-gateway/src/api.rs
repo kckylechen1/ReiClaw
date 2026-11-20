@@ -2,9 +2,11 @@
 //! All `/api/*` routes require bearer token authentication (PairingGuard).
 
 use super::AppState;
+#[cfg(test)]
+use axum::http::header;
 use axum::{
     extract::{Path, Query, State},
-    http::{HeaderMap, StatusCode, header},
+    http::{HeaderMap, StatusCode},
     response::{IntoResponse, Json},
 };
 use reiclaw_memory::MemoryEntry;
@@ -12,47 +14,7 @@ use serde::{Deserialize, Serialize};
 
 const MEMORY_API_CONTENT_MAX_CHARS: usize = 4096;
 
-// ── Bearer token auth extractor ─────────────────────────────────
-
-/// Extract and validate bearer token from Authorization header.
-pub(crate) fn extract_bearer_token(headers: &HeaderMap) -> Option<&str> {
-    headers
-        .get(header::AUTHORIZATION)
-        .and_then(|v| v.to_str().ok())
-        .and_then(|auth| auth.strip_prefix("Bearer "))
-}
-
-/// Verify bearer token against PairingGuard. Returns error response if unauthorized.
-pub(crate) fn require_auth(
-    state: &AppState,
-    headers: &HeaderMap,
-) -> Result<(), (StatusCode, Json<serde_json::Value>)> {
-    if !state.pairing.require_pairing() {
-        return Ok(());
-    }
-
-    let token = extract_bearer_token(headers).unwrap_or("");
-    // Defense-in-depth: reject empty tokens explicitly so a future
-    // refactor of is_authenticated cannot accidentally treat "" as valid.
-    if token.is_empty() {
-        return Err((
-            StatusCode::UNAUTHORIZED,
-            Json(serde_json::json!({
-                "error": "Unauthorized — pair first via POST /pair, then send Authorization: Bearer <token>"
-            })),
-        ));
-    }
-    if state.pairing.is_authenticated(token) {
-        Ok(())
-    } else {
-        Err((
-            StatusCode::UNAUTHORIZED,
-            Json(serde_json::json!({
-                "error": "Unauthorized — pair first via POST /pair, then send Authorization: Bearer <token>"
-            })),
-        ))
-    }
-}
+pub(crate) use crate::auth::require_paired as require_auth;
 
 // ── Query parameters ─────────────────────────────────────────────
 
@@ -1085,52 +1047,6 @@ pub async fn handle_api_channels(
         .collect();
 
     Json(serde_json::json!({ "channels": channels })).into_response()
-}
-
-/// POST /api/channels/{channel}/relink — replace a QR channel's pairing.
-///
-/// `{channel}` is the composite `<type>.<alias>` name returned by
-/// `GET /api/channels`. With in-process `zeroclaw-channels` retired,
-/// no channel holds in-process QR-pairing login state, so configured
-/// channels return `409` with `"outcome": "unsupported"` and unknown
-/// channels return `404`.
-pub async fn handle_api_channel_relink(
-    State(state): State<AppState>,
-    Path(channel): Path<String>,
-    headers: HeaderMap,
-) -> impl IntoResponse {
-    if let Err(e) = require_auth(&state, &headers) {
-        return e.into_response();
-    }
-
-    let config = state.config.read().clone();
-    let Some(info) = config
-        .channels_by_alias()
-        .into_iter()
-        .find(|info| format!("{}.{}", info.channel_type, info.alias) == channel)
-    else {
-        return (
-            StatusCode::NOT_FOUND,
-            Json(serde_json::json!({
-                "error": format!("unknown channel {channel} — use the composite name from GET /api/channels"),
-            })),
-        )
-            .into_response();
-    };
-
-    (
-        StatusCode::CONFLICT,
-        Json(serde_json::json!({
-            "channel": channel,
-            "outcome": "unsupported",
-            "error": format!(
-                "channel type {} has no relink operation (it does not use QR-pairing sessions) \
-                 or the feature is not compiled into this binary; nothing was changed",
-                info.channel_type
-            ),
-        })),
-    )
-        .into_response()
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
@@ -2422,53 +2338,14 @@ pub(crate) mod tests {
     }
 
     #[tokio::test]
-    async fn api_channel_relink_unsupported_channel_is_explicit_conflict_noop() {
-        let config = config_with_telegram("default");
-
-        let response = handle_api_channel_relink(
-            State(test_state(config)),
-            Path("telegram.default".to_string()),
-            HeaderMap::new(),
-        )
-        .await
-        .into_response();
-        assert_eq!(response.status(), StatusCode::CONFLICT);
-        let json = response_json(response).await;
-        assert_eq!(json["outcome"], "unsupported");
-        assert!(
-            json["error"]
-                .as_str()
-                .expect("error string")
-                .contains("nothing was changed")
-        );
-    }
-
-    #[tokio::test]
-    async fn api_channel_relink_unknown_channel_is_not_found() {
-        let response = handle_api_channel_relink(
-            State(test_state(reiclaw_config::schema::Config::default())),
-            Path("wechat.ghost".to_string()),
-            HeaderMap::new(),
-        )
-        .await
-        .into_response();
-        assert_eq!(response.status(), StatusCode::NOT_FOUND);
-    }
-
-    #[tokio::test]
-    async fn api_channel_relink_requires_bearer_auth_when_pairing_enabled() {
+    async fn api_channels_requires_bearer_auth_when_pairing_enabled() {
         let state = AppState {
             pairing: Arc::new(PairingGuard::new(true, &[])),
             ..test_state(config_with_telegram("default"))
         };
-
-        let response = handle_api_channel_relink(
-            State(state),
-            Path("telegram.default".to_string()),
-            HeaderMap::new(),
-        )
-        .await
-        .into_response();
+        let response = handle_api_channels(State(state), HeaderMap::new())
+            .await
+            .into_response();
         assert_eq!(response.status(), StatusCode::UNAUTHORIZED);
     }
 

@@ -172,10 +172,7 @@ fn subject(
     if query.session_id.is_empty() {
         return Err(StatusCode::BAD_REQUEST);
     }
-    let token = headers
-        .get(header::AUTHORIZATION)
-        .and_then(|v| v.to_str().ok())
-        .and_then(|v| v.strip_prefix("Bearer "))
+    let token = crate::auth::bearer_token(headers)
         .filter(|t| !t.is_empty())
         .ok_or(StatusCode::UNAUTHORIZED)?;
     let hash = reiclaw_config::tokens::hash_token(token);

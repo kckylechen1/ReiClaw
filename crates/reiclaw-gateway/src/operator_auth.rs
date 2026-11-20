@@ -7,7 +7,8 @@
 //! A configured operator hash list is authoritative; only an empty list
 //! retains legacy paired-token operator access during explicit migration.
 
-use axum::http::{HeaderMap, StatusCode, header};
+use axum::extract::{ConnectInfo, FromRequestParts};
+use axum::http::{HeaderMap, StatusCode, request::Parts};
 use axum::response::{IntoResponse, Json};
 use reiclaw_runtime::security::pairing::{PairingGuard, constant_time_eq};
 use std::net::SocketAddr;
@@ -26,12 +27,7 @@ pub(crate) fn warn_legacy_operator(config: &reiclaw_config::schema::GatewayOpera
     }
 }
 
-pub(crate) fn extract_bearer(headers: &HeaderMap) -> Option<&str> {
-    headers
-        .get(header::AUTHORIZATION)
-        .and_then(|v| v.to_str().ok())
-        .and_then(|auth| auth.strip_prefix("Bearer "))
-}
+pub(crate) use crate::auth::bearer_token as extract_bearer;
 
 pub(crate) fn require_operator(
     state: &AppState,
@@ -102,6 +98,38 @@ pub(crate) fn gate_operator_identity(
         return Some((StatusCode::TOO_MANY_REQUESTS, Json(err)).into_response());
     }
     None
+}
+
+/// Per-request operator admission, including the existing strict auth and
+/// pairing rate limits. It does not infer authority from pairing-off mode.
+pub struct OperatorAuth {
+    headers: HeaderMap,
+}
+
+impl OperatorAuth {
+    pub(crate) fn token(&self) -> &str {
+        // gate_operator_identity rejected absent/empty credentials already.
+        extract_bearer(&self.headers).unwrap_or("")
+    }
+}
+
+impl FromRequestParts<AppState> for OperatorAuth {
+    type Rejection = axum::response::Response;
+
+    async fn from_request_parts(
+        parts: &mut Parts,
+        state: &AppState,
+    ) -> Result<Self, Self::Rejection> {
+        let ConnectInfo(peer) = ConnectInfo::<SocketAddr>::from_request_parts(parts, state)
+            .await
+            .map_err(IntoResponse::into_response)?;
+        if let Some(error) = gate_operator_identity(state, peer, &parts.headers) {
+            return Err(error);
+        }
+        Ok(Self {
+            headers: parts.headers.clone(),
+        })
+    }
 }
 
 #[cfg(test)]

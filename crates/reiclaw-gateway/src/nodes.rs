@@ -6,6 +6,7 @@
 //! not treat `generation` as a durable identity on its own.
 
 use super::AppState;
+use crate::auth::ws_bearer_token as extract_node_ws_token;
 use crate::device_identity::{
     DeviceIdentityStore, PendingChallenge, admit_live_caps, auth_message, verify_auth_signature,
 };
@@ -15,7 +16,7 @@ use axum::{
         ConnectInfo, Query, State, WebSocketUpgrade,
         ws::{Message, WebSocket},
     },
-    http::{HeaderMap, StatusCode, header},
+    http::{HeaderMap, StatusCode},
     response::IntoResponse,
 };
 use futures_util::{SinkExt, StreamExt};
@@ -35,9 +36,6 @@ use uuid::Uuid;
 
 pub mod invocation;
 pub mod mdns;
-
-/// Prefix used in `Sec-WebSocket-Protocol` to carry a bearer token.
-const BEARER_SUBPROTO_PREFIX: &str = "bearer.";
 
 const NODES_DISABLED_MSG: &str =
     "Not Found — node discovery is disabled (set nodes.enabled=true to enable)";
@@ -342,46 +340,6 @@ impl NodeRegistry {
 #[derive(Deserialize)]
 pub struct NodeWsQuery {
     pub token: Option<String>,
-}
-
-/// Extract a bearer token from WebSocket-compatible sources.
-fn extract_node_ws_token<'a>(
-    headers: &'a HeaderMap,
-    query_token: Option<&'a str>,
-) -> Option<&'a str> {
-    // 1. Authorization header
-    if let Some(t) = headers
-        .get(header::AUTHORIZATION)
-        .and_then(|v| v.to_str().ok())
-        .and_then(|auth| auth.strip_prefix("Bearer "))
-        && !t.is_empty()
-    {
-        return Some(t);
-    }
-
-    // 2. Sec-WebSocket-Protocol: bearer.<token>
-    if let Some(t) = headers
-        .get("sec-websocket-protocol")
-        .and_then(|v| v.to_str().ok())
-        .and_then(|protos| {
-            protos
-                .split(',')
-                .map(|p| p.trim())
-                .find_map(|p| p.strip_prefix(BEARER_SUBPROTO_PREFIX))
-        })
-        && !t.is_empty()
-    {
-        return Some(t);
-    }
-
-    // 3. ?token= query parameter
-    if let Some(t) = query_token
-        && !t.is_empty()
-    {
-        return Some(t);
-    }
-
-    None
 }
 
 pub(crate) fn check_node_auth(
