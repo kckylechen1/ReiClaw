@@ -6,7 +6,7 @@ use crate::domain_matcher::DomainMatcher;
 use crate::schema::{
     Config, EmbeddingRouteConfig, ExternalRegistry, ExternalRegistryKind,
     MAX_MEMORY_RERANK_CANDIDATE_MULTIPLIER, McpConfig, McpTransport, MemoryConfig,
-    ModelProviderConfig, NevisConfig, ProxyConfig, ProxyScope, REPLY_MIN_INTERVAL_MAX_SECS,
+    ModelProviderConfig, ProxyConfig, ProxyScope, REPLY_MIN_INTERVAL_MAX_SECS,
     REPLY_QUEUE_DEPTH_CEILING, SearchMode, TEMPERATURE_RANGE, TelegramConfig,
     default_fts_early_return_score, default_otp_challenge_max_attempts, default_otp_gated_actions,
     default_rerank_threshold, default_retrieval_stages, normalize_proxy_url_option,
@@ -510,50 +510,6 @@ impl TelegramConfig {
             self.enabled,
             &self.bot_token,
         )
-    }
-}
-
-impl NevisConfig {
-    /// Validate that required fields are present when Nevis is enabled.
-    ///
-    /// Call at config load time to fail fast on invalid configuration rather
-    /// than deferring errors to the first authentication request.
-    pub fn validate(&self) -> Result<(), String> {
-        if !self.enabled {
-            return Ok(());
-        }
-
-        if self.instance_url.trim().is_empty() {
-            return Err("nevis.instance_url is required when Nevis IAM is enabled".into());
-        }
-
-        if self.client_id.trim().is_empty() {
-            return Err("nevis.client_id is required when Nevis IAM is enabled".into());
-        }
-
-        if self.realm.trim().is_empty() {
-            return Err("nevis.realm is required when Nevis IAM is enabled".into());
-        }
-
-        match self.token_validation.as_str() {
-            "local" | "remote" => {}
-            other => {
-                return Err(format!(
-                    "nevis.token_validation has invalid value '{other}': \
-                     expected 'local' or 'remote'"
-                ));
-            }
-        }
-
-        if self.token_validation == "local" && self.jwks_url.is_none() {
-            return Err("nevis.jwks_url is required when token_validation is 'local'".into());
-        }
-
-        if self.session_timeout_secs == 0 {
-            return Err("nevis.session_timeout_secs must be greater than 0".into());
-        }
-
-        Ok(())
     }
 }
 
@@ -1254,13 +1210,6 @@ impl Config {
                 "transcription.max_audio_bytes must be greater than zero"
             );
         }
-        if self.channels.max_concurrent_per_channel == 0 {
-            validation_bail!(
-                InvalidNumericRange,
-                "channels.max_concurrent_per_channel",
-                "channels.max_concurrent_per_channel must be greater than 0"
-            );
-        }
         // Typed-memory producers are a Tachi-only slice: the enabled write
         // path stores through `store_with_options_and_agent`, and only the
         // Tachi backend persists the full typed StoreOptions surface. Any
@@ -1947,11 +1896,6 @@ impl Config {
                     "tunnel.pinggy.region must be one of: us, eu, ap, br, au (or omitted for auto)"
                 );
             }
-        }
-
-        // Nevis IAM — delegate to NevisConfig::validate() for field-level checks
-        if let Err(msg) = self.security.nevis.validate() {
-            anyhow::bail!("security.nevis: {msg}");
         }
 
         // Per-profile validation: the context-compression summarizer provider

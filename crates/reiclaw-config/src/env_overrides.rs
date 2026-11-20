@@ -137,6 +137,7 @@ pub(crate) fn apply_env_overrides_matching(
         // Err — deprecation visibility should not depend on the rest of
         // the environment being clean.
         let tail_segments: Vec<&str> = tail.split(SEP).collect();
+        crate::retired_security::reject_retired_security_env(&tail, &value)?;
         if tail_segments.first() == Some(&"sop") {
             return Err(crate::current::RetiredSopConfigError.into());
         }
@@ -152,7 +153,9 @@ pub(crate) fn apply_env_overrides_matching(
         }
         let retired_hit = RETIRED_ENV_TOMBSTONE_PREFIXES
             .iter()
-            .find(|(prefix, _)| tail.starts_with(prefix.as_str()))
+            .find(|(prefix, _)| {
+                tail.starts_with(prefix.as_str()) || tail == prefix.trim_end_matches(SEP)
+            })
             .map(|(prefix, code)| {
                 let dotted = prefix.trim_end_matches(SEP).replace(SEP, ".");
                 (dotted, *code)
@@ -363,6 +366,67 @@ pub(crate) async fn env_test_lock() -> tokio::sync::MutexGuard<'static, ()> {
 mod tests {
     use super::*;
     use crate::schema::Config;
+
+    #[tokio::test]
+    async fn walker_rejects_retired_security_before_warning_tombstones() {
+        let _lock = env_test_lock().await;
+        for (name, value) in [
+            ("REI_security__nevis__client_secret", "private-sentinel"),
+            ("REI_security__nevis__enabled", "true"),
+            ("REI_security__webauthn__enabled", "\"false\""),
+            (
+                "REI_node_transport__allowed_peers",
+                "[\"private-sentinel\"]",
+            ),
+            ("REI_node_transport__require_https", "false"),
+            ("REI_node_transport__tls_key_path", "private-sentinel"),
+            ("REI_node_transport", "{ mutual_tls = true }"),
+        ] {
+            let _env = EnvVarGuard::set(name, value);
+            let error = apply_env_overrides(&mut Config::default()).unwrap_err();
+            assert!(error.is::<crate::current::RetiredSecurityConfigError>());
+            assert!(!format!("{error:#}").contains("private-sentinel"));
+        }
+    }
+
+    #[tokio::test]
+    async fn walker_warns_for_harmless_retired_security_and_live_aliases_still_work() {
+        let _lock = env_test_lock().await;
+        let _nevis = EnvVarGuard::set("REI_security__nevis__enabled", "false");
+        let _transport = EnvVarGuard::set("REI_node_transport", "{}");
+        let _global = EnvVarGuard::set("REI_channels__ack_reactions", "false");
+        let _alias = EnvVarGuard::set("REI_channels__telegram__primary__ack_reactions", "true");
+        let mut config = Config::default();
+        let applied = apply_env_overrides(&mut config).unwrap();
+        assert_eq!(
+            config.channels.telegram["primary"].ack_reactions,
+            Some(true)
+        );
+        assert_eq!(applied.tombstone_warnings.len(), 3);
+        assert_eq!(applied.paths.len(), 1);
+        assert!(
+            applied
+                .paths
+                .contains("channels.telegram.primary.ack_reactions")
+        );
+    }
+
+    #[tokio::test]
+    async fn walker_rejects_security_ancestor_override_instead_of_discarding_retired_children() {
+        let _lock = env_test_lock().await;
+        // REI_<lowercase> is the config-override convention. The aggregate
+        // security table is not an editable prop path, so it must fail before
+        // serde could drop an unknown retired child.
+        let _env = EnvVarGuard::set(
+            "REI_security",
+            "{ nevis = { enabled = true, client_secret = 'private-sentinel' } }",
+        );
+        let mut config = Config::default();
+        assert!(!config.prop_paths().iter().any(|path| path == "security"));
+        let error = apply_env_overrides(&mut config).unwrap_err();
+        assert!(error.to_string().contains("REI_security"));
+        assert!(!format!("{error:#}").contains("private-sentinel"));
+    }
 
     struct EnvVarGuard(&'static str);
     impl EnvVarGuard {

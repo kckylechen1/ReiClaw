@@ -129,6 +129,13 @@ use serde::{Deserialize, Serialize};
 /// - `text_browser_tool_removed`: a `[text_browser]` section is still
 ///   present. The text-browser tool was retired with the browser family,
 ///   so the section is ignored (see `RETIRED_CONFIG_SURFACES`).
+/// - `unenforced_security_config_removed`: an empty/default-only Nevis,
+///   WebAuthn or node-transport section is retired. Configured policy or
+///   credentials reject admission before deserialization instead of warning.
+/// - `unused_kernel_config_removed`: an ACP, trust-score, media-pipeline or
+///   link-enricher section has no kernel consumer and is ignored.
+/// - `unused_channel_setting_removed`: a global channel setting has no
+///   consumer. Per-Telegram-alias reaction and debounce controls remain live.
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 #[cfg_attr(feature = "schema-export", derive(schemars::JsonSchema))]
 pub struct ValidationWarning {
@@ -168,6 +175,15 @@ impl ValidationWarning {
 /// in a later announced window, after which the env paths hard-error like
 /// any other unknown path and the file sections parse-drop silently.
 pub const RETIRED_CONFIG_SURFACES: &[(&str, &str)] = &[
+    // Security-bearing sections are admitted only by the raw fail-closed
+    // validator in retired_security; only harmless defaults reach warnings.
+    ("security.nevis", "unenforced_security_config_removed"),
+    ("security.webauthn", "unenforced_security_config_removed"),
+    ("node_transport", "unenforced_security_config_removed"),
+    ("acp", "unused_kernel_config_removed"),
+    ("trust", "unused_kernel_config_removed"),
+    ("media_pipeline", "unused_kernel_config_removed"),
+    ("link_enricher", "unused_kernel_config_removed"),
     ("eval", "eval_harness_moved_to_dev_tool"),
     (
         "gateway.pairing_dashboard",
@@ -344,6 +360,34 @@ pub fn is_retired_channel_type(channel_type: &str) -> bool {
 /// deleted from its struct, serde silently drops the unknown key, and this
 /// checker makes the retirement visible instead of a silent no-op.
 pub const RETIRED_CONFIG_FIELDS: &[(&str, &str)] = &[
+    ("channels.cli", "unused_channel_setting_removed"),
+    (
+        "channels.message_timeout_secs",
+        "unused_channel_setting_removed",
+    ),
+    (
+        "channels.max_concurrent_per_channel",
+        "unused_channel_setting_removed",
+    ),
+    ("channels.ack_reactions", "unused_channel_setting_removed"),
+    ("channels.debounce_ms", "unused_channel_setting_removed"),
+    ("channels_config.cli", "unused_channel_setting_removed"),
+    (
+        "channels_config.message_timeout_secs",
+        "unused_channel_setting_removed",
+    ),
+    (
+        "channels_config.max_concurrent_per_channel",
+        "unused_channel_setting_removed",
+    ),
+    (
+        "channels_config.ack_reactions",
+        "unused_channel_setting_removed",
+    ),
+    (
+        "channels_config.debounce_ms",
+        "unused_channel_setting_removed",
+    ),
     (
         "runtime_profiles.*.auto_classify.cost_optimized_hint",
         "cost_optimized_routing_removed",
@@ -457,6 +501,9 @@ pub const RETIRED_CONFIG_VALUES: &[(&str, &[&str], &str)] = &[
 /// the human-readable half of the field tombstone warning.
 fn retired_field_reason(code: &str) -> &'static str {
     match code {
+        "unused_channel_setting_removed" => {
+            "the global channel setting has no runtime consumer; Telegram alias settings are unchanged"
+        }
         "cost_optimized_routing_removed" => {
             "the unused cost-optimized selector was removed; this field never \
              selected a route. The simple, standard and complex hints and \
@@ -680,6 +727,9 @@ pub fn retired_section_tombstones(contents: &str) -> Vec<ValidationWarning> {
     RETIRED_CONFIG_SURFACES
         .iter()
         .filter_map(|(path, code)| {
+            if !crate::retired_security::permits_section_warning(path, &root) {
+                return None;
+            }
             let message = if *path == "eval" && table_path_exists(root.as_table(), path) {
                 "[eval] in config.toml is no longer used: the evaluation harness moved to the development CLI. Pass suite_dir as --suite and mode as --mode; [runtime_profiles.<alias>.eval] is unchanged.".to_string()
             } else if table_path_exists(root.as_table(), path) {
@@ -837,7 +887,9 @@ delegation_policy = { mode = "allow" }
             for depth in 1..=segments.len() {
                 doc.push_str(&format!("[{}]\n", segments[..depth].join(".")));
             }
-            doc.push_str("legacy_key = true\n");
+            // Empty legacy sections are harmless. An invented key would be
+            // configured/unknown policy in a security-bearing tombstone and
+            // must reject admission rather than report that it was ignored.
             let warnings = retired_section_tombstones(&doc);
             assert_eq!(warnings.len(), 1, "{path}: {warnings:?}");
             assert_eq!(warnings[0].code, *code);
