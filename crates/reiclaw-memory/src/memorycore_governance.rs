@@ -349,6 +349,56 @@ mod tests {
         store.upsert(&entry).expect("seed upsert");
     }
 
+    #[test]
+    fn factory_governance_requires_enabled_hygiene_and_a_due_window() {
+        for (enabled, already_ran, expected_archived) in
+            [(false, false, 0), (true, true, 0), (true, false, 1)]
+        {
+            let tmp = TempDir::new().unwrap();
+            let config = MemoryConfig {
+                hygiene_enabled: enabled,
+                ..tachi_config()
+            };
+            if already_ran {
+                crate::hygiene::run_if_due(&config, tmp.path()).unwrap();
+            }
+            {
+                let mem = MemoryCore::new("memorycore", tmp.path()).unwrap();
+                let mut store = mem.store_handle().lock();
+                for (id, importance) in [("cadence-a", 0.5), ("cadence-b", 0.9)] {
+                    seed_raw(
+                        &mut store,
+                        id,
+                        &format!("/agents/default/ns/core/{id}"),
+                        "Identical raw fact for the governed cadence boundary",
+                        importance,
+                        &[],
+                        "raw",
+                    );
+                }
+            }
+            let _memory = create_memory_with_storage_and_routes(
+                &config,
+                &[],
+                ActiveStorage::None,
+                tmp.path(),
+                None,
+                None,
+            )
+            .unwrap();
+            let mem = MemoryCore::new("memorycore", tmp.path()).unwrap();
+            let store = mem.store_handle().lock();
+            let archived = ["cadence-a", "cadence-b"]
+                .into_iter()
+                .filter(|id| store.get_with_options(id, true).unwrap().unwrap().archived)
+                .count();
+            assert_eq!(
+                archived, expected_archived,
+                "enabled={enabled}, already_ran={already_ran}"
+            );
+        }
+    }
+
     /// Exercises the factory hygiene-cadence wiring in
     /// `create_memory_with_storage_and_routes` (not `run_memorycore_governance` alone).
     /// Deleting the `run_light_sleep_governance` one-liner there turns this RED.

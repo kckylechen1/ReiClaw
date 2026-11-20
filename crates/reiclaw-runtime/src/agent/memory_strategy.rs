@@ -77,6 +77,11 @@ impl DefaultMemoryStrategy {
 
     /// Run memory governance (cleanup, archiving, background consolidation).
     pub async fn run_governance(&self) -> anyhow::Result<()> {
+        // Capture the existing factory cadence before hygiene advances it.
+        // An explicit strategy call obeys the same configuration/window and
+        // cannot re-run governance after the factory already consumed it.
+        let light_sleep_due = self.memory_config.hygiene_enabled
+            && reiclaw_memory::hygiene::is_due(&self.workspace_dir).unwrap_or(true);
         // Delegate to the existing hygiene routine.
         // Phase 1: `hygiene::run_if_due` returns `Result<()>`.
         // A structured report will be wired in a follow-up when hygiene
@@ -86,7 +91,9 @@ impl DefaultMemoryStrategy {
         // default is no-op). The factory hygiene cadence in
         // `create_memory_with_storage_and_routes` is the primary live path;
         // this keeps the strategy surface honest without a second DB open.
-        self.memory.run_light_sleep_governance()?;
+        if light_sleep_due {
+            self.memory.run_light_sleep_governance()?;
+        }
         Ok(())
     }
 }
@@ -103,9 +110,11 @@ mod tests {
     use std::sync::atomic::{AtomicUsize, Ordering};
     use tempfile::TempDir;
 
-    /// Minimal Memory stub that counts enrichment calls.
+    /// Minimal Memory stub that counts maintenance calls.
+    #[derive(Default)]
     struct CountingMemory {
         enrichment_calls: AtomicUsize,
+        governance_calls: AtomicUsize,
     }
 
     impl Attributable for CountingMemory {
@@ -194,6 +203,11 @@ mod tests {
             self.enrichment_calls.fetch_add(1, Ordering::SeqCst);
             Ok(0)
         }
+
+        fn run_light_sleep_governance(&self) -> anyhow::Result<()> {
+            self.governance_calls.fetch_add(1, Ordering::SeqCst);
+            Ok(())
+        }
     }
 
     struct StubProvider;
@@ -226,6 +240,7 @@ mod tests {
         let tmp = TempDir::new().unwrap();
         let mem = Arc::new(CountingMemory {
             enrichment_calls: AtomicUsize::new(0),
+            ..Default::default()
         });
         let strategy = DefaultMemoryStrategy::new(
             mem.clone(),
@@ -249,5 +264,41 @@ mod tests {
             1,
             "second turn within cadence must not re-run enrichment"
         );
+    }
+
+    #[tokio::test]
+    async fn governance_obeys_configuration_and_existing_cadence_with_or_without_cache() {
+        for cache_enabled in [false, true] {
+            for (hygiene_enabled, already_ran, expected) in
+                [(false, false, 0), (true, true, 0), (true, false, 1)]
+            {
+                let tmp = TempDir::new().unwrap();
+                let config = reiclaw_config::schema::MemoryConfig {
+                    hygiene_enabled,
+                    ..Default::default()
+                };
+                if already_ran {
+                    reiclaw_memory::hygiene::run_if_due(&config, tmp.path()).unwrap();
+                }
+                let counter = Arc::new(CountingMemory::default());
+                let memory: Arc<dyn Memory> = counter.clone();
+                let memory = if cache_enabled {
+                    Arc::new(reiclaw_memory::RetrievalPipeline::new(
+                        memory,
+                        reiclaw_memory::RetrievalConfig {
+                            cache_enabled: true,
+                            ..Default::default()
+                        },
+                    )) as Arc<dyn Memory>
+                } else {
+                    memory
+                };
+                let strategy = DefaultMemoryStrategy::new(memory, config, tmp.path());
+                strategy.run_governance().await.unwrap();
+                strategy.run_governance().await.unwrap();
+                assert_eq!(counter.governance_calls.load(Ordering::SeqCst), expected);
+                assert_eq!(counter.enrichment_calls.load(Ordering::SeqCst), 0);
+            }
+        }
     }
 }

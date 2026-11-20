@@ -25,9 +25,8 @@
 
 use super::traits::{
     DailyDigest, EpisodeRecord, ExportFilter, Memory, MemoryCategory, MemoryEntry, MemoryStats,
-    PinnedDigest, ProceduralMessage, StoreOptions,
+    PinnedDigest, ProceduralMessage, RecallEntryPredicate, StoreOptions,
 };
-use async_trait::async_trait;
 use parking_lot::Mutex;
 use std::collections::HashMap;
 use std::sync::Arc;
@@ -303,10 +302,66 @@ impl RetrievalPipeline {
     }
 }
 
-#[async_trait]
-impl Memory for RetrievalPipeline {
+crate::forwarding::forward_memory! {
+    [impl Memory for RetrievalPipeline]
+    memory {
+        async fn get(&self, key: &str) -> anyhow::Result<Option<MemoryEntry>>;
+        async fn get_for_agent(
+            &self,
+            key: &str,
+            agent_id: &str,
+        ) -> anyhow::Result<Option<MemoryEntry>>;
+        async fn list(
+            &self,
+            category: Option<&MemoryCategory>,
+            session_id: Option<&str>,
+        ) -> anyhow::Result<Vec<MemoryEntry>>;
+        async fn export_agent(&self, agent_alias: &str) -> anyhow::Result<Vec<MemoryEntry>>;
+        async fn count_agent(&self, agent_alias: &str) -> anyhow::Result<usize>;
+        async fn count(&self) -> anyhow::Result<usize>;
+        async fn health_check(&self) -> bool;
+        async fn count_in_scope(
+            &self,
+            namespace: Option<&str>,
+            category: Option<&MemoryCategory>,
+        ) -> anyhow::Result<u64>;
+        async fn stats(&self) -> anyhow::Result<MemoryStats>;
+        async fn export(&self, filter: &ExportFilter) -> anyhow::Result<Vec<MemoryEntry>>;
+        async fn ensure_agent_uuid(&self, alias: &str) -> anyhow::Result<String>;
+        async fn read_episodes_in_window(
+            &self,
+            agent_id: &str,
+            since: Option<&str>,
+            until: Option<&str>,
+            session_id: Option<&str>,
+            limit: usize,
+        ) -> anyhow::Result<Vec<EpisodeRecord>>;
+        async fn load_pinned_digest(&self, agent_id: &str) -> anyhow::Result<Option<PinnedDigest>>;
+        async fn load_daily_digests(
+            &self,
+            agent_id: &str,
+            limit: usize,
+        ) -> anyhow::Result<Vec<DailyDigest>>;
+    }
+
     fn name(&self) -> &str {
         self.memory.name()
+    }
+
+    fn run_light_sleep_governance(&self) -> anyhow::Result<()> {
+        let result = self.memory.run_light_sleep_governance();
+        self.invalidate_cache();
+        result
+    }
+
+    async fn run_llm_enrichment(
+        &self,
+        provider: &dyn reiclaw_api::model_provider::ModelProvider,
+        model: &str,
+    ) -> anyhow::Result<usize> {
+        let result = self.memory.run_llm_enrichment(provider, model).await;
+        self.invalidate_cache();
+        result
     }
 
     async fn store(
@@ -333,26 +388,6 @@ impl Memory for RetrievalPipeline {
     ) -> anyhow::Result<Vec<MemoryEntry>> {
         self.cached_recall(query, limit, session_id, None, since, until)
             .await
-    }
-
-    async fn get(&self, key: &str) -> anyhow::Result<Option<MemoryEntry>> {
-        self.memory.get(key).await
-    }
-
-    async fn get_for_agent(
-        &self,
-        key: &str,
-        agent_id: &str,
-    ) -> anyhow::Result<Option<MemoryEntry>> {
-        self.memory.get_for_agent(key, agent_id).await
-    }
-
-    async fn list(
-        &self,
-        category: Option<&MemoryCategory>,
-        session_id: Option<&str>,
-    ) -> anyhow::Result<Vec<MemoryEntry>> {
-        self.memory.list(category, session_id).await
     }
 
     async fn forget(&self, key: &str) -> anyhow::Result<bool> {
@@ -427,28 +462,12 @@ impl Memory for RetrievalPipeline {
         result
     }
 
-    async fn export_agent(&self, agent_alias: &str) -> anyhow::Result<Vec<MemoryEntry>> {
-        self.memory.export_agent(agent_alias).await
-    }
-
     async fn rename_agent(&self, from: &str, to: &str) -> anyhow::Result<usize> {
         let result = self.memory.rename_agent(from, to).await;
         if !matches!(&result, Ok(0)) {
             self.invalidate_cache();
         }
         result
-    }
-
-    async fn count_agent(&self, agent_alias: &str) -> anyhow::Result<usize> {
-        self.memory.count_agent(agent_alias).await
-    }
-
-    async fn count(&self) -> anyhow::Result<usize> {
-        self.memory.count().await
-    }
-
-    async fn health_check(&self) -> bool {
-        self.memory.health_check().await
     }
 
     async fn supersede(&self, superseded_ids: &[String], new_id: &str) -> anyhow::Result<()> {
@@ -469,18 +488,6 @@ impl Memory for RetrievalPipeline {
         let result = self.memory.store_procedural(messages, session_id).await;
         self.invalidate_cache();
         result
-    }
-
-    async fn count_in_scope(
-        &self,
-        namespace: Option<&str>,
-        category: Option<&MemoryCategory>,
-    ) -> anyhow::Result<u64> {
-        self.memory.count_in_scope(namespace, category).await
-    }
-
-    async fn stats(&self) -> anyhow::Result<MemoryStats> {
-        self.memory.stats().await
     }
 
     async fn reindex(&self) -> anyhow::Result<usize> {
@@ -514,10 +521,6 @@ impl Memory for RetrievalPipeline {
     ) -> anyhow::Result<Vec<MemoryEntry>> {
         self.cached_recall(query, limit, session_id, Some(namespace), since, until)
             .await
-    }
-
-    async fn export(&self, filter: &ExportFilter) -> anyhow::Result<Vec<MemoryEntry>> {
-        self.memory.export(filter).await
     }
 
     async fn store_with_metadata(
@@ -573,6 +576,91 @@ impl Memory for RetrievalPipeline {
         result
     }
 
+    async fn store_with_options_and_agent(
+        &self,
+        key: &str,
+        content: &str,
+        category: MemoryCategory,
+        session_id: Option<&str>,
+        options: StoreOptions,
+        agent_id: Option<&str>,
+    ) -> anyhow::Result<()> {
+        let result = self
+            .memory
+            .store_with_options_and_agent(key, content, category, session_id, options, agent_id)
+            .await;
+        self.invalidate_cache();
+        result
+    }
+
+    // Predicates are part of read authority and cannot be represented by the
+    // plain-recall cache key. Keep these calls on the scoped backend's own
+    // filtered/refill path, including when the hot cache is enabled.
+    async fn recall_with_filter(
+        &self,
+        query: &str,
+        limit: usize,
+        session_id: Option<&str>,
+        since: Option<&str>,
+        until: Option<&str>,
+        refill_limit: usize,
+        filter: Option<Arc<RecallEntryPredicate>>,
+    ) -> anyhow::Result<Vec<MemoryEntry>> {
+        self.memory
+            .recall_with_filter(query, limit, session_id, since, until, refill_limit, filter)
+            .await
+    }
+
+    async fn recall_namespaced_with_filter(
+        &self,
+        namespace: &str,
+        query: &str,
+        limit: usize,
+        session_id: Option<&str>,
+        since: Option<&str>,
+        until: Option<&str>,
+        refill_limit: usize,
+        filter: Option<Arc<RecallEntryPredicate>>,
+    ) -> anyhow::Result<Vec<MemoryEntry>> {
+        self.memory
+            .recall_namespaced_with_filter(
+                namespace,
+                query,
+                limit,
+                session_id,
+                since,
+                until,
+                refill_limit,
+                filter,
+            )
+            .await
+    }
+
+    async fn recall_for_agents_with_filter(
+        &self,
+        allowed_agent_ids: &[&str],
+        query: &str,
+        limit: usize,
+        session_id: Option<&str>,
+        since: Option<&str>,
+        until: Option<&str>,
+        refill_limit: usize,
+        filter: Option<Arc<RecallEntryPredicate>>,
+    ) -> anyhow::Result<Vec<MemoryEntry>> {
+        self.memory
+            .recall_for_agents_with_filter(
+                allowed_agent_ids,
+                query,
+                limit,
+                session_id,
+                since,
+                until,
+                refill_limit,
+                filter,
+            )
+            .await
+    }
+
     async fn recall_for_agents(
         &self,
         allowed_agent_ids: &[&str],
@@ -590,27 +678,10 @@ impl Memory for RetrievalPipeline {
             .await
     }
 
-    async fn ensure_agent_uuid(&self, alias: &str) -> anyhow::Result<String> {
-        self.memory.ensure_agent_uuid(alias).await
-    }
-
     async fn commit_episode(&self, episode: &EpisodeRecord) -> anyhow::Result<String> {
         let result = self.memory.commit_episode(episode).await;
         self.invalidate_cache();
         result
-    }
-
-    async fn read_episodes_in_window(
-        &self,
-        agent_id: &str,
-        since: Option<&str>,
-        until: Option<&str>,
-        session_id: Option<&str>,
-        limit: usize,
-    ) -> anyhow::Result<Vec<EpisodeRecord>> {
-        self.memory
-            .read_episodes_in_window(agent_id, since, until, session_id, limit)
-            .await
     }
 
     async fn supersede_fact(
@@ -635,23 +706,12 @@ impl Memory for RetrievalPipeline {
         result
     }
 
-    async fn load_pinned_digest(&self, agent_id: &str) -> anyhow::Result<Option<PinnedDigest>> {
-        self.memory.load_pinned_digest(agent_id).await
-    }
-
     async fn publish_daily_digest(&self, digest: &DailyDigest) -> anyhow::Result<String> {
         let result = self.memory.publish_daily_digest(digest).await;
         self.invalidate_cache();
         result
     }
 
-    async fn load_daily_digests(
-        &self,
-        agent_id: &str,
-        limit: usize,
-    ) -> anyhow::Result<Vec<DailyDigest>> {
-        self.memory.load_daily_digests(agent_id, limit).await
-    }
 }
 
 #[cfg(test)]
@@ -661,6 +721,7 @@ mod tests {
     use crate::memorycore::MemoryCore;
     use crate::none::NoneMemory;
     use crate::traits::MemoryCategory;
+    use async_trait::async_trait;
     use std::sync::atomic::{AtomicUsize, Ordering};
 
     /// Cache config with the opt-in hot cache enabled (the production default
@@ -675,6 +736,7 @@ mod tests {
     struct StatefulMemory {
         entries: Mutex<Vec<MemoryEntry>>,
         recalls: AtomicUsize,
+        delegated: Mutex<Vec<serde_json::Value>>,
         /// When set, mutations return a backend error (reads still succeed).
         fail_mutations: bool,
     }
@@ -684,6 +746,7 @@ mod tests {
             Self {
                 entries: Mutex::new(entries),
                 recalls: AtomicUsize::new(0),
+                delegated: Mutex::new(Vec::new()),
                 fail_mutations: false,
             }
         }
@@ -693,6 +756,7 @@ mod tests {
             Self {
                 entries: Mutex::new(entries),
                 recalls: AtomicUsize::new(0),
+                delegated: Mutex::new(Vec::new()),
                 fail_mutations: true,
             }
         }
@@ -718,6 +782,112 @@ mod tests {
     impl Memory for StatefulMemory {
         fn name(&self) -> &str {
             "stateful"
+        }
+
+        fn run_light_sleep_governance(&self) -> anyhow::Result<()> {
+            self.delegated
+                .lock()
+                .push(serde_json::json!({"op": "governance"}));
+            anyhow::ensure!(!self.fail_mutations, "backend down");
+            Ok(())
+        }
+
+        async fn run_llm_enrichment(
+            &self,
+            provider: &dyn reiclaw_api::model_provider::ModelProvider,
+            model: &str,
+        ) -> anyhow::Result<usize> {
+            self.delegated.lock().push(serde_json::json!({
+                "op": "enrichment", "provider": provider.alias(), "model": model,
+            }));
+            anyhow::ensure!(!self.fail_mutations, "backend down");
+            Ok(7)
+        }
+
+        async fn store_with_options_and_agent(
+            &self,
+            key: &str,
+            content: &str,
+            category: MemoryCategory,
+            session_id: Option<&str>,
+            options: StoreOptions,
+            agent_id: Option<&str>,
+        ) -> anyhow::Result<()> {
+            self.delegated.lock().push(serde_json::json!({
+                "op": "typed_store", "key": key, "content": content,
+                "category": category, "session_id": session_id,
+                "options": options, "agent_id": agent_id,
+            }));
+            self.store(key, content, category, session_id).await
+        }
+
+        async fn recall_with_filter(
+            &self,
+            query: &str,
+            limit: usize,
+            session_id: Option<&str>,
+            since: Option<&str>,
+            until: Option<&str>,
+            refill_limit: usize,
+            filter: Option<Arc<RecallEntryPredicate>>,
+        ) -> anyhow::Result<Vec<MemoryEntry>> {
+            self.delegated.lock().push(serde_json::json!({
+                "op": "filtered", "query": query, "limit": limit,
+                "session_id": session_id, "since": since, "until": until,
+                "refill_limit": refill_limit, "filter": filter.is_some(),
+            }));
+            let fetch_limit = if filter.is_some() {
+                refill_limit
+            } else {
+                limit
+            };
+            let entries = self
+                .recall(query, fetch_limit, session_id, since, until)
+                .await?;
+            Ok(match filter {
+                Some(predicate) => entries
+                    .into_iter()
+                    .filter(|entry| predicate(entry))
+                    .take(limit)
+                    .collect(),
+                None => entries.into_iter().take(limit).collect(),
+            })
+        }
+
+        async fn recall_namespaced_with_filter(
+            &self,
+            namespace: &str,
+            query: &str,
+            limit: usize,
+            session_id: Option<&str>,
+            since: Option<&str>,
+            until: Option<&str>,
+            refill_limit: usize,
+            filter: Option<Arc<RecallEntryPredicate>>,
+        ) -> anyhow::Result<Vec<MemoryEntry>> {
+            self.delegated.lock().push(serde_json::json!({
+                "op": "namespaced_filtered", "namespace": namespace,
+            }));
+            self.recall_with_filter(query, limit, session_id, since, until, refill_limit, filter)
+                .await
+        }
+
+        async fn recall_for_agents_with_filter(
+            &self,
+            allowed_agent_ids: &[&str],
+            query: &str,
+            limit: usize,
+            session_id: Option<&str>,
+            since: Option<&str>,
+            until: Option<&str>,
+            refill_limit: usize,
+            filter: Option<Arc<RecallEntryPredicate>>,
+        ) -> anyhow::Result<Vec<MemoryEntry>> {
+            self.delegated.lock().push(serde_json::json!({
+                "op": "agents_filtered", "allowed_agent_ids": allowed_agent_ids,
+            }));
+            self.recall_with_filter(query, limit, session_id, since, until, refill_limit, filter)
+                .await
         }
 
         async fn store(
@@ -1671,5 +1841,320 @@ mod tests {
         assert!(pipeline.publish_daily_digest(&daily).await.is_err());
         assert_eq!(pipeline.cache_size(), 0);
         assert!(pipeline.generation() > gen3);
+    }
+
+    struct UnusedModelProvider;
+
+    impl reiclaw_api::attribution::Attributable for UnusedModelProvider {
+        fn role(&self) -> reiclaw_api::attribution::Role {
+            reiclaw_api::attribution::Role::System
+        }
+        fn alias(&self) -> &str {
+            "maintenance-model"
+        }
+    }
+
+    #[async_trait]
+    impl reiclaw_api::model_provider::ModelProvider for UnusedModelProvider {
+        async fn chat_with_system(
+            &self,
+            _: Option<&str>,
+            _: &str,
+            _: &str,
+            _: Option<f64>,
+        ) -> anyhow::Result<String> {
+            anyhow::bail!("the recording memory must not dispatch a model request")
+        }
+    }
+
+    fn typed_options() -> StoreOptions {
+        StoreOptions {
+            namespace: Some("ops".into()),
+            importance: Some(0.85),
+            kind: Some(crate::traits::MemoryKind::Semantic(
+                crate::traits::SemanticSubtype::Decision,
+            )),
+            pinned: true,
+            tenant_id: Some("tenant-a".into()),
+        }
+    }
+
+    #[tokio::test]
+    async fn factory_cache_modes_preserve_full_method_arguments_and_results() {
+        let mut direct_calls = None;
+        for stages in [vec![], vec!["fts", "vector"], vec!["cache"]] {
+            let cache_enabled = stages.contains(&"cache");
+            let inner = Arc::new(StatefulMemory::new(vec![entry(
+                "seed",
+                "seed fact",
+                1.0,
+                MemoryCategory::Core,
+                None,
+            )]));
+            let inner_dyn: Arc<dyn Memory> = inner.clone();
+            let memory = crate::wrap_in_retrieval_pipeline(
+                Arc::clone(&inner_dyn),
+                &reiclaw_config::schema::MemoryConfig {
+                    retrieval_stages: stages.into_iter().map(str::to_string).collect(),
+                    ..Default::default()
+                },
+            );
+            assert_eq!(Arc::ptr_eq(&inner_dyn, &memory), !cache_enabled);
+            // Only the opt-in branch may cache ordinary recalls.
+            for _ in 0..2 {
+                memory.recall("prime", 10, None, None, None).await.unwrap();
+            }
+            assert_eq!(inner.recalls(), if cache_enabled { 1 } else { 2 });
+
+            memory.run_light_sleep_governance().unwrap();
+            assert_eq!(
+                memory
+                    .run_llm_enrichment(&UnusedModelProvider, "chosen-model")
+                    .await
+                    .unwrap(),
+                7
+            );
+            memory
+                .store_with_options_and_agent(
+                    "typed",
+                    "typed fact",
+                    MemoryCategory::Core,
+                    Some("session-a"),
+                    typed_options(),
+                    Some("agent-a"),
+                )
+                .await
+                .unwrap();
+            for accept in [true, false] {
+                let filter: Arc<RecallEntryPredicate> =
+                    Arc::new(move |row| accept && row.key == "typed");
+                let plain = memory
+                    .recall_with_filter(
+                        "plain query",
+                        1,
+                        Some("session-a"),
+                        Some("since-a"),
+                        Some("until-a"),
+                        17,
+                        Some(Arc::clone(&filter)),
+                    )
+                    .await
+                    .unwrap();
+                let namespaced = memory
+                    .recall_namespaced_with_filter(
+                        "ops",
+                        "namespace query",
+                        1,
+                        Some("session-b"),
+                        Some("since-b"),
+                        Some("until-b"),
+                        19,
+                        Some(Arc::clone(&filter)),
+                    )
+                    .await
+                    .unwrap();
+                let agents = memory
+                    .recall_for_agents_with_filter(
+                        &["agent-a", "agent-b"],
+                        "agents query",
+                        1,
+                        Some("session-c"),
+                        Some("since-c"),
+                        Some("until-c"),
+                        23,
+                        Some(filter),
+                    )
+                    .await
+                    .unwrap();
+                for rows in [plain, namespaced, agents] {
+                    assert_eq!(rows.len(), usize::from(accept));
+                    if accept {
+                        assert_eq!(rows[0].content, "typed fact");
+                    }
+                }
+            }
+            // Filtered reads must reach the backend on every call; predicates
+            // cannot be served by a primed ordinary-recall cache.
+            assert_eq!(inner.recalls(), if cache_enabled { 7 } else { 8 });
+            let calls = inner.delegated.lock().clone();
+            assert_eq!(calls[0], serde_json::json!({"op": "governance"}));
+            assert_eq!(
+                calls[1],
+                serde_json::json!({
+                    "op": "enrichment", "provider": "maintenance-model", "model": "chosen-model",
+                })
+            );
+            assert_eq!(
+                calls[2]["options"],
+                serde_json::to_value(typed_options()).unwrap()
+            );
+            assert_eq!(calls[2]["agent_id"], "agent-a");
+            if let Some(expected) = &direct_calls {
+                assert_eq!(
+                    &calls, expected,
+                    "cache configuration must not change dispatch arguments"
+                );
+            } else {
+                direct_calls = Some(calls);
+            }
+        }
+    }
+
+    #[tokio::test]
+    async fn added_mutators_invalidate_cache_even_when_the_backend_fails() {
+        for fail in [false, true] {
+            for operation in ["governance", "enrichment", "typed_store"] {
+                let rows = vec![entry("seed", "fact", 1.0, MemoryCategory::Core, None)];
+                let inner = Arc::new(if fail {
+                    StatefulMemory::failing(rows)
+                } else {
+                    StatefulMemory::new(rows)
+                });
+                let pipeline = RetrievalPipeline::new(inner.clone(), cached_config());
+                Memory::recall(&pipeline, "fact", 10, None, None, None)
+                    .await
+                    .unwrap();
+                assert_eq!(pipeline.cache_size(), 1);
+                let result = match operation {
+                    "governance" => pipeline.run_light_sleep_governance(),
+                    "enrichment" => pipeline
+                        .run_llm_enrichment(&UnusedModelProvider, "model")
+                        .await
+                        .map(|_| ()),
+                    "typed_store" => {
+                        pipeline
+                            .store_with_options_and_agent(
+                                "typed",
+                                "new fact",
+                                MemoryCategory::Core,
+                                None,
+                                typed_options(),
+                                Some("agent"),
+                            )
+                            .await
+                    }
+                    _ => unreachable!(),
+                };
+                assert_eq!(result.is_err(), fail, "{operation}");
+                assert_eq!(pipeline.cache_size(), 0, "{operation}, fail={fail}");
+                Memory::recall(&pipeline, "fact", 10, None, None, None)
+                    .await
+                    .unwrap();
+                assert_eq!(inner.recalls(), 2);
+            }
+        }
+    }
+
+    #[cfg(feature = "memorycore")]
+    #[tokio::test]
+    async fn factory_cache_modes_preserve_typed_store_scan_agent_and_soul_boundaries() {
+        use reiclaw_config::schema::{
+            AliasedAgentConfig, Config, MemoryConfig, MemoryPolicyConfig,
+        };
+        for cached in [false, true] {
+            let tmp = tempfile::TempDir::new().unwrap();
+            let mut config = Config {
+                data_dir: tmp.path().to_path_buf(),
+                memory: MemoryConfig {
+                    backend: "memorycore".into(),
+                    embedding_provider: "none".into(),
+                    hygiene_enabled: false,
+                    audit_enabled: true,
+                    retrieval_stages: if cached { vec!["cache".into()] } else { vec![] },
+                    policy: MemoryPolicyConfig {
+                        redact_on_write: true,
+                        redact_categories: vec!["email".into()],
+                        ..Default::default()
+                    },
+                    ..Default::default()
+                },
+                ..Default::default()
+            };
+            for alias in ["alpha", "foreign"] {
+                config
+                    .agents
+                    .insert(alias.into(), AliasedAgentConfig::default());
+            }
+            let alpha = crate::create_memory_for_agent(&config, "alpha", None)
+                .await
+                .unwrap();
+            let foreign = crate::create_memory_for_agent(&config, "foreign", None)
+                .await
+                .unwrap();
+            let alpha_id = alpha.ensure_agent_uuid("alpha").await.unwrap();
+            let foreign_id = foreign.ensure_agent_uuid("foreign").await.unwrap();
+            alpha
+                .store_with_options_and_agent(
+                    "decision",
+                    "Contact alice@example.com about staged rollout",
+                    MemoryCategory::Core,
+                    None,
+                    typed_options(),
+                    Some(&alpha_id),
+                )
+                .await
+                .unwrap();
+            let row = alpha.get("decision").await.unwrap().unwrap();
+            assert_eq!(row.agent_id.as_deref(), Some(alpha_id.as_str()));
+            assert_eq!(row.kind, typed_options().kind);
+            assert!(row.pinned);
+            assert_eq!(row.tenant_id.as_deref(), Some("tenant-a"));
+            assert!(!row.content.contains("alice@example.com"));
+            assert!(row.content.contains("[REDACTED:email]"));
+            assert!(
+                alpha
+                    .store_with_options_and_agent(
+                        "foreign-write",
+                        "refused",
+                        MemoryCategory::Core,
+                        None,
+                        typed_options(),
+                        Some(&foreign_id),
+                    )
+                    .await
+                    .unwrap_err()
+                    .to_string()
+                    .contains("foreign agent_id")
+            );
+            assert!(
+                alpha
+                    .store_with_options_and_agent(
+                        "soul::identity",
+                        "refused",
+                        MemoryCategory::Core,
+                        None,
+                        StoreOptions {
+                            namespace: Some("soul".into()),
+                            ..typed_options()
+                        },
+                        Some(&alpha_id),
+                    )
+                    .await
+                    .is_err()
+            );
+            foreign
+                .store("foreign-row", "foreign fact", MemoryCategory::Core, None)
+                .await
+                .unwrap();
+            let hits = alpha
+                .recall_for_agents_with_filter(
+                    &[&alpha_id, &foreign_id],
+                    "",
+                    10,
+                    None,
+                    None,
+                    None,
+                    20,
+                    Some(Arc::new(|_| true)),
+                )
+                .await
+                .unwrap();
+            assert!(!hits.is_empty());
+            assert!(
+                hits.iter()
+                    .all(|row| row.agent_id.as_deref() == Some(alpha_id.as_str()))
+            );
+            assert!(foreign.get("foreign-write").await.unwrap().is_none());
+        }
     }
 }
