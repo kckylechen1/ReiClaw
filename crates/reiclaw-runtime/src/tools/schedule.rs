@@ -38,8 +38,9 @@ impl Tool for ScheduleTool {
     fn description(&self) -> &str {
         "Manage scheduled shell-only tasks. Actions: create/add/once/list/get/cancel/remove/pause/resume. \
          WARNING: This tool creates shell jobs whose output is only logged, NOT delivered to any channel. \
-         To send a scheduled message to Telegram, use the cron_add tool with job_type='agent' \
-         and a delivery config like {\"mode\":\"announce\",\"channel\":\"telegram\",\"to\":\"<channel_id>\"}."
+         To send a scheduled message through a configured gateway bridge, use the cron_add tool \
+         with job_type='agent' and a delivery config like \
+         {\"mode\":\"announce\",\"channel\":\"<bridge>\",\"to\":\"<recipient_id>\"}."
     }
 
     fn parameters_schema(&self) -> serde_json::Value {

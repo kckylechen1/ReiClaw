@@ -1,5 +1,5 @@
 use super::cron_common::{
-    AT_DESCRIPTION, CRON_TZ_DESCRIPTION, cron_job_output, deserialize_patch_arg,
+    AT_DESCRIPTION, CRON_TZ_DESCRIPTION, cron_job_output, delivery_schema, deserialize_patch_arg,
 };
 use crate::cron;
 use crate::security::SecurityPolicy;
@@ -158,34 +158,7 @@ impl Tool for CronUpdateTool {
                                 }
                             ]
                         },
-                        "delivery": {
-                            "type": "object",
-                            "description": "Delivery config to send job output to a channel after each run. When provided, mode, channel, and to are all expected.",
-                            "properties": {
-                                "mode": {
-                                    "type": "string",
-                                    "enum": ["none", "announce"],
-                                    "description": "'announce' sends output to the specified channel; 'none' disables delivery"
-                                },
-                                "channel": {
-                                    "type": "string",
-                                    "enum": cron::delivery_schema_channels(&self.config),
-                                    "description": "Channel type, or configured bridge name, to deliver output to"
-                                },
-                                "to": {
-                                    "type": "string",
-                                    "description": "Destination ID: Telegram chat ID, webhook recipient, etc."
-                                },
-                                "thread_id": {
-                                    "type": "string",
-                                    "description": "Optional thread/conversation identifier. Used by the webhook channel to route callbacks to the originating conversation; ignored by channels whose threading is implied by `to`."
-                                },
-                                "best_effort": {
-                                    "type": "boolean",
-                                    "description": "If true, a delivery failure does not fail the job itself. Defaults to true."
-                                }
-                            }
-                        }
+                        "delivery": delivery_schema(&self.config)
                     }
                 },
                 "approved": {
@@ -647,49 +620,21 @@ mod tests {
             at_description.contains("RFC3339 timestamp with explicit Z or offset"),
             "at description should require explicit Z or offset: {at_description}"
         );
-
-        // patch.delivery.channel enum covers all supported channels
-        let channel_enum = schema["properties"]["patch"]["properties"]["delivery"]["properties"]
-            ["channel"]["enum"]
-            .as_array()
-            .expect("patch.delivery.channel must have an enum");
-        let channel_strs: Vec<&str> = channel_enum.iter().filter_map(|v| v.as_str()).collect();
-        assert_eq!(channel_strs.as_slice(), cron::CRON_DELIVERY_SCHEMA_CHANNELS);
-        assert!(channel_strs.contains(&"telegram"));
-        assert!(channel_strs.contains(&"webhook"));
-        assert!(!channel_strs.contains(&"email"));
-        assert!(!channel_strs.contains(&"discord"));
-        // Retired transports must never be offered as delivery targets.
-        for retired in [
-            "slack",
-            "mattermost",
-            "matrix",
-            "dingtalk",
-            "wechat",
-            "signal",
-        ] {
-            assert!(!channel_strs.contains(&retired), "{retired} is retired");
-        }
-
-        // patch.delivery exposes thread_id so the webhook channel can route callbacks
-        // back to the originating conversation.
-        let delivery_props = schema["properties"]["patch"]["properties"]["delivery"]["properties"]
-            .as_object()
-            .expect("patch.delivery must have properties");
-        assert!(
-            delivery_props.contains_key("thread_id"),
-            "patch.delivery missing thread_id"
-        );
     }
 
     #[test]
-    fn add_and_update_delivery_channel_schemas_match() {
+    fn add_and_update_delivery_schemas_match() {
         let tmp = TempDir::new().unwrap();
-        let cfg = Arc::new(Config {
+        let mut config = Config {
             data_dir: tmp.path().join("data"),
             config_path: tmp.path().join("config.toml"),
             ..Config::default()
-        });
+        };
+        config
+            .gateway
+            .bridges
+            .insert("qq".into(), Default::default());
+        let cfg = Arc::new(config);
         let security = Arc::new(SecurityPolicy::from_risk_profile(
             &reiclaw_config::schema::RiskProfileConfig::default(),
             &cfg.data_dir,
@@ -703,27 +648,11 @@ mod tests {
         let add_schema = add_tool.parameters_schema();
         let update_schema = update_tool.parameters_schema();
 
-        let add_channels: Vec<&str> = add_schema["properties"]["delivery"]["properties"]["channel"]
-            ["enum"]
-            .as_array()
-            .expect("cron_add delivery.channel must have an enum")
-            .iter()
-            .filter_map(|value| value.as_str())
-            .collect();
-        let update_channels: Vec<&str> =
-            update_schema["properties"]["patch"]["properties"]["delivery"]["properties"]["channel"]
-                ["enum"]
-                .as_array()
-                .expect("cron_update patch.delivery.channel must have an enum")
-                .iter()
-                .filter_map(|value| value.as_str())
-                .collect();
-
-        assert_eq!(add_channels, update_channels);
-        assert_eq!(add_channels.as_slice(), cron::CRON_DELIVERY_SCHEMA_CHANNELS);
-        assert!(
-            !add_channels.contains(&"dingtalk"),
-            "retired transports must not appear"
+        let add_delivery = &add_schema["properties"]["delivery"];
+        assert_eq!(add_delivery["properties"]["channel"]["enum"], json!(["qq"]));
+        assert_eq!(
+            add_delivery,
+            &update_schema["properties"]["patch"]["properties"]["delivery"]
         );
     }
 

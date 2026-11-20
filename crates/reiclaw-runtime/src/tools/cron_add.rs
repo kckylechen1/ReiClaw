@@ -1,5 +1,5 @@
 use super::cron_common::{
-    AT_DESCRIPTION, CRON_TZ_DESCRIPTION, cron_add_output, deserialize_schedule_arg,
+    AT_DESCRIPTION, CRON_TZ_DESCRIPTION, cron_add_output, delivery_schema, deserialize_schedule_arg,
 };
 use crate::cron::{self, DeliveryConfig, JobType, Schedule, SessionTarget};
 use crate::security::SecurityPolicy;
@@ -165,11 +165,12 @@ impl Tool for CronAddTool {
          For relative one-shot reminders such as 'in 10 minutes' or 'after 2 hours', \
          use schedule={\"kind\":\"after\",\"after_seconds\":...}; the runtime resolves it \
          with the live clock when the tool executes. \
-         To deliver output to a configured channel, set \
-         delivery={\"mode\":\"announce\",\"channel\":\"telegram\",\"to\":\"<channel_id_or_chat_id>\"}. \
-         For webhook deliveries that must thread through the originating conversation, also set \
-         delivery.thread_id=\"<reply_target>\". \
-         This is the preferred tool for sending scheduled/delayed messages to users via channels."
+         Each run's result lands in the job's session and run history. To also deliver it \
+         through a configured gateway bridge, set \
+         delivery={\"mode\":\"announce\",\"channel\":\"<bridge>\",\"to\":\"<recipient_id>\"}; \
+         the delivery.channel schema lists the configured bridges, and when none are configured \
+         no channel delivery is possible. \
+         This is the preferred tool for sending scheduled/delayed messages to users via a bridge."
     }
 
     fn parameters_schema(&self) -> serde_json::Value {
@@ -253,34 +254,7 @@ impl Tool for CronAddTool {
                     "items": { "type": "string" },
                     "description": "Optional allowlist of tool names for agent jobs. When omitted, cron-launched agent runs keep non-scheduler tools available but exclude scheduler mutation tools such as cron_add, cron_update, cron_remove, cron_run, and schedule. Include those names explicitly to opt back in. An explicit empty list denies all tools."
                 },
-                "delivery": {
-                    "type": "object",
-                    "description": "Optional delivery config to send job output to a channel after each run. When provided, all three of mode, channel, and to are expected.",
-                    "properties": {
-                        "mode": {
-                            "type": "string",
-                            "enum": ["none", "announce"],
-                            "description": "'announce' sends output to the specified channel; 'none' disables delivery"
-                        },
-                        "channel": {
-                            "type": "string",
-                            "enum": cron::delivery_schema_channels(&self.config),
-                            "description": "Channel type, or configured bridge name, to deliver output to"
-                        },
-                        "to": {
-                            "type": "string",
-                            "description": "Destination ID: Telegram chat ID, webhook recipient, etc."
-                        },
-                        "thread_id": {
-                            "type": "string",
-                            "description": "Optional thread/conversation identifier. Used by the webhook channel to route callbacks to the originating conversation; ignored by channels whose threading is implied by `to`."
-                        },
-                        "best_effort": {
-                            "type": "boolean",
-                            "description": "If true, a delivery failure does not fail the job itself. Defaults to true."
-                        }
-                    }
-                },
+                "delivery": delivery_schema(&self.config),
                 "delete_after_run": {
                     "type": "boolean",
                     "description": "If true, the job is automatically deleted after its first successful run. Defaults to true for one-shot 'at' and 'after' schedules."
@@ -1184,64 +1158,49 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn delivery_schema_includes_supported_channels() {
+    async fn delivery_schema_offers_only_configured_bridges() {
         let tmp = TempDir::new().unwrap();
-        let cfg = test_config(&tmp).await;
+        let mut config = (*test_config(&tmp).await).clone();
+        for bridge in ["weixin", "qq"] {
+            config
+                .gateway
+                .bridges
+                .insert(bridge.into(), Default::default());
+        }
+        let cfg = Arc::new(config);
         let tool = CronAddTool::new(cfg.clone(), test_security(&cfg), TEST_AGENT);
 
-        let schema = tool.parameters_schema();
-        let values: Vec<&str> = schema["properties"]["delivery"]["properties"]["channel"]["enum"]
-            .as_array()
-            .expect("delivery.channel must have an enum")
-            .iter()
-            .filter_map(|value| value.as_str())
-            .collect();
-
-        assert_eq!(values.as_slice(), cron::CRON_DELIVERY_SCHEMA_CHANNELS);
-        assert!(values.contains(&"telegram"));
-        assert!(values.contains(&"webhook"));
-        // Owner-retired 2026-11-18: never offered as delivery targets.
-        assert!(!values.contains(&"email"));
-        assert!(!values.contains(&"discord"));
-        // Retired transports must never be offered as delivery targets.
-        for retired in [
-            "slack",
-            "mattermost",
-            "matrix",
-            "dingtalk",
-            "wechat",
-            "signal",
-        ] {
-            assert!(!values.contains(&retired), "{retired} is retired");
-        }
+        let delivery = &tool.parameters_schema()["properties"]["delivery"];
+        assert_eq!(
+            delivery["properties"]["mode"]["enum"],
+            json!(["none", "announce"])
+        );
+        assert_eq!(
+            delivery["properties"]["channel"]["enum"],
+            json!(["qq", "weixin"]),
+            "only configured bridges, sorted; never the retired in-core channels"
+        );
+        assert!(delivery["properties"].get("thread_id").is_some());
     }
 
     #[tokio::test]
-    async fn delivery_schema_includes_webhook_and_thread_id() {
+    async fn delivery_schema_without_bridges_offers_no_announce() {
         let tmp = TempDir::new().unwrap();
         let cfg = test_config(&tmp).await;
+        assert!(cfg.gateway.bridges.is_empty());
         let tool = CronAddTool::new(cfg.clone(), test_security(&cfg), TEST_AGENT);
-        let schema = tool.parameters_schema();
 
-        let channel_enum = schema["properties"]["delivery"]["properties"]["channel"]["enum"]
-            .as_array()
-            .cloned()
-            .unwrap_or_default();
+        let delivery = &tool.parameters_schema()["properties"]["delivery"];
+        assert_eq!(delivery["properties"]["mode"]["enum"], json!(["none"]));
         assert!(
-            channel_enum.iter().any(|value| value == "webhook"),
-            "delivery.channel enum must include webhook"
+            delivery["properties"].get("channel").is_none(),
+            "no bridge configured: no channel may be offered: {delivery}"
         );
         assert!(
-            !channel_enum.iter().any(|value| value == "whatsapp"),
-            "retired transports must not appear in the delivery enum"
-        );
-
-        let delivery_props = schema["properties"]["delivery"]["properties"]
-            .as_object()
-            .expect("delivery must have properties");
-        assert!(
-            delivery_props.contains_key("thread_id"),
-            "delivery schema must expose thread_id so the webhook channel can route callbacks"
+            delivery["description"]
+                .as_str()
+                .is_some_and(|text| text.contains("No gateway bridges are configured")),
+            "{delivery}"
         );
     }
 
