@@ -1,18 +1,14 @@
 //! Session key normalization shared across infra and memory backends.
 //!
-//! Channel orchestration uses two identifiers derived from a `ChannelMessage`:
-//! one ends up as a JSONL filename (via `SessionStore::session_path`) and as
-//! an in-memory HashMap key for the conversation history cache, while the
-//! same identifier is also passed to `Memory::store`/`Memory::recall` as the
-//! `session_id` filter. Because filesystem-safe sanitization is applied when
-//! writing the JSONL file, every other layer must use the same sanitized form
-//! to keep lookups consistent across daemon restarts and persisted backends.
+//! The same normalized identifier addresses persisted session history, the
+//! conversation cache and `Memory::store`/`Memory::recall` session filters.
+//! Preserve this mapping across restarts and when importing historical JSONL
+//! filenames into SQLite; retiring the file writer must not rename sessions.
 
 /// Replace every character outside `[A-Za-z0-9_-]` with `_`. Idempotent.
 ///
-/// Callers building session keys must pre-apply this so the runtime HashMap
-/// key, the on-disk JSONL filename, and the `session_id` column in memory
-/// backends all agree.
+/// Callers building session keys must pre-apply this so the runtime cache,
+/// persisted history and `session_id` column in memory backends all agree.
 pub fn sanitize_session_key(key: &str) -> String {
     key.chars()
         .map(|c| {

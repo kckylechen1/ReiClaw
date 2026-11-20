@@ -673,10 +673,7 @@ pub async fn run_worker(config: Config, cancel: CancellationToken) -> Result<()>
             startup_pass = false;
             continue;
         }
-        let backend = reiclaw_infra::make_session_backend(
-            &config.data_dir,
-            &config.channels.session_backend,
-        )?;
+        let backend = reiclaw_infra::make_session_backend(&config.data_dir)?;
         let mut dream_state = load_dream_state(&config.data_dir);
         let mut state_dirty = false;
 

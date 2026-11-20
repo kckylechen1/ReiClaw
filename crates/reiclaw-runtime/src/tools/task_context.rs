@@ -43,8 +43,6 @@ impl TaskIdentity {
             .is_ok_and(|runtime| runtime.has_filesystem_access())
         {
             Some("the durable task list requires persistent filesystem access")
-        } else if config.channels.session_backend != "sqlite" {
-            Some("the durable task list requires the SQLite session backend")
         } else {
             None
         };
@@ -102,9 +100,6 @@ impl TaskIdentity {
             return Err(
                 "task storage or owner changed; recreate the execution context".to_string(),
             );
-        }
-        if config.channels.session_backend != "sqlite" {
-            return Err("the durable task list requires the SQLite session backend".to_string());
         }
         if !config.agent(alias).is_some_and(|agent| agent.enabled) {
             return Err("task agent is not configured or is disabled".to_string());
@@ -288,7 +283,6 @@ mod tests {
             "readonly",
             "excluded",
             "disabled",
-            "backend",
             "data_dir",
             "identity_dir",
         ] {
@@ -320,7 +314,6 @@ mod tests {
                             .excluded_tools = vec!["task_list".into()]
                     }
                     "disabled" => current.agents.get_mut("alpha").unwrap().enabled = false,
-                    "backend" => current.channels.session_backend = "jsonl".into(),
                     "data_dir" => current.data_dir = tmp.path().join("other-data"),
                     "identity_dir" => {
                         current.companion_memory.store_dir = Some(tmp.path().join("other-identity"))

@@ -145,7 +145,6 @@ impl Fixture {
             config_path: tmp.path().join("config.toml"),
             ..Default::default()
         };
-        config.channels.session_backend = "sqlite".to_string();
         config.risk_profiles.insert(
             "edge-profile".into(),
             RiskProfileConfig {

@@ -10,6 +10,7 @@ use serde::Deserialize;
 use std::path::Path;
 
 pub use crate::retired_security::RetiredSecurityConfigError;
+pub use crate::retired_session_backend::RetiredSessionBackendError;
 use crate::schema::Config;
 
 /// The only schema version this binary reads and writes.
@@ -169,6 +170,7 @@ pub fn require_current_schema(value: &toml::Value) -> Result<()> {
     crate::providers::reject_retired_model_provider_config(value)?;
     reject_retired_channel_config(value)?;
     crate::retired_security::reject_retired_security_config(value)?;
+    crate::retired_session_backend::reject_retired_session_backend_config(value)?;
     let version = detect_version(value).map_err(|err| UnsupportedSchemaError(err.to_string()))?;
     if version != CURRENT_SCHEMA_VERSION {
         return Err(UnsupportedSchemaError(format!(

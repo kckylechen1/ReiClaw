@@ -134,6 +134,8 @@ use serde::{Deserialize, Serialize};
 ///   credentials reject admission before deserialization instead of warning.
 /// - `unused_kernel_config_removed`: an ACP, trust-score, media-pipeline or
 ///   link-enricher section has no kernel consumer and is ignored.
+/// - `session_backend_selector_removed`: the old SQLite default is ignored;
+///   JSONL, unknown and malformed selections refuse config admission.
 /// - `unused_channel_setting_removed`: a global channel setting has no
 ///   consumer. Per-Telegram-alias reaction and debounce controls remain live.
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
@@ -360,6 +362,10 @@ pub fn is_retired_channel_type(channel_type: &str) -> bool {
 /// deleted from its struct, serde silently drops the unknown key, and this
 /// checker makes the retirement visible instead of a silent no-op.
 pub const RETIRED_CONFIG_FIELDS: &[(&str, &str)] = &[
+    (
+        "channels.session_backend",
+        "session_backend_selector_removed",
+    ),
     ("channels.cli", "unused_channel_setting_removed"),
     (
         "channels.message_timeout_secs",
@@ -501,6 +507,9 @@ pub const RETIRED_CONFIG_VALUES: &[(&str, &[&str], &str)] = &[
 /// the human-readable half of the field tombstone warning.
 fn retired_field_reason(code: &str) -> &'static str {
     match code {
+        "session_backend_selector_removed" => {
+            "SQLite is the only session backend; legacy JSONL startup import remains available"
+        }
         "unused_channel_setting_removed" => {
             "the global channel setting has no runtime consumer; Telegram alias settings are unchanged"
         }
@@ -565,7 +574,9 @@ pub fn retired_field_tombstones(contents: &str) -> Vec<ValidationWarning> {
     };
     let mut warnings = Vec::new();
     for (path, code) in RETIRED_CONFIG_FIELDS {
-        if !field_path_exists(root, path) {
+        if !field_path_exists(root, path)
+            || !crate::retired_session_backend::permits_field_warning(path, root)
+        {
             continue;
         }
         let reason = retired_field_reason(code);

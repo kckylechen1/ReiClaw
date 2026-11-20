@@ -9,7 +9,6 @@ pub mod process;
 pub mod session_backend;
 pub mod session_queue;
 pub mod session_sqlite;
-pub mod session_store;
 pub mod sqlite_perms;
 
 use std::net::SocketAddr;
@@ -34,28 +33,9 @@ pub fn fallback_gateway_bind_socket_addr(port: u16) -> SocketAddr {
     SocketAddr::from(([127, 0, 0, 1], port))
 }
 
-pub fn make_session_backend(
-    workspace_dir: &Path,
-    backend: &str,
-) -> std::io::Result<Arc<dyn SessionBackend>> {
-    match backend {
-        "jsonl" => {
-            let store = session_store::SessionStore::new(workspace_dir)?;
-            Ok(Arc::new(store))
-        }
-        "sqlite" => Ok(Arc::new(open_sqlite_with_jsonl_import(workspace_dir)?)),
-        other => {
-            ::reiclaw_log::record!(
-                WARN,
-                ::reiclaw_log::Event::new(module_path!(), ::reiclaw_log::Action::Note)
-                    .with_outcome(::reiclaw_log::EventOutcome::Unknown)
-                    .with_attrs(::serde_json::json!({"other": other})),
-                "Unknown session_backend ''; falling back to sqlite. \
-                 Valid values: 'sqlite' (default), 'jsonl'."
-            );
-            Ok(Arc::new(open_sqlite_with_jsonl_import(workspace_dir)?))
-        }
-    }
+/// Open the single live session backend, including the retained legacy import.
+pub fn make_session_backend(workspace_dir: &Path) -> std::io::Result<Arc<dyn SessionBackend>> {
+    Ok(Arc::new(open_sqlite_with_jsonl_import(workspace_dir)?))
 }
 
 fn open_sqlite_with_jsonl_import(
@@ -80,8 +60,8 @@ fn open_sqlite_with_jsonl_import(
                 .with_outcome(::reiclaw_log::EventOutcome::Unknown)
                 .with_attrs(::serde_json::json!({"e": e.to_string()})),
             "session_backend=sqlite: JSONL import skipped: . Existing JSONL \
-             sessions remain on disk; switch to session_backend = \"jsonl\" if \
-             you need them visible immediately."
+             sessions remain on disk; review the import error and repair the source \
+             before retrying. The JSONL runtime backend is retired."
         ),
     }
     Ok(backend)
@@ -98,21 +78,9 @@ mod tests {
     }
 
     #[test]
-    fn make_session_backend_jsonl_round_trips_through_session_store() {
-        let tmp = TempDir::new().unwrap();
-        let backend = make_session_backend(tmp.path(), "jsonl").unwrap();
-        backend.append("k1", &user_msg("hello-jsonl")).unwrap();
-        let loaded = backend.load("k1");
-        assert_eq!(loaded.len(), 1);
-        // The JSONL backend writes one file per session key.
-        let jsonl = tmp.path().join("sessions").join("k1.jsonl");
-        assert!(jsonl.exists(), "jsonl file must be written under sessions/");
-    }
-
-    #[test]
     fn make_session_backend_sqlite_round_trips_through_sqlite_db() {
         let tmp = TempDir::new().unwrap();
-        let backend = make_session_backend(tmp.path(), "sqlite").unwrap();
+        let backend = make_session_backend(tmp.path()).unwrap();
         backend.append("k1", &user_msg("hello-sqlite")).unwrap();
         let loaded = backend.load("k1");
         assert_eq!(loaded.len(), 1);
@@ -123,29 +91,17 @@ mod tests {
     }
 
     #[test]
-    fn make_session_backend_unknown_value_falls_back_to_sqlite() {
-        let tmp = TempDir::new().unwrap();
-        let backend = make_session_backend(tmp.path(), "totally-not-a-backend").unwrap();
-        backend.append("k1", &user_msg("hello-fallback")).unwrap();
-        let db = tmp.path().join("sessions").join("sessions.db");
-        assert!(
-            db.exists(),
-            "unknown value must fall back to sqlite, not error"
-        );
-    }
-
-    #[test]
     fn make_session_backend_sqlite_imports_legacy_jsonl_on_first_open() {
         // Seed JSONL session files, then open SQLite — the .jsonl files must
         // be migrated and the imported sessions must be visible via the new
         // backend. The .jsonl files get renamed to .jsonl.migrated so the
         // operator can roll back.
         let tmp = TempDir::new().unwrap();
-        {
-            let jsonl = make_session_backend(tmp.path(), "jsonl").unwrap();
-            jsonl.append("legacy", &user_msg("from-jsonl")).unwrap();
-        }
-        let sqlite = make_session_backend(tmp.path(), "sqlite").unwrap();
+        let sessions = tmp.path().join("sessions");
+        std::fs::create_dir_all(&sessions).unwrap();
+        let original = "{\"role\":\"user\",\"content\":\"from-jsonl\"}\n";
+        std::fs::write(sessions.join("legacy.jsonl"), original).unwrap();
+        let sqlite = make_session_backend(tmp.path()).unwrap();
         let loaded = sqlite.load("legacy");
         assert_eq!(
             loaded.len(),
@@ -160,5 +116,10 @@ mod tests {
             jsonl_migrated.exists(),
             ".jsonl.migrated rollback file should remain"
         );
+        assert_eq!(std::fs::read_to_string(&jsonl_migrated).unwrap(), original);
+        drop(sqlite);
+        let reopened = make_session_backend(tmp.path()).unwrap();
+        assert_eq!(reopened.load("legacy").len(), 1, "no repeated import");
+        assert_eq!(reopened.load("legacy")[0].content, "from-jsonl");
     }
 }

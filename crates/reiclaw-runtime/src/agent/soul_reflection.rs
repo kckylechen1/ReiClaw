@@ -172,10 +172,7 @@ pub async fn run_worker(
             continue;
         }
         let store = SoulProfileStore::shared(&config.data_dir)?;
-        let backend = reiclaw_infra::make_session_backend(
-            &config.data_dir,
-            &config.channels.session_backend,
-        )?;
+        let backend = reiclaw_infra::make_session_backend(&config.data_dir)?;
         let mut aliases: Vec<&String> = config.agents.keys().collect();
         aliases.sort();
         for alias in aliases {

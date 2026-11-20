@@ -39,7 +39,6 @@ cli = true
 debounce_ms = 0
 max_concurrent_per_channel = 4
 message_timeout_secs = 300
-session_backend = "sqlite"
 session_persistence = true
 session_ttl_hours = 0
 show_tool_calls = false

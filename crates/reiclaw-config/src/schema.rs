@@ -7889,14 +7889,10 @@ pub struct ChannelsConfig {
     /// not forwarded as individual channel messages. Default: `false`.
     #[serde(default = "default_false")]
     pub show_tool_calls: bool,
-    /// Persist channel conversation history to JSONL files so sessions survive
-    /// daemon restarts. Files are stored in `{workspace}/sessions/`. Default: `true`.
+    /// Persist channel conversation history in SQLite so sessions survive
+    /// daemon restarts. Stored in `{workspace}/sessions/sessions.db`. Default: `true`.
     #[serde(default = "default_true")]
     pub session_persistence: bool,
-    /// Session persistence backend: `"jsonl"` (legacy) or `"sqlite"` (new default).
-    /// SQLite provides FTS5 search, metadata tracking, and TTL cleanup.
-    #[serde(default = "default_session_backend")]
-    pub session_backend: String,
     /// Auto-archive stale sessions older than this many hours. `0` disables. Default: `0`.
     #[serde(default)]
     pub session_ttl_hours: u32,
@@ -8032,10 +8028,6 @@ impl ChannelsConfig {
     }
 }
 
-fn default_session_backend() -> String {
-    "sqlite".into()
-}
-
 impl Default for ChannelsConfig {
     fn default() -> Self {
         Self {
@@ -8045,7 +8037,6 @@ impl Default for ChannelsConfig {
             filesystem: HashMap::new(),
             show_tool_calls: false,
             session_persistence: true,
-            session_backend: default_session_backend(),
             session_ttl_hours: 0,
         }
     }

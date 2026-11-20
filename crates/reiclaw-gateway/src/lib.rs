@@ -1020,18 +1020,12 @@ pub async fn run_gateway(
         });
 
     let session_backend: Option<Arc<dyn SessionBackend>> = if config.gateway.session_persistence {
-        match reiclaw_infra::make_session_backend(
-            &config.data_dir,
-            &config.channels.session_backend,
-        ) {
+        match reiclaw_infra::make_session_backend(&config.data_dir) {
             Ok(backend) => {
                 ::reiclaw_log::record!(
                     INFO,
                     ::reiclaw_log::Event::new(module_path!(), ::reiclaw_log::Action::Note),
-                    &format!(
-                        "Gateway session persistence enabled (backend={})",
-                        config.channels.session_backend
-                    )
+                    "Gateway session persistence enabled (SQLite)"
                 );
                 if config.gateway.session_ttl_hours > 0
                     && let Ok(cleaned) = backend.cleanup_stale(config.gateway.session_ttl_hours)

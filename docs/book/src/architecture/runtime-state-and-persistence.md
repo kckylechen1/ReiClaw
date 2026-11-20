@@ -49,7 +49,7 @@ new runtime state should be described in terms of `<install>/data/`,
 | Agent filesystem identity | Per-agent workspace files | `<install>/agents/<alias>/workspace/` | effective `SecurityPolicy` and agent prompt construction | Created lazily when the agent starts; workspace access is evaluated from config | This is the filesystem sandbox, not the config source of truth for providers/channels/tools. |
 | Shared skill bundles | Configured skill bundle entries and resolved bundle dirs | `<install>/shared/skills/<bundle>/` by default | skill loading / prompt enrichment | Reload and new agent starts observe config and filesystem changes | Bundle aliases and directory resolution come from config; the files are the bundle content. |
 | Conversation memory | `reiclaw-memory` backend selected per agent | Shared MemoryCore store under `data/memory/memorycore.db`, or per-agent Markdown files | `Arc<dyn Memory>` wrapped in agent-scoping adapters | Backend choice is locked once an agent has written data; same-backend cross-agent recall is opt-in (SQLite/Lucid/Postgres/Qdrant retired) | Memory rows are agent-scoped. Do not replace memory ownership with copied prompt/session caches. |
-| Chat and channel sessions | `[channels].session_backend` plus `SessionBackend` | Default `data/sessions/sessions.db`; legacy/explicit JSONL uses `data/sessions/*.jsonl` | `zeroclaw-infra` session backend shared by channels and gateway | SQLite backend uses WAL; `SessionActorQueue` serializes active turns per session | Chat/Code sessions use this unified backend. ACP protocol sessions use a separate store. |
+| Chat and channel sessions | SQLite `SessionBackend` | `data/sessions/sessions.db`; retained startup import reads legacy `data/sessions/*.jsonl` | `zeroclaw-infra` session backend shared by channels and gateway | SQLite uses WAL; `SessionActorQueue` serializes active turns per session | Chat/Code sessions use this unified backend. ACP protocol sessions use a separate store. |
 | ACP sessions | ACP protocol session store | `data/sessions/acp-sessions.db` | `AcpSessionStore` opened by `zeroclaw acp` and gateway agent-state handlers | WAL-backed SQLite store, separate from chat sessions | ACP `session/load` and `session/resume` operate on this protocol store, not the chat session backend. |
 | Cron jobs | Declarative config membership plus cron SQLite store | `data/cron/jobs.db` | `zeroclaw-runtime::cron` scheduler/store | Read paths do not create `jobs.db`; scheduler owns due/lock state | Declarative jobs are reconciled from config, while run metadata and locks live in the cron DB. |
 | SOP runs | Removed with the run side | `data/sop/runs.db` only as a leftover from an older install | none | The legacy `SopEngine`/`SopRunStore` pair was demolished; leftover stores are left in place and reported by a boot-time warning | Run truth lives Tachi-side as ProcedureRuns through the procedure_v1 seam. |
@@ -61,6 +61,23 @@ new runtime state should be described in terms of `<install>/data/`,
 | Paired device metadata | Device registry rows keyed by token hash | `data/devices.db` | `DeviceRegistry` cache plus SQLite | Registry reconciles metadata against the canonical paired-token set | This DB makes paired devices visible/manageable; it does not invent valid tokens. |
 | Health and component status | running subsystems report component state | none | gateway health/status state | Process-local; reset/rebuilt on daemon restart or reload | `/health`, `/api/health`, and `/api/status` are current observations, not durable configuration. |
 | Queues, debouncers, watchdogs | `zeroclaw-infra` process utilities | none unless a caller stores results elsewhere | in-memory queues/debouncers/watchdogs | Process-local; used to serialize, coalesce, or detect stalls | Treat these as coordination state. Persist only the domain data they protect, not the queue itself. |
+
+### Retired JSONL backend selection
+
+SQLite is the only runtime session backend. Remove the retired
+`channels.session_backend` setting and its `REI_channels__session_backend`
+override. An explicit `sqlite` value is accepted with a warning. `jsonl`,
+unknown values and non-string values reject configuration admission before
+another store can be selected. Review the existing history before making
+that operator edit.
+
+The startup importer still reads legacy `data/sessions/*.jsonl` and renames
+successfully imported source files to `*.jsonl.migrated`. Keep those files:
+the compatibility window has not closed. The importer retains its existing
+line-level tolerance, including skipping unreadable or malformed lines. A
+reported imported-file count is not evidence that every source record was
+imported. This backend retirement does not establish full migration or
+retire the importer.
 
 ## Reload and restart
 
@@ -87,8 +104,8 @@ existing SQLite store as `error`, preserving the turn ID, history and request
 receipts. This reports an interrupted turn, not that its tools had no effects.
 No tool or accepted request is automatically replayed. Non-gateway sessions
 and terminal states are untouched. Recovery neither creates a SQLite store nor
-migrates an older schema; a store error refuses startup. JSONL has no durable
-running-state guarantee.
+migrates an older schema; a store error refuses startup. Imported JSONL history
+has no earlier durable running-state evidence.
 
 This cooperative lock cannot fence older binaries or external database writers.
 Stop old gateways before upgrading; never run an older binary against the same

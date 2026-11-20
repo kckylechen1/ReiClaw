@@ -34,6 +34,7 @@ pub mod presets;
 pub mod provider_aliases;
 pub mod providers;
 mod retired_security;
+mod retired_session_backend;
 mod save;
 pub mod scattered_types;
 pub mod schema;
