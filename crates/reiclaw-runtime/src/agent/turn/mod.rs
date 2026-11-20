@@ -52,9 +52,7 @@ pub(crate) use provider_call::{
     ProviderCallOutcome, announce_llm_request, call_provider, enforce_tool_loop_budget,
 };
 pub use redact::scrub_credentials;
-pub(crate) use results_collect::{
-    CollectedResults, check_identical_output_abort, collect_tool_results,
-};
+pub(crate) use results_collect::{CollectedResults, collect_tool_results};
 pub use steering::drain_steering_messages;
 #[cfg(all(test, feature = "heavy-tests"))]
 pub(crate) use stream_consume::consume_provider_streaming_response;
@@ -75,7 +73,6 @@ use reiclaw_providers::{ChatMessage, ModelProvider};
 use std::collections::HashSet;
 use std::io::Write as _;
 use std::sync::Arc;
-use std::time::Instant;
 use tokio_util::sync::CancellationToken;
 
 /// Why history was trimmed to fit the context token budget.
@@ -315,16 +312,17 @@ pub async fn run_tool_call_loop_with_security(
     p: ToolLoop<'_>,
     security: Option<&crate::security::SecurityPolicy>,
 ) -> Result<String> {
-    run_tool_call_loop_with_guard(p, None, false, None, None, security).await
+    let repetition_guard = std::sync::Mutex::new(repetition::RepetitionGuard::default());
+    run_tool_call_loop_with_guard(p, &repetition_guard, false, None, None, security).await
 }
 
 /// Agent owns this guard for the full API turn, including steering rounds.
-/// Low-level/channel callers keep their legacy detector.
+/// Low-level/channel callers create the same guard for their invocation.
 /// Steering yield is internal to streamed Agent enrichment; keep the public
 /// LoopKnobs shape and low-level drain behavior compatible for embedders.
 pub(crate) async fn run_tool_call_loop_with_guard(
     p: ToolLoop<'_>,
-    repetition_guard: Option<&std::sync::Mutex<repetition::RepetitionGuard>>,
+    repetition_guard: &std::sync::Mutex<repetition::RepetitionGuard>,
     yield_to_steering: bool,
     side_query: Option<(
         &crate::agent::side_query::SideQueryHandle,
@@ -375,7 +373,7 @@ pub(crate) async fn run_tool_call_loop_with_guard(
 
 async fn run_tool_call_loop_turn(
     p: ToolLoop<'_>,
-    repetition_guard: Option<&std::sync::Mutex<repetition::RepetitionGuard>>,
+    repetition_guard: &std::sync::Mutex<repetition::RepetitionGuard>,
     yield_to_steering: bool,
     side_query: Option<(
         &crate::agent::side_query::SideQueryHandle,
@@ -504,22 +502,11 @@ async fn run_tool_call_loop_turn(
         max_tool_iterations
     };
 
-    let loop_started_at = Instant::now();
     let loop_ignore_tools: HashSet<&str> = pacing
         .loop_ignore_tools
         .iter()
         .map(String::as_str)
         .collect();
-    let mut consecutive_identical_outputs: usize = 0;
-    let mut last_tool_output_hash: Option<u64> = None;
-
-    let mut loop_detector = crate::agent::loop_detector::LoopDetector::new(
-        crate::agent::loop_detector::LoopDetectorConfig {
-            enabled: pacing.loop_detection_enabled && repetition_guard.is_none(),
-            window_size: pacing.loop_detection_window_size,
-            max_repeats: pacing.loop_detection_max_repeats,
-        },
-    );
 
     // Accumulated display text across all tool-loop calls.
     let mut accumulated_display_text = String::new();
@@ -1082,14 +1069,15 @@ async fn run_tool_call_loop_turn(
         // Preparation has applied approval and hooks. Resolve aliases with the
         // same dispatcher used for execution, admitting only one recovery
         // retry for this identity even when the provider batches duplicates.
-        if let Some(warned_call) = repetition_guard
-            .filter(|_| pacing.loop_detection_enabled)
-            .and_then(|guard| {
-                guard
+        if let Some(warned_call) = pacing
+            .loop_detection_enabled
+            .then(|| {
+                repetition_guard
                     .lock()
                     .unwrap_or_else(|e| e.into_inner())
                     .recovery_call_hash()
             })
+            .flatten()
         {
             let dispatch = ToolDispatchContext {
                 tools_registry,
@@ -1191,17 +1179,19 @@ async fn run_tool_call_loop_turn(
         // Synthetic approval/hook/unavailable outcomes are not execution
         // evidence. Observe the complete batch before choosing a disposition
         // so another completed approach can clear an outstanding warning.
-        let repetition_disposition = if let Some(guard) =
-            repetition_guard.filter(|_| pacing.loop_detection_enabled && !cancelled_mid_batch)
+        let repetition_disposition = if !cancelled_mid_batch
+            && !cancellation_token
+                .as_ref()
+                .is_some_and(CancellationToken::is_cancelled)
         {
-            guard
+            repetition_guard
                 .lock()
                 .unwrap_or_else(|e| e.into_inner())
                 .observe_round(
                     &executed_completed_calls,
                     &executed_completed_outcomes,
                     &loop_ignore_tools,
-                    pacing.loop_detection_max_repeats,
+                    pacing,
                 )
         } else {
             repetition::RepetitionDisposition::default()
@@ -1262,32 +1252,7 @@ async fn run_tool_call_loop_turn(
         let CollectedResults {
             individual_results,
             tool_results,
-            detection_relevant_output,
-        } = collect_tool_results(
-            ordered_results,
-            &tool_calls,
-            turn_state.history,
-            &mut loop_detector,
-            &loop_ignore_tools,
-            max_tool_result_chars,
-            collected_receipts,
-            model,
-            iteration,
-            turn_id,
-        )?;
-
-        if !cancelled_mid_batch && repetition_guard.is_none() {
-            check_identical_output_abort(
-                &detection_relevant_output,
-                loop_started_at,
-                pacing,
-                &mut consecutive_identical_outputs,
-                &mut last_tool_output_hash,
-                model,
-                iteration,
-                turn_id,
-            )?;
-        }
+        } = collect_tool_results(ordered_results, max_tool_result_chars, collected_receipts);
 
         turn_state.append_tool_round(
             assistant_history_content,

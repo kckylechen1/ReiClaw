@@ -906,3 +906,228 @@ async fn repeated_failure_warning_survives_mid_turn_reported_budget_trim_and_con
         }
     }
 }
+
+struct LowLevelTurn {
+    response: Result<String>,
+    history: Vec<ChatMessage>,
+    canonical: Vec<ChatMessage>,
+    requests: Requests,
+}
+
+/// Exercise the public loop entry, which owns its guard instead of receiving
+/// Agent's API-turn guard. Keep dedup off so actual repeated executions reach
+/// the evidence boundary, as they do for polling and recovery callers.
+async fn run_low_level(
+    responses: Vec<ChatResponse>,
+    tool: OutcomeTool,
+    pacing: reiclaw_config::schema::PacingConfig,
+    cancellation_token: Option<tokio_util::sync::CancellationToken>,
+) -> LowLevelTurn {
+    use crate::agent::turn::{LoopKnobs, ResolvedModelAccess, ToolLoop};
+    let requests = Arc::new(parking_lot::Mutex::new(Vec::new()));
+    let provider = RecordingProvider {
+        scripted: ScriptedProvider::new(responses),
+        requests: Arc::clone(&requests),
+        steering: None,
+        fail_overflow_at: None,
+    };
+    let observer = crate::observability::NoopObserver;
+    let tools: Vec<Box<dyn Tool>> = vec![Box::new(tool)];
+    let knobs = LoopKnobs {
+        dedup_enabled: false,
+        ..LoopKnobs::default()
+    };
+    let mut exec = crate::agent::turn::execution::test_support::execution(
+        ResolvedModelAccess {
+            model_provider: &provider,
+            provider_name: "custom",
+            model: "test-model",
+            temperature: None,
+        },
+        &observer,
+        &pacing,
+    );
+    exec.tools_registry = &tools;
+    exec.max_tool_iterations = 20;
+    exec.parallel_tools = false;
+    exec.context_token_budget = 0;
+    exec.knobs = &knobs;
+    let mut history = vec![ChatMessage::system("test"), ChatMessage::user("fetch it")];
+    let mut canonical = Vec::new();
+    let response = crate::agent::turn::run_tool_call_loop(ToolLoop {
+        exec,
+        history: &mut history,
+        channel_name: "test",
+        channel_reply_target: None,
+        cancellation_token,
+        on_delta: None,
+        shared_budget: None,
+        channel: None,
+        collected_receipts: None,
+        event_tx: None,
+        steering: None,
+        new_messages_out: Some(&mut canonical),
+        image_cache: None,
+        ingress: IngressContext::agent_direct(),
+        memory: None,
+        agent_alias: None,
+        parent_agent_alias: None,
+        turn_id: "low-level-repetition-test",
+    })
+    .await;
+    LowLevelTurn {
+        response,
+        history,
+        canonical,
+        requests,
+    }
+}
+
+fn flat_result_ids(messages: &[ChatMessage]) -> Vec<String> {
+    messages
+        .iter()
+        .filter(|message| message.role == "tool")
+        .map(|message| {
+            let value: serde_json::Value =
+                serde_json::from_str(&message.content).expect("paired tool result");
+            value["tool_call_id"]
+                .as_str()
+                .expect("tool result id")
+                .to_string()
+        })
+        .collect()
+}
+
+#[tokio::test]
+async fn low_level_entry_closes_identical_failures_after_one_recovery_with_results_preserved() {
+    for return_error in [false, true] {
+        let calls = Arc::new(AtomicUsize::new(0));
+        let mut tool = failing(&calls);
+        tool.return_error = return_error;
+        let turn = run_low_level(script(8), tool, Default::default(), None).await;
+        assert_eq!(calls.load(Ordering::SeqCst), 4);
+        assert_eq!(turn.requests.lock().len(), 4);
+        assert!(
+            turn.response
+                .expect("controlled closure")
+                .contains("The recovery retry failed with the same result")
+        );
+        let expected = ["fetch-0", "fetch-1", "fetch-2", "fetch-3"];
+        assert_eq!(flat_result_ids(&turn.history), expected);
+        assert_eq!(flat_result_ids(&turn.canonical), expected);
+        assert!(turn.canonical.last().is_some_and(|message| {
+            message.role == "assistant"
+                && message
+                    .content
+                    .contains("Completed tool results have been preserved")
+        }));
+    }
+}
+
+#[tokio::test]
+async fn low_level_entry_keeps_successful_polling_and_coalesces_timed_advice() {
+    for changing_output in [false, true] {
+        let calls = Arc::new(AtomicUsize::new(0));
+        let mut tool = failing(&calls);
+        tool.success = true;
+        tool.changing_output = changing_output;
+        let mut responses = script(12);
+        responses.push(text_response("poll complete"));
+        let turn = run_low_level(
+            responses,
+            tool,
+            reiclaw_config::schema::PacingConfig {
+                loop_detection_min_elapsed_secs: Some(0),
+                ..Default::default()
+            },
+            None,
+        )
+        .await;
+        let response = turn.response.expect("polling remains allowed");
+        assert!(response.ends_with("poll complete"));
+        assert_eq!(
+            response
+                .matches("The same tool call returned the same successful result repeatedly")
+                .count(),
+            usize::from(!changing_output)
+        );
+        assert_eq!(
+            response
+                .matches("configured observation grace period")
+                .count(),
+            usize::from(!changing_output)
+        );
+        assert_eq!(calls.load(Ordering::SeqCst), 12);
+        assert_eq!(turn.requests.lock().len(), 13);
+        assert_eq!(flat_result_ids(&turn.history).len(), 12);
+        assert_eq!(flat_result_ids(&turn.canonical).len(), 12);
+    }
+}
+
+#[tokio::test]
+async fn low_level_entry_honors_disabled_ignored_and_synthetic_outcomes() {
+    for scenario in ["disabled", "ignored", "unavailable"] {
+        for success in [false, true] {
+            let calls = Arc::new(AtomicUsize::new(0));
+            let mut tool = failing(&calls);
+            tool.success = success;
+            let mut responses = script(8);
+            if scenario == "unavailable" {
+                for response in &mut responses {
+                    response.tool_calls[0].name = "missing".into();
+                }
+            }
+            responses.push(text_response("done"));
+            let pacing = reiclaw_config::schema::PacingConfig {
+                loop_detection_enabled: scenario != "disabled",
+                loop_ignore_tools: if scenario == "ignored" {
+                    vec!["fetch".into()]
+                } else {
+                    Vec::new()
+                },
+                loop_detection_min_elapsed_secs: Some(0),
+                ..Default::default()
+            };
+            let turn = run_low_level(responses, tool, pacing, None).await;
+            assert_eq!(turn.response.expect("unblocked turn"), "done", "{scenario}");
+            assert_eq!(
+                calls.load(Ordering::SeqCst),
+                if scenario == "unavailable" { 0 } else { 8 }
+            );
+            assert_eq!(turn.requests.lock().len(), 9);
+            assert_eq!(flat_result_ids(&turn.canonical).len(), 8);
+        }
+    }
+}
+
+#[tokio::test]
+async fn low_level_cancelled_recovery_preserves_completed_and_interrupted_pairs_without_exhaustion()
+{
+    let calls = Arc::new(AtomicUsize::new(0));
+    let token = tokio_util::sync::CancellationToken::new();
+    let mut tool = failing(&calls);
+    tool.cancel_on_attempt = Some((token.clone(), 4));
+    let mut responses = script(4);
+    let mut unrun = tool_call("unrun", "fetch");
+    unrun.arguments = serde_json::json!({"url":"alternate"}).to_string();
+    responses[3].tool_calls.push(unrun);
+    let turn = run_low_level(responses, tool, Default::default(), Some(token)).await;
+    assert!(crate::agent::turn::is_tool_loop_cancelled(
+        &turn.response.expect_err("cancelled turn")
+    ));
+    assert_eq!(calls.load(Ordering::SeqCst), 4);
+    assert_eq!(turn.requests.lock().len(), 4);
+    let expected = ["fetch-0", "fetch-1", "fetch-2", "fetch-3", "unrun"];
+    assert_eq!(flat_result_ids(&turn.history), expected);
+    assert_eq!(flat_result_ids(&turn.canonical), expected);
+    assert!(turn.canonical.iter().any(|message| {
+        message
+            .content
+            .contains("interrupted by user before this tool produced a result")
+    }));
+    assert!(turn.canonical.iter().all(|message| {
+        !message
+            .content
+            .contains("The recovery retry failed with the same result")
+    }));
+}

@@ -2,22 +2,78 @@
 
 use crate::agent::tool_execution::{CompletedToolExecution, ToolExecutionOutcome};
 use regex::Regex;
+use reiclaw_config::schema::PacingConfig;
 use reiclaw_tool_call_parser::ParsedToolCall;
-use std::collections::HashSet;
+use std::collections::{HashSet, VecDeque};
 use std::hash::{Hash, Hasher};
 use std::sync::LazyLock;
+use std::time::{Duration, Instant};
 
 const SUCCESS_ADVISORY: &str = "The same tool call returned the same successful result repeatedly. Reconsider whether another call will help. Polling may continue when needed.";
 const FAILURE_RECOVERY: &str = "The same tool call failed with the same result repeatedly. Change the approach or explain the blocker. One further identical retry is available before this turn stops.";
 const FAILURE_EXHAUSTED: &str = "The recovery retry failed with the same result, so this turn has stopped. Completed tool results have been preserved. You can retry in a new turn.";
+const PING_PONG_ADVISORY: &str = "Tool calls have been alternating repeatedly. Reconsider whether the current sequence is useful. Successful polling may continue when needed.";
+const NO_PROGRESS_ADVISORY: &str = "Different calls to the same tool have returned the same successful result repeatedly. Consider a different approach. Successful polling may continue when needed.";
+const TIMED_ADVISORY: &str = "Recent tool rounds have returned the same successful results after the configured observation grace period. Reconsider whether another round will help. Successful polling may continue when needed.";
 
-#[derive(Default)]
 pub(crate) struct RepetitionGuard {
     last: Option<(Signature, bool)>,
     repeats: usize,
     warned_failure: Option<Signature>,
     success_advised: bool,
     exhausted: bool,
+    successful: VecDeque<SuccessEvidence>,
+    advised_patterns: VecDeque<Pattern>,
+    started_at: Instant,
+    timed_round: Option<(u64, usize, bool)>,
+}
+
+impl Default for RepetitionGuard {
+    fn default() -> Self {
+        Self {
+            last: None,
+            repeats: 0,
+            warned_failure: None,
+            success_advised: false,
+            exhausted: false,
+            successful: VecDeque::new(),
+            advised_patterns: VecDeque::new(),
+            started_at: Instant::now(),
+            timed_round: None,
+        }
+    }
+}
+
+#[derive(Clone, Copy)]
+struct SuccessEvidence {
+    tool: u64,
+    signature: Signature,
+}
+
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum Pattern {
+    PingPong(u64, u64),
+    NoProgress(u64, u64),
+}
+
+impl Pattern {
+    fn remains_in(self, window: &VecDeque<SuccessEvidence>) -> bool {
+        match self {
+            Self::PingPong(a, b) => {
+                window.iter().any(|item| item.tool == a) && window.iter().any(|item| item.tool == b)
+            }
+            Self::NoProgress(tool, result) => window
+                .iter()
+                .any(|item| item.tool == tool && item.signature.result == result),
+        }
+    }
+
+    fn message(self) -> &'static str {
+        match self {
+            Self::PingPong(_, _) => PING_PONG_ADVISORY,
+            Self::NoProgress(_, _) => NO_PROGRESS_ADVISORY,
+        }
+    }
 }
 
 #[derive(Default)]
@@ -40,8 +96,12 @@ impl RepetitionGuard {
         calls: &[ParsedToolCall],
         outcomes: &[CompletedToolExecution],
         ignored: &HashSet<&str>,
-        threshold: usize,
+        pacing: &PacingConfig,
     ) -> RepetitionDisposition {
+        if !pacing.loop_detection_enabled {
+            return RepetitionDisposition::default();
+        }
+        let mut has_success_output = false;
         let evidence: Vec<_> = calls
             .iter()
             .zip(outcomes)
@@ -50,7 +110,10 @@ impl RepetitionGuard {
                 if ignored.contains(name) {
                     return None;
                 }
+                has_success_output |=
+                    completed.outcome.success && !completed.outcome.output.is_empty();
                 Some((
+                    hash_tool_name(name),
                     signature(name, &call.arguments, &completed.outcome),
                     completed.outcome.success,
                 ))
@@ -63,10 +126,10 @@ impl RepetitionGuard {
         if let Some(warned) = self.warned_failure {
             if evidence
                 .iter()
-                .any(|&(hash, success)| success || hash != warned)
+                .any(|&(_, hash, success)| success || hash != warned)
             {
                 self.warned_failure = None;
-            } else if evidence.iter().any(|&(hash, _)| hash == warned) {
+            } else if evidence.iter().any(|&(_, hash, _)| hash == warned) {
                 self.exhausted = true;
                 return RepetitionDisposition {
                     message: Some(FAILURE_EXHAUSTED),
@@ -76,7 +139,7 @@ impl RepetitionGuard {
         }
 
         let mut disposition = RepetitionDisposition::default();
-        for (hash, success) in evidence {
+        for &(_, hash, success) in &evidence {
             if self.last == Some((hash, success)) {
                 self.repeats = self.repeats.saturating_add(1);
             } else {
@@ -84,7 +147,12 @@ impl RepetitionGuard {
                 self.repeats = 1;
                 self.warned_failure = None;
             }
-            if self.repeats < threshold.max(1) {
+            // A successful first call is not a repetition. Preserve the
+            // existing failure-recovery threshold, including an explicit 1.
+            let threshold = pacing
+                .loop_detection_max_repeats
+                .max(if success { 2 } else { 1 });
+            if self.repeats < threshold {
                 continue;
             }
             if success {
@@ -101,8 +169,128 @@ impl RepetitionGuard {
         if disposition.message == Some(FAILURE_RECOVERY) && self.warned_failure.is_none() {
             disposition.message = None;
         }
+        let successes: Vec<_> = evidence
+            .iter()
+            .filter_map(|&(tool, signature, success)| {
+                success.then_some(SuccessEvidence { tool, signature })
+            })
+            .collect();
+        let window_size = pacing
+            .loop_detection_window_size
+            .max(pacing.loop_detection_max_repeats.max(2).saturating_add(2));
+        let pattern = self.observe_success_patterns(&successes, window_size);
+        let timed = if has_success_output {
+            self.observe_timed_round(&successes, pacing.loop_detection_min_elapsed_secs)
+        } else {
+            None
+        };
+        if disposition.message.is_none() {
+            disposition.message = pattern.or(timed);
+        }
         disposition
     }
+
+    fn observe_success_patterns(
+        &mut self,
+        evidence: &[SuccessEvidence],
+        window_size: usize,
+    ) -> Option<&'static str> {
+        let limit = window_size.max(1);
+        let mut message = None;
+        for &item in evidence {
+            while self.successful.len() >= limit {
+                self.successful.pop_front();
+            }
+            self.successful.push_back(item);
+            self.advised_patterns
+                .retain(|pattern| pattern.remains_in(&self.successful));
+            let pattern = self
+                .detect_ping_pong()
+                .or_else(|| self.detect_no_progress());
+            if let Some(pattern) = pattern
+                && !self.advised_patterns.contains(&pattern)
+            {
+                while self.advised_patterns.len() >= limit {
+                    self.advised_patterns.pop_front();
+                }
+                self.advised_patterns.push_back(pattern);
+                message.get_or_insert(pattern.message());
+            }
+        }
+        message
+    }
+
+    fn detect_ping_pong(&self) -> Option<Pattern> {
+        if self.successful.len() < 8 {
+            return None;
+        }
+        let mut tail = self.successful.iter().rev();
+        let a = tail.next()?.tool;
+        let b = tail.next()?.tool;
+        if a == b
+            || !tail
+                .take(6)
+                .enumerate()
+                .all(|(index, item)| item.tool == if index % 2 == 0 { a } else { b })
+        {
+            return None;
+        }
+        Some(Pattern::PingPong(a.min(b), a.max(b)))
+    }
+
+    fn detect_no_progress(&self) -> Option<Pattern> {
+        let last = self.successful.back()?;
+        let matching: Vec<_> = self
+            .successful
+            .iter()
+            .filter(|item| item.tool == last.tool && item.signature.result == last.signature.result)
+            .collect();
+        (matching.len() >= 5
+            && matching
+                .iter()
+                .any(|item| item.signature.call != last.signature.call))
+        .then_some(Pattern::NoProgress(last.tool, last.signature.result))
+    }
+
+    fn observe_timed_round(
+        &mut self,
+        evidence: &[SuccessEvidence],
+        min_elapsed: Option<u64>,
+    ) -> Option<&'static str> {
+        let minimum = min_elapsed?;
+        if evidence.is_empty() || self.started_at.elapsed() < Duration::from_secs(minimum) {
+            return None;
+        }
+        let mut hasher = std::collections::hash_map::DefaultHasher::new();
+        evidence.len().hash(&mut hasher);
+        for item in evidence {
+            item.signature.result.hash(&mut hasher);
+        }
+        let hash = hasher.finish();
+        // Only an unchanged successful round advances this advisory episode;
+        // this elapsed gate is not a timeout or a turn termination condition.
+        match self.timed_round.as_mut() {
+            Some((previous, repeats, advised)) if *previous == hash => {
+                *repeats = repeats.saturating_add(1);
+                if *repeats >= 4 && !*advised {
+                    *advised = true;
+                    Some(TIMED_ADVISORY)
+                } else {
+                    None
+                }
+            }
+            _ => {
+                self.timed_round = Some((hash, 1, false));
+                None
+            }
+        }
+    }
+}
+
+fn hash_tool_name(name: &str) -> u64 {
+    let mut hasher = std::collections::hash_map::DefaultHasher::new();
+    name.hash(&mut hasher);
+    hasher.finish()
 }
 
 #[derive(Clone, Copy, PartialEq, Eq)]
@@ -278,7 +466,10 @@ mod tests {
                     executed_tool_name: executed.then(|| "remote".into()),
                 }],
                 &HashSet::new(),
-                1,
+                &PacingConfig {
+                    loop_detection_max_repeats: 1,
+                    ..PacingConfig::default()
+                },
             )
         };
         assert!(observe(&mut guard, false).message.is_none());
@@ -344,3 +535,7 @@ mod tests {
         );
     }
 }
+
+#[cfg(test)]
+#[path = "repetition_tests.rs"]
+mod regression_tests;

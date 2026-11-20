@@ -3628,10 +3628,10 @@ pub struct PacingConfig {
     #[serde(default)]
     pub step_timeout_secs: Option<u64>,
 
-    /// Minimum elapsed seconds before loop detection activates.
-    /// Tasks completing under this threshold get aggressive loop protection;
-    /// longer-running tasks receive a grace period before the detector starts
-    /// counting. `None` means loop detection is always active (existing behavior).
+    /// Minimum elapsed seconds before the additional identical-successful-round
+    /// advisory starts counting. `None` disables this extra advisory. This is
+    /// an observation grace period, not a timeout; ordinary repetition and
+    /// failed-call recovery remain active when loop detection is enabled.
     #[serde(default)]
     pub loop_detection_min_elapsed_secs: Option<u64>,
 
@@ -3649,8 +3649,10 @@ pub struct PacingConfig {
     #[serde(default)]
     pub message_timeout_scale_max: Option<u64>,
 
-    /// Enable pattern-based loop detection (exact repeat, ping-pong,
-    /// no-progress). Defaults to `true`.
+    /// Enable repetition detection and failed-call recovery. Successful exact
+    /// repeats, ping-pong and no-progress patterns are advisory; only another
+    /// identical failure after a recovery warning closes the turn. Defaults
+    /// to `true`.
     #[serde(default = "default_loop_detection_enabled")]
     pub loop_detection_enabled: bool,
 
@@ -3659,8 +3661,8 @@ pub struct PacingConfig {
     #[serde(default = "default_loop_detection_window_size")]
     pub loop_detection_window_size: usize,
 
-    /// Number of consecutive identical tool+args calls before the first
-    /// escalation (Warning). Defaults to 3.
+    /// Number of consecutive identical tool+args+result calls before a warning.
+    /// Defaults to 3. Successful calls always require at least two observations.
     #[serde(default = "default_loop_detection_max_repeats")]
     pub loop_detection_max_repeats: usize,
 }
