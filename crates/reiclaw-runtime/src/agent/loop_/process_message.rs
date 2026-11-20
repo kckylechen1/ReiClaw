@@ -331,9 +331,6 @@ pub async fn process_message_with_hooks(
             ChatMessage::user(&enriched),
         ];
         let loop_knobs = LoopKnobs::default();
-        // Keep the direct-message entry's previous pacing until its config
-        // wiring is validated separately from this assembly refactor.
-        let pacing = reiclaw_config::schema::PacingConfig::default();
         let exec = ResolvedAgentExecution::resolve(
             ResolvedModelAccess {
                 model_provider: model_provider.as_ref(),
@@ -357,7 +354,7 @@ pub async fn process_message_with_hooks(
                 // This entry historically uses the raw resolved ceiling;
                 // CLI run uses effective_context_budget through for_agent.
                 context_token_budget: agent.resolved.max_context_tokens,
-                ..ResolvedRuntimeKnobs::for_agent(&agent.resolved, &pacing, &loop_knobs)
+                ..ResolvedRuntimeKnobs::for_agent(&agent.resolved, &config.pacing, &loop_knobs)
             },
         )
         .with_task_owner(task_owner.as_ref());
