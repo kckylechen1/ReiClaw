@@ -1,12 +1,7 @@
-//! Host scope for point reads/deletes. SQLite and Tachi share these rules;
+//! Host scope for point reads/deletes over Tachi memory entries;
 //! physical keys/paths are backend details, never session authority.
 
-pub(crate) trait PointRow {
-    fn is_conversation(&self) -> bool;
-    fn session(&self) -> Option<&str>;
-    fn agent(&self) -> &str;
-    fn namespace(&self) -> &str;
-}
+use crate::traits::{MemoryCategory, MemoryEntry};
 
 /// No task-local context is the historical administrative API. An installed
 /// context, even an empty one, cannot see another session's Conversation rows.
@@ -27,43 +22,31 @@ impl PointScope {
         )
     }
 
-    pub(crate) fn select<T: PointRow>(&self, mut rows: Vec<T>, include_soul: bool) -> Vec<T> {
-        rows.retain(|row| include_soul || row.namespace() != crate::SOUL_NAMESPACE);
+    pub(crate) fn select(
+        &self,
+        mut rows: Vec<MemoryEntry>,
+        include_soul: bool,
+    ) -> Vec<MemoryEntry> {
+        rows.retain(|row| include_soul || row.namespace != crate::SOUL_NAMESPACE);
         if let Some(session) = &self.0 {
             rows.retain(|row| {
-                !row.is_conversation()
+                row.category != MemoryCategory::Conversation
                     || session
                         .as_deref()
-                        .is_some_and(|sid| row.session() == Some(sid))
+                        .is_some_and(|sid| row.session_id.as_deref() == Some(sid))
             });
             // A point key resolves to its Conversation row in this session,
             // falling back to the global key separately for each agent.
             let scoped_agents: std::collections::HashSet<String> = rows
                 .iter()
-                .filter(|row| row.is_conversation())
-                .map(|row| row.agent().to_owned())
+                .filter(|row| row.category == MemoryCategory::Conversation)
+                .map(|row| row.agent_id.as_deref().unwrap_or("default").to_owned())
                 .collect();
-            rows.retain(|row| row.is_conversation() || !scoped_agents.contains(row.agent()));
+            rows.retain(|row| {
+                row.category == MemoryCategory::Conversation
+                    || !scoped_agents.contains(row.agent_id.as_deref().unwrap_or("default"))
+            });
         }
         rows
-    }
-}
-
-#[cfg(feature = "memorycore")]
-impl PointRow for crate::traits::MemoryEntry {
-    fn is_conversation(&self) -> bool {
-        self.category == crate::traits::MemoryCategory::Conversation
-    }
-
-    fn session(&self) -> Option<&str> {
-        self.session_id.as_deref()
-    }
-
-    fn agent(&self) -> &str {
-        self.agent_id.as_deref().unwrap_or("default")
-    }
-
-    fn namespace(&self) -> &str {
-        &self.namespace
     }
 }

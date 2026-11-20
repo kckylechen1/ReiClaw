@@ -161,14 +161,6 @@ pub fn non_row_features(
     read_registry_list(pkg, "non_row_features")
 }
 
-/// Target-specific compatibility exclusions for standard distribution builds.
-/// Release workflows provide a target triple and never duplicate this policy.
-pub fn dist_target_exclusions(
-    pkg: &cargo_metadata::Package,
-) -> anyhow::Result<std::collections::BTreeMap<String, Vec<String>>> {
-    parse_target_exclusions(pkg.metadata.get("reiclaw"))
-}
-
 fn read_registry_list(pkg: &cargo_metadata::Package, key: &str) -> Vec<String> {
     pkg.metadata
         .get("reiclaw")
@@ -182,60 +174,7 @@ fn read_registry_list(pkg: &cargo_metadata::Package, key: &str) -> Vec<String> {
         .unwrap_or_default()
 }
 
-fn parse_nonempty_string_list(
-    value: &serde_json::Value,
-    path: &str,
-) -> anyhow::Result<Vec<String>> {
-    let entries = value
-        .as_array()
-        .ok_or_else(|| anyhow::Error::msg(format!("{path} must be an array")))?;
-    anyhow::ensure!(!entries.is_empty(), "{path} must not be empty");
-
-    let mut values = Vec::with_capacity(entries.len());
-    for entry in entries {
-        let feature = entry
-            .as_str()
-            .filter(|feature| !feature.is_empty())
-            .ok_or_else(|| {
-                anyhow::Error::msg(format!("{path} entries must be non-empty strings"))
-            })?;
-        anyhow::ensure!(
-            !values.iter().any(|existing| existing == feature),
-            "duplicate {path} entry `{feature}`"
-        );
-        values.push(feature.to_owned());
-    }
-    Ok(values)
-}
-
-fn parse_target_exclusions(
-    registry: Option<&serde_json::Value>,
-) -> anyhow::Result<std::collections::BTreeMap<String, Vec<String>>> {
-    let value = registry
-        .and_then(|reiclaw| reiclaw.get("dist_target_exclusions"))
-        .ok_or_else(|| {
-            anyhow::Error::msg("missing [package.metadata.reiclaw.dist_target_exclusions]")
-        })?;
-    let entries = value.as_object().ok_or_else(|| {
-        anyhow::Error::msg("[package.metadata.reiclaw.dist_target_exclusions] must be a table")
-    })?;
-    anyhow::ensure!(
-        !entries.is_empty(),
-        "dist_target_exclusions must not be empty"
-    );
-
-    let mut targets = std::collections::BTreeMap::new();
-    for (target, value) in entries {
-        anyhow::ensure!(!target.is_empty(), "dist target must not be empty");
-        targets.insert(
-            target.to_owned(),
-            parse_nonempty_string_list(value, &format!("dist_target_exclusions.{target}"))?,
-        );
-    }
-    Ok(targets)
-}
-
-/// Remove target-specific features from a resolved selection. Exclusions fail
+/// Remove caller-requested features from a resolved selection. Exclusions fail
 /// closed when they are stale or unknown so release policy cannot silently
 /// drift away from the canonical base set.
 pub fn exclude_features(
@@ -373,47 +312,6 @@ fn resolve_feature_list_from_package(
     selection.to_feature_list(&ctx)
 }
 
-/// Resolve a selection and apply the registry-owned compatibility policy for
-/// one build target. Target policy is defined only for distribution selections.
-pub fn resolve_feature_list_for_target(
-    manifest_dir: &Path,
-    selection: &Selection,
-    target: Option<&str>,
-) -> anyhow::Result<Vec<String>> {
-    let meta = cargo_metadata::MetadataCommand::new()
-        .manifest_path(manifest_dir.join("Cargo.toml"))
-        .no_deps()
-        .exec()?;
-    let root = workspace_root_package(&meta)?;
-    let features = resolve_feature_list_from_package(&meta, root, selection)?;
-    let Some(target) = target else {
-        return Ok(features);
-    };
-    anyhow::ensure!(!target.is_empty(), "target must not be empty");
-    anyhow::ensure!(
-        matches!(selection, Selection::Dist | Selection::DistBroad),
-        "target-specific exclusions are only defined for distribution selections"
-    );
-
-    let exclusions = dist_target_exclusions(root)?;
-    for (configured_target, excluded) in &exclusions {
-        for feature in excluded {
-            anyhow::ensure!(
-                features.iter().any(|candidate| candidate == feature),
-                "dist_target_exclusions.{configured_target} names `{feature}`, which is not in the selected distribution"
-            );
-        }
-    }
-
-    exclude_features(
-        features,
-        exclusions
-            .get(target)
-            .map(Vec::as_slice)
-            .unwrap_or_default(),
-    )
-}
-
 /// Read canonical data via `cargo_metadata` - Cargo's own resolver, so the
 /// feature graph matches what builds actually see. No awk, no hand-parsing.
 pub fn resolve(manifest_dir: &Path, selection: &Selection) -> anyhow::Result<Resolved> {
@@ -494,10 +392,6 @@ pub enum Selection {
     /// Standard binary distribution: lean Cargo defaults, resolved explicitly
     /// for single-artifact package managers.
     Dist,
-    /// Measurement-only broad distribution: `Dist` plus the canonical
-    /// `channels-full` aggregate. Not offered by installer menus until a
-    /// stable broad artifact lifecycle exists.
-    DistBroad,
     /// Every selectable feature (all − non_row − pure-alias).
     All,
     /// Explicit comma/space feature list (`--features X,Y`).
@@ -512,7 +406,6 @@ impl Selection {
             Selection::Full => "default",
             Selection::Minimal => "minimal",
             Selection::Dist => "dist",
-            Selection::DistBroad => "dist-broad",
             Selection::All => "all",
             Selection::Features(_) => "custom",
         }
@@ -525,7 +418,6 @@ impl Selection {
             Selection::Full => "default feature set",
             Selection::Minimal => "core only, no default features",
             Selection::Dist => "lean standard distribution (recommended)",
-            Selection::DistBroad => "broad-channel distribution measurement build",
             Selection::All => "every optional feature (kitchen sink)",
             Selection::Features(_) => "custom feature selection",
         }
@@ -536,7 +428,6 @@ impl Selection {
         vec![
             Selection::Minimal,
             Selection::Dist,
-            Selection::DistBroad,
             Selection::Full,
             Selection::All,
         ]
@@ -545,9 +436,6 @@ impl Selection {
     /// The selections a packaged/menu surface offers, in menu order.
     pub fn menu() -> Vec<Selection> {
         Self::named()
-            .into_iter()
-            .filter(|selection| !matches!(selection, Selection::DistBroad))
-            .collect()
     }
 
     /// Resolve a named build selection without coupling it to installer menus.
@@ -572,13 +460,7 @@ impl Selection {
         let mut set = match self {
             Selection::Minimal => Vec::new(),
             Selection::Full => ctx.expand("default"),
-            Selection::Dist | Selection::DistBroad => {
-                let mut s = ctx.expand("default");
-                if matches!(self, Selection::DistBroad) {
-                    s.extend(ctx.expand("channels-full"));
-                }
-                s
-            }
+            Selection::Dist => ctx.expand("default"),
             Selection::All => ctx
                 .all
                 .iter()
@@ -675,7 +557,7 @@ pub fn web_data_dir_expr(platform: Platform) -> &'static str {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::test_support::{self as ts, Cause};
+    use crate::test_support as ts;
     use std::path::PathBuf;
 
     fn root() -> PathBuf {
@@ -698,10 +580,7 @@ mod tests {
             .or_else(|| meta.workspace_packages().into_iter().next().cloned())
             .unwrap();
         let nr = non_row_features(&meta, &pkg);
-        assert!(
-            nr.contains(&"channels-full".to_string()),
-            "registry must declare channels-full meta"
-        );
+        assert_eq!(nr, ts::registry_string_list("non_row_features"));
         assert!(nr.contains(&"embedded-web".to_string()));
         assert!(!nr.is_empty(), "non_row must come from Cargo.toml metadata");
     }
@@ -711,7 +590,9 @@ mod tests {
         let r = resolve(&root(), &Selection::Full).unwrap();
         assert!(!r.default_features.is_empty());
         assert!(
-            r.default_features.iter().all(|f| f != "default-channels"),
+            r.default_features
+                .iter()
+                .all(|f| !ts::registry_string_list("non_row_features").contains(f)),
             "aggregates must expand, not appear as leaves"
         );
         assert!(r.default_features.contains(&"gateway".to_string()));
@@ -745,108 +626,14 @@ mod tests {
         let expected = resolve_feature_list(&root(), &Selection::Full).unwrap();
         assert_eq!(features, expected);
         assert!(!features.contains(&"whatsapp-web".to_string()));
-        // Positive control: the lean release still ships every channel surface
-        // #584 protects, sampled from the live registry rather than named.
-        let protected = ts::protected_retained_channel_features();
-        ts::require_non_empty("protected sample", Cause::Protected, protected.len());
-        for feature in protected {
-            assert!(
-                features.contains(&feature),
-                "dist must ship the protected channel feature {feature}"
-            );
+        // Real runtime owners stay in the distribution after channel stubs retire.
+        for feature in ["agent-runtime", "gateway"] {
+            assert!(features.contains(&feature.to_string()));
         }
-    }
-
-    #[test]
-    fn dist_broad_derives_membership_from_channels_full() {
-        let meta = cargo_metadata::MetadataCommand::new()
-            .manifest_path(root().join("Cargo.toml"))
-            .no_deps()
-            .exec()
-            .unwrap();
-        let pkg = workspace_root_package(&meta).unwrap();
-        let all_features: Vec<String> = pkg.features.keys().cloned().collect();
-        let non_row = non_row_features(&meta, pkg);
-
-        let ctx = FeatureCtx {
-            graph: &pkg.features,
-            all: &all_features,
-            non_row: &non_row,
-        };
-
-        let dist = resolve_feature_list(&root(), &Selection::Dist).unwrap();
-        let mut expected = dist.clone();
-        expected.extend(ctx.expand("channels-full"));
-        expected.sort();
-        expected.dedup();
-
-        let broad = resolve_feature_list(&root(), &Selection::DistBroad).unwrap();
-        assert_eq!(broad, expected);
-        // #584: the broad-only rows are sampled from the live `channels-full`
-        // aggregate instead of naming channels (this used to pin `channel-git`
-        // and `channel-line`). The lean-dist check is taken against the
-        // resolved default set — not against `dist` itself, which would make it
-        // vacuous.
-        let default_rows = resolve_feature_list(&root(), &Selection::Full).unwrap();
-        let mut full_rows: Vec<String> = ctx
-            .expand("channels-full")
-            .into_iter()
-            .filter(|f| ts::is_channel_feature(f))
-            .collect();
-        full_rows.sort();
-        let broad_only: Vec<String> = full_rows
-            .iter()
-            .filter(|f| !default_rows.contains(f))
-            .cloned()
-            .collect();
-        ts::require_non_empty("channels-full rows", Cause::Protected, full_rows.len());
-        // An empty broad-only set is the supported channels-full alias case.
-        // Assert equivalence explicitly instead of proving an empty walk.
-        if broad_only.is_empty() {
-            assert_eq!(
-                broad, dist,
-                "dist-broad must match dist when channels-full has no broad-only channels"
-            );
-        }
-        for feature in &full_rows {
-            assert!(
-                broad.contains(feature),
-                "dist-broad must include the channels-full row {feature}"
-            );
-        }
-        for feature in &broad_only {
-            // Against the resolved default set, not `dist` itself.
-            assert!(
-                !dist.contains(feature),
-                "channels-full row {feature} must stay out of the lean dist"
-            );
-        }
-        let protected = ts::protected_retained_channel_features();
-        ts::require_non_empty("protected sample", Cause::Protected, protected.len());
-        for feature in protected {
-            assert!(
-                broad.contains(&feature),
-                "dist-broad must keep the protected channel feature {feature}"
-            );
-        }
-        // Removed channels stay absent forever.
-        assert!(!broad.contains(&"channel-slack".to_string()));
-        assert!(!broad.contains(&"whatsapp-web".to_string()));
-        assert!(!broad.contains(&"sandbox-bubblewrap".to_string()));
-    }
-
-    #[test]
-    fn dist_broad_is_named_but_not_offered_in_installer_menus() {
-        assert_eq!(Selection::DistBroad.id(), "dist-broad");
-        assert!(matches!(
-            Selection::from_id("dist-broad"),
-            Some(Selection::DistBroad)
-        ));
-        assert!(Selection::from_id("unknown-selection").is_none());
         assert!(
-            Selection::menu()
+            !features
                 .iter()
-                .all(|selection| selection.id() != Selection::DistBroad.id())
+                .any(|feature| feature.starts_with("channel-"))
         );
     }
 
@@ -863,109 +650,19 @@ mod tests {
     }
 
     #[test]
-    fn target_exclusion_registry_rejects_malformed_metadata() {
-        assert!(parse_target_exclusions(None).is_err());
-        for malformed in [
-            serde_json::json!({ "dist_target_exclusions": [] }),
-            serde_json::json!({ "dist_target_exclusions": {} }),
-            serde_json::json!({ "dist_target_exclusions": { "target": [] } }),
-            serde_json::json!({ "dist_target_exclusions": { "target": [1] } }),
-            serde_json::json!({
-                "dist_target_exclusions": { "target": ["feature", "feature"] }
-            }),
-        ] {
-            assert!(parse_target_exclusions(Some(&malformed)).is_err());
-        }
-    }
-
-    #[test]
-    fn release_exclusions_remove_only_named_features() {
+    fn explicit_exclusions_remove_only_selected_features() {
         let dist = resolve_feature_list(&root(), &Selection::Dist).unwrap();
-        let meta = cargo_metadata::MetadataCommand::new()
-            .manifest_path(root().join("Cargo.toml"))
-            .no_deps()
-            .exec()
-            .unwrap();
-        let exclusions = dist_target_exclusions(workspace_root_package(&meta).unwrap()).unwrap();
-
-        for selection in [Selection::Dist, Selection::DistBroad] {
-            let unfiltered = resolve_feature_list(&root(), &selection).unwrap();
-            for (target, excluded) in &exclusions {
-                let resolved =
-                    resolve_feature_list_for_target(&root(), &selection, Some(target)).unwrap();
-                assert_eq!(resolved.len(), unfiltered.len() - excluded.len());
-                for feature in &unfiltered {
-                    assert_eq!(
-                        resolved.contains(feature),
-                        !excluded.contains(feature),
-                        "unexpected resolution for {target}: {feature}"
-                    );
-                }
-            }
-        }
-
-        let host = resolve_feature_list_for_target(
-            &root(),
-            &Selection::Dist,
-            Some("aarch64-apple-darwin"),
-        )
-        .unwrap();
-        assert_eq!(host, dist);
-
-        assert!(exclude_features(host, &["channel-slack".to_owned()]).is_err());
-        let (target, excluded) = exclusions.iter().next().unwrap();
-        let resolved =
-            resolve_feature_list_for_target(&root(), &Selection::Dist, Some(target)).unwrap();
-        assert!(exclude_features(resolved, &[excluded[0].clone()]).is_err());
-    }
-
-    #[test]
-    fn dist_target_exclusions_are_declared_in_registry() {
-        let meta = cargo_metadata::MetadataCommand::new()
-            .manifest_path(root().join("Cargo.toml"))
-            .no_deps()
-            .exec()
-            .unwrap();
-        let exclusions = dist_target_exclusions(workspace_root_package(&meta).unwrap()).unwrap();
-
-        // #584: the concrete rows follow Cargo.toml (parsed independently), so
-        // a batch that retires a channel does not re-pin a name here. What stays
-        // pinned is the shape of the policy: every row is non-empty and names a
-        // feature the distribution actually selects, so a stale row fails closed.
-        assert_eq!(
-            exclusions,
-            ts::registry_target_exclusions(),
-            "target exclusions come from Cargo.toml"
-        );
-        let declared_features = ts::live_feature_names();
-        let dist = resolve_feature_list(&root(), &Selection::Dist).unwrap();
-        ts::require_non_empty("target exclusions", Cause::Retired, exclusions.len());
-        ts::require_non_empty("[features] rows", Cause::Protected, declared_features.len());
-        for (target, excluded) in &exclusions {
-            ts::require_non_empty(
-                &format!("`dist_target_exclusions.{target}`"),
-                Cause::Retired,
-                excluded.len(),
-            );
-            for feature in excluded {
-                assert!(
-                    declared_features.contains(feature),
-                    "dist_target_exclusions.{target} names `{feature}`, which is not a [features] entry"
-                );
-                assert!(
-                    dist.contains(feature),
-                    "dist_target_exclusions.{target} names `{feature}`, which the dist build does not select"
-                );
-            }
-        }
-        assert_eq!(
-            exclusions["arm-unknown-linux-gnueabihf"],
-            vec!["observability-prometheus"]
-        );
-        assert_eq!(
-            exclusions["armv7-unknown-linux-gnueabihf"],
-            vec!["observability-prometheus"]
-        );
+        assert!(dist.contains(&"gateway".to_owned()));
+        assert!(dist.contains(&"agent-runtime".to_owned()));
+        let resolved = exclude_features(dist.clone(), &["gateway".to_owned()]).unwrap();
+        let expected: Vec<_> = dist
+            .into_iter()
+            .filter(|feature| feature != "gateway")
+            .collect();
+        assert_eq!(resolved, expected);
+        assert!(resolved.contains(&"agent-runtime".to_owned()));
+        assert!(exclude_features(resolved.clone(), &["unknown-feature".to_owned()]).is_err());
+        assert!(exclude_features(resolved, &["gateway".to_owned()]).is_err());
     }
 
     #[test]

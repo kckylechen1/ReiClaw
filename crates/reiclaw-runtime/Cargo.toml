@@ -59,7 +59,6 @@ which = "8.0"
 reiclaw-macros.workspace = true
 
 # Optional deps
-prometheus = { version = "0.14", default-features = false, optional = true }
 # Optional deps for specific features
 
 [target.'cfg(target_os = "linux")'.dependencies]
@@ -75,10 +74,8 @@ rustix = { version = "1.1", default-features = false, features = ["std", "fs"] }
 
 [features]
 default = [
-    "observability-prometheus",
     "schema-export",
 ]
-observability-prometheus = ["dep:prometheus"]
 sandbox-landlock = ["dep:landlock"]
 schema-export = ["dep:schemars", "reiclaw-config/schema-export"]
 
@@ -95,7 +92,6 @@ rcgen = "0.13"
 tempfile = "3.26"
 tokio = { version = "1.50", features = ["rt-multi-thread", "macros"] }
 scopeguard = "1.2"
-filetime = "0.2"
 wiremock = "0.6"
 # Test-only registry constructor used by the daemon heartbeat MCP
 # retry-regression tests. Not in default deps so

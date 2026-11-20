@@ -570,7 +570,6 @@ fn picker_items_for(
         }
         Section::Memory => PickerDispatch::Items(memory_picker(cfg)),
         Section::Channels => PickerDispatch::Items(schema_walk_picker(cfg, "channels")),
-        Section::Tunnel => PickerDispatch::Items(tunnel_provider_picker(cfg)),
         Section::Agents => PickerDispatch::Items(agents_picker(cfg)),
         // Storage is two-tier (`storage.<kind>.<alias>`) — same shape
         // and walker as channels and the typed-provider families.
@@ -847,43 +846,6 @@ fn first_alias<'a>(aliases: impl Iterator<Item = &'a String>) -> Option<String> 
     aliases.first().map(|alias| (*alias).clone())
 }
 
-fn tunnel_provider_picker(cfg: &reiclaw_config::schema::Config) -> Vec<PickerItem> {
-    // The canonical prop name uses an underscore (`tunnel_provider`); the
-    // hyphenated form is unknown to get_prop and silently yields "" (no active
-    // provider ever badged).
-    let active = cfg.get_prop("tunnel.tunnel_provider").unwrap_or_default();
-    let mut items = vec![PickerItem {
-        key: "none".to_string(),
-        label: "none".to_string(),
-        description: Some("Localhost only — no public tunnel.".to_string()),
-        badge: if active == "none" || active.is_empty() {
-            Some("active".to_string())
-        } else {
-            None
-        },
-    }];
-    for entry in cfg.tunnel.nested_option_entries() {
-        let badge = if entry.field == active {
-            Some("active".to_string())
-        } else if entry.present {
-            Some("configured".to_string())
-        } else {
-            None
-        };
-        items.push(PickerItem {
-            key: entry.field.to_string(),
-            label: entry.display_name.to_string(),
-            description: if entry.description.is_empty() {
-                None
-            } else {
-                Some(entry.description.to_string())
-            },
-            badge,
-        });
-    }
-    items
-}
-
 #[derive(Debug, Deserialize)]
 #[cfg_attr(feature = "schema-export", derive(schemars::JsonSchema))]
 pub struct SectionItemPath {
@@ -1085,25 +1047,6 @@ pub async fn handle_section_select(
             }
             mark_section_completed(&mut working, "memory");
             ("memory".to_string(), true)
-        }
-        Section::Tunnel => {
-            if let Err(e) = working.set_prop_persistent("tunnel.tunnel_provider", &key) {
-                return error_response(
-                    ConfigApiError::new(
-                        ConfigApiCode::ValidationFailed,
-                        format!("could not set tunnel.tunnel_provider = `{key}`: {e}"),
-                    )
-                    .with_path("tunnel.tunnel_provider"),
-                );
-            }
-            let prefix = if key == "none" {
-                "tunnel".to_string()
-            } else {
-                let p = format!("tunnel.{key}");
-                working.init_defaults(Some(&p));
-                p
-            };
-            (prefix, true)
         }
         Section::Mcp | Section::Skills | Section::Composition | Section::QuickstartState => {
             return error_response(
@@ -1425,13 +1368,19 @@ mod tests {
         for hidden in HIDDEN_TOP_LEVEL {
             roots.remove(*hidden);
         }
-        // The onboarding sections must still be in the derived set.
-        for required in ["providers", "channels", "memory", "tunnel"] {
+        // Every visible curated section must be discoverable. Read the live
+        // registry so retired sections never become test-only obligations.
+        for section in reiclaw_config::sections::QUICKSTART_SECTIONS {
+            let required = section.as_str().split('.').next().unwrap();
+            if HIDDEN_TOP_LEVEL.contains(&required) {
+                continue;
+            }
             assert!(
                 roots.contains(required),
-                "derived sections must include onboarding section `{required}`; got {roots:?}",
+                "derived sections must include curated section `{required}`; got {roots:?}",
             );
         }
+        assert!(!roots.contains("tunnel"));
         // Plus a sample of the runtime sections that used to be invisible.
         for runtime in ["gateway", "observability", "scheduler", "security"] {
             assert!(
@@ -1608,91 +1557,6 @@ mod tests {
         );
     }
 
-    #[test]
-    fn tunnel_picker_includes_synthetic_none() {
-        let cfg = empty_cfg();
-        let items = tunnel_provider_picker(&cfg);
-        assert_eq!(
-            items[0].key, "none",
-            "`none` must be the first entry in the tunnel picker"
-        );
-        // `none` is the active default for a fresh config.
-        assert_eq!(items[0].badge.as_deref(), Some("active"));
-    }
-
-    #[test]
-    fn tunnel_picker_surfaces_all_option_backed_providers_on_fresh_config() {
-        let cfg = empty_cfg();
-        let items = tunnel_provider_picker(&cfg);
-        let keys: std::collections::BTreeSet<&str> = items.iter().map(|i| i.key.as_str()).collect();
-        for required in [
-            "none",
-            "cloudflare",
-            "tailscale",
-            "ngrok",
-            "openvpn",
-            "pinggy",
-            "custom",
-        ] {
-            assert!(
-                keys.contains(required),
-                "tunnel picker on a fresh config must include `{required}`; got: {:?}",
-                keys.into_iter().collect::<Vec<_>>(),
-            );
-        }
-    }
-
-    #[test]
-    fn tunnel_picker_marks_active_provider_from_configured_section() {
-        let mut cfg = empty_cfg();
-        cfg.tunnel.tunnel_provider = "tailscale".to_string();
-        let items = tunnel_provider_picker(&cfg);
-        let active: Vec<&str> = items
-            .iter()
-            .filter(|i| i.badge.as_deref() == Some("active"))
-            .map(|i| i.key.as_str())
-            .collect();
-        assert_eq!(
-            active,
-            vec!["tailscale"],
-            "exactly one entry should be active after setting `tunnel.tunnel_provider = tailscale`"
-        );
-        assert_eq!(
-            items[0].key, "none",
-            "`none` is still the first picker entry even when another provider is active"
-        );
-    }
-
-    #[test]
-    fn tunnel_picker_badges_present_option_fields_as_configured() {
-        let mut cfg = empty_cfg();
-        cfg.tunnel.tunnel_provider = "cloudflare".to_string();
-        // Materialize the cloudflare nested Option directly so the picker sees
-        // it as present, without writing the developer's real config.
-        cfg.tunnel.cloudflare = Some(reiclaw_config::schema::CloudflareTunnelConfig::default());
-        let items = tunnel_provider_picker(&cfg);
-        let cloudflare = items
-            .iter()
-            .find(|i| i.key == "cloudflare")
-            .expect("cloudflare should appear in the picker");
-        assert_eq!(
-            cloudflare.badge.as_deref(),
-            Some("active"),
-            "cloudflare is the active provider"
-        );
-        // `tailscale` is statically known but the user hasn't configured
-        // it — its Option is still None, so no badge.
-        let tailscale = items
-            .iter()
-            .find(|i| i.key == "tailscale")
-            .expect("tailscale should appear in the picker");
-        assert!(
-            tailscale.badge.is_none(),
-            "tailscale's Option is None, so no badge; got: {:?}",
-            tailscale.badge
-        );
-    }
-
     #[tokio::test]
     async fn agent_select_create_retries_without_inheriting_a_retired_identity() {
         let tmp = tempfile::tempdir().unwrap();
@@ -1764,37 +1628,6 @@ mod tests {
             reiclaw_memory::companion::peek_agent_identity(&store_dir, "b"),
             Some(retired)
         );
-    }
-
-    #[tokio::test]
-    async fn tunnel_select_updates_canonical_provider_and_active_picker_badge() {
-        let tmp = tempfile::tempdir().expect("tempdir");
-        let cfg = reiclaw_config::schema::Config {
-            config_path: tmp.path().join("config.toml"),
-            ..Default::default()
-        };
-        let state = section_test_state(cfg);
-
-        let response = handle_section_select(
-            State(state.clone()),
-            axum::http::HeaderMap::new(),
-            axum::extract::Path(SectionItemPath {
-                section: "tunnel".to_string(),
-                key: "cloudflare".to_string(),
-            }),
-            None,
-        )
-        .await;
-
-        assert_eq!(response.status(), axum::http::StatusCode::OK);
-        let cfg = state.config.read().clone();
-        assert_eq!(cfg.tunnel.tunnel_provider, "cloudflare");
-        let items = tunnel_provider_picker(&cfg);
-        let cloudflare = items
-            .iter()
-            .find(|item| item.key == "cloudflare")
-            .expect("cloudflare should appear in the picker");
-        assert_eq!(cloudflare.badge.as_deref(), Some("active"));
     }
 
     #[test]
@@ -1869,46 +1702,39 @@ mod tests {
 
     #[test]
     fn picker_dispatch_covers_every_section_variant() {
-        use reiclaw_config::sections::Section;
+        use reiclaw_config::sections::{QUICKSTART_SECTIONS, SectionShape};
         let cfg = empty_cfg();
-        // The full Section surface = wizard steps + explorer-only.
-        // Spelling them out here pins both groups, so adding a row to
-        // the `sections!` macro forces an update here too.
-        let all: &[Section] = &[
-            Section::ModelProviders,
-            Section::TtsProviders,
-            Section::TranscriptionProviders,
-            Section::Channels,
-            Section::Memory,
-            Section::Tunnel,
-            Section::Agents,
-            Section::PeerGroups,
-            Section::Storage,
-            Section::Cron,
-            Section::Mcp,
-            Section::McpBundles,
-            Section::SkillBundles,
-            Section::RiskProfiles,
-            Section::RuntimeProfiles,
-        ];
-        let direct_form = [Section::Mcp];
-        for section in all {
-            match picker_items_for(*section, &cfg) {
-                PickerDispatch::Items(_items) => {
-                    assert!(
-                        !direct_form.contains(section),
-                        "{section:?} is marked DirectForm but dispatched to Items",
-                    );
-                }
-                PickerDispatch::DirectForm => {
-                    assert!(
-                        direct_form.contains(section),
-                        "{section:?} returned DirectForm but is not in the DirectForm set; \
-                         either give it a picker arm or add it to the DirectForm list",
-                    );
-                }
-            }
+        for section in QUICKSTART_SECTIONS {
+            let dispatched_direct =
+                matches!(picker_items_for(*section, &cfg), PickerDispatch::DirectForm);
+            assert_eq!(
+                dispatched_direct,
+                section.shape() == SectionShape::DirectForm,
+                "{section:?} picker dispatch must agree with its live registry shape"
+            );
         }
+    }
+
+    #[tokio::test]
+    async fn retired_tunnel_section_cannot_be_selected_or_persisted() {
+        let tmp = tempfile::tempdir().unwrap();
+        let path = tmp.path().join("config.toml");
+        let state = section_test_state(reiclaw_config::schema::Config {
+            config_path: path.clone(),
+            ..Default::default()
+        });
+        let response = handle_section_select(
+            State(state),
+            axum::http::HeaderMap::new(),
+            axum::extract::Path(SectionItemPath {
+                section: "tunnel".to_string(),
+                key: "cloudflare".to_string(),
+            }),
+            None,
+        )
+        .await;
+        assert_eq!(response.status(), axum::http::StatusCode::NOT_FOUND);
+        assert!(!path.exists());
     }
 
     #[test]

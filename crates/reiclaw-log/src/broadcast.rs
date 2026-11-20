@@ -62,29 +62,31 @@ pub(crate) static HOOK_TEST_LOCK: parking_lot::Mutex<()> = parking_lot::Mutex::n
 mod tests {
     use super::*;
 
-    #[tokio::test]
-    async fn set_and_subscribe_round_trip() {
-        // Install + emit happen inside this scope so the lock is released
-        // before the await; otherwise clippy flags a sync Mutex held
-        // across an await point.
-        let mut rx = {
-            let _guard = HOOK_TEST_LOCK.lock();
-            clear_broadcast_hook();
-            assert!(current_broadcast_hook().is_none());
+    #[test]
+    fn set_and_subscribe_round_trip() {
+        let _writer_guard = crate::writer::WRITER_TEST_LOCK.lock();
+        let _guard = HOOK_TEST_LOCK.lock();
+        clear_broadcast_hook();
+        assert!(current_broadcast_hook().is_none());
 
-            let (tx, _rx_keepalive) = broadcast::channel(8);
-            set_broadcast_hook(tx);
-            let rx = subscribe().expect("subscribe after set");
+        let (tx, _rx_keepalive) = broadcast::channel(8);
+        set_broadcast_hook(tx);
+        let mut rx = subscribe().expect("subscribe after set");
 
-            let hook = current_broadcast_hook().unwrap();
-            let _ = hook.send(serde_json::json!({ "ping": true }));
-            rx
+        let hook = current_broadcast_hook().unwrap();
+        let event_id = uuid::Uuid::new_v4().to_string();
+        hook.send(serde_json::json!({ "id": "unrelated", "ping": false }))
+            .unwrap();
+        hook.send(serde_json::json!({ "id": event_id.as_str(), "ping": true }))
+            .unwrap();
+        let value = loop {
+            let frame = rx.try_recv().expect("own ping frame delivered");
+            if frame["id"].as_str() == Some(event_id.as_str()) {
+                break frame;
+            }
         };
-
-        let value = rx.recv().await.unwrap();
         assert_eq!(value["ping"], true);
 
-        let _guard = HOOK_TEST_LOCK.lock();
         clear_broadcast_hook();
         assert!(current_broadcast_hook().is_none());
     }

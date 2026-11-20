@@ -706,7 +706,6 @@ fn v1_child_capability_set_is_disjoint_from_a_real_parent_registry() {
         mem,
         &reiclaw_config::schema::HttpRequestConfig::default(),
         &reiclaw_config::schema::WebFetchConfig::default(),
-        tmp.path(),
         &HashMap::new(),
         None,
         &reiclaw_config::schema::Config::default(),

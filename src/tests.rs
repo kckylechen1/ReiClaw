@@ -66,14 +66,19 @@ fn probe_config_dir_follows_clap_token_ownership() {
     }
 
     let command = Cli::command();
-    let external_payload = ["rei", "props", "legacy-command", "--config-dir=/unintended"];
-
-    // The external subcommand owns every remaining token, including one
-    // that looks like a global option.
-    let cli = Cli::try_parse_from(external_payload)
-        .expect("the deprecated external-subcommand path is valid clap input");
+    // A retained command's positional payload may contain a global-looking
+    // option after `--`; the payload must never redirect the config directory.
+    let payload = [
+        "rei",
+        "config",
+        "set",
+        "default_temperature",
+        "--",
+        "--config-dir=/unintended",
+    ];
+    let cli = Cli::try_parse_from(payload).expect("config value is valid clap input");
     assert!(cli.config_dir.is_none());
-    assert_eq!(probe_config_dir(&command, argv(&external_payload)), None);
+    assert_eq!(probe_config_dir(&command, argv(&payload)), None);
 
     // Option-looking and terminating tokens cannot satisfy the spaced
     // form's required value.
@@ -86,6 +91,14 @@ fn probe_config_dir_follows_clap_token_ownership() {
         probe_config_dir(&command, argv(&["rei", "--config-dir", "--"])),
         None
     );
+}
+
+#[test]
+fn retired_cli_commands_are_rejected_during_argument_parsing() {
+    for command in ["onboard", "update", "telegram", "props", "migrate"] {
+        let error = Cli::try_parse_from(["rei", command]).expect_err("retired command must fail");
+        assert_eq!(error.kind(), clap::error::ErrorKind::InvalidSubcommand);
+    }
 }
 
 #[test]
@@ -210,25 +223,6 @@ fn ensure_map_key_ignores_non_map_paths() {
 
 #[test]
 #[cfg(feature = "agent-runtime")]
-fn onboard_help_includes_model_flag() {
-    let cmd = Cli::command();
-    let onboard = cmd
-        .get_subcommands()
-        .find(|subcommand| subcommand.get_name() == "onboard")
-        .expect("onboard subcommand must exist");
-
-    let has_model_flag = onboard
-        .get_arguments()
-        .any(|arg| arg.get_id().as_str() == "model" && arg.get_long() == Some("model"));
-
-    assert!(
-        has_model_flag,
-        "onboard help should include --model for quick setup overrides"
-    );
-}
-
-#[test]
-#[cfg(feature = "agent-runtime")]
 fn gateway_admin_url_uses_unprefixed_admin_path_by_default() {
     assert_eq!(
         gateway_admin_url("127.0.0.1", 42617, None, "/admin/paircode"),
@@ -243,40 +237,6 @@ fn gateway_admin_url_prepends_configured_path_prefix() {
         gateway_admin_url("localhost", 42617, Some("/zeroclaw"), "/admin/paircode/new"),
         "http://localhost:42617/zeroclaw/admin/paircode/new"
     );
-}
-
-#[test]
-#[cfg(feature = "agent-runtime")]
-fn onboard_cli_accepts_model_provider_and_api_key_in_quick_mode() {
-    let cli = Cli::try_parse_from([
-        "rei",
-        "onboard",
-        "--model-provider",
-        "anthropic",
-        "--model",
-        "custom-model-946",
-        "--api-key",
-        "sk-issue946",
-    ])
-    .expect("quick onboard invocation should parse");
-
-    match cli.command {
-        Commands::Onboard {
-            force,
-            channels_only,
-            api_key,
-            model_provider,
-            model,
-            ..
-        } => {
-            assert!(!force);
-            assert!(!channels_only);
-            assert_eq!(model_provider.as_deref(), Some("anthropic"));
-            assert_eq!(model.as_deref(), Some("custom-model-946"));
-            assert_eq!(api_key.as_deref(), Some("sk-issue946"));
-        }
-        other => panic!("expected onboard command, got {other:?}"),
-    }
 }
 
 #[test]
@@ -323,37 +283,6 @@ fn bash_completion_avoids_infinite_recursion() {
         !script.contains("_rei_clap_orig() { _rei \"$@\"; }"),
         "bash completion must not define _rei_clap_orig as a simple forwarder to _rei"
     );
-}
-
-#[test]
-#[cfg(feature = "agent-runtime")]
-fn onboard_cli_accepts_force_flag() {
-    let cli =
-        Cli::try_parse_from(["rei", "onboard", "--force"]).expect("onboard --force should parse");
-
-    match cli.command {
-        Commands::Onboard { force, .. } => assert!(force),
-        other => panic!("expected onboard command, got {other:?}"),
-    }
-}
-
-#[test]
-#[cfg(feature = "agent-runtime")]
-fn onboard_cli_rejects_removed_interactive_flag() {
-    // --interactive was removed; onboard auto-detects TTY instead.
-    assert!(Cli::try_parse_from(["rei", "onboard", "--interactive"]).is_err());
-}
-
-#[test]
-#[cfg(feature = "agent-runtime")]
-fn onboard_cli_parses_quick_flag() {
-    let cli =
-        Cli::try_parse_from(["rei", "onboard", "--quick"]).expect("onboard --quick should parse");
-
-    match cli.command {
-        Commands::Onboard { quick, .. } => assert!(quick),
-        other => panic!("expected onboard command, got {other:?}"),
-    }
 }
 
 #[test]
@@ -732,42 +661,6 @@ fn reserve_consecutive_local_ports(count: u16) -> (u16, Vec<TcpListener>) {
     }
 
     panic!("could not reserve {count} consecutive local ports");
-}
-
-#[test]
-#[cfg(feature = "agent-runtime")]
-fn onboard_cli_quick_and_channels_only_conflict() {
-    // --quick and --channels-only should both parse at the CLI level
-    // (the conflict is checked at runtime), but we verify both flags parse.
-    let cli = Cli::try_parse_from(["rei", "onboard", "--quick", "--channels-only"]);
-    assert!(
-        cli.is_ok(),
-        "--quick --channels-only should parse at CLI level"
-    );
-}
-
-#[test]
-#[cfg(feature = "agent-runtime")]
-fn onboard_cli_bare_parses() {
-    let cli = Cli::try_parse_from(["rei", "onboard"]).expect("bare onboard should parse");
-
-    match cli.command {
-        Commands::Onboard { section, .. } => assert!(section.is_none()),
-        other => panic!("expected onboard command, got {other:?}"),
-    }
-}
-
-#[test]
-#[cfg(feature = "agent-runtime")]
-fn onboard_cli_positional_sections_parse() {
-    for w in reiclaw_config::sections::QUICKSTART_SECTIONS {
-        let cli = Cli::try_parse_from(["rei", "onboard", w.as_str()])
-            .unwrap_or_else(|_| panic!("onboard {} should parse", w.as_str()));
-        match cli.command {
-            Commands::Onboard { section, .. } => assert_eq!(section, Some(*w)),
-            other => panic!("expected onboard command, got {other:?}"),
-        }
-    }
 }
 
 #[test]
@@ -1605,12 +1498,19 @@ fn config_cli_exposes_current_validation_and_generation_only() {
 #[test]
 fn estop_engage_and_status_work_without_otp_secret_and_otp_init_enrolls_resume() {
     let dir = tempfile::tempdir().unwrap();
-    let mut config = Config::default();
-    config.config_path = dir.path().join("config.toml");
-    config.data_dir = dir.path().join("data");
-    config.security.estop.enabled = true;
-    config.security.estop.require_otp_to_resume = true;
-    config.security.otp.enabled = true;
+    let mut config = reiclaw_config::estop::LocalEstopConfig {
+        config_dir: dir.path().to_path_buf(),
+        estop: config::EstopConfig {
+            enabled: true,
+            state_file: "estop-state.json".into(),
+            ..config::EstopConfig::default()
+        },
+        otp: config::OtpConfig {
+            enabled: true,
+            ..config::OtpConfig::default()
+        },
+        secrets: config::SecretsConfig::default(),
+    };
 
     // 1. Parsing `rei estop otp-init` succeeds.
     assert!(matches!(
@@ -1642,7 +1542,7 @@ fn estop_engage_and_status_work_without_otp_secret_and_otp_init_enrolls_resume()
             network: false,
             domains: vec![],
             tools: vec![],
-            otp: Some("000000".into()),
+            otp: Some("invalid".into()),
         }),
         None,
         vec![],
@@ -1663,9 +1563,7 @@ fn estop_engage_and_status_work_without_otp_secret_and_otp_init_enrolls_resume()
     assert!(security::otp::secret_file_path(dir.path()).exists());
 
     let store = security::SecretStore::new(dir.path(), config.secrets.encrypt);
-    assert!(
-        security::OtpValidator::load_existing(&config.security.otp, dir.path(), &store).is_ok()
-    );
+    assert!(security::OtpValidator::load_existing(&config.otp, dir.path(), &store).is_ok());
     assert!(
         handle_estop_command(
             &config,
@@ -1673,7 +1571,7 @@ fn estop_engage_and_status_work_without_otp_secret_and_otp_init_enrolls_resume()
                 network: false,
                 domains: vec![],
                 tools: vec![],
-                otp: Some("000000".into()),
+                otp: Some("invalid".into()),
             }),
             None,
             vec![],
@@ -1682,7 +1580,7 @@ fn estop_engage_and_status_work_without_otp_secret_and_otp_init_enrolls_resume()
         .is_err()
     );
 
-    config.security.estop.require_otp_to_resume = false;
+    config.estop.require_otp_to_resume = false;
     handle_estop_command(
         &config,
         Some(EstopSubcommands::Resume {

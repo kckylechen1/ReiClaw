@@ -5,10 +5,6 @@ use anyhow::{Context, Result};
 use reiclaw_runtime::skills::{ScaffoldOptions, SkillFrontmatter, SkillsService};
 use std::path::{Path, PathBuf};
 
-pub mod creator {
-    #[allow(unused_imports)]
-    pub use reiclaw_runtime::skills::creator::*;
-}
 pub mod audit {
     #[allow(unused_imports)]
     pub use reiclaw_runtime::skills::audit::*;
@@ -46,7 +42,7 @@ pub async fn handle_command(
                 ));
             } else if let Some(ref a) = agent {
                 // Exactly what this agent loads at runtime — the same loader the
-                // agent boot/loop uses (workspace + open-skills +
+                // agent boot/loop uses (workspace +
                 // assigned bundles), so `list --agent` mirrors runtime behavior.
                 if config.agent(a).is_none() {
                     anyhow::bail!("agent '{a}' is not configured");
@@ -57,7 +53,7 @@ pub async fn handle_command(
                 rendered.push((format!("loaded by agent '{a}'"), skills));
             } else {
                 // Full inventory: every bundle, then the agent-agnostic sources
-                // (global dir + open-skills). `load_skills_with_config`
+                // (global skills directory). `load_skills_with_config`
                 // is the same loader the old `list` used, so those rows are
                 // preservedreview).
                 for alias in config.skill_bundles.keys() {
@@ -74,10 +70,7 @@ pub async fn handle_command(
                 }
                 let (skills, dropped) = load_skills_with_config_audited(&config.data_dir, config);
                 skipped.extend(dropped);
-                rendered.push((
-                    "global / open-skills / plugins (not from a bundle)".to_string(),
-                    skills,
-                ));
+                rendered.push(("global skills (not from a bundle)".to_string(), skills));
             }
 
             let total: usize = rendered.iter().map(|(_, s)| s.len()).sum();
@@ -165,9 +158,16 @@ pub async fn handle_command(
             source,
             agent,
             bundle,
-            no_tier_banner,
             skill,
         } => {
+            if source.starts_with("registry:")
+                || (is_skill_name(&source) && !Path::new(&source).is_dir())
+            {
+                anyhow::bail!(
+                    "Automatic skill registry sync is retired. Install from an explicit local \
+                     directory or git URL; use --skill <name> for a git catalog."
+                );
+            }
             println!("Installing skill from: {source}");
 
             let location = resolve_install_location(config, agent.as_deref(), bundle.as_deref())?;
@@ -193,34 +193,6 @@ pub async fn handle_command(
             } else if is_git_source(&source) {
                 install_git_skill_source(&source, &skills_path, config.skills.allow_scripts)
                     .with_context(|| format!("failed to install git skill source: {source}"))?
-            } else if is_registry_source(&source) {
-                println!("  Resolving '{source}' from skills registry...");
-                install_registry_skill_source(
-                    &source,
-                    &skills_path,
-                    config.skills.allow_scripts,
-                    workspace_dir,
-                    config.skills.registry_url.as_deref(),
-                    no_tier_banner,
-                )
-                .with_context(|| format!("failed to install skill from registry: {source}"))?
-            } else if is_extra_registry_source(&source) {
-                // `is_extra_registry_source` is `parse_extra_registry_source(..).is_some()`,
-                // so this re-parse always succeeds. `unwrap_or_default` only guards an
-                // unreachable `None` for a cosmetic label rather than panicking in the CLI.
-                let registry_label = parse_extra_registry_source(&source)
-                    .map(|(name, _)| name)
-                    .unwrap_or_default();
-                println!("  Resolving '{source}' from registry '{registry_label}'...");
-                install_extra_registry_skill_source(
-                    &source,
-                    &skills_path,
-                    config.skills.allow_scripts,
-                    workspace_dir,
-                    &config.skills.extra_registries,
-                    no_tier_banner,
-                )
-                .with_context(|| format!("failed to install skill from extra registry: {source}"))?
             } else {
                 install_local_skill_source(&source, &skills_path, config.skills.allow_scripts)
                     .with_context(|| format!("failed to install local skill source: {source}"))?
@@ -358,49 +330,6 @@ pub async fn handle_command(
             }
             crate::SkillBundleCommands::Show { alias } => handle_bundle_show(config, alias),
         },
-        crate::SkillCommands::Test { name, verbose } => {
-            let results = if let Some(ref skill_name) = name {
-                // Test a single skill
-                let source_path = PathBuf::from(skill_name);
-                let target = if source_path.exists() {
-                    source_path
-                } else {
-                    locate_installed_skill_dir(config, skill_name)?
-                };
-
-                let r = testing::test_skill(&target, skill_name, verbose)?;
-                if r.tests_run == 0 {
-                    println!(
-                        "  {} No TEST.sh found for skill '{}'.",
-                        console::style("-").dim(),
-                        skill_name,
-                    );
-                    return Ok(());
-                }
-                vec![r]
-            } else {
-                // Test all skills across every bundle plus the global dir.
-                let install_root = config.install_root_dir();
-                let mut dirs: Vec<PathBuf> = config
-                    .skill_bundles
-                    .keys()
-                    .filter_map(|a| {
-                        reiclaw_config::skill_bundles::resolve_directory(config, &install_root, a)
-                            .ok()
-                    })
-                    .collect();
-                dirs.push(skills_dir(&config.data_dir));
-                testing::test_all_skills(&dirs, verbose)?
-            };
-
-            testing::print_results(&results);
-
-            let any_failed = results.iter().any(|r| !r.failures.is_empty());
-            if any_failed {
-                anyhow::bail!("Some skill tests failed.");
-            }
-            Ok(())
-        }
     }
 }
 
@@ -1125,6 +1054,34 @@ mod install_location_tests {
     }
 
     #[tokio::test]
+    async fn retired_registry_install_sources_fail_before_creating_directories() {
+        let tmp = tempfile::TempDir::new().unwrap();
+        let config = Config {
+            config_path: tmp.path().join("config.toml"),
+            data_dir: tmp.path().join("data"),
+            ..Default::default()
+        };
+        for source in [
+            "registry:team/example".to_string(),
+            format!("retired-registry-skill-{}", uuid::Uuid::new_v4()),
+        ] {
+            let error = handle_command(
+                crate::SkillCommands::Install {
+                    source,
+                    agent: None,
+                    bundle: None,
+                    skill: None,
+                },
+                &config,
+            )
+            .await
+            .unwrap_err();
+            assert!(error.to_string().contains("registry sync is retired"));
+            assert!(!config.data_dir.exists());
+        }
+    }
+
+    #[tokio::test]
     async fn install_command_then_runtime_loads_the_skill() {
         let tmp = tempfile::TempDir::new().unwrap();
         let root = tmp.path();
@@ -1152,7 +1109,6 @@ mod install_location_tests {
                 source: source.to_string_lossy().into_owned(),
                 agent: None,
                 bundle: None,
-                no_tier_banner: true,
                 skill: None,
             },
             &c,

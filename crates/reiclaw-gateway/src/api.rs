@@ -1823,7 +1823,7 @@ pub(crate) mod tests {
     use http_body_util::BodyExt;
     use parking_lot::RwLock;
     use reiclaw_infra::session_backend::SessionBackend;
-    use reiclaw_infra::session_store::SessionStore;
+    use reiclaw_infra::session_sqlite::SqliteSessionBackend;
     use reiclaw_memory::{Memory, MemoryCategory, MemoryEntry};
     use reiclaw_providers::ModelProvider;
     use reiclaw_runtime::security::pairing::PairingGuard;
@@ -2758,7 +2758,8 @@ pub(crate) mod tests {
             ..reiclaw_config::schema::Config::default()
         };
         std::fs::create_dir_all(&config.data_dir).unwrap();
-        let backend: Arc<dyn SessionBackend> = Arc::new(SessionStore::new(tmp.path()).unwrap());
+        let backend: Arc<dyn SessionBackend> =
+            Arc::new(SqliteSessionBackend::new(tmp.path()).unwrap());
         backend
             .append(
                 "gw_operator-1",
@@ -2820,7 +2821,8 @@ pub(crate) mod tests {
             ..reiclaw_config::schema::Config::default()
         };
         std::fs::create_dir_all(&config.data_dir).unwrap();
-        let backend: Arc<dyn SessionBackend> = Arc::new(SessionStore::new(tmp.path()).unwrap());
+        let backend: Arc<dyn SessionBackend> =
+            Arc::new(SqliteSessionBackend::new(tmp.path()).unwrap());
         let state = test_state_with_session_backend(config, backend);
 
         let response = handle_api_session_message_post(
@@ -2851,7 +2853,8 @@ pub(crate) mod tests {
             ..reiclaw_config::schema::Config::default()
         };
         std::fs::create_dir_all(&config.data_dir).unwrap();
-        let backend: Arc<dyn SessionBackend> = Arc::new(SessionStore::new(tmp.path()).unwrap());
+        let backend: Arc<dyn SessionBackend> =
+            Arc::new(SqliteSessionBackend::new(tmp.path()).unwrap());
         let state = test_state_with_session_backend(config, backend.clone());
 
         let response = handle_api_session_message_post(
@@ -2883,7 +2886,8 @@ pub(crate) mod tests {
             ..reiclaw_config::schema::Config::default()
         };
         std::fs::create_dir_all(&config.data_dir).unwrap();
-        let backend: Arc<dyn SessionBackend> = Arc::new(SessionStore::new(tmp.path()).unwrap());
+        let backend: Arc<dyn SessionBackend> =
+            Arc::new(SqliteSessionBackend::new(tmp.path()).unwrap());
         backend
             .append(
                 "gw_operator-1",
@@ -4201,7 +4205,7 @@ pub(crate) mod tests {
     fn resolve_session_key_prefers_existing_gateway_sessions() {
         use reiclaw_api::model_provider::ChatMessage;
         let dir = tempfile::tempdir().unwrap();
-        let backend = reiclaw_infra::make_session_backend(dir.path(), "sqlite").unwrap();
+        let backend = reiclaw_infra::make_session_backend(dir.path()).unwrap();
         backend
             .append("gw_my_chat", &ChatMessage::user("hi"))
             .unwrap();

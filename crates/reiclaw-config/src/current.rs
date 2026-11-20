@@ -9,6 +9,8 @@ use anyhow::{Context, Result};
 use serde::Deserialize;
 use std::path::Path;
 
+pub use crate::retired_security::RetiredSecurityConfigError;
+pub use crate::retired_session_backend::RetiredSessionBackendError;
 use crate::schema::Config;
 
 /// The only schema version this binary reads and writes.
@@ -167,6 +169,8 @@ pub fn require_current_schema(value: &toml::Value) -> Result<()> {
     }
     crate::providers::reject_retired_model_provider_config(value)?;
     reject_retired_channel_config(value)?;
+    crate::retired_security::reject_retired_security_config(value)?;
+    crate::retired_session_backend::reject_retired_session_backend_config(value)?;
     let version = detect_version(value).map_err(|err| UnsupportedSchemaError(err.to_string()))?;
     if version != CURRENT_SCHEMA_VERSION {
         return Err(UnsupportedSchemaError(format!(
@@ -902,7 +906,7 @@ schema_version = 3
 [heartbeat]
 enabled = "not-a-bool"
 
-[backup]
+[scheduler]
 enabled = "also-not-a-bool"
 "#;
         let load = parse_current_salvaged(raw).unwrap();
@@ -912,7 +916,7 @@ enabled = "also-not-a-bool"
             load.dropped
         );
         assert!(
-            load.dropped.iter().any(|p| p == "backup"),
+            load.dropped.iter().any(|p| p == "scheduler"),
             "second offender must be dropped, got {:?}",
             load.dropped
         );

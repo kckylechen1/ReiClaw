@@ -504,6 +504,8 @@ async fn persist_and_swap(
             && !e.is::<reiclaw_config::current::UnsupportedSchemaError>()
             && !e.is::<reiclaw_config::providers::RetiredModelProviderError>()
             && !e.is::<reiclaw_config::current::RetiredChannelConfigError>()
+            && !e.is::<reiclaw_config::current::RetiredSecurityConfigError>()
+            && !e.is::<reiclaw_config::current::RetiredSessionBackendError>()
         {
             if let Some(prev) = snapshot {
                 let _ = tokio::fs::write(&config_path, prev).await;
@@ -2992,6 +2994,19 @@ mod tests {
                 "schema_version = 4\n".into(),
                 "schema_version 4 is unsupported",
             ),
+            (
+                "schema_version = 3\n[channels]\nsession_backend = 'jsonl'\n".into(),
+                "channels.session_backend is retired",
+            ),
+            (
+                "schema_version = 3\n[channels]\nsession_backend = 'private-unknown-backend'\n"
+                    .into(),
+                "channels.session_backend is retired",
+            ),
+            (
+                "schema_version = 3\n[channels]\nsession_backend = false\n".into(),
+                "channels.session_backend is retired",
+            ),
         ] {
             std::fs::write(&config_path, &external).unwrap();
             // Writing the same snapshot would preserve bytes but change mtime.
@@ -3029,6 +3044,7 @@ mod tests {
             assert!(!message.contains("private-legacy-route"));
             assert!(!message.contains("private-retired-credential"));
             assert!(!message.contains("private_alias"));
+            assert!(!message.contains("private-unknown-backend"));
             assert_eq!(std::fs::read(&config_path).unwrap(), external.as_bytes());
             assert_eq!(
                 std::fs::metadata(&config_path).unwrap().modified().unwrap(),

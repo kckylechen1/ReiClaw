@@ -10,6 +10,7 @@ use super::{
 
 use crate::agent::history::DEFAULT_MAX_HISTORY_MESSAGES;
 use crate::agent::tool_execution::{ToolDispatchContext, execute_one_tool};
+use crate::agent::turn::stream_consume::StreamOutput;
 use reiclaw_api::channel::{
     Channel, ChannelApprovalRequest, ChannelApprovalResponse, ChannelMessage, SendMessage,
 };
@@ -6568,8 +6569,11 @@ async fn consume_provider_streaming_response_buffers_split_tool_protocol_markers
         "mock-model",
         Some(0.0),
         None,
-        Some(&tx),
-        None, // event_tx
+        StreamOutput {
+            on_delta: Some(&tx),
+            event_tx: None,
+            delivered_event_text: &mut String::new(),
+        },
         false,
     )
     .await
@@ -6655,8 +6659,11 @@ async fn consume_provider_streaming_response_buffers_top_level_tool_call_array()
         "mock-model",
         Some(0.0),
         None,
-        Some(&tx),
-        None, // event_tx
+        StreamOutput {
+            on_delta: Some(&tx),
+            event_tx: None,
+            delivered_event_text: &mut String::new(),
+        },
         false,
     )
     .await
@@ -6693,8 +6700,11 @@ async fn consume_provider_streaming_response_preserves_schema_array_without_tool
         "mock-model",
         Some(0.0),
         None,
-        Some(&tx),
-        None, // event_tx
+        StreamOutput {
+            on_delta: Some(&tx),
+            event_tx: None,
+            delivered_event_text: &mut String::new(),
+        },
         false,
     )
     .await
@@ -6734,8 +6744,11 @@ async fn consume_provider_streaming_response_preserves_unknown_function_call_jso
         "mock-model",
         Some(0.0),
         None,
-        Some(&tx),
-        None, // event_tx
+        StreamOutput {
+            on_delta: Some(&tx),
+            event_tx: None,
+            delivered_event_text: &mut String::new(),
+        },
         false,
     )
     .await
@@ -6775,8 +6788,11 @@ async fn consume_provider_streaming_response_preserves_malformed_unknown_tool_ca
         "mock-model",
         Some(0.0),
         None,
-        Some(&tx),
-        None, // event_tx
+        StreamOutput {
+            on_delta: Some(&tx),
+            event_tx: None,
+            delivered_event_text: &mut String::new(),
+        },
         false,
     )
     .await
@@ -6860,8 +6876,11 @@ async fn consume_provider_streaming_response_buffers_malformed_tool_protocol_jso
         "mock-model",
         Some(0.0),
         None,
-        Some(&tx),
-        None, // event_tx
+        StreamOutput {
+            on_delta: Some(&tx),
+            event_tx: None,
+            delivered_event_text: &mut String::new(),
+        },
         false,
     )
     .await
@@ -6943,8 +6962,11 @@ async fn consume_provider_streaming_response_drops_truncated_protocol_at_finish(
         "mock-model",
         Some(0.0),
         None,
-        Some(&tx),
-        None, // event_tx
+        StreamOutput {
+            on_delta: Some(&tx),
+            event_tx: None,
+            delivered_event_text: &mut String::new(),
+        },
         false,
     )
     .await
@@ -7028,8 +7050,11 @@ async fn consume_provider_streaming_response_preserves_json_fenced_tool_protocol
         "mock-model",
         Some(0.0),
         None,
-        Some(&tx),
-        None, // event_tx
+        StreamOutput {
+            on_delta: Some(&tx),
+            event_tx: None,
+            delivered_event_text: &mut String::new(),
+        },
         false,
     )
     .await
@@ -7117,8 +7142,11 @@ async fn consume_provider_streaming_response_buffers_tool_call_fence_with_tools(
         "mock-model",
         Some(0.0),
         None,
-        Some(&tx),
-        None, // event_tx
+        StreamOutput {
+            on_delta: Some(&tx),
+            event_tx: None,
+            delivered_event_text: &mut String::new(),
+        },
         false,
     )
     .await
@@ -7201,8 +7229,11 @@ async fn consume_provider_streaming_response_preserves_plain_prefix_before_proto
         "mock-model",
         Some(0.0),
         None,
-        Some(&tx),
-        None, // event_tx
+        StreamOutput {
+            on_delta: Some(&tx),
+            event_tx: None,
+            delivered_event_text: &mut String::new(),
+        },
         false,
     )
     .await
@@ -7288,8 +7319,11 @@ async fn consume_provider_streaming_response_preserves_split_protocol_after_plai
         "mock-model",
         Some(0.0),
         None,
-        Some(&tx),
-        None, // event_tx
+        StreamOutput {
+            on_delta: Some(&tx),
+            event_tx: None,
+            delivered_event_text: &mut String::new(),
+        },
         false,
     )
     .await
@@ -7748,8 +7782,11 @@ async fn consume_provider_streaming_response_strips_split_think_tags_before_forw
         "mock-model",
         Some(0.0),
         None,
-        Some(&tx),
-        None, // event_tx
+        StreamOutput {
+            on_delta: Some(&tx),
+            event_tx: None,
+            delivered_event_text: &mut String::new(),
+        },
         true,
     )
     .await
@@ -9236,8 +9273,11 @@ async fn consume_provider_streaming_response_captures_reasoning_content() {
         "deepseek-v4-pro",
         Some(0.2),
         None,
-        None,
-        None, // event_tx
+        StreamOutput {
+            on_delta: None,
+            event_tx: None,
+            delivered_event_text: &mut String::new(),
+        },
         false,
     )
     .await
@@ -9331,8 +9371,11 @@ async fn consume_provider_streaming_response_accumulates_split_reasoning_chunks(
         "deepseek-v4-flash",
         Some(0.2),
         None,
-        None,
-        None, // event_tx
+        StreamOutput {
+            on_delta: None,
+            event_tx: None,
+            delivered_event_text: &mut String::new(),
+        },
         false,
     )
     .await
@@ -10464,265 +10507,6 @@ async fn trim_record_carries_model_attribution() {
     );
 }
 
-fn review_test_pricing() -> crate::agent::cost::ModelProviderPricing {
-    use std::collections::HashMap;
-    let mut model_pricing: HashMap<String, f64> = HashMap::new();
-    model_pricing.insert("mock-model.input".to_string(), 3.0);
-    model_pricing.insert("mock-model.output".to_string(), 15.0);
-    let mut pricing: crate::agent::cost::ModelProviderPricing = HashMap::new();
-    pricing.insert("mock-provider".to_string(), model_pricing);
-    pricing
-}
-
-fn review_test_history() -> Vec<ChatMessage> {
-    // One completed tool call so `should_trigger` (threshold 1) fires.
-    vec![
-        ChatMessage::system("test"),
-        ChatMessage::user("hello"),
-        ChatMessage::assistant("..."),
-        ChatMessage {
-            role: "tool".to_string(),
-            content: "ok".to_string(),
-        },
-    ]
-}
-
-#[tokio::test]
-async fn skill_review_fork_records_cost_usage_under_parent_scope() {
-    use super::{TOOL_LOOP_COST_TRACKING_CONTEXT, ToolLoopCostTrackingContext};
-    use crate::cost::CostTracker;
-    use crate::observability::noop::NoopObserver;
-
-    // Fork's single provider turn returns "Nothing to save." with usage —
-    // no tool calls, so the fork ends after one recorded provider call.
-    let model_provider = ScriptedModelProvider {
-        responses: Arc::new(Mutex::new(VecDeque::from([ChatResponse {
-            text: Some("Nothing to save.".to_string()),
-            tool_calls: Vec::new(),
-            usage: Some(reiclaw_providers::traits::TokenUsage {
-                input_tokens: Some(800),
-                output_tokens: Some(120),
-                cached_input_tokens: None,
-            }),
-            reasoning_content: None,
-        }]))),
-        capabilities: ProviderCapabilities::default(),
-    };
-    let observer = NoopObserver;
-    let workspace = tempfile::TempDir::new().unwrap();
-    let cost_config = reiclaw_config::schema::CostConfig {
-        enabled: true,
-        ..reiclaw_config::schema::CostConfig::default()
-    };
-    let tracker = Arc::new(CostTracker::new(cost_config, workspace.path()).unwrap());
-    let ctx =
-        ToolLoopCostTrackingContext::new(Arc::clone(&tracker), Arc::new(review_test_pricing()));
-
-    let review_config = reiclaw_config::schema::SkillImprovementConfig {
-        enabled: true,
-        cooldown_secs: 0,
-        nudge_interval_iterations: 1,
-        max_review_iterations: 2,
-    };
-
-    TOOL_LOOP_COST_TRACKING_CONTEXT
-        .scope(
-            Some(ctx),
-            crate::skills::review::maybe_run_skill_review(
-                None,
-                workspace.path().to_path_buf(),
-                review_config,
-                false,
-                review_test_history(),
-                Vec::new(),
-                &model_provider,
-                "mock-provider",
-                "mock-model",
-                &observer,
-                &reiclaw_config::schema::MultimodalConfig::default(),
-                &reiclaw_config::schema::PacingConfig::default(),
-                0,
-                0,
-                None,
-                None, // agent_alias — no parent alias in the review-fork test fixture
-            ),
-        )
-        .await;
-
-    let summary = tracker.get_summary().unwrap();
-    assert_eq!(
-        summary.request_count, 1,
-        "review fork must record its provider call under the parent cost scope"
-    );
-    assert_eq!(summary.total_tokens, 920);
-    assert!(summary.session_cost_usd > 0.0);
-}
-
-#[tokio::test]
-async fn skill_review_fork_respects_budget_under_parent_scope() {
-    use super::{TOOL_LOOP_COST_TRACKING_CONTEXT, ToolLoopCostTrackingContext};
-    use crate::cost::CostTracker;
-    use crate::observability::noop::NoopObserver;
-
-    // Provider that WOULD record usage if reached — but the pre-exceeded
-    // budget must block the call before it happens.
-    let model_provider = ScriptedModelProvider {
-        responses: Arc::new(Mutex::new(VecDeque::from([ChatResponse {
-            text: Some("should not be reached".to_string()),
-            tool_calls: Vec::new(),
-            usage: Some(reiclaw_providers::traits::TokenUsage {
-                input_tokens: Some(800),
-                output_tokens: Some(120),
-                cached_input_tokens: None,
-            }),
-            reasoning_content: None,
-        }]))),
-        capabilities: ProviderCapabilities::default(),
-    };
-    let observer = NoopObserver;
-    let workspace = tempfile::TempDir::new().unwrap();
-    let cost_config = reiclaw_config::schema::CostConfig {
-        enabled: true,
-        daily_limit_usd: 0.001, // very low limit
-        ..reiclaw_config::schema::CostConfig::default()
-    };
-    let tracker = Arc::new(CostTracker::new(cost_config, workspace.path()).unwrap());
-    // Record usage that already exceeds the daily limit.
-    tracker
-        .record_usage(crate::cost::calculate_token_usage(
-            "mock-model",
-            100_000,
-            50_000,
-            0,
-            1.0,
-            1.0,
-            0.0,
-        ))
-        .unwrap();
-    let before = tracker.get_summary().unwrap().request_count;
-
-    let ctx =
-        ToolLoopCostTrackingContext::new(Arc::clone(&tracker), Arc::new(review_test_pricing()));
-    let review_config = reiclaw_config::schema::SkillImprovementConfig {
-        enabled: true,
-        cooldown_secs: 0,
-        nudge_interval_iterations: 1,
-        max_review_iterations: 2,
-    };
-
-    TOOL_LOOP_COST_TRACKING_CONTEXT
-        .scope(
-            Some(ctx),
-            crate::skills::review::maybe_run_skill_review(
-                None,
-                workspace.path().to_path_buf(),
-                review_config,
-                false,
-                review_test_history(),
-                Vec::new(),
-                &model_provider,
-                "mock-provider",
-                "mock-model",
-                &observer,
-                &reiclaw_config::schema::MultimodalConfig::default(),
-                &reiclaw_config::schema::PacingConfig::default(),
-                0,
-                0,
-                None,
-                None, // agent_alias — no parent alias in the review-fork test fixture
-            ),
-        )
-        .await;
-
-    let after = tracker.get_summary().unwrap().request_count;
-    assert_eq!(
-        after, before,
-        "budget-exceeded fork must not make a recorded provider call"
-    );
-}
-
-#[tokio::test]
-async fn reflected_skill_creation_records_cost_usage_under_parent_scope() {
-    use super::{TOOL_LOOP_COST_TRACKING_CONTEXT, ToolLoopCostTrackingContext};
-    use crate::cost::CostTracker;
-    use crate::skills::creator::{SkillCreator, ToolCallRecord};
-
-    // Reflection's single post-turn provider call returns a valid SKILL.md
-    // with usage. It must go through `chat` (the scripted provider bails on
-    // `chat_with_system`), and record its usage under the parent scope.
-    let model_provider = ScriptedModelProvider {
-        responses: Arc::new(Mutex::new(VecDeque::from([ChatResponse {
-            text: Some(
-                "---\nname: model-picked\ndescription: Build and test the project.\n---\n\n# X\n\nBody.\n"
-                    .to_string(),
-            ),
-            tool_calls: Vec::new(),
-            usage: Some(reiclaw_providers::traits::TokenUsage {
-                input_tokens: Some(800),
-                output_tokens: Some(120),
-                cached_input_tokens: None,
-            }),
-            reasoning_content: None,
-        }]))),
-        capabilities: ProviderCapabilities::default(),
-    };
-
-    let dir = tempfile::TempDir::new().unwrap();
-    let creator = SkillCreator::new(
-        dir.path().to_path_buf(),
-        reiclaw_config::schema::SkillCreationConfig {
-            enabled: true,
-            reflection_enabled: true,
-            ..reiclaw_config::schema::SkillCreationConfig::default()
-        },
-    );
-    let tool_calls = vec![
-        ToolCallRecord {
-            name: "shell".to_string(),
-            args: serde_json::json!({ "cmd": "build" }),
-        },
-        ToolCallRecord {
-            name: "shell".to_string(),
-            args: serde_json::json!({ "cmd": "test" }),
-        },
-    ];
-
-    let workspace = tempfile::TempDir::new().unwrap();
-    let cost_config = reiclaw_config::schema::CostConfig {
-        enabled: true,
-        ..reiclaw_config::schema::CostConfig::default()
-    };
-    let tracker = Arc::new(CostTracker::new(cost_config, workspace.path()).unwrap());
-    let ctx =
-        ToolLoopCostTrackingContext::new(Arc::clone(&tracker), Arc::new(review_test_pricing()));
-
-    let slug = TOOL_LOOP_COST_TRACKING_CONTEXT
-        .scope(
-            Some(ctx),
-            creator.create_from_execution_reflected(
-                "Build and test the project",
-                &tool_calls,
-                "All tests passed.",
-                None,
-                "mock-provider",
-                &model_provider,
-                "mock-model",
-            ),
-        )
-        .await
-        .unwrap()
-        .expect("a skill should be created from the reflected SKILL.md");
-    assert_eq!(slug, "build-and-test-the-project");
-
-    let summary = tracker.get_summary().unwrap();
-    assert_eq!(
-        summary.request_count, 1,
-        "reflection must record its provider call under the parent cost scope"
-    );
-    assert_eq!(summary.total_tokens, 920);
-    assert!(summary.session_cost_usd > 0.0);
-}
-
 use reiclaw_api::tool::Tool as TestTool;
 use reiclaw_policy::SecurityPolicy as TestPolicy;
 
@@ -11245,7 +11029,6 @@ async fn process_message_seam_narrows_safe_defaults_outside_allowed_tools() {
         mem,
         &config.http_request,
         &config.web_fetch,
-        &security.workspace_dir,
         &config.agents,
         None,
         &config,

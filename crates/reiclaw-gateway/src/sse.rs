@@ -188,7 +188,7 @@ impl reiclaw_runtime::observability::Observer for BroadcastObserver {
             }
         }
 
-        // Recording into the primary observer (logs / Prometheus) is the
+        // Recording into the primary observer (logs / verbose output) is the
         // responsibility of whoever built the event source; `TeeObserver`
         // takes care of that fan-out. Here we only translate to JSON and
         // ship to SSE subscribers.

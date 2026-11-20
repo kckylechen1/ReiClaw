@@ -31,11 +31,6 @@ pub fn resolve(
         }
         policy.tracker = tracker.clone();
         policy.enforce_tool_operation(operation, name)?;
-        if current.channels.session_backend != "sqlite" {
-            return Err(
-                "durable delegation bindings require the SQLite session backend".to_string(),
-            );
-        }
     }
     Ok((current.tachi.clone(), selected_data_dir.to_path_buf()))
 }

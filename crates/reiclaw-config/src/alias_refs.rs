@@ -228,7 +228,7 @@ pub fn dirty_entry_for(refsite_path: &str) -> String {
         Some("agents" | "peer_groups") if segs.len() >= 2 => format!("{}.{}", segs[0], segs[1]),
         // providers.<cat>.<fam>.<alias>.* → the provider entry.
         Some("providers") if segs.len() >= 4 => segs[..4].join("."),
-        // Scalars / whole-vector fields (heartbeat.agent, acp.default_agent,
+        // Scalars / whole-vector fields (heartbeat.agent,
         // escalation.alert_channels[i], model_routes[i]…) → strip any index.
         _ => refsite_path
             .split('[')
@@ -451,15 +451,6 @@ fn delete_agent(
 fn scrub_agent_refs(cfg: &mut Config, alias: &str) {
     if cfg.heartbeat.agent.trim() == alias {
         cfg.heartbeat.agent.clear();
-    }
-    // Compute the match first so the immutable borrow ends before the assignment.
-    let clear_acp = cfg
-        .acp
-        .default_agent
-        .as_deref()
-        .is_some_and(|da| da.trim() == alias);
-    if clear_acp {
-        cfg.acp.default_agent = None;
     }
     for agent in cfg.agents.values_mut() {
         agent.workspace.access.retain(|k, _| k.as_str() != alias); // raw
@@ -735,15 +726,6 @@ fn rewrite_agent_refs(cfg: &mut Config, old: &str, new: &str) -> Vec<String> {
     if cfg.heartbeat.agent.trim() == old {
         cfg.heartbeat.agent = new.to_string();
         dirty.push("heartbeat.agent".to_string());
-    }
-    let hit_acp = cfg
-        .acp
-        .default_agent
-        .as_deref()
-        .is_some_and(|da| da.trim() == old);
-    if hit_acp {
-        cfg.acp.default_agent = Some(new.to_string());
-        dirty.push("acp.default_agent".to_string());
     }
     for (name, agent) in cfg.agents.iter_mut() {
         let mut touched = false;
@@ -1237,16 +1219,6 @@ fn collect_agent_refs(cfg: &Config, alias: &str, sites: &mut Vec<RefSite>) {
                 raw,
             ));
         }
-    }
-    // acp.default_agent — Option<String>, not load-validated (schema.rs:10889).
-    if let Some(da) = cfg.acp.default_agent.as_deref()
-        && da.trim() == alias
-    {
-        sites.push(RefSite::soft(
-            "acp.default_agent".to_string(),
-            ScrubAction::ClearOptional,
-            da,
-        ));
     }
     for (name, agent) in sorted_agents(cfg) {
         if agent.workspace.access.keys().any(|k| k.as_str() == alias) {

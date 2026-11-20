@@ -199,7 +199,7 @@ policy enforcement show real design intent. That intent needs to be understood b
 contributor who writes code near a trust boundary, and this RFC exists partly to give
 contributors the vocabulary to recognize where those boundaries are.
 
-The current fork uses the `Observer` trait, optional Prometheus metrics, and
+The current fork uses the `Observer` trait and
 `zeroclaw-log` for structured logs and event broadcast. Its in-process OpenTelemetry
 backend has been retired; DORA telemetry had no production emitter and is not supported.
 See [Logs & observability](../ops/observability.md) for the retained implementation.
@@ -530,7 +530,7 @@ the system was asked to do and what it actually does.
 
 ### 4.6 Observability as Debuggability
 
-The current fork's `Observer`, optional Prometheus metrics, and `zeroclaw-log` path
+The current fork's `Observer` and `zeroclaw-log` path
 are described in [Logs & observability](../ops/observability.md). The in-process
 OpenTelemetry backend has been retired, and DORA telemetry had no production emitter.
 The teaching gap is between having the retained infrastructure and using it in a way

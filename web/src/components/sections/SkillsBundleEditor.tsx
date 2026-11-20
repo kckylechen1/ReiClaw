@@ -506,15 +506,13 @@ interface TagsFieldProps {
 /**
  * Tags editor + the slash-command opt-in. The `slash` tag is surfaced as a
  * boolean toggle (it makes the skill a Discord slash command — see
- * zeroclaw-labs/zeroclaw#7490); `open-skills` is loader-managed and shown
- * read-only. Everything else is an editable badge. The full tag list (including
- * `slash`/`open-skills`) is preserved on save.
+ * zeroclaw-labs/zeroclaw#7490). Other tags are editable metadata, including
+ * historical source tags. The full tag list is preserved on save.
  */
 function TagsField({ tags, onTagsChange }: TagsFieldProps) {
   const [tagInput, setTagInput] = useState('');
   const slashOn = tags.includes('slash');
-  const isOpenSkills = tags.includes('open-skills');
-  const editableTags = tags.filter((t) => t !== 'slash' && t !== 'open-skills');
+  const editableTags = tags.filter((t) => t !== 'slash');
 
   const setSlash = (on: boolean) =>
     onTagsChange(on ? [...tags, 'slash'] : tags.filter((t) => t !== 'slash'));
@@ -522,7 +520,7 @@ function TagsField({ tags, onTagsChange }: TagsFieldProps) {
   const addTag = () => {
     const next = tagInput.trim().toLowerCase();
     setTagInput('');
-    if (!next || next === 'slash' || next === 'open-skills' || tags.includes(next)) return;
+    if (!next || next === 'slash' || tags.includes(next)) return;
     onTagsChange([...tags, next]);
   };
 
@@ -568,15 +566,6 @@ function TagsField({ tags, onTagsChange }: TagsFieldProps) {
               </button>
             </span>
           ))}
-          {isOpenSkills && (
-            <span
-              className="inline-flex items-center text-xs px-2 py-0.5 rounded-md border opacity-60"
-              title="Loader-managed: community-synced skill (open-skills)"
-              style={{ borderColor: 'var(--pc-border)', color: 'var(--pc-text-faint)' }}
-            >
-              open-skills
-            </span>
-          )}
           <input
             type="text"
             value={tagInput}

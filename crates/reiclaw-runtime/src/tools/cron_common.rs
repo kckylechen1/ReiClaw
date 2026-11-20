@@ -1,9 +1,63 @@
 use crate::cron::{CronJob, CronJobPatch, Schedule, deserialize_maybe_stringified};
+use reiclaw_config::schema::Config;
 use serde_json::{Value, json};
 
 pub(crate) const CRON_TZ_DESCRIPTION: &str = "Optional explicit IANA timezone name, e.g. 'America/New_York'. If omitted, the schedule uses the runtime local timezone. For user-facing schedules, pass an explicit IANA timezone.";
 
 pub(crate) const AT_DESCRIPTION: &str = "RFC3339 timestamp with explicit Z or offset, e.g. '2025-12-31T23:59:00Z' or '2025-12-31T18:59:00-05:00'.";
+
+/// JSON Schema for the `delivery` object shared by `cron_add` and
+/// `cron_update`. Announce delivery only reaches a configured
+/// `[gateway.bridges.<name>]` (in-process channels are retired), so the
+/// channel enum lists exactly those bridges. With none configured the
+/// schema offers only `mode = "none"`, which still lets the model clear an
+/// existing delivery; the run result lands in the job's session and run
+/// history either way.
+pub(crate) fn delivery_schema(config: &Config) -> Value {
+    let mut bridges: Vec<&String> = config.gateway.bridges.keys().collect();
+    bridges.sort();
+    if bridges.is_empty() {
+        return json!({
+            "type": "object",
+            "description": "No gateway bridges are configured, so job output cannot be announced to a channel; it stays in the job's session and run history. Set mode 'none' to clear an existing delivery.",
+            "properties": {
+                "mode": {
+                    "type": "string",
+                    "enum": ["none"],
+                    "description": "'none' disables delivery"
+                }
+            }
+        });
+    }
+    json!({
+        "type": "object",
+        "description": "Optional delivery config to also send job output to a configured gateway bridge after each run; the result always lands in the job's session and run history. With mode 'announce', channel and to are expected.",
+        "properties": {
+            "mode": {
+                "type": "string",
+                "enum": ["none", "announce"],
+                "description": "'announce' sends output to the bridge named in channel; 'none' disables delivery"
+            },
+            "channel": {
+                "type": "string",
+                "enum": bridges,
+                "description": "Configured gateway bridge to deliver output to"
+            },
+            "to": {
+                "type": "string",
+                "description": "Recipient on the bridge, e.g. a chat or user ID"
+            },
+            "thread_id": {
+                "type": "string",
+                "description": "Optional thread/conversation identifier, for bridges that route a reply into a thread distinct from `to`."
+            },
+            "best_effort": {
+                "type": "boolean",
+                "description": "If true, a delivery failure does not fail the job itself. Defaults to true."
+            }
+        }
+    })
+}
 
 pub(crate) fn deserialize_schedule_arg(value: &Value) -> Result<Schedule, String> {
     reject_at_without_explicit_offset(value)?;

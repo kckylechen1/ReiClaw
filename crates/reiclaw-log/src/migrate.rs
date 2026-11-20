@@ -350,6 +350,7 @@ mod tests {
 
     #[test]
     fn migrates_legacy_to_current_shape() {
+        let _writer_guard = crate::writer::WRITER_TEST_LOCK.lock();
         let tmp = tempfile::tempdir().unwrap();
         let path = tmp.path().join("trace.jsonl");
         write_jsonl(
@@ -392,6 +393,7 @@ mod tests {
 
     #[test]
     fn mixed_schema_file_migrates_legacy_rows_after_current_rows() {
+        let _writer_guard = crate::writer::WRITER_TEST_LOCK.lock();
         let tmp = tempfile::tempdir().unwrap();
         let path = tmp.path().join("trace.jsonl");
         let current = r#"{"id":"current","@timestamp":"2026-05-15T19:00:00Z","severity_number":9,"severity_text":"INFO","event":{"category":"agent","action":"x","outcome":"success"},"service":{"name":"zeroclaw","version":"0.8.3"},"zeroclaw":{},"schema_version":2}"#;
@@ -414,6 +416,7 @@ mod tests {
 
     #[test]
     fn migration_preserves_malformed_rows() {
+        let _writer_guard = crate::writer::WRITER_TEST_LOCK.lock();
         let tmp = tempfile::tempdir().unwrap();
         let path = tmp.path().join("trace.jsonl");
         let malformed = "  {not valid json}  ";
@@ -438,6 +441,7 @@ mod tests {
 
     #[test]
     fn migration_preserves_nonlegacy_bytes_and_line_endings() {
+        let _writer_guard = crate::writer::WRITER_TEST_LOCK.lock();
         let tmp = tempfile::tempdir().unwrap();
         let path = tmp.path().join("trace.jsonl");
         let preserved = concat!(
@@ -466,6 +470,7 @@ mod tests {
 
     #[test]
     fn timestamp_lookalike_is_preserved_during_real_migration() {
+        let _writer_guard = crate::writer::WRITER_TEST_LOCK.lock();
         let tmp = tempfile::tempdir().unwrap();
         let path = tmp.path().join("trace.jsonl");
         let lookalike = r#"{"timestamp":"2026-05-15T19:00:00Z","note":"foreign record"}"#;

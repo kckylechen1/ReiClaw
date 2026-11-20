@@ -21,32 +21,21 @@ pub mod scoped;
 pub mod send_message_to_peer;
 pub mod shell;
 pub mod skill_http;
-pub mod skill_manage;
 pub mod skill_tool;
 pub mod task_context;
 pub mod task_list;
 pub mod task_section;
-pub mod todo_write;
 
 // Tool types from zeroclaw-tools (direct imports, no shims)
 pub use reiclaw_tools::ask_user::AskUserTool;
 pub use reiclaw_tools::ask_user::ChannelMapHandle;
-pub use reiclaw_tools::backup_tool::BackupTool;
 pub use reiclaw_tools::content_search::ContentSearchTool;
-pub use reiclaw_tools::data_management::DataManagementTool;
 pub use reiclaw_tools::episode_read::EpisodeReadTool;
 pub use reiclaw_tools::escalate::EscalateToHumanTool;
-pub use reiclaw_tools::file_download::FileDownloadTool;
 pub use reiclaw_tools::file_edit::FileEditTool;
-pub use reiclaw_tools::file_upload::FileUploadTool;
-pub use reiclaw_tools::file_upload_bundle::FileUploadBundleTool;
 pub use reiclaw_tools::file_write::FileWriteTool;
-pub use reiclaw_tools::git_operations::GitOperationsTool;
 pub use reiclaw_tools::glob_search::GlobSearchTool;
 pub use reiclaw_tools::http_request::HttpRequestTool;
-pub use reiclaw_tools::image_gen::ImageGenTool;
-pub use reiclaw_tools::image_info::ImageInfoTool;
-pub use reiclaw_tools::llm_task::LlmTaskTool;
 pub use reiclaw_tools::mcp_client::{McpRegistry, McpServer};
 pub use reiclaw_tools::mcp_context;
 pub use reiclaw_tools::mcp_deferred::{
@@ -61,7 +50,6 @@ pub use reiclaw_tools::memory_forget::MemoryForgetTool;
 pub use reiclaw_tools::memory_purge::MemoryPurgeTool;
 pub use reiclaw_tools::memory_recall::MemoryRecallTool;
 pub use reiclaw_tools::memory_store::MemoryStoreTool;
-pub use reiclaw_tools::pipeline::PipelineTool;
 pub use reiclaw_tools::propose_soul_change::ProposeSoulChangeTool;
 pub use reiclaw_tools::screenshot::ScreenshotTool;
 pub use reiclaw_tools::session_search::SessionSearchTool;
@@ -94,7 +82,6 @@ pub use skill_http::SkillHttpTool;
 pub use skill_tool::{SkillBuiltinTool, SkillShellTool};
 pub use task_list::TaskListTool;
 pub use task_section::TaskListSection;
-pub use todo_write::TodoWriteTool;
 
 /// Re-entrant agent-spawning tools that must never be collapsed by the
 /// per-turn duplicate-call guard: launching several with the same prompt
@@ -510,7 +497,6 @@ pub fn all_tools(
     memory: Arc<dyn Memory>,
     http_config: &reiclaw_config::schema::HttpRequestConfig,
     web_fetch_config: &reiclaw_config::schema::WebFetchConfig,
-    workspace_dir: &std::path::Path,
     // Formerly the delegate tool's agent roster / parent fallback key.
     // `delegate` is retired (wall 1); the parameters stay in the
     // signature (underscored, intentionally unused) so call sites do not
@@ -529,7 +515,6 @@ pub fn all_tools(
         memory,
         http_config,
         web_fetch_config,
-        workspace_dir,
         _agents,
         _fallback_api_key,
         root_config,
@@ -557,7 +542,6 @@ pub fn all_tools_with_runtime(
     memory: Arc<dyn Memory>,
     http_config: &reiclaw_config::schema::HttpRequestConfig,
     web_fetch_config: &reiclaw_config::schema::WebFetchConfig,
-    workspace_dir: &std::path::Path,
     // Formerly the delegate tool's agent roster / parent fallback key.
     // `delegate` is retired (wall 1); the parameters stay in the
     // signature (underscored, intentionally unused) so call sites do not
@@ -708,10 +692,6 @@ pub fn all_tools_with_runtime(
         // explicit owner model selection for runtime model switching, and
         // startup application of persisted proxy config. These model tool
         // implementations and their private mutation protocols are retired.
-        Arc::new(GitOperationsTool::new(
-            security.clone(),
-            workspace_dir.to_path_buf(),
-        )),
     ];
 
     // Proactive messages through channel bridges; only offered when a
@@ -777,7 +757,6 @@ pub fn all_tools_with_runtime(
             },
         ),
     ));
-    tool_arcs.push(Arc::new(TodoWriteTool::new()));
 
     // Durable cross-session commitment list (#567). Owner identity is the
     // mint-once companion UUID (alias renames keep the list); the model
@@ -796,26 +775,6 @@ pub fn all_tools_with_runtime(
         task_writer,
         task_reminder_target,
     )));
-
-    // LLM task tool — registered using the calling agent's provider
-    if let Some((family, alias, entry)) = root_config.resolved_model_provider_for_agent(agent_alias)
-    {
-        let llm_task_provider = family.to_string();
-        let llm_task_model = entry
-            .model
-            .clone()
-            .unwrap_or_else(|| "openai/gpt-4o-mini".to_string());
-        let llm_task_runtime_options =
-            reiclaw_providers::provider_runtime_options_for_alias(root_config, family, alias);
-        tool_arcs.push(Arc::new(LlmTaskTool::new(
-            security.clone(),
-            llm_task_provider,
-            llm_task_model,
-            entry.temperature,
-            entry.api_key.clone(),
-            llm_task_runtime_options,
-        )));
-    }
 
     if matches!(
         root_config.effective_skills_prompt_mode(agent_alias),
@@ -914,23 +873,10 @@ pub fn all_tools_with_runtime(
     // admits it to any registry (the daemon notes the withheld section at
     // boot and reload instead).
     //
-    // Backup and data management: operator-only surfaces. The gateway
-    // operator API (`/api/agents/{alias}/backup*`,
-    // `/api/agents/{alias}/data-retention*`) dispatches to the same
-    // BackupTool / DataManagementTool command methods; the `[backup]` and
-    // `[data_retention]` sections keep configuring that surface, not a
-    // model tool.
-
     // Vision tools are always available
     tool_arcs.push(Arc::new(ScreenshotTool::new(security.clone())));
-    tool_arcs.push(Arc::new(RateLimitedTool::new(
-        PathGuardedTool::new(ImageInfoTool::new(security.clone()), security.clone()),
-        security.clone(),
-    )));
 
-    if let Ok(backend) =
-        reiclaw_infra::make_session_backend(&config.data_dir, &config.channels.session_backend)
-    {
+    if let Ok(backend) = reiclaw_infra::make_session_backend(&config.data_dir) {
         tool_arcs.push(Arc::new(SessionsCurrentTool::new(backend.clone())));
         tool_arcs.push(Arc::new(SessionsListTool::new(backend.clone())));
         tool_arcs.push(Arc::new(SessionsHistoryTool::new(
@@ -942,57 +888,6 @@ pub fn all_tools_with_runtime(
             agent_alias,
         )));
         tool_arcs.push(Arc::new(SessionsSendTool::new(backend, security.clone())));
-    }
-
-    // Standalone image generation tool (config-gated)
-    if root_config.image_gen.enabled {
-        tool_arcs.push(Arc::new(ImageGenTool::new_with_persistence(
-            security.clone(),
-            workspace_dir.to_path_buf(),
-            root_config.image_gen.default_model.clone(),
-            root_config.image_gen.api_key_env.clone(),
-            persistent_writes,
-        )));
-    }
-
-    // File upload tool — enabled iff [file_upload].url is set
-    if root_config
-        .file_upload
-        .url
-        .as_deref()
-        .is_some_and(|u| !u.trim().is_empty())
-    {
-        tool_arcs.push(Arc::new(FileUploadTool::new(
-            security.clone(),
-            root_config.file_upload.clone(),
-        )));
-    }
-
-    // File upload bundle tool — enabled iff [file_upload_bundle].url is set
-    if root_config
-        .file_upload_bundle
-        .url
-        .as_deref()
-        .is_some_and(|u| !u.trim().is_empty())
-    {
-        tool_arcs.push(Arc::new(FileUploadBundleTool::new(
-            security.clone(),
-            root_config.file_upload_bundle.clone(),
-        )));
-    }
-
-    // File download tool — enabled iff [file_download].url is set
-    if root_config
-        .file_download
-        .url
-        .as_deref()
-        .is_some_and(|u| !u.trim().is_empty())
-    {
-        tool_arcs.push(Arc::new(FileDownloadTool::new_with_persistence(
-            security.clone(),
-            root_config.file_download.clone(),
-            persistent_writes,
-        )));
     }
 
     // Interactive ask_user tool — always registered; owns its own late-bound channel map.

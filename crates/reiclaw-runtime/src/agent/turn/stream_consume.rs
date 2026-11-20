@@ -26,6 +26,14 @@ pub(crate) struct StreamedChatOutcome {
     pub(crate) usage: Option<reiclaw_providers::traits::TokenUsage>,
 }
 
+/// Streaming sinks and the caller-owned record of successfully delivered text.
+/// The record survives when a live estop drops the stream-consumption future.
+pub(crate) struct StreamOutput<'a> {
+    pub(crate) on_delta: Option<&'a tokio::sync::mpsc::Sender<DraftEvent>>,
+    pub(crate) event_tx: Option<&'a tokio::sync::mpsc::Sender<TurnEvent>>,
+    pub(crate) delivered_event_text: &'a mut String,
+}
+
 pub(crate) async fn consume_provider_streaming_response(
     model_provider: &dyn ModelProvider,
     messages: &[ChatMessage],
@@ -34,10 +42,17 @@ pub(crate) async fn consume_provider_streaming_response(
     model: &str,
     temperature: Option<f64>,
     cancellation_token: Option<&CancellationToken>,
-    on_delta: Option<&tokio::sync::mpsc::Sender<DraftEvent>>,
-    event_tx: Option<&tokio::sync::mpsc::Sender<TurnEvent>>,
+    output: StreamOutput<'_>,
     strict_tool_parsing: bool,
 ) -> Result<StreamedChatOutcome> {
+    let StreamOutput {
+        on_delta,
+        event_tx,
+        delivered_event_text,
+    } = output;
+    // Kept by the caller so a live estop can drop this future (including a
+    // blocked sink send) without losing text already delivered to the caller.
+    delivered_event_text.clear();
     let mut provider_stream = ProviderDispatch::from_ref(model_provider).stream_chat(
         ChatRequest {
             messages,
@@ -68,7 +83,6 @@ pub(crate) async fn consume_provider_streaming_response(
     // surfaces, so a non-streaming retry after a stream error overwrites
     // rather than duplicates.
     let mut visible_event_output = false;
-    let mut forwarded_text = String::new();
 
     macro_rules! forward_visible {
         ($text:expr, $count_visible:tt) => {{
@@ -78,12 +92,16 @@ pub(crate) async fn consume_provider_streaming_response(
             }
             if let Some(tx) = event_tx {
                 outcome.forwarded_live_deltas = true;
-                forward_visible!(@count $count_visible, visible);
-                let _ = tx
+                if tx
                     .send(TurnEvent::Chunk {
                         delta: visible.clone(),
                     })
-                    .await;
+                    .await
+                    .is_ok()
+                {
+                    forward_visible!(@count $count_visible);
+                    delivered_event_text.push_str(&visible);
+                }
             }
             if let Some(tx) = delta_sender {
                 outcome.forwarded_live_deltas = true;
@@ -92,11 +110,10 @@ pub(crate) async fn consume_provider_streaming_response(
                 }
             }
         }};
-        (@count true, $visible:ident) => {{
+        (@count true) => {{
             visible_event_output = true;
-            forwarded_text.push_str(&$visible);
         }};
-        (@count false, $visible:ident) => {{}};
+        (@count false) => {{}};
     }
 
     loop {
@@ -106,10 +123,12 @@ pub(crate) async fn consume_provider_streaming_response(
                     // Cancel after visible streamed text: persist-worthy,
                     // exactly like the pre-consolidation engine's
                     // committed-partial-on-cancel.
-                    if forwarded_text.is_empty() {
+                    if delivered_event_text.is_empty() {
                         return Err(ToolLoopCancelled.into());
                     }
-                    return Err(StreamCancelledAfterOutput::new(forwarded_text).into());
+                    return Err(StreamCancelledAfterOutput::new(
+                        std::mem::take(delivered_event_text),
+                    ).into());
                 }
                 chunk = provider_stream.next() => chunk,
             }
@@ -135,11 +154,11 @@ pub(crate) async fn consume_provider_streaming_response(
                 let message = format!("model_provider stream error: {err}");
                 if visible_event_output {
                     // Persist only what the consumer actually saw
-                    // (`forwarded_text`), never the raw accumulated text —
+                    // (`delivered_event_text`), never the raw accumulated text —
                     // that includes guard-withheld protocol fragments and
                     // suppression-buffered output nobody received.
                     return Err(StreamInterruptedAfterOutput {
-                        partial_text: forwarded_text,
+                        partial_text: std::mem::take(delivered_event_text),
                         message,
                     }
                     .into());
@@ -362,8 +381,11 @@ mod tests {
             "mock-model",
             Some(0.0),
             None,
-            None,
-            Some(&event_tx),
+            StreamOutput {
+                on_delta: None,
+                event_tx: Some(&event_tx),
+                delivered_event_text: &mut String::new(),
+            },
             false,
         )
         .await

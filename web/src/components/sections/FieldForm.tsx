@@ -974,8 +974,8 @@ const FieldForm = forwardRef<FieldFormHandle, FieldFormProps>(
     // is the agent whose `channels` list contains `<type>.<alias>` (a reverse
     // lookup the gateway already does and returns as `owning_agent`), so it
     // is NOT the alias in the path. `undefined` for non-channel sections
-    // (risk profiles are shared across agents; pipeline is
-    // global) leaves the picker on the default-agent catalog.
+    // (for example, shared risk profiles) leaves the picker on the
+    // default-agent catalog.
     const [toolAgent, setToolAgent] = useState<string | undefined>(undefined);
     useEffect(() => {
       if (!prefix.startsWith("channels.")) {
@@ -1363,8 +1363,7 @@ const FieldForm = forwardRef<FieldFormHandle, FieldFormProps>(
 
     // When the parent's `includePath` predicate excludes every entry and the
     // user hasn't typed a filter, the section truly has nothing to configure
-    // (e.g. `[tunnel]` with `tunnel_provider = "none"` has only the
-    // discriminator field, which the parent excludes). Collapse the whole
+    // after picker-owned discriminator fields are excluded. Collapse the whole
     // form in that case so the operator doesn't see an empty "Foo settings"
     // header above a useless "No fields match." line.
     const trulyEmpty =

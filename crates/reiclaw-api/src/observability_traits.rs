@@ -201,11 +201,10 @@ pub enum ObserverEvent {
     /// Emitted after persisting a memory entry. Carries only bounded
     /// fields — the raw memory `key` is intentionally omitted because
     /// keys can encode high-cardinality identifiers (UUIDs, phone
-    /// numbers, message timestamps) that would blow up Prometheus label
-    /// series.
+    /// numbers, message timestamps) that would create unbounded event dimensions.
     MemoryStore {
         /// Memory category (`"core"`, `"daily"`, `"conversation"`, etc.) —
-        /// bounded set, safe to use as a Prometheus label.
+        /// bounded set for event grouping.
         category: String,
         /// Bounded backend identifier (e.g. `"sqlite"`, `"qdrant"`).
         backend: String,
@@ -307,7 +306,7 @@ pub enum ObserverMetric {
 /// Core observability trait for recording agent runtime telemetry.
 ///
 /// Implement this trait to integrate with any monitoring backend (structured
-/// logging, Prometheus, OpenTelemetry, etc.). The agent runtime holds one or
+/// logging or event broadcasts). The agent runtime holds one or
 /// more `Observer` instances and calls [`record_event`](Observer::record_event)
 /// and [`record_metric`](Observer::record_metric) at key lifecycle points.
 ///
@@ -336,14 +335,12 @@ pub trait Observer: Send + Sync + 'static {
 
     /// Return the human-readable name of this observer backend.
     ///
-    /// Used in logs and diagnostics (e.g., `"console"`, `"prometheus"`,
-    /// `"opentelemetry"`).
+    /// Used in logs and diagnostics (e.g., `"log"`, `"verbose"`, `"noop"`).
     fn name(&self) -> &str;
 
     /// Downcast to `Any` for backend-specific operations.
     ///
     /// Enables callers to access concrete observer types when needed
-    /// (e.g., retrieving a Prometheus registry handle for custom metrics).
     fn as_any(&self) -> &dyn std::any::Any;
 }
 
@@ -352,8 +349,8 @@ pub trait Observer: Send + Sync + 'static {
 /// Lets a singleton observer be handed out as `Arc<MyObserver>` and still be
 /// used wherever `Box<dyn Observer>` is expected (e.g.
 /// `Box::new(MyObserver::shared())`). `as_any` deliberately delegates to the
-/// inner `T` so downcasts in handlers like `/metrics` recover the concrete
-/// type rather than the `Arc` wrapper.
+/// inner `T` so backend-specific diagnostics recover the concrete type
+/// rather than the `Arc` wrapper.
 impl<T: Observer + ?Sized> Observer for std::sync::Arc<T> {
     fn record_event(&self, event: &ObserverEvent) {
         self.as_ref().record_event(event);

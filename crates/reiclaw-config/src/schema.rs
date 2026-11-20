@@ -167,29 +167,11 @@ pub struct Config {
     #[group = "Operations"]
     pub observability: ObservabilityConfig,
 
-    /// Trust scoring and regression detection configuration (`[trust]`).
-    #[serde(default)]
-    #[nested]
-    #[group = "Operations"]
-    pub trust: crate::scattered_types::TrustConfig,
-
     /// Security subsystem configuration (`[security]`).
     #[serde(default)]
     #[nested]
     #[group = "Operations"]
     pub security: SecurityConfig,
-
-    /// Backup tool configuration (`[backup]`).
-    #[serde(default)]
-    #[nested]
-    #[group = "Operations"]
-    pub backup: BackupConfig,
-
-    /// Data retention and purge configuration (`[data_retention]`).
-    #[serde(default)]
-    #[nested]
-    #[group = "Operations"]
-    pub data_retention: DataRetentionConfig,
 
     /// Managed cybersecurity service configuration (`[security_ops]`).
     #[serde(default)]
@@ -226,12 +208,6 @@ pub struct Config {
     #[nested]
     pub skills: SkillsConfig,
 
-    /// Pipeline tool configuration (`[pipeline]`).
-    #[serde(default)]
-    #[nested]
-    #[group = "Agent"]
-    pub pipeline: PipelineConfig,
-
     /// Automatic query classification — maps user messages to model hints.
     #[serde(default)]
     #[nested]
@@ -252,12 +228,6 @@ pub struct Config {
     #[serde(default, skip_serializing_if = "HashMap::is_empty")]
     #[nested]
     pub cron: HashMap<String, CronJobDecl>,
-
-    /// ACP (Agent Client Protocol) server configuration (`[acp]`).
-    #[serde(default)]
-    #[nested]
-    #[group = "Integrations"]
-    pub acp: AcpConfig,
 
     /// Durable task-list behavior (`[tasks]`, #568): the owner-selected
     /// reminder destination armed occurrences copy at creation.
@@ -280,11 +250,6 @@ pub struct Config {
     #[serde(default)]
     #[nested]
     pub storage: StorageConfig,
-
-    /// Tunnel configuration for exposing the gateway publicly (`[tunnel]`).
-    #[serde(default)]
-    #[nested]
-    pub tunnel: TunnelConfig,
 
     /// Gateway server configuration: host, port, pairing, rate limits (`[gateway]`).
     #[serde(default)]
@@ -310,23 +275,11 @@ pub struct Config {
     #[group = "Tools"]
     pub multimodal: MultimodalConfig,
 
-    /// Automatic media understanding pipeline (`[media_pipeline]`).
-    #[serde(default)]
-    #[nested]
-    #[group = "Tools"]
-    pub media_pipeline: MediaPipelineConfig,
-
     /// Web fetch tool configuration (`[web_fetch]`).
     #[serde(default)]
     #[nested]
     #[group = "Tools"]
     pub web_fetch: WebFetchConfig,
-
-    /// Link enricher configuration (`[link_enricher]`).
-    #[serde(default)]
-    #[nested]
-    #[group = "Tools"]
-    pub link_enricher: LinkEnricherConfig,
 
     /// Web search tool configuration (`[web_search]`).
     #[serde(default)]
@@ -469,34 +422,6 @@ pub struct Config {
     #[serde(default)]
     #[nested]
     pub onboard_state: OnboardStateConfig,
-
-    /// Secure inter-node transport configuration (`[node_transport]`).
-    #[serde(default)]
-    #[nested]
-    #[group = "Network"]
-    pub node_transport: NodeTransportConfig,
-
-    /// Standalone image generation tool configuration (`[image_gen]`).
-    #[serde(default)]
-    #[nested]
-    #[group = "Tools"]
-    pub image_gen: ImageGenConfig,
-
-    /// Standalone file upload tool configuration (`[file_upload]`).
-    #[serde(default)]
-    #[nested]
-    pub file_upload: FileUploadConfig,
-
-    /// Standalone multi-file bundle upload tool configuration
-    /// (`[file_upload_bundle]`).
-    #[serde(default)]
-    #[nested]
-    pub file_upload_bundle: FileUploadBundleConfig,
-
-    /// Standalone file download tool configuration (`[file_download]`).
-    #[serde(default)]
-    #[nested]
-    pub file_download: FileDownloadConfig,
 
     /// Verifiable Intent (VI) credential issuance and constraint checking
     /// (`[verifiable_intent]`). No credential chain verifier exists yet, so the
@@ -1467,9 +1392,8 @@ pub struct AliasedAgentConfig {
     /// return promptly. Enable it when this agent must call its `mcp_bundles`
     /// tools over ACP; `session/new` then pays the one-time MCP connection cost
     /// (bounded and non-fatal per server). Set per agent so each ACP profile
-    /// opts in independently; when this agent is the ACP default
-    /// (`acp.default_agent`, or the sole configured agent), the flag is picked
-    /// up automatically for sessions that omit `agentAlias`.
+    /// opts in independently. The standalone ACP bridge selects its agent
+    /// explicitly; there is no kernel-wide ACP default agent.
     #[tab(Bundles)]
     #[serde(default)]
     pub acp_enable_mcp: bool,
@@ -3781,306 +3705,19 @@ pub enum SkillsPromptInjectionMode {
     Compact,
 }
 
-/// An external, user-configured skill registry ZeroClaw can install from.
-///
-/// Reuses the same git-clone mechanism as the default `zeroclaw-skills`
-/// registry. Install a skill from it with `registry:<name>/<skill>`.
-#[derive(Debug, Clone, PartialEq, Eq, Default)]
-pub enum ExternalRegistryKind {
-    #[default]
-    Git,
-    Unsupported(String),
-}
-
-impl ExternalRegistryKind {
-    pub fn as_str(&self) -> &str {
-        match self {
-            Self::Git => "git",
-            Self::Unsupported(kind) => kind.as_str(),
-        }
-    }
-}
-
-impl From<String> for ExternalRegistryKind {
-    fn from(kind: String) -> Self {
-        if kind == "git" {
-            Self::Git
-        } else {
-            Self::Unsupported(kind)
-        }
-    }
-}
-
-impl From<ExternalRegistryKind> for String {
-    fn from(kind: ExternalRegistryKind) -> Self {
-        kind.as_str().to_string()
-    }
-}
-
-impl std::fmt::Display for ExternalRegistryKind {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        f.write_str(self.as_str())
-    }
-}
-
-impl Serialize for ExternalRegistryKind {
-    fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
-    where
-        S: serde::Serializer,
-    {
-        serializer.serialize_str(self.as_str())
-    }
-}
-
-impl<'de> Deserialize<'de> for ExternalRegistryKind {
-    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
-    where
-        D: serde::Deserializer<'de>,
-    {
-        Ok(String::deserialize(deserializer)?.into())
-    }
-}
-
-#[derive(Debug, Clone, Serialize, Deserialize)]
-#[cfg_attr(feature = "schema-export", derive(schemars::JsonSchema))]
-pub struct ExternalRegistry {
-    /// Short alias used in `registry:<name>/<skill>` install specs.
-    pub name: String,
-    /// Git repository URL of the registry (must expose a top-level `skills/` dir).
-    pub url: String,
-    /// Registry protocol. Only `"git"` is supported today; other protocols
-    /// are reserved for a future additive release.
-    #[serde(default)]
-    #[cfg_attr(feature = "schema-export", schemars(with = "String"))]
-    pub kind: ExternalRegistryKind,
-    /// Whether this registry is eligible for installs. Default: `true`.
-    #[serde(default = "default_true")]
-    pub enabled: bool,
-}
-
-impl ExternalRegistry {
-    /// Returns true when `name` can be addressed by `registry:<name>/<skill>`.
-    ///
-    /// Keep this as the single registry-alias rule used by both config
-    /// validation and runtime install-spec parsing. Lowercase aliases also
-    /// avoid clone-directory collisions on case-insensitive filesystems.
-    pub fn is_valid_name(name: &str) -> bool {
-        !name.is_empty()
-            && name
-                .bytes()
-                .all(|b| b.is_ascii_lowercase() || b.is_ascii_digit() || b == b'-' || b == b'_')
-    }
-}
-
 /// Skills loading configuration (`[skills]` section).
 #[derive(Debug, Clone, Serialize, Deserialize, Default, Configurable)]
 #[cfg_attr(feature = "schema-export", derive(schemars::JsonSchema))]
 #[prefix = "skills"]
 pub struct SkillsConfig {
-    /// Enable loading and syncing the community open-skills repository.
-    /// Default: `false` (opt-in).
-    #[serde(default)]
-    pub open_skills_enabled: bool,
-    /// Optional path to a local open-skills repository.
-    /// If unset, defaults to `$HOME/open-skills` when enabled.
-    #[serde(default)]
-    pub open_skills_dir: Option<String>,
     /// Allow script-like files in skills (`.sh`, `.bash`, `.ps1`, shebang shell files).
     /// Default: `false` (secure by default).
     #[serde(default)]
     pub allow_scripts: bool,
-    /// URL of the skills registry repository for bare-name installs.
-    /// Default: `https://github.com/zeroclaw-labs/zeroclaw-skills`
-    #[serde(default)]
-    pub registry_url: Option<String>,
-    /// Additional user-configured skill registries, installed via
-    /// `registry:<name>/<skill>`. Each reuses the git-clone registry path and
-    /// is cloned to its own `extra-registry-<name>/` workspace directory.
-    #[serde(default, skip_serializing_if = "Vec::is_empty")]
-    pub extra_registries: Vec<ExternalRegistry>,
     /// Controls how skills are injected into the system prompt.
     /// `full` preserves legacy behavior. `compact` keeps context small and loads skills on demand.
     #[serde(default)]
     pub prompt_injection_mode: SkillsPromptInjectionMode,
-    /// Autonomous skill creation from successful multi-step task executions.
-    #[serde(default)]
-    #[nested]
-    pub skill_creation: SkillCreationConfig,
-    /// Prompt-triggered install suggestions for missing skills.
-    #[serde(default, alias = "install-suggestions")]
-    #[nested]
-    pub install_suggestions: SkillInstallSuggestionsConfig,
-    /// Automatic skill self-improvement after successful skill usage.
-    #[serde(default)]
-    #[nested]
-    pub skill_improvement: SkillImprovementConfig,
-}
-
-/// Autonomous skill creation configuration (`[skills.skill_creation]` section).
-#[derive(Debug, Clone, Serialize, Deserialize, Configurable)]
-#[cfg_attr(feature = "schema-export", derive(schemars::JsonSchema))]
-#[prefix = "skills.skill_creation"]
-#[serde(default)]
-pub struct SkillCreationConfig {
-    /// Enable automatic skill creation after successful multi-step tasks.
-    /// Default: `false`.
-    pub enabled: bool,
-    /// Maximum number of auto-generated skills to keep.
-    /// When exceeded, the oldest auto-generated skill is removed (LRU eviction).
-    pub max_skills: usize,
-    /// Embedding similarity threshold for deduplication.
-    /// Skills with descriptions more similar than this value are skipped.
-    pub similarity_threshold: f64,
-    /// Synthesize a canonical `SKILL.md` from the execution trace via a
-    /// bounded model-provider reflection call instead of the deterministic
-    /// `SKILL.toml` generator. Requires `enabled = true`. Falls back to
-    /// `SKILL.toml` whenever the reflection call or its output is invalid, so
-    /// turning this on never leaves a skill un-created. This is distinct from
-    /// the `[skills.skill_improvement]` background review fork, which patches
-    /// existing skills after use rather than creating new ones from a trace.
-    /// Default: `false`.
-    #[serde(default = "default_reflection_enabled")]
-    pub reflection_enabled: bool,
-    /// Maximum characters of the final assistant answer fed into the
-    /// reflection prompt. Bounds prompt size so a long answer cannot blow up
-    /// the reflection request. Default: `2000`.
-    #[serde(default = "default_max_final_answer_chars")]
-    pub max_final_answer_chars: usize,
-    /// Maximum characters of the rendered tool-call trace fed into the
-    /// reflection prompt. Default: `4000`.
-    #[serde(default = "default_max_tool_trace_chars")]
-    pub max_tool_trace_chars: usize,
-    /// Maximum characters of the task description fed into the reflection
-    /// prompt. Default: `1000`.
-    #[serde(default = "default_max_task_chars")]
-    pub max_task_chars: usize,
-}
-
-fn default_reflection_enabled() -> bool {
-    false
-}
-
-fn default_max_final_answer_chars() -> usize {
-    2000
-}
-
-fn default_max_tool_trace_chars() -> usize {
-    4000
-}
-
-fn default_max_task_chars() -> usize {
-    1000
-}
-
-impl Default for SkillCreationConfig {
-    fn default() -> Self {
-        Self {
-            enabled: false,
-            max_skills: 500,
-            similarity_threshold: 0.85,
-            reflection_enabled: default_reflection_enabled(),
-            max_final_answer_chars: default_max_final_answer_chars(),
-            max_tool_trace_chars: default_max_tool_trace_chars(),
-            max_task_chars: default_max_task_chars(),
-        }
-    }
-}
-
-/// Prompt-triggered skill install suggestions (`[skills.install_suggestions]` section).
-#[derive(Debug, Clone, Serialize, Deserialize, Configurable, Default)]
-#[cfg_attr(feature = "schema-export", derive(schemars::JsonSchema))]
-#[prefix = "skills.install_suggestions"]
-#[serde(default)]
-pub struct SkillInstallSuggestionsConfig {
-    /// Enable suggestions for installable skills before normal agent turns.
-    /// Default: `false`.
-    pub enabled: bool,
-}
-
-/// Skill self-improvement configuration (`[skills.skill-improvement]` section).
-///
-/// Controls the post-turn background review fork that may patch, expand, or
-/// archive skills based on what the conversation revealed. The fork runs in a
-/// restricted toolset (only `skills_list`, `skill_view`, `skill_manage`) and
-/// never touches the user-visible conversation.
-#[derive(Debug, Clone, Serialize, Deserialize, Configurable)]
-#[cfg_attr(feature = "schema-export", derive(schemars::JsonSchema))]
-#[prefix = "skills.skill_improvement"]
-pub struct SkillImprovementConfig {
-    /// Enable the background skill-review fork. Default: `false`.
-    /// Opt-in: users must explicitly enable this to allow post-turn skill
-    /// mutations.
-    #[serde(default)]
-    pub enabled: bool,
-    /// Minimum interval (in seconds) between reviews for the same skill.
-    /// Acts as a durable rate limit on patches to any one skill. Default: `3600`.
-    #[serde(default = "default_skill_improvement_cooldown")]
-    pub cooldown_secs: u64,
-    /// Spawn a review fork once at least this many tool-call iterations have
-    /// accumulated in the current run. `0` disables iteration-based triggering.
-    /// Default: `10`.
-    #[serde(default = "default_nudge_interval_iterations")]
-    pub nudge_interval_iterations: u32,
-    /// Maximum tool-call iterations the review fork itself is allowed to make.
-    /// Caps the fork's LLM cost. Default: `8`.
-    #[serde(default = "default_max_review_iterations")]
-    pub max_review_iterations: u32,
-}
-
-fn default_skill_improvement_cooldown() -> u64 {
-    3600
-}
-
-fn default_nudge_interval_iterations() -> u32 {
-    10
-}
-
-fn default_max_review_iterations() -> u32 {
-    8
-}
-
-impl Default for SkillImprovementConfig {
-    fn default() -> Self {
-        Self {
-            enabled: false,
-            cooldown_secs: 3600,
-            nudge_interval_iterations: 10,
-            max_review_iterations: 8,
-        }
-    }
-}
-
-/// Pipeline tool configuration (`[pipeline]` section).
-#[derive(Debug, Clone, Serialize, Deserialize, Configurable)]
-#[cfg_attr(feature = "schema-export", derive(schemars::JsonSchema))]
-#[prefix = "pipeline"]
-pub struct PipelineConfig {
-    /// Enable the `execute_pipeline` meta-tool.
-    /// Default: `false`.
-    #[serde(default)]
-    pub enabled: bool,
-    /// Maximum number of steps allowed in a single pipeline invocation.
-    /// Default: `20`.
-    #[serde(default = "default_pipeline_max_steps")]
-    pub max_steps: usize,
-    /// Tools allowed in pipeline steps. Steps referencing tools not on this
-    /// list are rejected before execution.
-    #[serde(default)]
-    pub allowed_tools: Vec<String>,
-}
-
-fn default_pipeline_max_steps() -> usize {
-    20
-}
-
-impl Default for PipelineConfig {
-    fn default() -> Self {
-        Self {
-            enabled: false,
-            max_steps: 20,
-            allowed_tools: Vec::new(),
-        }
-    }
 }
 
 /// Multimodal (image) handling configuration (`[multimodal]` section).
@@ -4166,46 +3803,6 @@ impl Default for MultimodalConfig {
             allow_remote_fetch: false,
             vision_model_provider: None,
             vision_model: None,
-        }
-    }
-}
-
-// ── Media Pipeline ──────────────────────────────────────────────
-
-/// Automatic media understanding pipeline configuration (`[media_pipeline]`).
-///
-/// When enabled, inbound channel messages with media attachments are
-/// pre-processed before reaching the agent: audio is transcribed, images are
-/// annotated, and videos are summarised.
-#[allow(clippy::struct_excessive_bools)]
-#[derive(Debug, Clone, Serialize, Deserialize, Configurable)]
-#[cfg_attr(feature = "schema-export", derive(schemars::JsonSchema))]
-#[prefix = "media_pipeline"]
-pub struct MediaPipelineConfig {
-    /// Master toggle for the media pipeline (default: false).
-    #[serde(default)]
-    pub enabled: bool,
-
-    /// Transcribe audio attachments using the configured transcription model_provider.
-    #[serde(default = "default_true")]
-    pub transcribe_audio: bool,
-
-    /// Add image descriptions when a vision-capable model is active.
-    #[serde(default = "default_true")]
-    pub describe_images: bool,
-
-    /// Summarize video attachments (placeholder — requires external API).
-    #[serde(default = "default_true")]
-    pub summarize_video: bool,
-}
-
-impl Default for MediaPipelineConfig {
-    fn default() -> Self {
-        Self {
-            enabled: false,
-            transcribe_audio: true,
-            describe_images: true,
-            summarize_video: true,
         }
     }
 }
@@ -4553,7 +4150,7 @@ pub struct GatewayConfig {
     /// Require pairing before accepting requests (default: true)
     #[serde(default = "default_true")]
     pub require_pairing: bool,
-    /// Allow binding to non-localhost without a tunnel (default: false)
+    /// Acknowledge a non-loopback bind while pairing is enabled (default: false).
     #[serde(default)]
     pub allow_public_bind: bool,
     /// Dangerously allow network-facing access without pairing (default: false).
@@ -4789,10 +4386,6 @@ fn default_memory_backend() -> String {
     "memorycore".into()
 }
 
-fn default_tunnel_provider() -> String {
-    "none".into()
-}
-
 impl Default for GatewayConfig {
     fn default() -> Self {
         Self {
@@ -4870,72 +4463,6 @@ impl Default for GatewayClientAuthConfig {
             ca_cert_path: String::new(),
             require_client_cert: default_true(),
             pinned_certs: Vec::new(),
-        }
-    }
-}
-
-/// Secure transport configuration for inter-node communication (`[node_transport]`).
-#[derive(Debug, Clone, Serialize, Deserialize, Configurable)]
-#[cfg_attr(feature = "schema-export", derive(schemars::JsonSchema))]
-#[prefix = "node_transport"]
-pub struct NodeTransportConfig {
-    /// Enable the secure transport layer.
-    #[serde(default = "default_node_transport_enabled")]
-    pub enabled: bool,
-    /// Shared secret for HMAC authentication between nodes.
-    #[serde(default)]
-    #[secret]
-    #[credential_class = "encrypted_secret"]
-    #[cfg_attr(feature = "schema-export", schemars(extend("x-secret" = true)))]
-    pub shared_secret: String,
-    /// Maximum age of signed requests in seconds (replay protection).
-    #[serde(default = "default_max_request_age")]
-    pub max_request_age_secs: i64,
-    /// Require HTTPS for all node communication.
-    #[serde(default = "default_require_https")]
-    pub require_https: bool,
-    /// Allow specific node IPs/CIDRs.
-    #[serde(default)]
-    pub allowed_peers: Vec<String>,
-    /// Path to TLS certificate file.
-    #[serde(default)]
-    pub tls_cert_path: Option<String>,
-    /// Path to TLS private key file.
-    #[serde(default)]
-    pub tls_key_path: Option<String>,
-    /// Require client certificates (mutual TLS).
-    #[serde(default)]
-    pub mutual_tls: bool,
-    /// Maximum number of connections per peer.
-    #[serde(default = "default_connection_pool_size")]
-    pub connection_pool_size: usize,
-}
-
-fn default_node_transport_enabled() -> bool {
-    true
-}
-fn default_max_request_age() -> i64 {
-    300
-}
-fn default_require_https() -> bool {
-    true
-}
-fn default_connection_pool_size() -> usize {
-    4
-}
-
-impl Default for NodeTransportConfig {
-    fn default() -> Self {
-        Self {
-            enabled: default_node_transport_enabled(),
-            shared_secret: String::new(),
-            max_request_age_secs: default_max_request_age(),
-            require_https: default_require_https(),
-            allowed_peers: Vec::new(),
-            tls_cert_path: None,
-            tls_key_path: None,
-            mutual_tls: false,
-            connection_pool_size: default_connection_pool_size(),
         }
     }
 }
@@ -5169,47 +4696,6 @@ impl Default for WebFetchConfig {
     }
 }
 
-// ── Link enricher ─────────────────────────────────────────────────
-
-/// Automatic link understanding for inbound channel messages (`[link_enricher]`).
-///
-/// When enabled, URLs in incoming messages are automatically fetched and
-/// summarised. The summary is prepended to the message before the agent
-/// processes it, giving the LLM context about linked pages without an
-/// explicit tool call.
-#[derive(Debug, Clone, Serialize, Deserialize, Configurable)]
-#[cfg_attr(feature = "schema-export", derive(schemars::JsonSchema))]
-#[prefix = "link_enricher"]
-pub struct LinkEnricherConfig {
-    /// Enable the link enricher pipeline stage (default: false)
-    #[serde(default)]
-    pub enabled: bool,
-    /// Maximum number of links to fetch per message (default: 3)
-    #[serde(default = "default_link_enricher_max_links")]
-    pub max_links: usize,
-    /// Per-link fetch timeout in seconds (default: 10)
-    #[serde(default = "default_link_enricher_timeout_secs")]
-    pub timeout_secs: u64,
-}
-
-fn default_link_enricher_max_links() -> usize {
-    3
-}
-
-fn default_link_enricher_timeout_secs() -> u64 {
-    10
-}
-
-impl Default for LinkEnricherConfig {
-    fn default() -> Self {
-        Self {
-            enabled: false,
-            max_links: default_link_enricher_max_links(),
-            timeout_secs: default_link_enricher_timeout_secs(),
-        }
-    }
-}
-
 // ── Shell tool ───────────────────────────────────────────────────
 
 /// Shell tool configuration (`[shell_tool]` section).
@@ -5330,395 +4816,6 @@ impl Default for WebSearchConfig {
             searxng_instance_url: None,
             max_results: default_web_search_max_results(),
             timeout_secs: default_web_search_timeout_secs(),
-        }
-    }
-}
-
-// ── Backup ──────────────────────────────────────────────────────
-
-/// Backup tool configuration (`[backup]` section).
-#[derive(Debug, Clone, Serialize, Deserialize, Configurable)]
-#[cfg_attr(feature = "schema-export", derive(schemars::JsonSchema))]
-#[prefix = "backup"]
-pub struct BackupConfig {
-    /// Kept for config compatibility. This no longer registers a
-    /// model-callable tool: backup create/list/verify/restore live on the
-    /// operator-only gateway API (`/api/agents/{alias}/backup*`), whose
-    /// authorization is the operator bearer gate — this flag does not
-    /// gate that API. The section's parameters (`max_keep`,
-    /// `include_dirs`) configure it; enabling the flag never widens the
-    /// model-visible tool registry.
-    #[serde(default = "default_true")]
-    pub enabled: bool,
-    /// Maximum number of backups to keep (oldest are pruned).
-    #[serde(default = "default_backup_max_keep")]
-    pub max_keep: usize,
-    /// Workspace subdirectories to include in backups.
-    #[serde(default = "default_backup_include_dirs")]
-    pub include_dirs: Vec<String>,
-    /// Output directory for backup archives (relative to workspace root).
-    #[serde(default = "default_backup_destination_dir")]
-    pub destination_dir: String,
-    /// Optional cron expression for scheduled automatic backups.
-    #[serde(default)]
-    pub schedule_cron: Option<String>,
-    /// IANA timezone for `schedule_cron`.
-    #[serde(default)]
-    pub schedule_timezone: Option<String>,
-    /// Compress backup archives.
-    #[serde(default = "default_true")]
-    pub compress: bool,
-    /// Encrypt backup archives (requires a configured secret store key).
-    #[serde(default)]
-    pub encrypt: bool,
-}
-
-fn default_backup_max_keep() -> usize {
-    10
-}
-
-fn default_backup_include_dirs() -> Vec<String> {
-    vec![
-        "config".into(),
-        "memory".into(),
-        "audit".into(),
-        "knowledge".into(),
-    ]
-}
-
-fn default_backup_destination_dir() -> String {
-    "state/backups".into()
-}
-
-impl Default for BackupConfig {
-    fn default() -> Self {
-        Self {
-            enabled: true,
-            max_keep: default_backup_max_keep(),
-            include_dirs: default_backup_include_dirs(),
-            destination_dir: default_backup_destination_dir(),
-            schedule_cron: None,
-            schedule_timezone: None,
-            compress: true,
-            encrypt: false,
-        }
-    }
-}
-
-// ── Data Retention ──────────────────────────────────────────────
-
-/// Data retention and purge configuration (`[data_retention]` section).
-#[derive(Debug, Clone, Serialize, Deserialize, Configurable)]
-#[cfg_attr(feature = "schema-export", derive(schemars::JsonSchema))]
-#[prefix = "data_retention"]
-pub struct DataRetentionConfig {
-    /// Kept for config compatibility. This no longer registers a
-    /// model-callable tool: retention status/stats/purge live on the
-    /// operator-only gateway API
-    /// (`/api/agents/{alias}/data-retention*`), whose authorization is
-    /// the operator bearer gate — this flag does not gate that API. The
-    /// section's parameters (`retention_days`) configure it; enabling
-    /// the flag never widens the model-visible tool registry.
-    #[serde(default)]
-    pub enabled: bool,
-    /// Days of data to retain before purge eligibility.
-    #[serde(default = "default_retention_days")]
-    pub retention_days: u64,
-    /// Preview what would be deleted without actually removing anything.
-    #[serde(default)]
-    pub dry_run: bool,
-    /// Limit retention enforcement to specific data categories (empty = all).
-    #[serde(default)]
-    pub categories: Vec<String>,
-}
-
-fn default_retention_days() -> u64 {
-    90
-}
-
-impl Default for DataRetentionConfig {
-    fn default() -> Self {
-        Self {
-            enabled: false,
-            retention_days: default_retention_days(),
-            dry_run: false,
-            categories: Vec::new(),
-        }
-    }
-}
-
-// ── Standalone Image Generation ─────────────────────────────────
-
-/// Standalone image generation tool configuration (`[image_gen]`).
-///
-/// When enabled, registers an `image_gen` tool that generates images via
-/// fal.ai's synchronous API (Flux / Nano Banana models) and saves them
-/// to the workspace `images/` directory.
-#[derive(Debug, Clone, Serialize, Deserialize, Configurable)]
-#[cfg_attr(feature = "schema-export", derive(schemars::JsonSchema))]
-#[prefix = "image_gen"]
-pub struct ImageGenConfig {
-    /// Enable the standalone image generation tool. Default: false.
-    #[serde(default)]
-    pub enabled: bool,
-
-    /// Default fal.ai model identifier.
-    #[serde(default = "default_image_gen_model")]
-    pub default_model: String,
-
-    /// Environment variable name holding the fal.ai API key.
-    #[serde(default = "default_image_gen_api_key_env")]
-    #[credential_class = "legacy_env_path"]
-    pub api_key_env: String,
-}
-
-fn default_image_gen_model() -> String {
-    "fal-ai/flux/schnell".into()
-}
-
-fn default_image_gen_api_key_env() -> String {
-    "FAL_API_KEY".into()
-}
-
-impl Default for ImageGenConfig {
-    fn default() -> Self {
-        Self {
-            enabled: false,
-            default_model: default_image_gen_model(),
-            api_key_env: default_image_gen_api_key_env(),
-        }
-    }
-}
-
-// ── File Upload ─────────────────────────────────────────────────
-
-/// Standalone file upload tool configuration (`[file_upload]`).
-///
-/// When `url` is set to a non-empty value, registers a `file_upload` tool that
-/// POSTs files from the agent's local filesystem to the configured endpoint
-/// using `multipart/form-data`. The LLM provides only a file path; the host
-/// reads the bytes and uploads them without ever including file content in
-/// the model context.
-///
-/// When `url` is `None` or empty, the tool is not registered.
-#[derive(Debug, Clone, Serialize, Deserialize, Configurable)]
-#[cfg_attr(feature = "schema-export", derive(schemars::JsonSchema))]
-#[prefix = "file_upload"]
-pub struct FileUploadConfig {
-    /// Upload endpoint URL. Tool is disabled when this is `None` or empty.
-    #[serde(default)]
-    pub url: Option<String>,
-
-    /// HTTP method. Only `POST` (default) and `PUT` are accepted.
-    #[serde(default = "default_file_upload_method")]
-    pub method: String,
-
-    /// Multipart form-field name for the file part. Default: `file`.
-    #[serde(default = "default_file_upload_field_name")]
-    pub field_name: String,
-
-    /// Maximum file size in bytes. Larger files are rejected before any
-    /// bytes hit the network. Default: 25 MiB.
-    #[serde(default = "default_file_upload_max_size_bytes")]
-    pub max_file_size_bytes: u64,
-
-    /// Request timeout in seconds. Default: 60.
-    #[serde(default = "default_file_upload_timeout_secs")]
-    pub timeout_secs: u64,
-
-    /// Static HTTP headers attached to every upload request. Same shape as
-    /// `[mcp.servers.*.headers]`.
-    #[serde(default)]
-    #[secret]
-    #[cfg_attr(feature = "schema-export", schemars(extend("x-secret" = true)))]
-    pub headers: HashMap<String, String>,
-}
-
-fn default_file_upload_method() -> String {
-    "POST".into()
-}
-
-fn default_file_upload_field_name() -> String {
-    "file".into()
-}
-
-fn default_file_upload_max_size_bytes() -> u64 {
-    25 * 1024 * 1024
-}
-
-fn default_file_upload_timeout_secs() -> u64 {
-    60
-}
-
-impl Default for FileUploadConfig {
-    fn default() -> Self {
-        Self {
-            url: None,
-            method: default_file_upload_method(),
-            field_name: default_file_upload_field_name(),
-            max_file_size_bytes: default_file_upload_max_size_bytes(),
-            timeout_secs: default_file_upload_timeout_secs(),
-            headers: HashMap::new(),
-        }
-    }
-}
-
-// ── File Upload Bundle ──────────────────────────────────────────
-
-/// Standalone multi-file bundle upload tool configuration
-/// (`[file_upload_bundle]`).
-///
-/// When `url` is set to a non-empty value, registers a `file_upload_bundle`
-/// tool that POSTs N files from the agent's local filesystem to the
-/// configured endpoint as a single `multipart/form-data` request. The LLM
-/// provides only file paths; the host reads the bytes.
-///
-/// When `url` is `None` or empty, the tool is not registered.
-#[derive(Debug, Clone, Serialize, Deserialize, Configurable)]
-#[cfg_attr(feature = "schema-export", derive(schemars::JsonSchema))]
-#[prefix = "file-upload-bundle"]
-pub struct FileUploadBundleConfig {
-    /// Upload endpoint URL. Tool is disabled when this is `None` or empty.
-    #[serde(default)]
-    pub url: Option<String>,
-
-    /// HTTP method. Only `POST` (default) and `PUT` are accepted.
-    #[serde(default = "default_file_upload_bundle_method")]
-    pub method: String,
-
-    /// Multipart form-field name reused across every file part. Default: `file`.
-    #[serde(default = "default_file_upload_bundle_field_name")]
-    pub field_name: String,
-
-    /// Maximum per-file size in bytes. Default: 10 MiB.
-    #[serde(default = "default_file_upload_bundle_max_file_size_bytes")]
-    pub max_file_size_bytes: u64,
-
-    /// Maximum cumulative size across every file in one call. Default: 32 MiB.
-    #[serde(default = "default_file_upload_bundle_max_total_size_bytes")]
-    pub max_total_size_bytes: u64,
-
-    /// Maximum number of files per call. Default: 16.
-    #[serde(default = "default_file_upload_bundle_max_files")]
-    pub max_files: u32,
-
-    /// Request timeout in seconds. Default: 120.
-    #[serde(default = "default_file_upload_bundle_timeout_secs")]
-    pub timeout_secs: u64,
-
-    /// Maximum response body bytes to read from the upload endpoint.
-    /// Prevents unbounded memory use from a malicious or verbose receiver.
-    /// Default: 4096 (4 KiB).
-    #[serde(default = "default_file_upload_bundle_max_response_body_bytes")]
-    pub max_response_body_bytes: usize,
-
-    /// Static HTTP headers attached to every upload request.
-    #[serde(default)]
-    #[secret]
-    #[cfg_attr(feature = "schema-export", schemars(extend("x-secret" = true)))]
-    pub headers: HashMap<String, String>,
-}
-
-fn default_file_upload_bundle_method() -> String {
-    "POST".into()
-}
-
-fn default_file_upload_bundle_field_name() -> String {
-    "file".into()
-}
-
-fn default_file_upload_bundle_max_file_size_bytes() -> u64 {
-    10 * 1024 * 1024
-}
-
-fn default_file_upload_bundle_max_total_size_bytes() -> u64 {
-    32 * 1024 * 1024
-}
-
-fn default_file_upload_bundle_max_files() -> u32 {
-    16
-}
-
-fn default_file_upload_bundle_timeout_secs() -> u64 {
-    120
-}
-
-fn default_file_upload_bundle_max_response_body_bytes() -> usize {
-    4 * 1024
-}
-
-impl Default for FileUploadBundleConfig {
-    fn default() -> Self {
-        Self {
-            url: None,
-            method: default_file_upload_bundle_method(),
-            field_name: default_file_upload_bundle_field_name(),
-            max_file_size_bytes: default_file_upload_bundle_max_file_size_bytes(),
-            max_total_size_bytes: default_file_upload_bundle_max_total_size_bytes(),
-            max_files: default_file_upload_bundle_max_files(),
-            timeout_secs: default_file_upload_bundle_timeout_secs(),
-            max_response_body_bytes: default_file_upload_bundle_max_response_body_bytes(),
-            headers: HashMap::new(),
-        }
-    }
-}
-
-// ── File Download ───────────────────────────────────────────────
-
-/// Standalone file download tool configuration (`[file_download]`).
-///
-/// When `url` is set to a non-empty value, registers a `file_download` tool
-/// that GETs a file from the configured endpoint and writes it to the agent's
-/// workspace filesystem. The LLM supplies only a document identifier and a
-/// workspace-relative destination path; the endpoint URL comes solely from this
-/// config and is never model-controlled. Response bytes are streamed to disk
-/// and never loaded into model context.
-///
-/// When `url` is `None` or empty, the tool is not registered.
-#[derive(Debug, Clone, Serialize, Deserialize, Configurable)]
-#[cfg_attr(feature = "schema-export", derive(schemars::JsonSchema))]
-#[prefix = "file-download"]
-pub struct FileDownloadConfig {
-    /// Download endpoint URL. Tool is disabled when this is `None` or empty.
-    /// The file to fetch is selected by the `document_id` query parameter.
-    #[serde(default)]
-    pub url: Option<String>,
-
-    /// Maximum download size in bytes. Enforced while streaming: the transfer
-    /// is aborted and the partial file removed once this ceiling is exceeded,
-    /// so an oversized or unbounded body never fully buffers in memory or lands
-    /// on disk. Default: 25 MiB.
-    #[serde(default = "default_file_download_max_size_bytes")]
-    pub max_file_size_bytes: u64,
-
-    /// Request timeout in seconds. Default: 120.
-    #[serde(default = "default_file_download_timeout_secs")]
-    pub timeout_secs: u64,
-
-    /// Static HTTP headers attached to every download request — typically an
-    /// `Authorization: Bearer …` token for the upstream endpoint. Same shape as
-    /// `[mcp.servers.*.headers]`.
-    #[serde(default)]
-    #[secret]
-    #[cfg_attr(feature = "schema-export", schemars(extend("x-secret" = true)))]
-    pub headers: HashMap<String, String>,
-}
-
-fn default_file_download_max_size_bytes() -> u64 {
-    25 * 1024 * 1024
-}
-
-fn default_file_download_timeout_secs() -> u64 {
-    120
-}
-
-impl Default for FileDownloadConfig {
-    fn default() -> Self {
-        Self {
-            url: None,
-            max_file_size_bytes: default_file_download_max_size_bytes(),
-            timeout_secs: default_file_download_timeout_secs(),
-            headers: HashMap::new(),
         }
     }
 }
@@ -6409,7 +5506,6 @@ pub enum ObservabilityBackend {
     None,
     Log,
     Verbose,
-    Prometheus,
 }
 
 impl ObservabilityBackend {
@@ -6419,7 +5515,6 @@ impl ObservabilityBackend {
             Self::None => "none",
             Self::Log => "log",
             Self::Verbose => "verbose",
-            Self::Prometheus => "prometheus",
         }
     }
 }
@@ -6513,7 +5608,7 @@ impl LogLlmRequestPayload {
 #[cfg_attr(feature = "schema-export", derive(schemars::JsonSchema))]
 #[prefix = "observability"]
 pub struct ObservabilityConfig {
-    /// Observability sink: none | log | verbose | prometheus.
+    /// Observability sink: none | log | verbose.
     #[serde(default, deserialize_with = "deserialize_enum_lenient")]
     pub backend: ObservabilityBackend,
 
@@ -6777,7 +5872,6 @@ pub fn default_auto_approve() -> Vec<String> {
         "web_fetch".into(),
         "glob_search".into(),
         "content_search".into(),
-        "image_info".into(),
         "tool_search".into(),
     ]
 }
@@ -7788,218 +6882,6 @@ fn default_max_run_history() -> u32 {
     50
 }
 
-// ── ACP ──────────────────────────────────────────────────────────
-
-/// ACP (Agent Client Protocol) server configuration (`[acp]` section).
-#[derive(Debug, Clone, Serialize, Deserialize, Configurable)]
-#[cfg_attr(feature = "schema-export", derive(schemars::JsonSchema))]
-#[prefix = "acp"]
-pub struct AcpConfig {
-    /// Agent alias to use when `session/new` omits `agentAlias` and more than
-    /// one agent is configured. When exactly one agent exists it is
-    /// auto-selected regardless of this field.
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub default_agent: Option<String>,
-    /// Maximum number of concurrent ACP sessions. Default: `10`.
-    #[serde(default = "default_acp_max_sessions")]
-    pub max_sessions: usize,
-    /// Idle session timeout in seconds. Sessions with no activity for this
-    /// duration are eligible for eviction. Default: `3600` (1 hour).
-    #[serde(default = "default_acp_session_timeout_secs")]
-    pub session_timeout_secs: u64,
-}
-
-fn default_acp_max_sessions() -> usize {
-    10
-}
-
-fn default_acp_session_timeout_secs() -> u64 {
-    3600
-}
-
-impl Default for AcpConfig {
-    fn default() -> Self {
-        Self {
-            default_agent: None,
-            max_sessions: default_acp_max_sessions(),
-            session_timeout_secs: default_acp_session_timeout_secs(),
-        }
-    }
-}
-
-// ── Tunnel ──────────────────────────────────────────────────────
-
-/// Tunnel configuration for exposing the gateway publicly (`[tunnel]` section).
-///
-/// Supported model_providers: `"none"` (default), `"cloudflare"`, `"tailscale"`, `"ngrok"`, `"openvpn"`, `"pinggy"`, `"custom"`.
-#[derive(Debug, Clone, Serialize, Deserialize, Configurable)]
-#[cfg_attr(feature = "schema-export", derive(schemars::JsonSchema))]
-#[prefix = "tunnel"]
-pub struct TunnelConfig {
-    /// How the gateway gets exposed to the public internet so webhooks (Telegram, Slack, etc.) can reach it. `none` = keep it local, no tunnel; `cloudflare` = Cloudflare Tunnel via cloudflared (needs a Zero Trust account and token); `tailscale` = Tailscale Funnel/Serve (tailnet-only or public, no account beyond tailscale); `ngrok` = ngrok agent with auth token; `openvpn` = bring-your-own OpenVPN egress; `pinggy` = Pinggy SSH tunnels (quick one-shot URLs); `custom` = run an arbitrary command you define under `[tunnel.custom]`.
-    #[serde(default = "default_tunnel_provider")]
-    pub tunnel_provider: String,
-
-    /// Cloudflare Tunnel configuration (used when `tunnel_provider = "cloudflare"`).
-    #[serde(default)]
-    #[nested]
-    pub cloudflare: Option<CloudflareTunnelConfig>,
-
-    /// Tailscale Funnel/Serve configuration (used when `tunnel_provider = "tailscale"`).
-    #[serde(default)]
-    #[nested]
-    pub tailscale: Option<TailscaleTunnelConfig>,
-
-    /// ngrok tunnel configuration (used when `tunnel_provider = "ngrok"`).
-    #[serde(default)]
-    #[nested]
-    pub ngrok: Option<NgrokTunnelConfig>,
-
-    /// OpenVPN tunnel configuration (used when `tunnel_provider = "openvpn"`).
-    #[serde(default)]
-    #[nested]
-    pub openvpn: Option<OpenVpnTunnelConfig>,
-
-    /// Custom tunnel command configuration (used when `tunnel_provider = "custom"`).
-    #[serde(default)]
-    #[nested]
-    pub custom: Option<CustomTunnelConfig>,
-
-    /// Pinggy tunnel configuration (used when `tunnel_provider = "pinggy"`).
-    #[serde(default)]
-    #[nested]
-    pub pinggy: Option<PinggyTunnelConfig>,
-}
-
-impl Default for TunnelConfig {
-    fn default() -> Self {
-        Self {
-            tunnel_provider: "none".into(),
-            cloudflare: None,
-            tailscale: None,
-            ngrok: None,
-            openvpn: None,
-            custom: None,
-            pinggy: None,
-        }
-    }
-}
-
-#[derive(Debug, Clone, Default, Serialize, Deserialize, Configurable)]
-#[cfg_attr(feature = "schema-export", derive(schemars::JsonSchema))]
-#[prefix = "tunnel.cloudflare"]
-pub struct CloudflareTunnelConfig {
-    /// Cloudflare Tunnel token (from Zero Trust dashboard)
-    #[serde(default)]
-    #[secret]
-    #[credential_class = "encrypted_secret"]
-    #[cfg_attr(feature = "schema-export", schemars(extend("x-secret" = true)))]
-    pub token: String,
-}
-
-#[derive(Debug, Clone, Default, Serialize, Deserialize, Configurable)]
-#[cfg_attr(feature = "schema-export", derive(schemars::JsonSchema))]
-#[prefix = "tunnel.tailscale"]
-pub struct TailscaleTunnelConfig {
-    /// Use Tailscale Funnel (public internet) vs Serve (tailnet only)
-    #[serde(default)]
-    pub funnel: bool,
-    /// Optional hostname override
-    #[serde(default)]
-    pub hostname: Option<String>,
-}
-
-#[derive(Debug, Clone, Default, Serialize, Deserialize, Configurable)]
-#[cfg_attr(feature = "schema-export", derive(schemars::JsonSchema))]
-#[prefix = "tunnel.ngrok"]
-pub struct NgrokTunnelConfig {
-    /// ngrok auth token
-    #[serde(default)]
-    #[secret]
-    #[credential_class = "encrypted_secret"]
-    #[cfg_attr(feature = "schema-export", schemars(extend("x-secret" = true)))]
-    pub auth_token: String,
-    /// Optional custom domain
-    #[serde(default)]
-    pub domain: Option<String>,
-}
-
-/// OpenVPN tunnel configuration (`[tunnel.openvpn]`).
-///
-/// Required when `tunnel.tunnel_provider = "openvpn"`. Omitting this section entirely
-/// preserves previous behavior. Setting `tunnel.tunnel_provider = "none"` (or removing
-/// the `[tunnel.openvpn]` block) cleanly reverts to no-tunnel mode.
-///
-/// Defaults: `connect_timeout_secs = 30`.
-#[derive(Debug, Clone, Serialize, Deserialize, Configurable)]
-#[cfg_attr(feature = "schema-export", derive(schemars::JsonSchema))]
-#[prefix = "tunnel.openvpn"]
-pub struct OpenVpnTunnelConfig {
-    /// Path to `.ovpn` configuration file (must not be empty).
-    pub config_file: String,
-    /// Optional path to auth credentials file (`--auth-user-pass`).
-    #[serde(default)]
-    #[credential_class = "path_only_reference"]
-    pub auth_file: Option<String>,
-    /// Advertised address once VPN is connected (e.g., `"10.8.0.2:42617"`).
-    /// When omitted the tunnel falls back to `http://{local_host}:{local_port}`.
-    #[serde(default)]
-    pub advertise_address: Option<String>,
-    /// Connection timeout in seconds (default: 30, must be > 0).
-    #[serde(default = "default_openvpn_timeout")]
-    pub connect_timeout_secs: u64,
-    /// Extra openvpn CLI arguments forwarded verbatim.
-    #[serde(default)]
-    pub extra_args: Vec<String>,
-}
-
-fn default_openvpn_timeout() -> u64 {
-    30
-}
-
-impl Default for OpenVpnTunnelConfig {
-    fn default() -> Self {
-        Self {
-            config_file: String::new(),
-            auth_file: None,
-            advertise_address: None,
-            connect_timeout_secs: default_openvpn_timeout(),
-            extra_args: Vec::new(),
-        }
-    }
-}
-
-#[derive(Debug, Clone, Default, Serialize, Deserialize, Configurable)]
-#[cfg_attr(feature = "schema-export", derive(schemars::JsonSchema))]
-#[prefix = "tunnel.pinggy"]
-pub struct PinggyTunnelConfig {
-    /// Pinggy access token (optional — free tier works without one).
-    #[serde(default)]
-    #[secret]
-    #[credential_class = "encrypted_secret"]
-    #[cfg_attr(feature = "schema-export", schemars(extend("x-secret" = true)))]
-    pub token: Option<String>,
-    /// Server region: `"us"` (USA), `"eu"` (Europe), `"ap"` (Asia), `"br"` (South America), `"au"` (Australia), or omit for auto.
-    #[serde(default)]
-    pub region: Option<String>,
-}
-
-#[derive(Debug, Clone, Default, Serialize, Deserialize, Configurable)]
-#[cfg_attr(feature = "schema-export", derive(schemars::JsonSchema))]
-#[prefix = "tunnel.custom"]
-pub struct CustomTunnelConfig {
-    /// Command template to start the tunnel. Use {port} and {host} placeholders.
-    /// Example: "bore local {port} --to bore.pub"
-    #[serde(default)]
-    pub start_command: String,
-    /// Optional URL to check tunnel health
-    #[serde(default)]
-    pub health_url: Option<String>,
-    /// Optional regex to extract public URL from command stdout
-    #[serde(default)]
-    pub url_pattern: Option<String>,
-}
-
 // ── Channels ─────────────────────────────────────────────────────
 
 /// Channel kinds whose in-process transport runners were retired with the
@@ -8073,9 +6955,6 @@ pub fn is_retired_transport(kind: &str) -> bool {
 #[cfg_attr(feature = "schema-export", derive(schemars::JsonSchema))]
 #[prefix = "channels"]
 pub struct ChannelsConfig {
-    /// Enable the CLI interactive channel. Default: `true`.
-    #[serde(default = "default_true")]
-    pub cli: bool,
     /// Telegram bot channel instances (`[channels.telegram.<alias>]`).
     #[serde(default, skip_serializing_if = "HashMap::is_empty")]
     #[nested]
@@ -8104,44 +6983,18 @@ pub struct ChannelsConfig {
     )]
     #[cfg_attr(feature = "schema-export", schemars(skip))]
     pub filesystem: HashMap<String, ()>,
-    /// Base timeout in seconds for processing a single channel message (LLM + tools).
-    /// Runtime uses this as a per-turn budget that scales with tool-loop depth
-    /// (up to 4x, capped) so one slow/retried model call does not consume the
-    /// entire conversation budget.
-    /// Default: 300s for on-device LLMs (Ollama) which are slower than cloud APIs.
-    #[serde(default = "default_channel_message_timeout_secs")]
-    pub message_timeout_secs: u64,
-    /// Per-channel multiplier for the global channel message in-flight budget.
-    /// Runtime multiplies this value by the configured channel count, then
-    /// applies its global minimum and maximum bounds to one shared dispatcher
-    /// semaphore. Default: `4`.
-    #[serde(default = "default_channel_max_concurrent_per_channel")]
-    pub max_concurrent_per_channel: usize,
-    /// Whether to add acknowledgement reactions (👀 on receipt, ✅/⚠️ on
-    /// completion) to incoming channel messages. Default: `true`.
-    #[serde(default = "default_true")]
-    pub ack_reactions: bool,
     /// Whether to send tool-call notification messages (e.g. `🔧 web_search_tool: …`)
     /// to channel users. When `false`, tool calls are still logged server-side but
     /// not forwarded as individual channel messages. Default: `false`.
     #[serde(default = "default_false")]
     pub show_tool_calls: bool,
-    /// Persist channel conversation history to JSONL files so sessions survive
-    /// daemon restarts. Files are stored in `{workspace}/sessions/`. Default: `true`.
+    /// Persist channel conversation history in SQLite so sessions survive
+    /// daemon restarts. Stored in `{workspace}/sessions/sessions.db`. Default: `true`.
     #[serde(default = "default_true")]
     pub session_persistence: bool,
-    /// Session persistence backend: `"jsonl"` (legacy) or `"sqlite"` (new default).
-    /// SQLite provides FTS5 search, metadata tracking, and TTL cleanup.
-    #[serde(default = "default_session_backend")]
-    pub session_backend: String,
     /// Auto-archive stale sessions older than this many hours. `0` disables. Default: `0`.
     #[serde(default)]
     pub session_ttl_hours: u32,
-    /// Inbound message debounce window in milliseconds. When a sender fires
-    /// multiple messages within this window, they are accumulated and dispatched
-    /// as a single concatenated message. `0` disables debouncing. Default: `0`.
-    #[serde(default)]
-    pub debounce_ms: u64,
 }
 
 // ── Retired SOP run-side config keys ────────────────────────────────────────
@@ -8274,34 +7127,16 @@ impl ChannelsConfig {
     }
 }
 
-fn default_channel_message_timeout_secs() -> u64 {
-    300
-}
-
-fn default_channel_max_concurrent_per_channel() -> usize {
-    4
-}
-
-fn default_session_backend() -> String {
-    "sqlite".into()
-}
-
 impl Default for ChannelsConfig {
     fn default() -> Self {
         Self {
-            cli: true,
             telegram: HashMap::new(),
             webhook: HashMap::new(),
             mqtt: HashMap::new(),
             filesystem: HashMap::new(),
-            message_timeout_secs: default_channel_message_timeout_secs(),
-            max_concurrent_per_channel: default_channel_max_concurrent_per_channel(),
-            ack_reactions: true,
             show_tool_calls: false,
             session_persistence: true,
-            session_backend: default_session_backend(),
             session_ttl_hours: 0,
-            debounce_ms: 0,
         }
     }
 }
@@ -8579,7 +7414,7 @@ impl_reply_pacing!(TelegramConfig, WebhookConfig);
 
 // ── Security Config ─────────────────────────────────────────────────
 
-/// Security configuration for audit logging, OTP, e-stop, IAM/SSO, and WebAuthn.
+/// Security configuration for audit logging, credential redaction, OTP, and e-stop.
 ///
 /// Sandbox backend and resource limits live on per-agent risk profiles
 /// (see `RiskProfileConfig::sandbox_*` and `RiskProfileConfig::max_*`); the
@@ -8608,16 +7443,6 @@ pub struct SecurityConfig {
     #[serde(default)]
     #[nested]
     pub estop: EstopConfig,
-
-    /// Nevis IAM integration for SSO/MFA authentication and role-based access.
-    #[serde(default)]
-    #[nested]
-    pub nevis: NevisConfig,
-
-    /// WebAuthn / FIDO2 hardware key authentication configuration.
-    #[serde(default)]
-    #[nested]
-    pub webauthn: WebAuthnConfig,
 }
 
 /// Outbound credential leak detection configuration.
@@ -8664,51 +7489,6 @@ impl Default for LeakDetectionConfig {
             high_entropy_tokens: default_leak_detection_high_entropy_tokens(),
         }
     }
-}
-
-/// WebAuthn / FIDO2 hardware key authentication configuration (`[security.webauthn]`).
-///
-/// Enables registration and authentication via hardware security keys
-/// (YubiKey, SoloKey, etc.) and platform authenticators (Touch ID, Windows Hello).
-#[derive(Debug, Clone, Serialize, Deserialize, Configurable)]
-#[cfg_attr(feature = "schema-export", derive(schemars::JsonSchema))]
-#[prefix = "security.webauthn"]
-pub struct WebAuthnConfig {
-    /// Enable WebAuthn authentication. Default: false.
-    #[serde(default)]
-    pub enabled: bool,
-    /// Relying Party ID (domain name, e.g. "example.com"). Default: "localhost".
-    #[serde(default = "default_webauthn_rp_id")]
-    pub rp_id: String,
-    /// Relying Party origin URL (e.g. `"https://example.com"`). Default: `"http://localhost:42617"`.
-    #[serde(default = "default_webauthn_rp_origin")]
-    pub rp_origin: String,
-    /// Relying Party display name. Default: "ReiClaw".
-    #[serde(default = "default_webauthn_rp_name")]
-    pub rp_name: String,
-}
-
-impl Default for WebAuthnConfig {
-    fn default() -> Self {
-        Self {
-            enabled: false,
-            rp_id: default_webauthn_rp_id(),
-            rp_origin: default_webauthn_rp_origin(),
-            rp_name: default_webauthn_rp_name(),
-        }
-    }
-}
-
-fn default_webauthn_rp_id() -> String {
-    "localhost".into()
-}
-
-fn default_webauthn_rp_origin() -> String {
-    "http://localhost:42617".into()
-}
-
-fn default_webauthn_rp_name() -> String {
-    "ReiClaw".into()
 }
 
 /// OTP validation strategy.
@@ -8848,125 +7628,6 @@ impl Default for EstopConfig {
             require_otp_to_resume: true,
         }
     }
-}
-
-/// Nevis IAM integration configuration.
-///
-/// When `enabled` is true, ZeroClaw validates incoming requests against a Nevis
-/// Security Suite instance and maps Nevis roles to tool/workspace permissions.
-#[derive(Clone, Serialize, Deserialize, Configurable)]
-#[cfg_attr(feature = "schema-export", derive(schemars::JsonSchema))]
-#[prefix = "security.nevis"]
-#[serde(deny_unknown_fields)]
-pub struct NevisConfig {
-    /// Enable Nevis IAM integration. Defaults to false for backward compatibility.
-    #[serde(default)]
-    pub enabled: bool,
-
-    /// Base URL of the Nevis instance (e.g. `https://nevis.example.com`).
-    #[serde(default)]
-    pub instance_url: String,
-
-    /// Nevis realm to authenticate against.
-    #[serde(default = "default_nevis_realm")]
-    pub realm: String,
-
-    /// OAuth2 client ID registered in Nevis.
-    #[serde(default)]
-    pub client_id: String,
-
-    /// OAuth2 client secret. Encrypted via SecretStore when stored on disk.
-    #[serde(default)]
-    #[secret]
-    #[credential_class = "encrypted_secret"]
-    #[cfg_attr(feature = "schema-export", schemars(extend("x-secret" = true)))]
-    pub client_secret: Option<String>,
-
-    /// Token validation strategy: `"local"` (JWKS) or `"remote"` (introspection).
-    #[serde(default = "default_nevis_token_validation")]
-    pub token_validation: String,
-
-    /// JWKS endpoint URL for local token validation.
-    #[serde(default)]
-    pub jwks_url: Option<String>,
-
-    /// Nevis role to ZeroClaw permission mappings.
-    #[serde(default)]
-    pub role_mapping: Vec<NevisRoleMappingConfig>,
-
-    /// Require MFA verification for all Nevis-authenticated requests.
-    #[serde(default)]
-    pub require_mfa: bool,
-
-    /// Session timeout in seconds.
-    #[serde(default = "default_nevis_session_timeout_secs")]
-    pub session_timeout_secs: u64,
-}
-
-impl std::fmt::Debug for NevisConfig {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        f.debug_struct("NevisConfig")
-            .field("enabled", &self.enabled)
-            .field("instance_url", &self.instance_url)
-            .field("realm", &self.realm)
-            .field("client_id", &self.client_id)
-            .field(
-                "client_secret",
-                &self.client_secret.as_ref().map(|_| "[REDACTED]"),
-            )
-            .field("token_validation", &self.token_validation)
-            .field("jwks_url", &self.jwks_url)
-            .field("role_mapping", &self.role_mapping)
-            .field("require_mfa", &self.require_mfa)
-            .field("session_timeout_secs", &self.session_timeout_secs)
-            .finish()
-    }
-}
-
-fn default_nevis_realm() -> String {
-    "master".into()
-}
-
-fn default_nevis_token_validation() -> String {
-    "local".into()
-}
-
-fn default_nevis_session_timeout_secs() -> u64 {
-    3600
-}
-
-impl Default for NevisConfig {
-    fn default() -> Self {
-        Self {
-            enabled: false,
-            instance_url: String::new(),
-            realm: default_nevis_realm(),
-            client_id: String::new(),
-            client_secret: None,
-            token_validation: default_nevis_token_validation(),
-            jwks_url: None,
-            role_mapping: Vec::new(),
-            require_mfa: false,
-            session_timeout_secs: default_nevis_session_timeout_secs(),
-        }
-    }
-}
-
-/// Maps a Nevis role to ZeroClaw tool permissions and workspace access.
-#[derive(Debug, Clone, Serialize, Deserialize)]
-#[cfg_attr(feature = "schema-export", derive(schemars::JsonSchema))]
-#[serde(deny_unknown_fields)]
-pub struct NevisRoleMappingConfig {
-    /// Nevis role name (case-insensitive).
-    pub nevis_role: String,
-
-    /// Tool names this role can access. Use `"all"` for unrestricted tool access.
-    #[serde(default)]
-    pub zeroclaw_permissions: Vec<String>,
-
-    /// Workspace names this role can access. Use `"all"` for unrestricted.
-    #[serde(default)]
-    pub workspace_access: Vec<String>,
 }
 
 /// Sandbox configuration for OS-level isolation
@@ -9159,9 +7820,6 @@ impl Default for Config {
             model_routes: Vec::new(),
             embedding_routes: Vec::new(),
             observability: ObservabilityConfig::default(),
-            trust: crate::scattered_types::TrustConfig::default(),
-            backup: BackupConfig::default(),
-            data_retention: DataRetentionConfig::default(),
             security: SecurityConfig::default(),
             security_ops: SecurityOpsConfig::default(),
             runtime: RuntimeConfig::default(),
@@ -9169,21 +7827,16 @@ impl Default for Config {
             scheduler: SchedulerConfig::default(),
             pacing: PacingConfig::default(),
             skills: SkillsConfig::default(),
-            pipeline: PipelineConfig::default(),
             heartbeat: HeartbeatConfig::default(),
             cron: HashMap::new(),
-            acp: AcpConfig::default(),
             channels: ChannelsConfig::default(),
             memory: MemoryConfig::default(),
             storage: StorageConfig::default(),
-            tunnel: TunnelConfig::default(),
             gateway: GatewayConfig::default(),
             secrets: SecretsConfig::default(),
             http_request: HttpRequestConfig::default(),
             multimodal: MultimodalConfig::default(),
-            media_pipeline: MediaPipelineConfig::default(),
             web_fetch: WebFetchConfig::default(),
-            link_enricher: LinkEnricherConfig::default(),
             web_search: WebSearchConfig::default(),
             proxy: ProxyConfig::default(),
             cost: CostConfig::default(),
@@ -9204,11 +7857,6 @@ impl Default for Config {
             tachi: crate::tachi::TachiConfig::default(),
             nodes: NodesConfig::default(),
             onboard_state: OnboardStateConfig::default(),
-            node_transport: NodeTransportConfig::default(),
-            image_gen: ImageGenConfig::default(),
-            file_upload: FileUploadConfig::default(),
-            file_upload_bundle: FileUploadBundleConfig::default(),
-            file_download: FileDownloadConfig::default(),
             verifiable_intent: VerifiableIntentConfig::default(),
             sop: HashMap::new(),
             shell_tool: ShellToolConfig::default(),

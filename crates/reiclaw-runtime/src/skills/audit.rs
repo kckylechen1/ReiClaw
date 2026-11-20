@@ -74,35 +74,6 @@ pub fn audit_skill_directory_with_options(
     Ok(report)
 }
 
-pub fn audit_open_skill_markdown(path: &Path, repo_root: &Path) -> Result<SkillAuditReport> {
-    if !path.exists() {
-        bail!(
-            "Open-skill markdown not found: {}",
-            path.display().to_string()
-        );
-    }
-    let canonical_repo = repo_root
-        .canonicalize()
-        .with_context(|| format!("failed to canonicalize {}", repo_root.display().to_string()))?;
-    let canonical_path = path
-        .canonicalize()
-        .with_context(|| format!("failed to canonicalize {}", path.display().to_string()))?;
-    if !canonical_path.starts_with(&canonical_repo) {
-        bail!(
-            "Open-skill markdown escapes repository root: {}",
-            path.display()
-        );
-    }
-
-    let mut report = SkillAuditReport {
-        files_scanned: 1,
-        findings: Vec::new(),
-        ..Default::default()
-    };
-    audit_markdown_file(&canonical_repo, &canonical_path, &mut report)?;
-    Ok(report)
-}
-
 fn collect_paths_depth_first(root: &Path) -> Result<Vec<PathBuf>> {
     let mut stack = vec![root.to_path_buf()];
     let mut out = Vec::new();

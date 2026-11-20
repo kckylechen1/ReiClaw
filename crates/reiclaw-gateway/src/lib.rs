@@ -8,7 +8,6 @@ pub mod agent_owned_state;
 pub mod api;
 pub mod api_attachments;
 pub mod api_attention;
-pub mod api_backup_retention;
 pub mod api_config;
 mod api_delegation;
 pub mod api_logs;
@@ -524,9 +523,9 @@ fn gateway_session_queue() -> Arc<session_queue::SessionActorQueue> {
 /// How the gateway treats the address it is about to bind.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum PublicBindPosture {
-    /// Loopback, or network-facing with pairing and an explicit opt-in or tunnel.
+    /// Loopback, or network-facing with pairing and an explicit opt-in.
     Local,
-    /// Network-facing with pairing on but no tunnel or opt-in: warn.
+    /// Network-facing with pairing on but no opt-in: warn.
     ExposedWithoutOptIn,
     /// Network-facing, pairing off, explicit dangerous exemption set: allowed, warned loudly.
     UnauthenticatedOptedIn,
@@ -540,7 +539,6 @@ fn public_bind_posture(
     host: &str,
     require_pairing: bool,
     allow_public_bind: bool,
-    no_tunnel: bool,
     dangerously_allow_unauthenticated_public_bind: bool,
 ) -> PublicBindPosture {
     if !is_public_bind(host)
@@ -556,7 +554,7 @@ fn public_bind_posture(
             PublicBindPosture::RefuseUnauthenticated
         };
     }
-    if !allow_public_bind && no_tunnel {
+    if !allow_public_bind {
         PublicBindPosture::ExposedWithoutOptIn
     } else {
         PublicBindPosture::Local
@@ -584,7 +582,6 @@ pub async fn run_gateway(
         host,
         config.gateway.require_pairing,
         config.gateway.allow_public_bind,
-        config.tunnel.tunnel_provider == "none",
         config.gateway.dangerously_allow_unauthenticated_public_bind,
     ) {
         PublicBindPosture::Local => {}
@@ -594,7 +591,7 @@ pub async fn run_gateway(
                 ::reiclaw_log::Event::new(module_path!(), ::reiclaw_log::Action::Note)
                     .with_outcome(::reiclaw_log::EventOutcome::Unknown),
                 "⚠️  Binding to {host} — gateway will be exposed to all network interfaces.\n\
-                 Suggestion: use --host 127.0.0.1 (default), configure a tunnel, or set\n\
+                 Suggestion: use --host 127.0.0.1 (default) or set\n\
                  [gateway] allow_public_bind = true in config.toml to silence this warning.\n\n\
                  Docker/VM: if you are running inside a container or VM, this is expected."
             );
@@ -846,7 +843,6 @@ pub async fn run_gateway(
                 Arc::clone(&mem),
                 &config.http_request,
                 &config.web_fetch,
-                &config.data_dir,
                 &config.agents,
                 config
                     .model_provider_for_agent(agent_alias)
@@ -951,7 +947,6 @@ pub async fn run_gateway(
             Arc::clone(&mem),
             &config.http_request,
             &config.web_fetch,
-            &config.data_dir,
             &config.agents,
             config
                 .model_provider_for_agent(&alias)
@@ -1020,18 +1015,12 @@ pub async fn run_gateway(
         });
 
     let session_backend: Option<Arc<dyn SessionBackend>> = if config.gateway.session_persistence {
-        match reiclaw_infra::make_session_backend(
-            &config.data_dir,
-            &config.channels.session_backend,
-        ) {
+        match reiclaw_infra::make_session_backend(&config.data_dir) {
             Ok(backend) => {
                 ::reiclaw_log::record!(
                     INFO,
                     ::reiclaw_log::Event::new(module_path!(), ::reiclaw_log::Action::Note),
-                    &format!(
-                        "Gateway session persistence enabled (backend={})",
-                        config.channels.session_backend
-                    )
+                    "Gateway session persistence enabled (SQLite)"
                 );
                 if config.gateway.session_ttl_hours > 0
                     && let Ok(cleaned) = backend.cleanup_stale(config.gateway.session_ttl_hours)
@@ -1092,40 +1081,6 @@ pub async fn run_gateway(
         .path_prefix
         .as_deref()
         .filter(|p| !p.is_empty());
-
-    // ── Tunnel ────────────────────────────────────────────────
-    let tunnel = match reiclaw_runtime::tunnel::create_tunnel(&config.tunnel) {
-        Ok(t) => t,
-        Err(e) => {
-            ::reiclaw_log::record!(
-                WARN,
-                ::reiclaw_log::Event::new(module_path!(), ::reiclaw_log::Action::Note)
-                    .with_outcome(::reiclaw_log::EventOutcome::Unknown)
-                    .with_attrs(::serde_json::json!({
-                        "tunnel_provider": config.tunnel.tunnel_provider,
-                        "error": format!("{e}"),
-                    })),
-                "Gateway: tunnel adapter failed to construct; booting without a \
-                 tunnel. Fix [tunnel] and POST /admin/reload."
-            );
-            None
-        }
-    };
-    let mut tunnel_url: Option<String> = None;
-
-    if let Some(ref tun) = tunnel {
-        println!("🔗 Starting {} tunnel...", tun.name());
-        match tun.start(host, actual_port).await {
-            Ok(url) => {
-                println!("🌐 Tunnel active: {url}");
-                tunnel_url = Some(url);
-            }
-            Err(e) => {
-                println!("⚠️  Tunnel failed to start: {e}");
-                println!("   Falling back to local-only mode.");
-            }
-        }
-    }
 
     let auto_detect_web_dist = || -> Option<std::path::PathBuf> {
         let mut candidates = vec![
@@ -1199,9 +1154,6 @@ pub async fn run_gateway(
 
     let pfx = path_prefix.unwrap_or("");
     println!("🦀 ReiClaw Gateway listening on http://{display_addr}{pfx}");
-    if let Some(ref url) = tunnel_url {
-        println!("  🌐 Public URL: {url}");
-    }
     if web_dist_dir.is_some() {
         println!("  🌐 Web Dashboard: http://{display_addr}{pfx}/");
     } else {
@@ -1256,7 +1208,6 @@ pub async fn run_gateway(
         println!("  GET  {pfx}/ws/nodes  — WebSocket node discovery");
     }
     println!("  GET  {pfx}/health    — health check");
-    println!("  GET  {pfx}/metrics   — Prometheus metrics");
     println!("  Press Ctrl+C to stop.\n");
 
     reiclaw_runtime::health::mark_component_ok("gateway");
@@ -1276,7 +1227,7 @@ pub async fn run_gateway(
 
     // Bound into AppState. Not a broadcaster — the broadcaster is the
     // `broadcast_layer` installed above as the global hook. This is the
-    // configured backend (Log/Prometheus/...) wrapped by `TeeObserver`,
+    // configured backend (Log/Verbose/Noop) wrapped by `TeeObserver`,
     // which tees events into the hook on every record.
     let state_observer: Arc<dyn reiclaw_runtime::observability::Observer> = Arc::from(
         reiclaw_runtime::observability::create_observer(&config.observability),
@@ -1462,7 +1413,6 @@ pub async fn run_gateway(
         .route("/admin/paircode/new", post(handle_admin_paircode_new))
         // ── Existing routes ──
         .route("/health", get(handle_health))
-        .route("/metrics", get(handle_metrics))
         .route("/pair", post(handle_pair))
         .route("/pair/code", get(handle_pair_code))
         .route("/webhook", post(handle_webhook))
@@ -1640,12 +1590,6 @@ pub async fn run_gateway(
             "/api/soul/proposals/{id}/resolve",
             post(api_soul::post_resolve_proposal),
         )
-        // ── Backup / data-retention operator surface ──
-        // Thin operator-bearer-gated entries over the same BackupTool /
-        // DataManagementTool command methods the model-visible tools use;
-        // restore keeps its confirm/dry-run guard, purge keeps its
-        // dry-run default. Route table lives with the handlers.
-        .merge(api_backup_retention::routes())
         // ── SSE event stream ──
         .route("/api/events", get(sse::handle_sse_events))
         .route("/api/events/history", get(sse::handle_events_history))
@@ -1926,52 +1870,6 @@ async fn handle_health(State(state): State<AppState>) -> impl IntoResponse {
         "runtime": reiclaw_runtime::health::snapshot_json(),
     });
     Json(body)
-}
-
-/// Prometheus content type for text exposition format.
-const PROMETHEUS_CONTENT_TYPE: &str = "text/plain; version=0.0.4; charset=utf-8";
-
-fn prometheus_disabled_hint() -> String {
-    String::from(
-        "# Prometheus backend not enabled. Set [observability] backend = \"prometheus\" in config.\n",
-    )
-}
-
-#[cfg(feature = "observability-prometheus")]
-fn prometheus_observer_from_state(
-    observer: &dyn reiclaw_runtime::observability::Observer,
-) -> Option<&reiclaw_runtime::observability::PrometheusObserver> {
-    // `TeeObserver::as_any` returns the primary observer, so a single direct
-    // downcast finds the PrometheusObserver whether the state observer is the
-    // raw backend or wrapped by the factory tee.
-    observer
-        .as_any()
-        .downcast_ref::<reiclaw_runtime::observability::PrometheusObserver>()
-}
-
-/// GET /metrics — Prometheus text exposition format
-async fn handle_metrics(State(state): State<AppState>) -> impl IntoResponse {
-    let body = {
-        #[cfg(feature = "observability-prometheus")]
-        {
-            if let Some(prom) = prometheus_observer_from_state(state.observer.as_ref()) {
-                prom.encode()
-            } else {
-                prometheus_disabled_hint()
-            }
-        }
-        #[cfg(not(feature = "observability-prometheus"))]
-        {
-            let _ = &state;
-            prometheus_disabled_hint()
-        }
-    };
-
-    (
-        StatusCode::OK,
-        [(header::CONTENT_TYPE, PROMETHEUS_CONTENT_TYPE)],
-        body,
-    )
 }
 
 /// POST /pair — exchange one-time code for bearer token

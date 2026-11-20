@@ -39,7 +39,7 @@ const MEMORY_MARKER: &str = "HYPERION_LEAN_MEMORY_MD_MARKER";
 /// fixture + ExplicitOnly MCP + WeChat `inject_memory = false`).
 const LEAN_PROVIDER_WIRE_TOKEN_CEILING: usize = 5_000;
 
-const PARSE_HELPER_TABLES: &[&str] = &["data_retention", "security", "security_ops"];
+const PARSE_HELPER_TABLES: &[&str] = &["security", "security_ops"];
 
 #[derive(Debug, Clone)]
 struct ToolWireRow {
@@ -301,7 +301,6 @@ async fn assemble_turn(req: TurnRequest<'_>) -> (ScopedAssembled, WireBudget) {
         mem,
         &req.config.http_request,
         &req.config.web_fetch,
-        workspace,
         &req.config.agents,
         None,
         req.config,
@@ -871,8 +870,6 @@ async fn minimal_composition_no_bypass_subsystem_flags() {
         ..Config::default()
     };
     // Explicitly configure and enable non-minimal subsystems with valid credentials
-    config.pipeline.enabled = true;
-    config.pipeline.allowed_tools = vec!["shell".to_string(), "file_read".to_string()];
     config.http_request.enabled = true;
     config.web_search.enabled = true;
 
@@ -887,11 +884,6 @@ async fn minimal_composition_no_bypass_subsystem_flags() {
         workspace: tmp.path(),
     })
     .await;
-    assert!(
-        full_budget.names.contains(&"execute_pipeline".to_string()),
-        "execute_pipeline must be registered under full composition: {:?}",
-        full_budget.names
-    );
     assert!(
         full_budget.names.contains(&"http_request".to_string()),
         "http_request must be registered under full composition: {:?}",

@@ -676,7 +676,7 @@ async fn validate_does_not_warn_when_a_bundle_exists() {
 
 fn parse_test_config(raw: &str) -> Config {
     let mut merged = raw.trim().to_string();
-    for table in ["data_retention", "security", "security_ops"] {
+    for table in ["security", "security_ops"] {
         if has_test_table(&merged, table) {
             continue;
         }
@@ -763,9 +763,7 @@ async fn config_default_has_sane_values() {
     // No model_provider configured by default — set during Quickstart.
     assert!(c.providers.models.is_empty());
     assert!(c.providers.models.iter_entries().next().is_none());
-    assert!(!c.skills.open_skills_enabled);
     assert!(!c.skills.allow_scripts);
-    assert!(!c.skills.install_suggestions.enabled);
     assert_eq!(
         c.skills.prompt_injection_mode,
         SkillsPromptInjectionMode::Full
@@ -914,30 +912,6 @@ runtime_profile = "fast"
     );
 }
 
-#[test]
-async fn skills_install_suggestions_config_deserializes_enabled() {
-    let c = parse_test_config(
-        r#"
-[skills.install_suggestions]
-enabled = true
-"#,
-    );
-
-    assert!(c.skills.install_suggestions.enabled);
-}
-
-#[test]
-async fn skills_install_suggestions_config_accepts_hyphen_alias() {
-    let c = parse_test_config(
-        r#"
-[skills.install-suggestions]
-enabled = true
-"#,
-    );
-
-    assert!(c.skills.install_suggestions.enabled);
-}
-
 fn capture_log_events() -> tokio::sync::broadcast::Receiver<serde_json::Value> {
     ::reiclaw_log::try_install_capture_subscriber();
     ::reiclaw_log::subscribe_or_install()
@@ -1039,95 +1013,6 @@ async fn validate_rejects_reply_min_interval_above_upper_bound() {
         msg.contains("channels.telegram.default.reply_min_interval_secs"),
         "error must name the offending path; got: {msg}"
     );
-}
-
-fn ext_reg(name: &str, url: &str, kind: &str) -> ExternalRegistry {
-    ExternalRegistry {
-        name: name.to_string(),
-        url: url.to_string(),
-        kind: kind.to_string().into(),
-        enabled: true,
-    }
-}
-
-#[test]
-async fn validate_accepts_git_extra_registry() {
-    let mut config = Config::default();
-    config.skills.extra_registries = vec![ext_reg("team", "https://github.com/acme/skills", "git")];
-    assert!(config.validate().is_ok(), "valid git registry must pass");
-}
-
-#[test]
-async fn validate_rejects_extra_registry_non_git_kind() {
-    let mut config = Config::default();
-    config.skills.extra_registries =
-        vec![ext_reg("team", "https://github.com/acme/skills", "zip-api")];
-    let err = config
-        .validate()
-        .expect_err("non-git kind must be rejected");
-    assert!(err.to_string().contains("kind must be 'git'"), "got: {err}");
-}
-
-#[test]
-async fn validate_rejects_extra_registry_duplicate_names() {
-    let mut config = Config::default();
-    config.skills.extra_registries = vec![
-        ext_reg("team", "https://github.com/acme/a", "git"),
-        ext_reg("team", "https://github.com/acme/b", "git"),
-    ];
-    let err = config
-        .validate()
-        .expect_err("duplicate names must be rejected");
-    assert!(
-        err.to_string().contains("duplicate name 'team'"),
-        "got: {err}"
-    );
-}
-
-#[test]
-async fn validate_rejects_extra_registry_unaddressable_names() {
-    for name in [
-        "team.prod",
-        "team prod",
-        "team/prod",
-        "..",
-        " team",
-        "team ",
-        "Team",
-        "teamProd",
-    ] {
-        let mut config = Config::default();
-        config.skills.extra_registries =
-            vec![ext_reg(name, "https://github.com/acme/skills", "git")];
-        let err = config
-            .validate()
-            .expect_err("unaddressable extra-registry name must be rejected");
-        assert!(
-            err.to_string().contains("registry:<name>/<skill>"),
-            "name {name:?} produced unexpected error: {err}"
-        );
-    }
-}
-
-#[test]
-async fn validate_rejects_extra_registry_empty_name_or_url() {
-    let mut config = Config::default();
-    config.skills.extra_registries = vec![ext_reg("", "https://github.com/acme/a", "git")];
-    assert!(config.validate().is_err(), "empty name must be rejected");
-
-    let mut config = Config::default();
-    config.skills.extra_registries = vec![ext_reg("team", "   ", "git")];
-    assert!(config.validate().is_err(), "empty url must be rejected");
-}
-
-#[test]
-async fn validate_rejects_extra_registry_bad_url_scheme() {
-    let mut config = Config::default();
-    config.skills.extra_registries = vec![ext_reg("team", "ftp://example.com/x", "git")];
-    let err = config
-        .validate()
-        .expect_err("non-http(s)/file scheme must be rejected");
-    assert!(err.to_string().contains("scheme"), "got: {err}");
 }
 
 #[test]
@@ -1342,12 +1227,12 @@ async fn observability_enums_deserialize_legacy_string_values() {
     // Backward compat: TOML configs written before the enum conversion
     // stored these as bare strings. They must still parse.
     let toml = r#"
-backend = "prometheus"
+backend = "log"
 log_persistence = "full"
 log_tool_io = "off"
 "#;
     let o: ObservabilityConfig = toml::from_str(toml).unwrap();
-    assert_eq!(o.backend, ObservabilityBackend::Prometheus);
+    assert_eq!(o.backend, ObservabilityBackend::Log);
     assert_eq!(o.log_persistence, LogPersistence::Full);
     assert_eq!(o.log_tool_io, LogToolIo::Off);
 
@@ -1357,7 +1242,7 @@ log_tool_io = "off"
 
     // Round-trip: serialize back to the same wire strings the runtime
     // boundary (`to_log_config`) and downstream `from_raw` expect.
-    assert_eq!(ObservabilityBackend::Prometheus.as_wire(), "prometheus");
+    assert_eq!(ObservabilityBackend::Log.as_wire(), "log");
     assert_eq!(LogPersistence::Full.as_wire(), "full");
     assert_eq!(LogPersistence::Rotating.as_wire(), "rotating");
     assert_eq!(LogToolIo::Off.as_wire(), "off");
@@ -1396,7 +1281,7 @@ async fn observability_backend_unknown_falls_back_to_default() {
     assert_eq!(noop.backend, ObservabilityBackend::None);
     // The retired OTel backend values load as the default sink; the
     // retired-value tombstone reports them.
-    for retired in ["otel", "otlp", "opentelemetry"] {
+    for retired in ["otel", "otlp", "opentelemetry", "prometheus"] {
         let parsed: ObservabilityConfig =
             toml::from_str(&format!("backend = \"{retired}\"")).unwrap();
         assert_eq!(parsed.backend, ObservabilityBackend::None);
@@ -1695,45 +1580,8 @@ async fn ollama_schema_exposes_live_options_without_native_tuning() {
 #[test]
 async fn channels_default() {
     let c = ChannelsConfig::default();
-    assert!(c.cli);
     assert!(c.telegram.is_empty());
     assert!(!c.show_tool_calls);
-    assert_eq!(
-        c.max_concurrent_per_channel,
-        default_channel_max_concurrent_per_channel()
-    );
-}
-
-#[test]
-async fn channels_max_concurrent_per_channel_defaults_and_round_trips() {
-    let parsed: ChannelsConfig = toml::from_str("cli = true").unwrap();
-    assert_eq!(
-        parsed.max_concurrent_per_channel,
-        default_channel_max_concurrent_per_channel()
-    );
-
-    let parsed: ChannelsConfig =
-        toml::from_str("cli = true\nmax_concurrent_per_channel = 2").unwrap();
-    assert_eq!(parsed.max_concurrent_per_channel, 2);
-
-    let toml_str = toml::to_string_pretty(&parsed).unwrap();
-    let reparsed: ChannelsConfig = toml::from_str(&toml_str).unwrap();
-    assert_eq!(reparsed.max_concurrent_per_channel, 2);
-}
-
-#[test]
-async fn validate_rejects_zero_channel_max_concurrent_per_channel() {
-    let mut config = Config::default();
-    config.channels.max_concurrent_per_channel = 0;
-
-    let err = config
-        .validate()
-        .expect_err("zero channel concurrency budget must fail validate");
-    assert!(
-        err.to_string()
-            .contains("channels.max_concurrent_per_channel must be greater than 0"),
-        "got: {err}"
-    );
 }
 
 // ── Serde round-trip ─────────────────────────────────────
@@ -1794,9 +1642,6 @@ async fn config_toml_roundtrip() {
             );
             m
         },
-        trust: crate::scattered_types::TrustConfig::default(),
-        backup: BackupConfig::default(),
-        data_retention: DataRetentionConfig::default(),
         security: SecurityConfig::default(),
         security_ops: SecurityOpsConfig::default(),
         runtime: RuntimeConfig {
@@ -1806,7 +1651,6 @@ async fn config_toml_roundtrip() {
         reliability: ReliabilityConfig::default(),
         scheduler: SchedulerConfig::default(),
         skills: SkillsConfig::default(),
-        pipeline: PipelineConfig::default(),
         query_classification: QueryClassificationConfig::default(),
         heartbeat: HeartbeatConfig {
             enabled: true,
@@ -1818,9 +1662,7 @@ async fn config_toml_roundtrip() {
             ..HeartbeatConfig::default()
         },
         cron: HashMap::new(),
-        acp: AcpConfig::default(),
         channels: ChannelsConfig {
-            cli: true,
             telegram: HashMap::from([(
                 "default".to_string(),
                 TelegramConfig {
@@ -1843,25 +1685,17 @@ async fn config_toml_roundtrip() {
             webhook: HashMap::new(),
             mqtt: HashMap::new(),
             filesystem: HashMap::new(),
-            message_timeout_secs: 300,
-            max_concurrent_per_channel: default_channel_max_concurrent_per_channel(),
-            ack_reactions: true,
             show_tool_calls: true,
             session_persistence: true,
-            session_backend: default_session_backend(),
             session_ttl_hours: 0,
-            debounce_ms: 0,
         },
         memory: MemoryConfig::default(),
         storage: StorageConfig::default(),
-        tunnel: TunnelConfig::default(),
         gateway: GatewayConfig::default(),
         secrets: SecretsConfig::default(),
         http_request: HttpRequestConfig::default(),
         multimodal: MultimodalConfig::default(),
-        media_pipeline: MediaPipelineConfig::default(),
         web_fetch: WebFetchConfig::default(),
-        link_enricher: LinkEnricherConfig::default(),
         web_search: WebSearchConfig::default(),
         proxy: ProxyConfig::default(),
         pacing: PacingConfig::default(),
@@ -1881,11 +1715,6 @@ async fn config_toml_roundtrip() {
         tachi: crate::tachi::TachiConfig::default(),
         nodes: NodesConfig::default(),
         onboard_state: OnboardStateConfig::default(),
-        node_transport: NodeTransportConfig::default(),
-        image_gen: ImageGenConfig::default(),
-        file_upload: FileUploadConfig::default(),
-        file_upload_bundle: FileUploadBundleConfig::default(),
-        file_download: FileDownloadConfig::default(),
         verifiable_intent: VerifiableIntentConfig::default(),
         sop: HashMap::new(),
         shell_tool: ShellToolConfig::default(),
@@ -1963,7 +1792,6 @@ default_temperature = 0.7
     assert_eq!(parsed.runtime.kind, RuntimeKind::Native);
     // Heartbeat defaults to disabled.
     assert!(!parsed.heartbeat.enabled);
-    assert!(parsed.channels.cli);
     assert!(parsed.memory.hygiene_enabled);
     assert_eq!(parsed.memory.archive_after_days, 7);
     assert_eq!(parsed.memory.purge_after_days, 30);
@@ -2579,31 +2407,23 @@ async fn config_save_and_load_tmpdir() {
         data_dir: dir.join("workspace"),
         config_path: config_path.clone(),
         observability: ObservabilityConfig::default(),
-        trust: crate::scattered_types::TrustConfig::default(),
-        backup: BackupConfig::default(),
-        data_retention: DataRetentionConfig::default(),
         security: SecurityConfig::default(),
         security_ops: SecurityOpsConfig::default(),
         runtime: RuntimeConfig::default(),
         reliability: ReliabilityConfig::default(),
         scheduler: SchedulerConfig::default(),
         skills: SkillsConfig::default(),
-        pipeline: PipelineConfig::default(),
         query_classification: QueryClassificationConfig::default(),
         heartbeat: HeartbeatConfig::default(),
         cron: HashMap::new(),
-        acp: AcpConfig::default(),
         channels: ChannelsConfig::default(),
         memory: MemoryConfig::default(),
         storage: StorageConfig::default(),
-        tunnel: TunnelConfig::default(),
         gateway: GatewayConfig::default(),
         secrets: SecretsConfig::default(),
         http_request: HttpRequestConfig::default(),
         multimodal: MultimodalConfig::default(),
-        media_pipeline: MediaPipelineConfig::default(),
         web_fetch: WebFetchConfig::default(),
-        link_enricher: LinkEnricherConfig::default(),
         web_search: WebSearchConfig::default(),
         proxy: ProxyConfig::default(),
         pacing: PacingConfig::default(),
@@ -2624,11 +2444,6 @@ async fn config_save_and_load_tmpdir() {
         tachi: crate::tachi::TachiConfig::default(),
         nodes: NodesConfig::default(),
         onboard_state: OnboardStateConfig::default(),
-        node_transport: NodeTransportConfig::default(),
-        image_gen: ImageGenConfig::default(),
-        file_upload: FileUploadConfig::default(),
-        file_upload_bundle: FileUploadBundleConfig::default(),
-        file_download: FileDownloadConfig::default(),
         verifiable_intent: VerifiableIntentConfig::default(),
         sop: HashMap::new(),
         shell_tool: ShellToolConfig::default(),
@@ -2699,19 +2514,13 @@ async fn config_save_encrypts_nested_credentials() {
         },
     );
     // ModelProvider fields are now resolved directly — no cache needed.
-    config.link_enricher.enabled = true;
     config.web_search.brave_api_key = Some("brave-credential".into());
     config.web_search.tavily_api_key = Some("tavily-credential".into());
     config.reliability.api_keys = vec![
         "rotation-credential-a".into(),
         "rotation-credential-b".into(),
     ];
-    config.node_transport.shared_secret = "node-shared-credential".into();
     config.nodes.auth_token = Some("nodes-auth-credential".into());
-    config.file_upload.headers = HashMap::from([(
-        "Authorization".to_string(),
-        "Bearer upload-credential".to_string(),
-    )]);
     config.http_request.secrets = HashMap::from([(
         "api_token".to_string(),
         "Bearer http-request-credential".to_string(),
@@ -2783,7 +2592,6 @@ async fn config_save_encrypts_nested_credentials() {
         "tavily-credential",
         "rotation-credential-a",
         "rotation-credential-b",
-        "node-shared-credential",
         "nodes-auth-credential",
         "Bearer upload-credential",
         "Bearer http-request-credential",
@@ -2853,24 +2661,9 @@ async fn config_save_encrypts_nested_credentials() {
         "rotation-credential-b"
     );
 
-    assert!(crate::secrets::SecretStore::is_encrypted(
-        &stored.node_transport.shared_secret
-    ));
-    assert_eq!(
-        store.decrypt(&stored.node_transport.shared_secret).unwrap(),
-        "node-shared-credential"
-    );
-
     let nodes_auth = stored.nodes.auth_token.as_deref().unwrap();
     assert!(crate::secrets::SecretStore::is_encrypted(nodes_auth));
     assert_eq!(store.decrypt(nodes_auth).unwrap(), "nodes-auth-credential");
-
-    let upload_auth = stored.file_upload.headers.get("Authorization").unwrap();
-    assert!(crate::secrets::SecretStore::is_encrypted(upload_auth));
-    assert_eq!(
-        store.decrypt(upload_auth).unwrap(),
-        "Bearer upload-credential"
-    );
 
     let http_request_auth = stored.http_request.secrets.get("api_token").unwrap();
     assert!(crate::secrets::SecretStore::is_encrypted(http_request_auth));
@@ -5113,6 +4906,30 @@ async fn proxy_config_scope_services_requires_entries_when_enabled() {
 }
 
 #[test]
+async fn retired_tunnel_proxy_selectors_fail_without_changing_live_proxy_scope() {
+    let mut proxy = ProxyConfig {
+        enabled: true,
+        http_proxy: Some("http://127.0.0.1:7890".into()),
+        scope: ProxyScope::Services,
+        services: vec!["model_provider.*".into(), "channel.telegram".into()],
+        ..Default::default()
+    };
+    proxy.validate().unwrap();
+    for selector in ["tunnel.custom", "tunnel.*"] {
+        proxy.services.push(selector.into());
+        let error = proxy.validate().unwrap_err();
+        assert!(
+            error
+                .to_string()
+                .contains("Unsupported proxy service selector")
+        );
+        assert_eq!(proxy.http_proxy.as_deref(), Some("http://127.0.0.1:7890"));
+        proxy.services.pop();
+    }
+    proxy.validate().unwrap();
+}
+
+#[test]
 async fn gateway_config_default_values() {
     let g = GatewayConfig::default();
     assert_eq!(g.port, 42617);
@@ -5342,7 +5159,7 @@ async fn save_dirty_retains_current_schema_version_and_explicit_values() {
         config_path: config_path.clone(),
         ..Default::default()
     };
-    config.observability.backend = ObservabilityBackend::Prometheus;
+    config.observability.backend = ObservabilityBackend::Log;
     config.mark_dirty("observability.backend");
     config.save_dirty().await.unwrap();
     let written = std::fs::read_to_string(&config_path).unwrap();
@@ -5351,10 +5168,7 @@ async fn save_dirty_retains_current_schema_version_and_explicit_values() {
         reloaded.schema_version,
         crate::current::CURRENT_SCHEMA_VERSION
     );
-    assert_eq!(
-        reloaded.observability.backend,
-        ObservabilityBackend::Prometheus
-    );
+    assert_eq!(reloaded.observability.backend, ObservabilityBackend::Log);
     assert!(written.trim_start().starts_with("schema_version ="));
 }
 
@@ -7121,21 +6935,21 @@ async fn mcp_transport_serde_roundtrip_lowercase() {
 }
 
 #[tokio::test]
-async fn nevis_client_secret_encrypt_decrypt_roundtrip() {
+async fn node_auth_secret_encrypt_decrypt_roundtrip() {
     let dir = std::env::temp_dir().join(format!(
-        "zeroclaw_test_nevis_secret_{}",
+        "zeroclaw_test_node_auth_secret_{}",
         uuid::Uuid::new_v4()
     ));
     fs::create_dir_all(&dir).await.unwrap();
 
-    let plaintext_secret = "nevis-test-client-secret-value";
+    let plaintext_secret = "node-auth-test-secret-value";
 
     let mut config = Config {
         data_dir: dir.join("workspace"),
         config_path: dir.join("config.toml"),
         ..Default::default()
     };
-    config.security.nevis.client_secret = Some(plaintext_secret.into());
+    config.nodes.auth_token = Some(plaintext_secret.into());
 
     // Save (triggers encryption)
     config.save().await.unwrap();
@@ -7146,15 +6960,15 @@ async fn nevis_client_secret_encrypt_decrypt_roundtrip() {
         .unwrap();
     assert!(
         !raw_toml.contains(plaintext_secret),
-        "Saved TOML must not contain the plaintext client_secret"
+        "Saved TOML must not contain the plaintext auth_token"
     );
 
     // Parse stored TOML and verify the value is encrypted
     let stored: Config = toml::from_str(&raw_toml).unwrap();
-    let stored_secret = stored.security.nevis.client_secret.as_ref().unwrap();
+    let stored_secret = stored.nodes.auth_token.as_ref().unwrap();
     assert!(
         crate::secrets::SecretStore::is_encrypted(stored_secret),
-        "Stored client_secret must be marked as encrypted"
+        "Stored auth_token must be marked as encrypted"
     );
 
     // Decrypt and verify it matches the original plaintext
@@ -7167,137 +6981,12 @@ async fn nevis_client_secret_encrypt_decrypt_roundtrip() {
     let load_store = crate::secrets::SecretStore::new(&dir, loaded.secrets.encrypt);
     loaded.decrypt_secrets(&load_store).unwrap();
     assert_eq!(
-        loaded.security.nevis.client_secret.as_deref().unwrap(),
+        loaded.nodes.auth_token.as_deref().unwrap(),
         plaintext_secret,
-        "Loaded client_secret must match the original plaintext after decryption"
+        "Loaded auth_token must match the original plaintext after decryption"
     );
 
     let _ = fs::remove_dir_all(&dir).await;
-}
-
-// ══════════════════════════════════════════════════════════
-// Nevis config validation tests
-// ══════════════════════════════════════════════════════════
-
-#[test]
-async fn nevis_config_validate_disabled_accepts_empty_fields() {
-    let cfg = NevisConfig::default();
-    assert!(!cfg.enabled);
-    assert!(cfg.validate().is_ok());
-}
-
-#[test]
-async fn nevis_config_validate_rejects_empty_instance_url() {
-    let cfg = NevisConfig {
-        enabled: true,
-        instance_url: String::new(),
-        client_id: "test-client".into(),
-        ..NevisConfig::default()
-    };
-    let err = cfg.validate().unwrap_err();
-    assert!(err.contains("instance_url"));
-}
-
-#[test]
-async fn nevis_config_validate_rejects_empty_client_id() {
-    let cfg = NevisConfig {
-        enabled: true,
-        instance_url: "https://nevis.example.com".into(),
-        client_id: String::new(),
-        ..NevisConfig::default()
-    };
-    let err = cfg.validate().unwrap_err();
-    assert!(err.contains("client_id"));
-}
-
-#[test]
-async fn nevis_config_validate_rejects_empty_realm() {
-    let cfg = NevisConfig {
-        enabled: true,
-        instance_url: "https://nevis.example.com".into(),
-        client_id: "test-client".into(),
-        realm: String::new(),
-        ..NevisConfig::default()
-    };
-    let err = cfg.validate().unwrap_err();
-    assert!(err.contains("realm"));
-}
-
-#[test]
-async fn nevis_config_validate_rejects_local_without_jwks() {
-    let cfg = NevisConfig {
-        enabled: true,
-        instance_url: "https://nevis.example.com".into(),
-        client_id: "test-client".into(),
-        token_validation: "local".into(),
-        jwks_url: None,
-        ..NevisConfig::default()
-    };
-    let err = cfg.validate().unwrap_err();
-    assert!(err.contains("jwks_url"));
-}
-
-#[test]
-async fn nevis_config_validate_rejects_zero_session_timeout() {
-    let cfg = NevisConfig {
-        enabled: true,
-        instance_url: "https://nevis.example.com".into(),
-        client_id: "test-client".into(),
-        token_validation: "remote".into(),
-        session_timeout_secs: 0,
-        ..NevisConfig::default()
-    };
-    let err = cfg.validate().unwrap_err();
-    assert!(err.contains("session_timeout_secs"));
-}
-
-#[test]
-async fn nevis_config_validate_accepts_valid_enabled_config() {
-    let cfg = NevisConfig {
-        enabled: true,
-        instance_url: "https://nevis.example.com".into(),
-        realm: "master".into(),
-        client_id: "test-client".into(),
-        token_validation: "remote".into(),
-        session_timeout_secs: 3600,
-        ..NevisConfig::default()
-    };
-    assert!(cfg.validate().is_ok());
-}
-
-#[test]
-async fn nevis_config_validate_rejects_invalid_token_validation() {
-    let cfg = NevisConfig {
-        enabled: true,
-        instance_url: "https://nevis.example.com".into(),
-        realm: "master".into(),
-        client_id: "test-client".into(),
-        token_validation: "invalid_mode".into(),
-        session_timeout_secs: 3600,
-        ..NevisConfig::default()
-    };
-    let err = cfg.validate().unwrap_err();
-    assert!(
-        err.contains("invalid value 'invalid_mode'"),
-        "Expected invalid token_validation error, got: {err}"
-    );
-}
-
-#[test]
-async fn nevis_config_debug_redacts_client_secret() {
-    let cfg = NevisConfig {
-        client_secret: Some("super-secret".into()),
-        ..NevisConfig::default()
-    };
-    let debug_output = format!("{:?}", cfg);
-    assert!(
-        !debug_output.contains("super-secret"),
-        "Debug output must not contain the raw client_secret"
-    );
-    assert!(
-        debug_output.contains("[REDACTED]"),
-        "Debug output must show [REDACTED] for client_secret"
-    );
 }
 
 #[test]
@@ -7967,19 +7656,13 @@ async fn prop_is_secret_routes_through_hashmap_keyed_paths() {
 }
 
 #[test]
-async fn file_transfer_header_maps_are_secret() {
-    assert!(Config::prop_is_secret(
-        "file_download.headers.Authorization"
-    ));
-    assert!(Config::prop_is_secret("file_upload.headers.Authorization"));
-    assert!(Config::prop_is_secret(
-        "file_upload_bundle.headers.Authorization"
-    ));
+async fn mcp_header_maps_are_secret() {
     assert!(Config::prop_is_secret(
         "mcp.servers.acme.headers.Authorization"
     ));
-    assert!(!Config::prop_is_secret("file_download.timeout_secs"));
-    assert!(!Config::prop_is_secret("file_download.headers"));
+    assert!(Config::prop_is_secret("mcp.servers.acme.headers.X-Api-Key"));
+    assert!(!Config::prop_is_secret("mcp.servers.acme.command"));
+    assert!(!Config::prop_is_secret("mcp.servers.acme.headers"));
 }
 
 #[test]
@@ -11690,7 +11373,7 @@ async fn every_prop_is_gettable_and_settable() {
 /// it, that field is unreachable on every surface.
 ///
 /// `init_defaults(None)` populates Option-shaped subsections (memory
-/// backend specifics, tunnel provider details, etc.) so the walk
+/// backend specifics, gateway TLS settings, etc.) so the walk
 /// also exercises fields that only materialize once a backend is
 /// chosen.
 #[test]
@@ -11743,7 +11426,7 @@ async fn channels_root_settings_stay_on_direct_prop_surface() {
         "root [channels] settings should include show_tool_calls: {direct_channel_paths:?}"
     );
     assert!(
-        direct_channel_paths.contains(&"channels.ack_reactions"),
+        direct_channel_paths.contains(&"channels.session_persistence"),
         "root [channels] settings should include other global channel controls"
     );
     assert!(
@@ -14423,11 +14106,6 @@ async fn empty_table_round_trips_to_section_defaults() {
     assert_eq!(web_search.enabled, WebSearchConfig::default().enabled);
     let memory: MemoryConfig = toml::from_str("").unwrap();
     assert_eq!(memory.backend, MemoryConfig::default().backend);
-    let tunnel: TunnelConfig = toml::from_str("").unwrap();
-    assert_eq!(
-        tunnel.tunnel_provider,
-        TunnelConfig::default().tunnel_provider
-    );
     let hooks: HooksConfig = toml::from_str("").unwrap();
     assert_eq!(hooks.enabled, HooksConfig::default().enabled);
     let builtin: BuiltinHooksConfig = toml::from_str("").unwrap();

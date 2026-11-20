@@ -443,7 +443,7 @@ impl Tool for SessionsCurrentTool {
 mod tests {
     use super::*;
     use reiclaw_api::model_provider::ChatMessage;
-    use reiclaw_infra::session_store::SessionStore;
+    use reiclaw_infra::session_sqlite::SqliteSessionBackend;
     use tempfile::TempDir;
 
     fn test_security() -> Arc<SecurityPolicy> {
@@ -452,13 +452,13 @@ mod tests {
 
     fn test_backend() -> (TempDir, Arc<dyn SessionBackend>) {
         let tmp = TempDir::new().unwrap();
-        let store = SessionStore::new(tmp.path()).unwrap();
+        let store = SqliteSessionBackend::new(tmp.path()).unwrap();
         (tmp, Arc::new(store))
     }
 
     fn seeded_backend() -> (TempDir, Arc<dyn SessionBackend>) {
         let tmp = TempDir::new().unwrap();
-        let store = SessionStore::new(tmp.path()).unwrap();
+        let store = SqliteSessionBackend::new(tmp.path()).unwrap();
         store
             .append("telegram__alice", &ChatMessage::user("Hello from Alice"))
             .unwrap();

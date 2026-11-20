@@ -2,7 +2,7 @@
 
 Every event ZeroClaw emits flows through one crate: `zeroclaw-log`. The crate
 owns the on-disk JSONL schema, the in-process broadcast stream the dashboard
-reads, the bridge to the typed `Observer` (Prometheus), and the
+reads, the bridge to the typed `Observer`, and the
 macros (`record!`, `scope!`, `spawn!`) that subsystems call.
 
 This page covers what an operator needs: configuration, where the log lives,
@@ -289,7 +289,7 @@ volume governor for genuine errors.
 - `crates/zeroclaw-log/src/migrate.rs`: schema-1 → schema-2 streaming
   migration.
 - `crates/zeroclaw-log/src/observer_bridge.rs`: typed `Observer`
-  projection for Prometheus consumers.
+  projection for runtime event consumers.
 - `crates/zeroclaw-gateway/src/api_logs.rs`: the HTTP adapter.
 
 Touch the source before you trust the prose on this page.

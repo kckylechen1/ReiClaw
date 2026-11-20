@@ -15,6 +15,31 @@ agents) are accepted. This is separate from gateway pairing
 (`[gateway] require_pairing`), which authenticates HTTP/WebSocket clients, not
 chat-channel senders.
 
+## Delivery and execution boundaries
+
+Peer membership permits scoped communication; it does not grant owner identity,
+private-memory access, or universal authority to execute work. Each configured
+agent retains its own policy and session scope.
+
+The current `send_message_to_peer` checks peer/channel membership. An internal
+agent target starts a detached turn and returns delivery acceptance; that
+response is not an automatically correlated completion receipt. External-peer
+delivery uses the existing channel path.
+
+[ADR-027](../architecture/decisions/ADR-027-owner-workflow-closure-and-scoped-services.md)
+retains this product capability and amends ADR-026's blanket retirement:
+
+- informational messages route to an admitted peer/session with a delivery receipt;
+- clarification of existing work refers to that conversation or Tachi dispatch;
+- new work is explicitly admitted by its execution owner with request/result
+  correlation, scope, and budget, rather than arising implicitly from delivery.
+
+These improvements remain implementation work. Independent peers need not
+become L1 children or external CLI harnesses. Replace the old launcher only
+after retained communication works through the admitted path. Keep the
+`external_peers`, `ignore`, modality, and `admin_for_agent_scope` boundaries
+when changing routing; they are not exclusive launcher configuration.
+
 ## Fields
 
 A `[peer_groups.<name>]` block carries:

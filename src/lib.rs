@@ -49,7 +49,6 @@ pub mod channels;
 pub mod commands {
     #[cfg(feature = "agent-runtime")]
     pub mod self_test;
-    pub mod update;
 }
 pub mod config;
 #[cfg(feature = "agent-runtime")]
@@ -83,7 +82,7 @@ your config file (gateway.host / gateway.port).
 Examples:
   rei gateway start              # use config defaults
   rei gateway start -p 8080      # listen on port 8080
-  rei gateway start --host 0.0.0.0   # requires [gateway].allow_public_bind=true or a tunnel
+  rei gateway start --host 0.0.0.0   # acknowledge exposure with [gateway].allow_public_bind=true
   rei gateway start -p 0         # random available port")]
     Start {
         /// Port to listen on (use 0 for random available port); defaults to config gateway.port
@@ -438,7 +437,7 @@ pub enum SkillCommands {
     /// List all installed skills
     List {
         /// Show exactly what this agent loads at runtime (its workspace +
-        /// open-skills + assigned bundles). --bundle takes precedence
+        /// assigned bundles). --bundle takes precedence
         /// when both are passed.
         #[arg(long)]
         agent: Option<String>,
@@ -516,10 +515,6 @@ Examples:
         /// Install into this bundle directly. Takes precedence over --agent.
         #[arg(long)]
         bundle: Option<String>,
-        /// Suppress only the install-time tier banner; other install
-        /// progress output (resolving, installed, audited) is unaffected.
-        #[arg(long)]
-        no_tier_banner: bool,
         /// Install a single named skill from a git catalog repo (its `skills/<name>/` directory).
         #[arg(long)]
         skill: Option<String>,
@@ -534,14 +529,6 @@ Examples:
         /// Remove from this bundle directly (disambiguates duplicates).
         #[arg(long)]
         bundle: Option<String>,
-    },
-    /// Run TEST.sh validation for a skill (or all skills)
-    Test {
-        /// Skill name to test; omit for all skills
-        name: Option<String>,
-        /// Show verbose output
-        #[arg(long)]
-        verbose: bool,
     },
 }
 
@@ -579,25 +566,6 @@ pub enum SkillBundleCommands {
     Show {
         /// Bundle alias
         alias: String,
-    },
-}
-
-/// Migration subcommands
-#[derive(Subcommand, Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
-pub enum MigrateCommands {
-    #[command(about = "Import memory from an OpenClaw workspace into this ReiClaw workspace")]
-    Openclaw {
-        /// Optional path to `OpenClaw` workspace (defaults to ~/.openclaw/workspace)
-        #[arg(long)]
-        source: Option<std::path::PathBuf>,
-
-        /// Validate and preview migration without writing any data
-        #[arg(long)]
-        dry_run: bool,
-
-        /// Rebuild backend indexes after importing entries
-        #[arg(long)]
-        reindex: bool,
     },
 }
 
@@ -809,9 +777,9 @@ pub enum MemoryCommands {
         yes: bool,
     },
     // Rebuild backend indexes: FTS tables + any missing embedding vectors.
-    // Run after `rei migrate openclaw` or other bulk writes that land rows
-    // with `embedding = NULL`. Safe to re-run; only touches entries whose
-    // vector is missing. No-op for backends without a vector index.
+    // Run after bulk writes that leave entries without embedding vectors.
+    // Safe to re-run; only touches entries whose vector is missing.
+    // No-op for backends without a vector index.
     Reindex,
 }
 

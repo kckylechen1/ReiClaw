@@ -60,7 +60,7 @@ pub struct SessionQuery {
 }
 
 /// One persisted message with the optional `created_at` the backend
-/// stamped on it. JSONL / in-memory backends return `None`; SQLite
+/// stamped on it. In-memory backends return `None`; SQLite
 /// returns the row's `created_at` column.
 #[derive(Debug, Clone)]
 pub struct TimestampedMessage {

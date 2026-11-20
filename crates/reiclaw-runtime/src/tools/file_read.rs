@@ -52,7 +52,7 @@ impl Tool for FileReadTool {
     }
 
     fn description(&self) -> &str {
-        "Read file contents with line numbers. Supports partial reading via offset and limit. Binary and image files are rejected (use the image_info tool for images). Set encoding=\"base64\" to return raw bytes base64-encoded (for binary files such as .pdf/.xlsx/.docx); offset/limit are ignored in that mode."
+        "Read file contents with line numbers. Supports partial reading via offset and limit. Binary and image files are rejected in text mode. Set encoding=\"base64\" to return raw bytes base64-encoded (for binary files such as .pdf/.xlsx/.docx); offset/limit are ignored in that mode."
     }
 
     fn parameters_schema(&self) -> serde_json::Value {
@@ -285,14 +285,13 @@ impl FileReadTool {
                 // Bytes still flow to the binary detection below.
 
                 // Reject confident binary instead of returning lossy garbage.
-                // Known image formats: point the agent at the image_info tool.
+                // Known image formats require the explicit raw-byte read mode.
                 if let Some(kind) = detect_image_format(&bytes) {
                     return Ok(ToolResult {
                         success: false,
                         output: ToolOutput::default(),
                         error: Some(format!(
-                            "Binary image file detected ({kind}): {}. Use the image_info \
-                             tool for images, or encoding=\"base64\" to read the raw bytes.",
+                            "Binary image file detected ({kind}): {}. Use encoding=\"base64\" to read the raw bytes.",
                             resolved_path.display()
                         )),
                     });
@@ -1102,8 +1101,8 @@ mod tests {
         );
         let err = result.error.as_deref().unwrap_or_default();
         assert!(
-            err.contains("image") && err.contains("image_info"),
-            "error must point at image_info, got: {:?}",
+            err.contains("image") && err.contains("base64"),
+            "error must describe the explicit raw-byte mode, got: {:?}",
             result.error
         );
 
@@ -1162,8 +1161,8 @@ mod tests {
         assert!(!result.success, "bmp read must fail");
         let err = result.error.as_deref().unwrap_or_default();
         assert!(
-            err.contains("image") && err.contains("image_info"),
-            "error must point at image_info, got: {:?}",
+            err.contains("image") && err.contains("base64"),
+            "error must describe the explicit raw-byte mode, got: {:?}",
             result.error
         );
 

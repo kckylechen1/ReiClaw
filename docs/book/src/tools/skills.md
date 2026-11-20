@@ -140,7 +140,7 @@ zeroclaw skills audit ./release-check
 
 </div>
 
-Install a skill from a local directory, Git URL, or registry name:
+Install a skill from an explicit local directory or Git URL:
 
 <div class="os-tabs-src">
 
@@ -149,7 +149,7 @@ Install a skill from a local directory, Git URL, or registry name:
 ```sh
 zeroclaw skills install ./release-check --bundle ops
 zeroclaw skills install https://example.com/zeroclaw-release-check.git --bundle ops
-zeroclaw skills install release-check --agent default
+zeroclaw skills install ./release-check --agent default
 ```
 
 </div>
@@ -189,20 +189,9 @@ zeroclaw skills remove release-check --agent default
 
 Removing from a bundle archives the skill directory so it can be recovered. Removing from the global directory deletes the global copy after the existing path-containment checks pass.
 
-Run `TEST.sh` validation for one skill, or omit the name to test all installed skills:
-
-<div class="os-tabs-src">
-
-#### sh
-
-```sh
-zeroclaw skills test release-check
-zeroclaw skills test --verbose
-```
-
-</div>
-
-`zeroclaw skills test` runs the skill's `TEST.sh` file when one exists. Inspect `TEST.sh` before running tests from a skill source you do not already trust.
+Skill authoring and test execution belong in the external coding workbench.
+The in-process `skills test` command and automatic creation or review loops are
+retired; run reviewed tests through the normal authorized development workflow.
 
 If `zeroclaw skills list` shows a skill but the agent does not use it, check the runtime view:
 
@@ -218,12 +207,6 @@ zeroclaw skills list --agent default
 
 When the skill appears only in the global group, install it into a bundle and ensure the agent lists that bundle in `agents.<alias>.skill_bundles`.
 
-## Prompt-triggered capability suggestions
-
-ZeroClaw can optionally suggest an installable skill capability when a submitted prompt clearly names something that exists in cached registry metadata but is not installed. The server-side path runs after submission and before the normal LLM turn. It only returns a suggestion; it does not install the skill, enable it, write memory, or treat the skill body as global instructions.
-
-Enable it via the `skills` config (gateway or `zeroclaw config set`). The suggestion matcher uses installed skill names and cached registry metadata such as names, aliases, and frontmatter. It intentionally avoids matching unapproved skill bodies. Plugin/package-level discovery remains follow-up scope until the plugin registry search/install surface is available. Exact composer-time suggestions while the user is still typing require ACP, gateway, or client UI support and are outside this server-only path.
-
 ## Script safety
 
 ZeroClaw audits skills before loading or installing them. Script-like files such as `.sh`, `.bash`, `.ps1`, and files with shell shebangs are blocked by default.
@@ -232,45 +215,36 @@ If you intentionally use script-bearing skills, enable `skills.allow_scripts`. K
 
 For Python-specific execution patterns, interpreter policy, and native versus Docker trade-offs, see [Running Python skills](./python-skills.md).
 
-## Loading community skills
+## Registry retirement and local loading
 
-Community open-skills loading is opt-in via the `skills` config. When enabled, ZeroClaw loads skills from the configured `open_skills_dir`, or from `$HOME/open-skills` when no directory is set. If that directory does not exist, ZeroClaw may clone the community open-skills repository; if it does exist and is a git checkout, ZeroClaw may pull updates. Enable this only for community sources you trust, or point `open_skills_dir` at a reviewed local copy.
+ReiClaw no longer clones or refreshes open-skills, the default skill registry, or
+extra registries during loading or bare-name installation. Existing checked-out
+files are left in place. To keep a reviewed skill available, install its local
+directory into an assigned bundle or explicitly install from a Git URL as shown
+above. Registry-name and `registry:<name>/<skill>` sources no longer install.
 
-## Advanced config
+Remove the retired `skills.open_skills_enabled`, `skills.open_skills_dir`,
+`skills.registry_url`, `skills.extra_registries`, `skills.skill_creation`,
+`skills.skill_improvement` and `skills.install_suggestions` settings. Config-file
+and `REI_skills__*` overrides report retirement warnings, including the legacy
+`REI_OPEN_SKILLS_ENABLED` and `REI_OPEN_SKILLS_DIR` environment variables.
 
-The default prompt injection mode is `full`, which includes full skill instructions in the system prompt. Use `compact` to keep only compact metadata in context and load skill details on demand:
+The retained loader reads and audits the current workspace and assigned bundle
+directories on each load. It preserves bundle inclusion rules and workspace
+precedence; script policy is still controlled by `skills.allow_scripts`. The
+existing skill API, bundle editor and scaffold commands remain available until
+the external workbench cutover.
 
-## Autonomous skill creation
+## Prompt injection
 
-After a successful multi-step task (at least two tool calls), ZeroClaw can persist the execution as a reusable skill. This is **off by default** and opt-in:
+The default `full` mode includes skill instructions in the system prompt. Use
+`compact` to include metadata and read details on demand through `read_skill`:
 
 ```toml
-[skills.skill_creation]
-enabled = true              # off by default
-max_skills = 500            # LRU cap: oldest auto-generated skill is evicted past this
-similarity_threshold = 0.85 # embedding-dedup cutoff; near-duplicate tasks are skipped
+[skills]
+allow_scripts = false
+prompt_injection_mode = "compact"
 ```
-
-By default each created skill is a deterministic `SKILL.toml` generated directly from the tool-call trace; no model call is involved.
-
-### Reflection (`SKILL.md` synthesis)
-
-With reflection enabled, ZeroClaw instead asks the agent's configured model provider to synthesize a canonical [`SKILL.md`](#create-a-markdown-skill) from a **bounded** slice of the execution (the task, the tool-call trace, and the final answer). Every input is independently truncated to a configured character budget so a large execution can never produce an unbounded reflection request:
-
-```toml
-[skills.skill_creation]
-enabled = true
-reflection_enabled = true   # opt-in; requires enabled = true
-max_task_chars = 1000           # task description budget
-max_tool_trace_chars = 4000     # tool-call trace budget
-max_final_answer_chars = 2000   # final assistant answer budget
-```
-
-If the reflection call fails (provider error, malformed output, or an empty body), ZeroClaw falls back to the deterministic `SKILL.toml` path, so enabling reflection never leaves a skill un-created. Reflected skills are stamped with the `zeroclaw-auto` author and participate in the same dedup and LRU eviction as `SKILL.toml` skills.
-
-Because reflection forwards turn content to the model provider, the task, the tool-call trace, and the final answer are each scanned for credential-shaped values (API keys, tokens, AWS credentials, PEM private keys, JWTs, database connection URLs, and high-entropy secrets) and redacted **before** the prompt is composed and sent, using the same outbound-content guardrail ZeroClaw applies to channel responses. Redaction runs in-process ahead of the request, so a secret that appears in a tool argument or the final answer is replaced with a `[REDACTED_…]` marker rather than reaching the provider.
-
-> **Reflection vs. skill improvement.** Reflection (`[skills.skill_creation] reflection_enabled`) *creates a new skill* from a completed execution trace. The `[skills.skill_improvement]` background review fork is a separate feature that *patches existing skills* after they are used. They can be enabled independently.
 
 ## See also
 

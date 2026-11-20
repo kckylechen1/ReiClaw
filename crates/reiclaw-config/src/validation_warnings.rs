@@ -129,6 +129,21 @@ use serde::{Deserialize, Serialize};
 /// - `text_browser_tool_removed`: a `[text_browser]` section is still
 ///   present. The text-browser tool was retired with the browser family,
 ///   so the section is ignored (see `RETIRED_CONFIG_SURFACES`).
+/// - `unenforced_security_config_removed`: an empty/default-only Nevis,
+///   WebAuthn or node-transport section is retired. Configured policy or
+///   credentials reject admission before deserialization instead of warning.
+/// - `unused_kernel_config_removed`: an ACP, trust-score, media-pipeline or
+///   link-enricher section has no kernel consumer and is ignored.
+/// - `session_backend_selector_removed`: the old SQLite default is ignored;
+///   JSONL, unknown and malformed selections refuse config admission.
+/// - `unused_channel_setting_removed`: a global channel setting has no
+///   consumer. Per-Telegram-alias reaction and debounce controls remain live.
+/// - `in_process_tunnel_removed`: an empty or disabled-default `[tunnel]`
+///   section is ignored. Configured tunnels and credentials reject admission;
+///   operators must migrate them to a host-managed service explicitly.
+/// - `skill_authoring_and_registry_removed`: automatic skill creation,
+///   improvement, suggestions and registry sync are retired. Local bundle
+///   loading, prompt injection and `skills.allow_scripts` remain active.
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 #[cfg_attr(feature = "schema-export", derive(schemars::JsonSchema))]
 pub struct ValidationWarning {
@@ -168,6 +183,39 @@ impl ValidationWarning {
 /// in a later announced window, after which the env paths hard-error like
 /// any other unknown path and the file sections parse-drop silently.
 pub const RETIRED_CONFIG_SURFACES: &[(&str, &str)] = &[
+    // Security-bearing sections are admitted only by the raw fail-closed
+    // validator in retired_security; only harmless defaults reach warnings.
+    ("security.nevis", "unenforced_security_config_removed"),
+    ("security.webauthn", "unenforced_security_config_removed"),
+    ("node_transport", "unenforced_security_config_removed"),
+    ("tunnel", "in_process_tunnel_removed"),
+    (
+        "skills.skill_creation",
+        "skill_authoring_and_registry_removed",
+    ),
+    (
+        "skills.skill_improvement",
+        "skill_authoring_and_registry_removed",
+    ),
+    (
+        "skills.install_suggestions",
+        "skill_authoring_and_registry_removed",
+    ),
+    (
+        "skills.install-suggestions",
+        "skill_authoring_and_registry_removed",
+    ),
+    ("acp", "unused_kernel_config_removed"),
+    ("trust", "unused_kernel_config_removed"),
+    ("media_pipeline", "unused_kernel_config_removed"),
+    ("link_enricher", "unused_kernel_config_removed"),
+    ("backup", "backup_retention_engine_removed"),
+    ("data_retention", "backup_retention_engine_removed"),
+    ("pipeline", "overlapping_builtin_tool_removed"),
+    ("image_gen", "overlapping_builtin_tool_removed"),
+    ("file_upload", "overlapping_builtin_tool_removed"),
+    ("file_upload_bundle", "overlapping_builtin_tool_removed"),
+    ("file_download", "overlapping_builtin_tool_removed"),
     ("eval", "eval_harness_moved_to_dev_tool"),
     (
         "gateway.pairing_dashboard",
@@ -345,6 +393,54 @@ pub fn is_retired_channel_type(channel_type: &str) -> bool {
 /// checker makes the retirement visible instead of a silent no-op.
 pub const RETIRED_CONFIG_FIELDS: &[(&str, &str)] = &[
     (
+        "channels.session_backend",
+        "session_backend_selector_removed",
+    ),
+    (
+        "skills.open_skills_enabled",
+        "skill_authoring_and_registry_removed",
+    ),
+    (
+        "skills.open_skills_dir",
+        "skill_authoring_and_registry_removed",
+    ),
+    (
+        "skills.registry_url",
+        "skill_authoring_and_registry_removed",
+    ),
+    (
+        "skills.extra_registries",
+        "skill_authoring_and_registry_removed",
+    ),
+    ("channels.cli", "unused_channel_setting_removed"),
+    (
+        "channels.message_timeout_secs",
+        "unused_channel_setting_removed",
+    ),
+    (
+        "channels.max_concurrent_per_channel",
+        "unused_channel_setting_removed",
+    ),
+    ("channels.ack_reactions", "unused_channel_setting_removed"),
+    ("channels.debounce_ms", "unused_channel_setting_removed"),
+    ("channels_config.cli", "unused_channel_setting_removed"),
+    (
+        "channels_config.message_timeout_secs",
+        "unused_channel_setting_removed",
+    ),
+    (
+        "channels_config.max_concurrent_per_channel",
+        "unused_channel_setting_removed",
+    ),
+    (
+        "channels_config.ack_reactions",
+        "unused_channel_setting_removed",
+    ),
+    (
+        "channels_config.debounce_ms",
+        "unused_channel_setting_removed",
+    ),
+    (
         "runtime_profiles.*.auto_classify.cost_optimized_hint",
         "cost_optimized_routing_removed",
     ),
@@ -433,6 +529,11 @@ pub const RETIRED_CONFIG_FIELDS: &[(&str, &str)] = &[
 pub const RETIRED_CONFIG_VALUES: &[(&str, &[&str], &str)] = &[
     (
         "observability.backend",
+        &["prometheus"],
+        "prometheus_observability_removed",
+    ),
+    (
+        "observability.backend",
         &["otel", "otlp", "opentelemetry"],
         "otel_observability_removed",
     ),
@@ -457,6 +558,16 @@ pub const RETIRED_CONFIG_VALUES: &[(&str, &[&str], &str)] = &[
 /// the human-readable half of the field tombstone warning.
 fn retired_field_reason(code: &str) -> &'static str {
     match code {
+        "session_backend_selector_removed" => {
+            "SQLite is the only session backend; legacy JSONL startup import remains available"
+        }
+        "skill_authoring_and_registry_removed" => {
+            "automatic skill authoring and registry sync were retired; use reviewed local \
+             bundles or an explicit audited install. Script policy remains in skills.allow_scripts"
+        }
+        "unused_channel_setting_removed" => {
+            "the global channel setting has no runtime consumer; Telegram alias settings are unchanged"
+        }
         "cost_optimized_routing_removed" => {
             "the unused cost-optimized selector was removed; this field never \
              selected a route. The simple, standard and complex hints and \
@@ -482,9 +593,13 @@ fn retired_field_reason(code: &str) -> &'static str {
             "the rust_native (WebDriver) browser backend was removed; selecting it \
              fails the browser tool. Use agent_browser, computer_use or auto"
         }
+        "prometheus_observability_removed" => {
+            "the Prometheus observer and /metrics endpoint were removed; use structured logs \
+             and /api/events. The retired backend value loads as `none`"
+        }
         "otel_observability_removed" => {
-            "the OpenTelemetry exporter was removed; the `log`, `verbose` and \
-             `prometheus` sinks remain, and a retired backend value loads as `none`"
+            "the OpenTelemetry exporter was removed; the `log` and `verbose` \
+             sinks remain, and a retired backend value loads as `none`"
         }
         "whatsapp_audio_option_removed" => {
             "the WhatsApp-only forwarded audio selector has no runtime consumer after the transport retired"
@@ -518,7 +633,9 @@ pub fn retired_field_tombstones(contents: &str) -> Vec<ValidationWarning> {
     };
     let mut warnings = Vec::new();
     for (path, code) in RETIRED_CONFIG_FIELDS {
-        if !field_path_exists(root, path) {
+        if !field_path_exists(root, path)
+            || !crate::retired_session_backend::permits_field_warning(path, root)
+        {
             continue;
         }
         let reason = retired_field_reason(code);
@@ -680,8 +797,13 @@ pub fn retired_section_tombstones(contents: &str) -> Vec<ValidationWarning> {
     RETIRED_CONFIG_SURFACES
         .iter()
         .filter_map(|(path, code)| {
+            if !crate::retired_security::permits_section_warning(path, &root) {
+                return None;
+            }
             let message = if *path == "eval" && table_path_exists(root.as_table(), path) {
                 "[eval] in config.toml is no longer used: the evaluation harness moved to the development CLI. Pass suite_dir as --suite and mode as --mode; [runtime_profiles.<alias>.eval] is unchanged.".to_string()
+            } else if *code == "backup_retention_engine_removed" && table_path_exists(root.as_table(), path) {
+                format!("[{path}] in config.toml is ignored: the in-process backup and retention engine was retired. Configure host-managed backups and retention, including encryption and scheduling, for the active config/data directories. Existing archives are unchanged; no backup or purge is scheduled from this section. Remove the section.")
             } else if table_path_exists(root.as_table(), path) {
                 format!(
                     "[{path}] in config.toml is ignored: the section was removed from the \
@@ -728,6 +850,52 @@ fn table_path_exists(root: Option<&toml::value::Table>, path: &str) -> bool {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn retired_skill_authoring_file_warns_and_preserves_live_script_policy() {
+        let contents = r#"
+schema_version = 3
+[skills]
+allow_scripts = false
+prompt_injection_mode = "compact"
+open_skills_enabled = true
+open_skills_dir = "private-sentinel"
+registry_url = "https://private-sentinel"
+extra_registries = [{ name = "team", url = "private-sentinel" }]
+[skills.skill_creation]
+enabled = true
+[skills.skill_improvement]
+enabled = true
+[skills.install_suggestions]
+enabled = true
+[skills.install-suggestions]
+enabled = true
+"#;
+        let config = crate::current::parse_current(contents).unwrap();
+        assert!(!config.skills.allow_scripts);
+        assert_eq!(
+            config.skills.prompt_injection_mode,
+            crate::schema::SkillsPromptInjectionMode::Compact
+        );
+        let mut warnings = retired_section_tombstones(contents);
+        warnings.extend(retired_field_tombstones(contents));
+        assert_eq!(warnings.len(), 8);
+        assert!(warnings.iter().all(|warning| {
+            warning.code == "skill_authoring_and_registry_removed"
+                && !warning.message.contains("private-sentinel")
+        }));
+        let serialized = toml::Value::try_from(config).unwrap();
+        let keys: std::collections::BTreeSet<&str> = serialized["skills"]
+            .as_table()
+            .unwrap()
+            .keys()
+            .map(String::as_str)
+            .collect();
+        assert_eq!(
+            keys,
+            std::collections::BTreeSet::from(["allow_scripts", "prompt_injection_mode"])
+        );
+    }
 
     #[test]
     fn retired_field_tombstones_flags_field_under_wildcard_alias() {
@@ -779,7 +947,7 @@ delegation_policy = { mode = "allow" }
             assert_eq!(warnings[0].path, "observability.backend");
             assert!(warnings[0].message.contains(value), "{warnings:?}");
         }
-        assert!(retired_field_tombstones("[observability]\nbackend = \"prometheus\"\n").is_empty());
+        assert!(retired_field_tombstones("[observability]\nbackend = \"log\"\n").is_empty());
         assert!(retired_field_tombstones("[observability]\nbackend = 3\n").is_empty());
     }
 
@@ -837,7 +1005,9 @@ delegation_policy = { mode = "allow" }
             for depth in 1..=segments.len() {
                 doc.push_str(&format!("[{}]\n", segments[..depth].join(".")));
             }
-            doc.push_str("legacy_key = true\n");
+            // Empty legacy sections are harmless. An invented key would be
+            // configured/unknown policy in a security-bearing tombstone and
+            // must reject admission rather than report that it was ignored.
             let warnings = retired_section_tombstones(&doc);
             assert_eq!(warnings.len(), 1, "{path}: {warnings:?}");
             assert_eq!(warnings[0].code, *code);

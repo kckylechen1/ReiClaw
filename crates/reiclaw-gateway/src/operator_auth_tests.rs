@@ -2,7 +2,7 @@
 use super::*;
 #[cfg(feature = "nodes")]
 use crate::api_node_identity;
-use crate::{api_backup_retention, api_soul, api_user_model};
+use crate::{api_soul, api_user_model};
 #[cfg(feature = "nodes")]
 use axum::routing::delete;
 use axum::{
@@ -66,13 +66,7 @@ fn router(state: AppState) -> Router {
         .route(
             "/api/soul/proposals/{id}/resolve",
             post(api_soul::post_resolve_proposal),
-        )
-        // ── Backup / data-retention operator surface ──
-        // Thin operator-bearer-gated entries over the same BackupTool /
-        // DataManagementTool command methods the model-visible tools use;
-        // restore keeps its confirm/dry-run guard, purge keeps its
-        // dry-run default. Route table lives with the handlers.
-        .merge(api_backup_retention::routes());
+        );
     #[cfg(feature = "nodes")]
     let router = router
         .route(
@@ -118,13 +112,6 @@ fn operations() -> Vec<(Method, &'static str)> {
         (Method::POST, "/api/node-identities/pairing"),
         (Method::POST, "/api/node-identities"),
         (Method::DELETE, "/api/node-identities/missing"),
-        (Method::GET, "/api/agents/missing/backup"),
-        (Method::POST, "/api/agents/missing/backup"),
-        (Method::POST, "/api/agents/missing/backup/missing/verify"),
-        (Method::POST, "/api/agents/missing/backup/missing/restore"),
-        (Method::GET, "/api/agents/missing/data-retention/status"),
-        (Method::GET, "/api/agents/missing/data-retention/stats"),
-        (Method::POST, "/api/agents/missing/data-retention/purge"),
     ]
     .into_iter()
     .filter(|(_, path)| cfg!(feature = "nodes") || !path.starts_with("/api/node-identities"))
@@ -259,7 +246,7 @@ async fn operator_credentials_successful_reads() {
     for (method, path) in [
         (Method::GET, "/api/user-model/candidates"),
         (Method::GET, "/api/soul?agent=owner"),
-        (Method::GET, "/api/agents/owner/backup"),
+        (Method::GET, "/api/user-model/heads"),
     ] {
         let state = state_with_operator(true, true);
         state

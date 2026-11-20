@@ -14,6 +14,11 @@ crate or a WASM plugin.
 - The accepted [ADR-017](../../docs/book/src/architecture/decisions/ADR-017-personal-agent-body-edges-and-delegation.md)
   places external harness delegation through Tachi, and device execution
   on separately authorized Nodes.
+- The accepted [ADR-027](../../docs/book/src/architecture/decisions/ADR-027-owner-workflow-closure-and-scoped-services.md)
+  retains bounded L1 communication and named-peer collaboration. Reuse the
+  existing loop and conversation owners; peer delivery, continuation, and
+  new-work admission have distinct authority and receipts. A peer is not
+  automatically a child, and a message does not authorize a detached launcher.
 - The current execution order and replacement gates live in
   [issue #374](https://github.com/kckylechen1/ReiClaw/issues/374);
   [fork notes](../../docs/book/src/contributing/fork-notes.md) record

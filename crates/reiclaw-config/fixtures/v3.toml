@@ -20,26 +20,12 @@ runtime_profile = "default"
 [agents.simple_agent.identity]
 format = "openclaw"
 
-[backup]
-compress = true
-destination_dir = "state/backups"
-enabled = true
-encrypt = false
-include_dirs = [
-    "config",
-    "memory",
-    "audit",
-    "knowledge",
-]
-max_keep = 10
-
 [channels]
 ack_reactions = true
 cli = true
 debounce_ms = 0
 max_concurrent_per_channel = 4
 message_timeout_secs = 300
-session_backend = "sqlite"
 session_persistence = true
 session_ttl_hours = 0
 show_tool_calls = false
@@ -93,12 +79,6 @@ expr = "0 7 * * *"
 kind = "cron"
 tz = "UTC"
 
-[data_retention]
-categories = []
-dry_run = false
-enabled = false
-retention_days = 90
-
 [[embedding_routes]]
 dimensions = 1536
 hint = "default"
@@ -146,9 +126,6 @@ allowed_private_hosts = []
 enabled = true
 max_response_size = 1000000
 timeout_secs = 30
-
-[image_gen]
-enabled = false
 
 [link_enricher]
 enabled = false
@@ -244,11 +221,6 @@ external_peers = [
     "@v1_admin",
     "12345678",
 ]
-
-[pipeline]
-allowed_tools = []
-enabled = false
-max_steps = 20
 
 [providers.models.anthropic.agent_complex_agent]
 api_key = "sk-ant-complex"

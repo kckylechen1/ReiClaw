@@ -128,11 +128,9 @@ cd ReiClaw
 > installs **upstream ZeroClaw**, not this fork.
 
 To update this fork, update its source checkout and run `./install.sh --source`
-with the same preset and features as your existing installation. The legacy
-`rei update` command (including `--check`, `--force`, and `--version`)
-returns source-update instructions without accessing a release server or
-replacing the executable. This fork does not yet publish a verified binary
-update channel. The bootstrap script defaults to source builds; `--prebuilt`
+with the same preset and features as your existing installation. The retired
+`rei update` command has been removed. This fork does not yet publish a
+verified binary update channel. The bootstrap script defaults to source builds; `--prebuilt`
 exits with source-install instructions before downloading or installing
 anything. ReiClaw supports Linux and macOS; Windows is not supported.
 
@@ -158,7 +156,7 @@ Flags:
 ./install.sh --source                # always build from source
 ./install.sh --preset minimal        # kernel-only source preset
 ./install.sh --minimal               # alias for --preset minimal
-./install.sh --source --features agent-runtime,channel-telegram  # custom feature set
+./install.sh --source --features agent-runtime,gateway  # custom feature set
 ./install.sh --with-gateway          # force gateway support on
 ./install.sh --without-gateway       # force gateway support off
 ./install.sh --prefix /tmp/zc-test   # install under a custom prefix

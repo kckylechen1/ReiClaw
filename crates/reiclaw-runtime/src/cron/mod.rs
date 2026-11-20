@@ -27,32 +27,6 @@ pub use types::{
     deserialize_maybe_stringified,
 };
 
-/// Channel names exposed by the cron tool schemas: the retained surfaces
-/// only. Retired transports (in-process runners removed with #579/#581)
-/// are deliberately absent — a cron delivery targeting one can never
-/// deliver, so the tool schema must not offer it (#584). Runtime delivery
-/// is provided by the registered channel delivery handler (gateway
-/// bridges), not this static enum.
-pub(crate) const CRON_DELIVERY_SCHEMA_CHANNELS: &[&str] = &["telegram", "webhook"];
-
-/// Delivery channel names for the cron tool schemas: the in-core channels
-/// plus every configured `[gateway.bridges.<name>]`, whose deliveries go to
-/// the bridge outbox.
-pub(crate) fn delivery_schema_channels(config: &Config) -> Vec<String> {
-    let mut names: Vec<String> = CRON_DELIVERY_SCHEMA_CHANNELS
-        .iter()
-        .map(|name| (*name).to_string())
-        .collect();
-    let mut bridges: Vec<&String> = config.gateway.bridges.keys().collect();
-    bridges.sort();
-    for bridge in bridges {
-        if !names.contains(bridge) {
-            names.push(bridge.clone());
-        }
-    }
-    names
-}
-
 /// Validate a shell command against an agent's security policy
 /// (allowlist + risk gate). `agent_alias` names the agent under whose
 /// risk profile the command will run. Returns `Ok(())` if the command

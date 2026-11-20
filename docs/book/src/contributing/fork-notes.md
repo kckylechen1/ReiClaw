@@ -129,7 +129,7 @@ See [runtime internals](../agents/internals.md#repeated-tool-failure-recovery).
 | Cron `allowed_tools = []` means deny-all | asserts the opposite in a test | deliberate |
 | `ModelProvider::set_credential` with real 429 rotation | logs "cannot apply … Retrying with original key" | deliberate |
 | WeChat state persistence is atomic and non-blocking | blocking, non-atomic write | deliberate |
-| Portable memory kernel behind `memory-core` (`reiclaw-memory/memorycore`), default backend `memorycore` | absent (defaults to SQLite) | deliberate; `memorycore` is default in `reiclaw`, while `--no-default-features`, `--features slim-control`, and default `reiclaw-memory` stay AGPL-free |
+| Portable memory kernel behind `memory-core` (`reiclaw-memory/memorycore`), default backend `memorycore` | absent (defaults to SQLite) | deliberate; `memorycore` is default in `reiclaw`, while `--no-default-features --features agent-runtime,gateway` and default `reiclaw-memory` exclude the AGPL dependency |
 | `vault:<NAME>` secret references resolved from Tachi Vault and preserved on disk | `op://` only at `87461d1ac5` | deliberate; Tachi Vault owns credentials |
 | HyperMemory custom CRUD backend | absent | retired; never re-add |
 | Builtin `calculator` / `weather` tools (`crates/reiclaw-tools/src/{calculator,weather_tool}.rs`) | present | retired; implementations deleted, names reserved in `RETIRED_OPERATOR_TOOL_NAMES`. Weather, if ever needed again, is an HTTP skill / MCP wrapper, not a builtin |
@@ -383,8 +383,8 @@ this fork converges default conversation memory on the embedded Tachi
 
 - `reiclaw` enables `memory-core` by default and defaults
   `[memory].backend` and `[agents.<alias>.memory].backend` to `memorycore` (`MemoryCore`).
-  `reiclaw-memory` keeps default features off, and both
-  `--no-default-features` and `--features slim-control` remain 100% AGPL-free.
+  `reiclaw-memory` keeps default features off. Root builds using
+  `--no-default-features --features agent-runtime,gateway` exclude the AGPL dependency.
 - `SqliteMemory`, `LucidMemory`, `MEMORY_SNAPSHOT.md` export/hydration, SQLite
   v3 memory migration, and `[storage.sqlite]` / `[storage.lucid]` configuration
   sections are retired.

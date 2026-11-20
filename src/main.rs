@@ -158,8 +158,6 @@ mod gateway_helpers;
 #[cfg(feature = "agent-runtime")]
 mod integrations;
 #[cfg(feature = "agent-runtime")]
-mod migration;
-#[cfg(feature = "agent-runtime")]
 mod security_status;
 #[cfg(feature = "agent-runtime")]
 mod service;
@@ -185,8 +183,8 @@ use gateway_helpers::{
 // Re-export so binary modules can use crate::<CommandEnum> while keeping a single source of truth.
 pub use reiclaw::{
     AgentsCommands, BridgeCommands, ChannelCommands, ChannelsCommands, CronCommands,
-    GatewayCommands, IntegrationCommands, MemoryCommands, MigrateCommands, ProvidersCommands,
-    ServiceCommands, SkillBundleCommands, SkillCommands,
+    GatewayCommands, IntegrationCommands, MemoryCommands, ProvidersCommands, ServiceCommands,
+    SkillBundleCommands, SkillCommands,
 };
 
 #[derive(Copy, Clone, Debug, Eq, PartialEq, ValueEnum)]
@@ -270,31 +268,6 @@ impl LogLevel {
     }
 }
 
-/// Subcommands for `rei telegram`.
-#[cfg(all(feature = "agent-runtime", feature = "channel-telegram"))]
-#[derive(Subcommand, Debug)]
-enum TelegramCommands {
-    /// Explain migration of the retired Telegram skip command
-    #[command(long_about = "\
-The in-process Telegram listener and its skip markers are retired. \
-This compatibility command returns a migration error without writing a marker. \
-Telegram intake and cursor recovery belong to rei-bridge-telegram; \
-this command cannot skip a bridge update.")]
-    SkipUpdate {
-        /// Legacy bot alias (accepted for compatibility)
-        #[arg(long)]
-        alias: String,
-
-        /// Legacy update ID (accepted for compatibility)
-        #[arg(long)]
-        update_id: i64,
-
-        /// Legacy skip reason (accepted for compatibility)
-        #[arg(long)]
-        reason: Option<String>,
-    },
-}
-
 /// Subcommands for `rei soul`.
 #[cfg(feature = "agent-runtime")]
 #[derive(Subcommand, Debug)]
@@ -342,63 +315,6 @@ enum Commands {
         /// Alias for the new agent. Defaults to a sanitized provider name.
         #[arg(long)]
         agent: Option<String>,
-    },
-
-    /// Deprecated. Use `rei quickstart`. Any flags error.
-    Onboard {
-        /// Configure a specific section only. Omit to run the full flow.
-        #[command(subcommand)]
-        section: Option<reiclaw_config::sections::Section>,
-
-        /// Skip interactive prompts; read from --api-key/--model-provider/--model/--memory.
-        #[arg(long, hide = true)]
-        quick: bool,
-
-        /// Force the dialoguer CLI backend instead of the default ratatui TUI.
-        #[arg(long, hide = true)]
-        cli: bool,
-
-        /// Deprecated: TUI is now the default. Accepted as a no-op for one release.
-        #[arg(long, hide = true)]
-        tui: bool,
-
-        /// Don't ask "keep stored secret?" — always re-prompt.
-        #[arg(long, hide = true)]
-        force: bool,
-
-        /// Back up existing config and start from defaults.
-        #[arg(long, hide = true)]
-        reinit: bool,
-
-        /// API key for model_provider configuration.
-        #[arg(long, hide = true)]
-        api_key: Option<String>,
-
-        /// ModelProvider name. Used as the type key for the synthesized
-        /// `[providers.models.<type>.default]` entry.
-        #[arg(long, hide = true)]
-        model_provider: Option<String>,
-
-        /// Model ID override.
-        #[arg(long, hide = true)]
-        model: Option<String>,
-
-        /// Memory backend (memorycore, markdown, none).
-        #[arg(long, hide = true)]
-        memory: Option<String>,
-
-        // Deprecated legacy flags — parsed for one release, each maps to a
-        // subcommand with a stderr warning pointing at the new form.
-        #[arg(long, hide = true)]
-        channels_only: bool,
-        #[arg(long, hide = true)]
-        providers_only: bool,
-        #[arg(long, hide = true)]
-        memory_only: bool,
-        #[arg(long, hide = true)]
-        hardware_only: bool,
-        #[arg(long, hide = true)]
-        tunnel_only: bool,
     },
 
     /// Start the AI agent loop
@@ -695,12 +611,6 @@ Examples:
         path: String,
     },
 
-    /// Migrate data from other agent runtimes
-    Migrate {
-        #[command(subcommand)]
-        migrate_command: MigrateCommands,
-    },
-
     #[command(about = "Manage provider subscription authentication profiles")]
     Auth {
         #[command(subcommand)]
@@ -754,24 +664,6 @@ Property path tab completion is included automatically in `rei completions <shel
         config_command: ConfigCommands,
     },
 
-    /// Update this fork from source
-    #[command(long_about = "\
-This fork has no verified binary update channel. Update a checkout of https://github.com/kckylechen1/ReiClaw and run ./install.sh --source with your existing preset/features. Upstream releases cannot update this fork.")]
-    Update {
-        /// Legacy flag; binary update checks are disabled in this fork
-        #[arg(long)]
-        check: bool,
-        /// Legacy flag; cannot override the source-only update policy
-        #[arg(long)]
-        force: bool,
-        /// Legacy target version; binary updates are disabled
-        #[arg(long)]
-        version: Option<String>,
-        /// Legacy output flag; the disabled updater always returns an error
-        #[arg(long)]
-        json: bool,
-    },
-
     /// Run diagnostic self-tests
     #[command(long_about = "\
 Run diagnostic self-tests to verify the ReiClaw installation.
@@ -814,19 +706,6 @@ Examples:
         soul_command: SoulCommands,
     },
 
-    #[cfg(all(feature = "agent-runtime", feature = "channel-telegram"))]
-    /// Compatibility diagnostics for retired Telegram operator tooling
-    #[command(long_about = "\
-The in-process Telegram listener is retired. Telegram intake and cursor \
-recovery belong to rei-bridge-telegram.
-
-skip-update remains parseable for compatibility and returns a migration \
-error. It does not write a skip marker or advance the bridge cursor.")]
-    Telegram {
-        #[command(subcommand)]
-        telegram_command: TelegramCommands,
-    },
-
     #[command(long_about = "\
 Generate shell completion scripts for `rei`.
 
@@ -850,27 +729,6 @@ Examples:
     /// Print the config JSON Schema (used by the docs pipeline).
     #[command(hide = true)]
     MarkdownSchema,
-
-    /// Deprecated: use `rei config` instead
-    #[command(hide = true)]
-    Props {
-        #[command(subcommand)]
-        props_command: DeprecatedPropsCommands,
-    },
-}
-
-/// Stub enum that mirrors the old `props` subcommands so clap can still parse
-/// `rei props <anything>` and print a deprecation message.
-#[derive(Subcommand, Debug)]
-enum DeprecatedPropsCommands {
-    #[command(external_subcommand)]
-    Any(
-        #[expect(
-            dead_code,
-            reason = "clap needs the payload to accept any argv; the rename error ignores it"
-        )]
-        Vec<String>,
-    ),
 }
 
 #[derive(Subcommand, Debug)]
@@ -1208,8 +1066,7 @@ fn main() -> Result<()> {
     // or blocking-pool threads exist, so the reading runtime is fully
     // dropped before anything is applied. Daemon reloads refresh the
     // runtime global only, keeping live-env application restart-only.
-    // Stdout-only invocations (completions, markdown-help/schema, help,
-    // version, parse errors) skip this read.
+    // Stdout-only invocations and the local emergency-stop path skip this read.
     if invocation_needs_config() {
         let proxy = {
             let pre_runtime = tokio::runtime::Builder::new_current_thread()
@@ -1233,8 +1090,8 @@ fn main() -> Result<()> {
 /// Decide pre-parse whether this invocation will need the config-driven
 /// runtime, using a non-exiting trial parse of the CLI. Parse errors,
 /// `--help` and `--version` surface as `Err` and re-parse inside
-/// `async_main` for the error/help path; the stdout-only subcommands are
-/// enumerated explicitly so they skip the proxy bootstrap read.
+/// `async_main` for the error/help path; stdout-only and local emergency-stop
+/// subcommands are enumerated explicitly so they skip the proxy bootstrap read.
 fn invocation_needs_config() -> bool {
     let command = Cli::command();
     let Ok(matches) = command.try_get_matches_from(std::env::args_os()) else {
@@ -1245,6 +1102,7 @@ fn invocation_needs_config() -> bool {
         matches.subcommand_matches("markdown-help").is_some(),
         matches.subcommand_matches("markdown-schema").is_some(),
         matches.subcommand_matches("help").is_some(),
+        matches.subcommand_matches("estop").is_some(),
     ];
     !config_free.into_iter().any(|excluded| excluded)
 }
@@ -1328,51 +1186,6 @@ async fn async_main(command: clap::Command) -> Result<()> {
     );
 
     #[cfg(feature = "agent-runtime")]
-    if let Commands::Onboard {
-        section,
-        quick,
-        cli: use_cli,
-        tui: _,
-        force,
-        reinit,
-        api_key,
-        model_provider,
-        model,
-        memory,
-        channels_only,
-        providers_only,
-        memory_only,
-        hardware_only,
-        tunnel_only,
-    } = &cli.command
-    {
-        let any_legacy_flag = section.is_some()
-            || *quick
-            || *use_cli
-            || *force
-            || *reinit
-            || api_key.is_some()
-            || model_provider.is_some()
-            || model.is_some()
-            || memory.is_some()
-            || *channels_only
-            || *providers_only
-            || *memory_only
-            || *hardware_only
-            || *tunnel_only;
-        if any_legacy_flag {
-            eprintln!(
-                "error: `rei onboard` is deprecated and its flags no longer apply. \
-                 Use `rei quickstart` to create a new agent, or `rei config set <path>=<value>` \
-                 for headless updates."
-            );
-            std::process::exit(2);
-        }
-        eprintln!("`rei onboard` is deprecated — use `rei quickstart`.");
-        return Ok(());
-    }
-
-    #[cfg(feature = "agent-runtime")]
     if let Commands::Service {
         service_command: ServiceCommands::RunLaunchdDaemon,
         ..
@@ -1384,6 +1197,20 @@ async fn async_main(command: clap::Command) -> Result<()> {
             .map(std::path::Path::new)
             .context("launchd runner requires --config-dir")?;
         return service::run_launchd_daemon(config_dir).await;
+    }
+
+    // Emergency stop must remain reachable when unrelated model/Vault credentials
+    // cannot be resolved. Its local reader refuses malformed safety settings.
+    #[cfg(feature = "agent-runtime")]
+    if let Commands::Estop {
+        estop_command,
+        level,
+        domains,
+        tools,
+    } = cli.command
+    {
+        let config = reiclaw_config::estop::LocalEstopConfig::load().await?;
+        return handle_estop_command(&config, estop_command, level, domains, tools);
     }
 
     // All other commands need config loaded first
@@ -1545,10 +1372,9 @@ async fn async_main(command: clap::Command) -> Result<()> {
 
     #[cfg(feature = "agent-runtime")]
     match cli.command {
-        Commands::Onboard { .. }
-        | Commands::Completions { .. }
-        | Commands::MarkdownHelp
-        | Commands::MarkdownSchema => unreachable!(),
+        Commands::Completions { .. } | Commands::MarkdownHelp | Commands::MarkdownSchema => {
+            unreachable!()
+        }
 
         Commands::Quickstart {
             model_provider,
@@ -2047,15 +1873,6 @@ async fn async_main(command: clap::Command) -> Result<()> {
 
         Commands::Status { format } => commands::status::handle(&config, format).await,
 
-        #[cfg(all(feature = "agent-runtime", feature = "channel-telegram"))]
-        Commands::Telegram { telegram_command } => match telegram_command {
-            TelegramCommands::SkipUpdate {
-                alias,
-                update_id,
-                reason,
-            } => commands::telegram::run_skip_update(&alias, update_id, reason),
-        },
-
         #[cfg(feature = "agent-runtime")]
         Commands::Security {
             security_command: SecurityCommands::Status { agent, json },
@@ -2069,12 +1886,7 @@ async fn async_main(command: clap::Command) -> Result<()> {
             Ok(())
         }
 
-        Commands::Estop {
-            estop_command,
-            level,
-            domains,
-            tools,
-        } => handle_estop_command(&config, estop_command, level, domains, tools),
+        Commands::Estop { .. } => unreachable!("estop is dispatched before full config loading"),
 
         Commands::Cron { cron_command } => cron::handle_command(cron_command, &config),
 
@@ -2191,10 +2003,6 @@ async fn async_main(command: clap::Command) -> Result<()> {
 
         Commands::Browse { path } => browse::handle_browse(path, &config),
 
-        Commands::Migrate { migrate_command } => {
-            migration::handle_command(migrate_command, &config).await
-        }
-
         Commands::Memory { memory_command } => {
             memory::cli::handle_command(memory_command, &config).await
         }
@@ -2202,8 +2010,6 @@ async fn async_main(command: clap::Command) -> Result<()> {
         Commands::Auth { auth_command } => {
             commands::auth::handle_auth_command(auth_command, &config).await
         }
-
-        Commands::Update { .. } => reiclaw::commands::update::unavailable(),
 
         Commands::SelfTest { quick } => {
             let results = if quick {
@@ -2237,36 +2043,26 @@ async fn async_main(command: clap::Command) -> Result<()> {
         Commands::Config { config_command } => {
             commands::config::handle(config_command, &mut config).await
         }
-
-        Commands::Props { .. } => {
-            anyhow::bail!(
-                "`rei props` has been renamed to `rei config`. \
-                 Replace `props` with `config` in your command and try again."
-            );
-        }
     }
 }
 
 #[cfg(feature = "agent-runtime")]
 fn handle_estop_command(
-    config: &Config,
+    config: &reiclaw_config::estop::LocalEstopConfig,
     estop_command: Option<EstopSubcommands>,
     level: Option<EstopLevelArg>,
     domains: Vec<String>,
     tools: Vec<String>,
 ) -> Result<()> {
-    let config_dir = config
-        .config_path
-        .parent()
-        .context("Config path must have a parent directory")?;
+    let config_dir = &config.config_dir;
 
     if matches!(estop_command, Some(EstopSubcommands::OtpInit)) {
-        if !config.security.otp.enabled {
+        if !config.otp.enabled {
             bail!("OTP is disabled. Enable [security.otp].enabled = true in config.toml");
         }
         let store = security::SecretStore::new(config_dir, config.secrets.encrypt);
         let (_validator, enrollment_uri) =
-            security::OtpValidator::from_config(&config.security.otp, config_dir, &store)?;
+            security::OtpValidator::from_config(&config.otp, config_dir, &store)?;
         if let Some(uri) = enrollment_uri {
             println!("Initialized OTP secret for ReiClaw.");
             println!("Enrollment URI: {uri}");
@@ -2279,11 +2075,11 @@ fn handle_estop_command(
         return Ok(());
     }
 
-    if !config.security.estop.enabled {
+    if !config.estop.enabled {
         bail!("Emergency stop is disabled. Enable [security.estop].enabled = true in config.toml");
     }
 
-    let mut manager = security::EstopManager::load(&config.security.estop, config_dir)?;
+    let mut manager = security::EstopManager::load(&config.estop, config_dir)?;
 
     match estop_command {
         Some(EstopSubcommands::Status) => {
@@ -2299,8 +2095,8 @@ fn handle_estop_command(
         }) => {
             let selector = build_resume_selector(network, domains, tools)?;
             let mut otp_code = otp;
-            let otp_validator = if config.security.estop.require_otp_to_resume {
-                if !config.security.otp.enabled {
+            let otp_validator = if config.estop.require_otp_to_resume {
+                if !config.otp.enabled {
                     bail!(
                         "security.estop.require_otp_to_resume=true but security.otp.enabled=false"
                     );
@@ -2314,11 +2110,8 @@ fn handle_estop_command(
                 }
 
                 let store = security::SecretStore::new(config_dir, config.secrets.encrypt);
-                let validator = security::OtpValidator::load_existing(
-                    &config.security.otp,
-                    config_dir,
-                    &store,
-                )?;
+                let validator =
+                    security::OtpValidator::load_existing(&config.otp, config_dir, &store)?;
                 Some(validator)
             } else {
                 None
@@ -2541,22 +2334,6 @@ fn warn_verifiable_intent_withheld(config: &Config) {
 /// gateway request and per nested rebuild).
 #[cfg(feature = "agent-runtime")]
 fn warn_withheld_operator_tools(config: &Config) {
-    if config.backup.enabled {
-        ::reiclaw_log::record!(
-            WARN,
-            ::reiclaw_log::Event::new(module_path!(), ::reiclaw_log::Action::Note)
-                .with_outcome(::reiclaw_log::EventOutcome::Unknown),
-            "backup: the backup model tool is retired; backup create/list/verify/restore are operator-only via the gateway operator API (POST/GET /api/agents/<alias>/backup). The [backup] section still configures that surface"
-        );
-    }
-    if config.data_retention.enabled {
-        ::reiclaw_log::record!(
-            WARN,
-            ::reiclaw_log::Event::new(module_path!(), ::reiclaw_log::Action::Note)
-                .with_outcome(::reiclaw_log::EventOutcome::Unknown),
-            "data_retention: the data_management model tool is retired; retention status/stats/purge are operator-only via the gateway operator API (/api/agents/<alias>/data-retention). The [data_retention] section still configures that surface"
-        );
-    }
     if config.security_ops.enabled {
         ::reiclaw_log::record!(
             WARN,

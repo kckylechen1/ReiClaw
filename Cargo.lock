@@ -1532,12 +1532,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "infer"
-version = "0.19.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "a588916bfdfd92e71cacef98a63d9b1f0d74d6599980d11894290e7ddefffcf7"
-
-[[package]]
 name = "inout"
 version = "0.1.4"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -2312,20 +2306,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "prometheus"
-version = "0.14.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "3ca5326d8d0b950a9acd87e6a3f94745394f62e4dae1b1ee22b2bc0c394af43a"
-dependencies = [
- "cfg-if",
- "fnv",
- "lazy_static",
- "memchr",
- "parking_lot",
- "thiserror 2.0.21",
-]
-
-[[package]]
 name = "pulldown-cmark"
 version = "0.13.6"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -2957,7 +2937,6 @@ dependencies = [
  "base64 0.22.1",
  "console",
  "directories",
- "filetime",
  "futures-util",
  "glob",
  "hex",
@@ -2969,7 +2948,6 @@ dependencies = [
  "landlock",
  "libc",
  "parking_lot",
- "prometheus",
  "pulldown-cmark",
  "rand",
  "rcgen",
@@ -3029,7 +3007,6 @@ dependencies = [
  "futures-util",
  "glob",
  "hex",
- "infer",
  "jiff",
  "nanohtml2text",
  "parking_lot",
@@ -3044,7 +3021,6 @@ dependencies = [
  "reiclaw-providers",
  "reqwest",
  "rusqlite",
- "rustix",
  "scopeguard",
  "serde",
  "serde_json",

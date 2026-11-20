@@ -99,13 +99,34 @@ pub struct AppliedOverrides {
 /// for each. Hard-errors on any env var that doesn't resolve to a known
 /// schema path or whose alias fails validation.
 pub fn apply_env_overrides(config: &mut Config) -> Result<AppliedOverrides> {
+    apply_env_overrides_matching(config, |_| true)
+}
+
+/// Reuse the canonical override walker for a local command's selected settings.
+/// The predicate receives the lowercase env tail before any path is applied.
+pub(crate) fn apply_env_overrides_matching(
+    config: &mut Config,
+    include_tail: impl Fn(&str) -> bool,
+) -> Result<AppliedOverrides> {
     let mut entries: Vec<(String, String, String)> = std::env::vars()
         .filter_map(|(k, v)| {
+            // Legacy open-skills controls predate the lowercase override
+            // convention. Surface their retirement through the same exact
+            // field tombstones; never read values into a live loader.
+            let retired_alias = match k.as_str() {
+                "REI_OPEN_SKILLS_ENABLED" => Some("skills__open_skills_enabled"),
+                "REI_OPEN_SKILLS_DIR" => Some("skills__open_skills_dir"),
+                _ => None,
+            };
+            if let Some(tail) = retired_alias {
+                return include_tail(tail).then(|| (k, v, tail.to_string()));
+            }
             let tail = k.strip_prefix(PREFIX)?;
             (!tail.is_empty()
                 && tail
                     .chars()
-                    .all(|c| c.is_ascii_lowercase() || c.is_ascii_digit() || c == '_'))
+                    .all(|c| c.is_ascii_lowercase() || c.is_ascii_digit() || c == '_')
+                && include_tail(tail))
             .then(|| (k.clone(), v, tail.to_string()))
         })
         .collect();
@@ -127,6 +148,8 @@ pub fn apply_env_overrides(config: &mut Config) -> Result<AppliedOverrides> {
         // Err — deprecation visibility should not depend on the rest of
         // the environment being clean.
         let tail_segments: Vec<&str> = tail.split(SEP).collect();
+        crate::retired_security::reject_retired_security_env(&tail, &value)?;
+        crate::retired_session_backend::reject_retired_session_backend_env(&tail, &value)?;
         if tail_segments.first() == Some(&"sop") {
             return Err(crate::current::RetiredSopConfigError.into());
         }
@@ -142,7 +165,9 @@ pub fn apply_env_overrides(config: &mut Config) -> Result<AppliedOverrides> {
         }
         let retired_hit = RETIRED_ENV_TOMBSTONE_PREFIXES
             .iter()
-            .find(|(prefix, _)| tail.starts_with(prefix.as_str()))
+            .find(|(prefix, _)| {
+                tail.starts_with(prefix.as_str()) || tail == prefix.trim_end_matches(SEP)
+            })
             .map(|(prefix, code)| {
                 let dotted = prefix.trim_end_matches(SEP).replace(SEP, ".");
                 (dotted, *code)
@@ -353,6 +378,220 @@ pub(crate) async fn env_test_lock() -> tokio::sync::MutexGuard<'static, ()> {
 mod tests {
     use super::*;
     use crate::schema::Config;
+
+    #[tokio::test]
+    async fn local_override_selection_excludes_legacy_skill_aliases() {
+        let _lock = env_test_lock().await;
+        let _legacy = EnvVarGuard::set("REI_OPEN_SKILLS_DIR", "private-sentinel");
+        let _retired = EnvVarGuard::set("REI_skills__open_skills_enabled", "true");
+        let mut config = Config::default();
+        let selected =
+            apply_env_overrides_matching(&mut config, |tail| tail.starts_with("security__estop__"))
+                .unwrap();
+        assert!(selected.tombstone_warnings.is_empty());
+        assert!(selected.paths.is_empty());
+    }
+
+    #[tokio::test]
+    async fn retired_skill_authoring_env_warns_without_erasing_script_policy() {
+        let _lock = env_test_lock().await;
+        let _policy = EnvVarGuard::set("REI_skills__allow_scripts", "true");
+        for (name, value) in [
+            ("REI_skills__skill_creation__enabled", "true"),
+            ("REI_skills__skill_improvement", "{ enabled = true }"),
+            ("REI_skills__install_suggestions__enabled", "true"),
+            ("REI_skills__open_skills_enabled", "true"),
+            ("REI_skills__open_skills_dir", "private-sentinel"),
+            ("REI_skills__registry_url", "https://private-sentinel"),
+            (
+                "REI_skills__extra_registries",
+                "[{ name = 'team', url = 'private-sentinel' }]",
+            ),
+            ("REI_OPEN_SKILLS_ENABLED", "true"),
+            ("REI_OPEN_SKILLS_DIR", "private-sentinel"),
+        ] {
+            let _retired = EnvVarGuard::set(name, value);
+            let mut config = Config::default();
+            let applied = apply_env_overrides(&mut config).unwrap();
+            assert!(config.skills.allow_scripts);
+            assert_eq!(
+                applied.paths,
+                HashSet::from(["skills.allow_scripts".to_string()])
+            );
+            assert_eq!(applied.tombstone_warnings.len(), 1);
+            let warning = &applied.tombstone_warnings[0];
+            assert_eq!(warning.code, "skill_authoring_and_registry_removed");
+            assert!(!warning.message.contains("private-sentinel"));
+        }
+        let _unknown = EnvVarGuard::set("REI_skills__future_ide", "true");
+        assert!(apply_env_overrides(&mut Config::default()).is_err());
+    }
+
+    #[tokio::test]
+    async fn walker_refuses_retired_tunnel_settings_and_only_warns_for_disabled_defaults() {
+        let _lock = env_test_lock().await;
+        for (name, value) in [
+            ("REI_tunnel", "{ tunnel_provider = 'ngrok' }"),
+            (
+                "REI_tunnel",
+                "{ cloudflare = { token = 'private-sentinel' } }",
+            ),
+            ("REI_tunnel__tunnel_provider", "tailscale"),
+            ("REI_tunnel__ngrok", "{ auth_token = 'private-sentinel' }"),
+            ("REI_tunnel__ngrok__auth_token", "private-sentinel"),
+            ("REI_tunnel__tailscale__funnel", "true"),
+            ("REI_tunnel__custom__start_command", "private-sentinel"),
+            ("REI_tunnel", "private-sentinel"),
+            ("REI_tunnel__tunnel_provider", "false"),
+        ] {
+            let _env = EnvVarGuard::set(name, value);
+            let error = apply_env_overrides(&mut Config::default()).unwrap_err();
+            assert!(error.is::<crate::current::RetiredSecurityConfigError>());
+            assert!(!format!("{error:#}").contains("private-sentinel"));
+        }
+        for (name, value) in [
+            ("REI_tunnel", "{}"),
+            ("REI_tunnel", "{ tunnel_provider = 'none' }"),
+            ("REI_tunnel__tunnel_provider", "none"),
+            ("REI_tunnel__cloudflare", "{}"),
+        ] {
+            let _env = EnvVarGuard::set(name, value);
+            let applied = apply_env_overrides(&mut Config::default()).unwrap();
+            assert!(applied.paths.is_empty());
+            assert_eq!(applied.tombstone_warnings.len(), 1);
+            assert_eq!(
+                applied.tombstone_warnings[0].code,
+                "in_process_tunnel_removed"
+            );
+        }
+    }
+
+    #[tokio::test]
+    async fn walker_rejects_retired_security_before_warning_tombstones() {
+        let _lock = env_test_lock().await;
+        for (name, value) in [
+            ("REI_security__nevis__client_secret", "private-sentinel"),
+            ("REI_security__nevis__enabled", "true"),
+            ("REI_security__webauthn__enabled", "\"false\""),
+            (
+                "REI_node_transport__allowed_peers",
+                "[\"private-sentinel\"]",
+            ),
+            ("REI_node_transport__require_https", "false"),
+            ("REI_node_transport__tls_key_path", "private-sentinel"),
+            ("REI_node_transport", "{ mutual_tls = true }"),
+        ] {
+            let _env = EnvVarGuard::set(name, value);
+            let error = apply_env_overrides(&mut Config::default()).unwrap_err();
+            assert!(error.is::<crate::current::RetiredSecurityConfigError>());
+            assert!(!format!("{error:#}").contains("private-sentinel"));
+        }
+    }
+
+    #[tokio::test]
+    async fn walker_warns_for_harmless_retired_security_and_live_aliases_still_work() {
+        let _lock = env_test_lock().await;
+        let _nevis = EnvVarGuard::set("REI_security__nevis__enabled", "false");
+        let _transport = EnvVarGuard::set("REI_node_transport", "{}");
+        let _global = EnvVarGuard::set("REI_channels__ack_reactions", "false");
+        let _alias = EnvVarGuard::set("REI_channels__telegram__primary__ack_reactions", "true");
+        let mut config = Config::default();
+        let applied = apply_env_overrides(&mut config).unwrap();
+        assert_eq!(
+            config.channels.telegram["primary"].ack_reactions,
+            Some(true)
+        );
+        assert_eq!(applied.tombstone_warnings.len(), 3);
+        assert_eq!(applied.paths.len(), 1);
+        assert!(
+            applied
+                .paths
+                .contains("channels.telegram.primary.ack_reactions")
+        );
+    }
+
+    #[tokio::test]
+    async fn walker_rejects_security_ancestor_override_instead_of_discarding_retired_children() {
+        let _lock = env_test_lock().await;
+        // REI_<lowercase> is the config-override convention. The aggregate
+        // security table is not an editable prop path, so it must fail before
+        // serde could drop an unknown retired child.
+        let _env = EnvVarGuard::set(
+            "REI_security",
+            "{ nevis = { enabled = true, client_secret = 'private-sentinel' } }",
+        );
+        let mut config = Config::default();
+        assert!(!config.prop_paths().iter().any(|path| path == "security"));
+        let error = apply_env_overrides(&mut config).unwrap_err();
+        assert!(error.to_string().contains("REI_security"));
+        assert!(!format!("{error:#}").contains("private-sentinel"));
+    }
+
+    #[tokio::test]
+    async fn walker_rejects_retired_session_backend_without_silently_selecting_sqlite() {
+        let _lock = env_test_lock().await;
+        for value in [
+            "jsonl",
+            "private-unknown-backend",
+            "default",
+            "",
+            "false",
+            "7",
+            "[]",
+            "{ sqlite = true }",
+            "\"sqlite\"\ninjected = true",
+        ] {
+            let _env = EnvVarGuard::set("REI_channels__session_backend", value);
+            let mut config = Config::default();
+            let error = apply_env_overrides(&mut config).unwrap_err();
+            assert!(error.is::<crate::current::RetiredSessionBackendError>());
+            assert!(!format!("{error:#}").contains("private-unknown-backend"));
+            assert!(config.retired_surface_warnings.is_empty());
+        }
+        let _child = EnvVarGuard::set("REI_channels__session_backend__name", "sqlite");
+        assert!(
+            apply_env_overrides(&mut Config::default())
+                .unwrap_err()
+                .is::<crate::current::RetiredSessionBackendError>()
+        );
+    }
+
+    #[tokio::test]
+    async fn walker_warns_only_for_the_retired_sqlite_default() {
+        let _lock = env_test_lock().await;
+        let _live = EnvVarGuard::set("REI_channels__show_tool_calls", "true");
+        for value in ["sqlite", "\"sqlite\"", "'sqlite'"] {
+            let _env = EnvVarGuard::set("REI_channels__session_backend", value);
+            let mut config = Config::default();
+            let applied = apply_env_overrides(&mut config).unwrap();
+            assert!(config.channels.show_tool_calls);
+            assert!(!applied.paths.contains("channels.session_backend"));
+            assert!(!applied.snapshots.contains_key("channels.session_backend"));
+            assert_eq!(applied.tombstone_warnings.len(), 1);
+            assert_eq!(
+                applied.tombstone_warnings[0].path,
+                "channels.session_backend"
+            );
+            assert_eq!(
+                applied.tombstone_warnings[0].code,
+                "session_backend_selector_removed"
+            );
+        }
+    }
+
+    #[tokio::test]
+    async fn walker_rejects_channel_ancestor_without_discarding_backend_selection() {
+        let _lock = env_test_lock().await;
+        let _env = EnvVarGuard::set(
+            "REI_channels",
+            "{ session_backend = 'private-unknown-backend' }",
+        );
+        let mut config = Config::default();
+        assert!(!config.prop_paths().iter().any(|path| path == "channels"));
+        let error = apply_env_overrides(&mut config).unwrap_err();
+        assert!(error.to_string().contains("REI_channels"));
+        assert!(!format!("{error:#}").contains("private-unknown-backend"));
+    }
 
     struct EnvVarGuard(&'static str);
     impl EnvVarGuard {

@@ -4619,7 +4619,7 @@ mod tests {
     #[test]
     fn stamp_session_keeps_the_name_of_a_new_session() {
         let dir = tempfile::tempdir().unwrap();
-        let backend = reiclaw_infra::make_session_backend(dir.path(), "sqlite").unwrap();
+        let backend = reiclaw_infra::make_session_backend(dir.path()).unwrap();
         let reported = stamp_session(backend.as_ref(), "gw_new1", "default", Some("Foo"));
         assert_eq!(reported.as_deref(), Some("Foo"));
         assert_eq!(

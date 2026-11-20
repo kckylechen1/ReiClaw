@@ -2,7 +2,6 @@
 
 use super::traits::{Memory, MemoryCategory, MemoryEntry};
 use anyhow::Result;
-use async_trait::async_trait;
 use std::sync::Arc;
 
 pub struct MarkdownPeer {
@@ -63,40 +62,35 @@ impl AgentScopedMarkdownMemory {
     }
 }
 
-#[async_trait]
-impl Memory for AgentScopedMarkdownMemory {
+crate::forwarding::forward_memory! {
+    [impl Memory for AgentScopedMarkdownMemory]
+    own {
+        async fn health_check(&self) -> bool;
+        async fn store(
+            &self,
+            key: &str,
+            content: &str,
+            category: MemoryCategory,
+            session_id: Option<&str>,
+        ) -> Result<()>;
+        async fn store_with_metadata(
+            &self,
+            key: &str,
+            content: &str,
+            category: MemoryCategory,
+            session_id: Option<&str>,
+            namespace: Option<&str>,
+            importance: Option<f64>,
+        ) -> Result<()>;
+        async fn forget(&self, key: &str) -> Result<bool>;
+        async fn forget_for_agent(&self, key: &str, agent_id: &str) -> Result<bool>;
+        async fn count(&self) -> Result<usize>;
+    }
+
     fn name(&self) -> &str {
         // Identical to MarkdownMemory's name so dashboards and log
         // grep keep working.
         self.own.name()
-    }
-
-    async fn health_check(&self) -> bool {
-        self.own.health_check().await
-    }
-
-    async fn store(
-        &self,
-        key: &str,
-        content: &str,
-        category: MemoryCategory,
-        session_id: Option<&str>,
-    ) -> Result<()> {
-        self.own.store(key, content, category, session_id).await
-    }
-
-    async fn store_with_metadata(
-        &self,
-        key: &str,
-        content: &str,
-        category: MemoryCategory,
-        session_id: Option<&str>,
-        namespace: Option<&str>,
-        importance: Option<f64>,
-    ) -> Result<()> {
-        self.own
-            .store_with_metadata(key, content, category, session_id, namespace, importance)
-            .await
     }
 
     async fn store_with_agent(
@@ -224,17 +218,6 @@ impl Memory for AgentScopedMarkdownMemory {
         Ok(Self::stamp_attribution(&self.own_alias, entries))
     }
 
-    async fn forget(&self, key: &str) -> Result<bool> {
-        self.own.forget(key).await
-    }
-
-    async fn forget_for_agent(&self, key: &str, agent_id: &str) -> Result<bool> {
-        self.own.forget_for_agent(key, agent_id).await
-    }
-
-    async fn count(&self) -> Result<usize> {
-        self.own.count().await
-    }
 }
 
 impl ::reiclaw_api::attribution::Attributable for AgentScopedMarkdownMemory {

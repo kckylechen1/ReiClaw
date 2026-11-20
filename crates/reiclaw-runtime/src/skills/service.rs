@@ -29,8 +29,6 @@ pub struct SkillSummary {
 pub enum SkillOrigin {
     /// `<install>/agents/<alias>/workspace/skills/`.
     Workspace,
-    /// The open-skills repo (tagged `open-skills`).
-    OpenSkills,
     /// A configured `[skill_bundles.<alias>]`; holds the bundle alias.
     Bundle(String),
 }
@@ -213,13 +211,9 @@ impl<'a> SkillsService<'a> {
     }
 
     /// Attribute a resolved skill to its [`SkillOrigin`], mirroring the
-    /// resolver's own discriminators so dashboard provenance can't drift: the
-    /// `open-skills` tag, then a `location` match against a configured bundle
-    /// directory; otherwise the workspace.
+    /// resolver's source directories: a configured bundle location, otherwise
+    /// the workspace. Manifest tags never change source ownership.
     fn derive_origin(skill: &super::Skill, bundles: &[BundleSummary]) -> SkillOrigin {
-        if skill.tags.iter().any(|t| t == "open-skills") {
-            return SkillOrigin::OpenSkills;
-        }
         if let Some(loc) = &skill.location {
             for b in bundles {
                 if loc.starts_with(&b.directory) {
@@ -262,7 +256,6 @@ impl<'a> SkillsService<'a> {
         }
         self.ensure_editable(target, &dir)?;
         std::fs::write(dir.join(SKILL_MANIFEST_FILENAME), doc.serialize())?;
-        super::cache::invalidate();
         Ok(())
     }
 
@@ -275,7 +268,6 @@ impl<'a> SkillsService<'a> {
     ) -> Result<PathBuf, ServiceError> {
         let path =
             scaffold::scaffold_skill(self.config, &self.install_root, target, frontmatter, opts)?;
-        super::cache::invalidate();
         Ok(path)
     }
 
@@ -303,7 +295,6 @@ impl<'a> SkillsService<'a> {
                 std::fs::rename(&dir, archive_root.join(archive_name))?;
             }
         }
-        super::cache::invalidate();
         Ok(())
     }
 
@@ -416,7 +407,7 @@ mod tests {
         };
         assert_eq!(
             SkillsService::derive_origin(&mk("s", &["open-skills"], None), &bundles),
-            SkillOrigin::OpenSkills
+            SkillOrigin::Workspace
         );
         assert_eq!(
             SkillsService::derive_origin(
@@ -616,7 +607,6 @@ mod tests {
         )
         .unwrap();
 
-        super::super::cache::invalidate();
         let set = svc.resolve_effective_skills("default").unwrap();
         assert!(
             set.skills.iter().all(|s| s.name != "broken"),
@@ -644,7 +634,6 @@ mod tests {
         let svc = SkillsService::new(&cfg, dir.path());
 
         // (a) nothing configured → both empty.
-        super::super::cache::invalidate();
         let empty = svc.resolve_effective_skills("default").unwrap();
         assert!(empty.skills.is_empty() && empty.dropped.is_empty());
 
@@ -659,7 +648,6 @@ mod tests {
             "[skill]\nname = \"broken\"\ndescription = \"d\"\nbogus = true\n",
         )
         .unwrap();
-        super::super::cache::invalidate();
         let all_dropped = svc.resolve_effective_skills("default").unwrap();
         assert!(all_dropped.skills.is_empty());
         assert_eq!(all_dropped.dropped.len(), 1);
@@ -693,7 +681,6 @@ mod tests {
         )
         .unwrap();
 
-        super::super::cache::invalidate();
         let set = svc.resolve_effective_skills("default").unwrap();
         let foos: Vec<_> = set.skills.iter().filter(|s| s.name == "foo").collect();
         assert_eq!(foos.len(), 1, "only the winning foo is in the set");

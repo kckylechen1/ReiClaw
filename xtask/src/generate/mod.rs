@@ -37,11 +37,7 @@ fn workspace_root() -> PathBuf {
         .unwrap_or_else(|| PathBuf::from("."))
 }
 
-pub fn features(
-    selection_id: &str,
-    target: Option<&str>,
-    excluded: &[String],
-) -> anyhow::Result<()> {
+pub fn features(selection_id: &str, excluded: &[String]) -> anyhow::Result<()> {
     let selection = Sel::from_id(selection_id).ok_or_else(|| {
         anyhow::Error::msg(format!(
             "unknown selection `{selection_id}` (known: {})",
@@ -53,7 +49,7 @@ pub fn features(
         ))
     })?;
     let list = spec::exclude_features(
-        spec::resolve_feature_list_for_target(&workspace_root(), &selection, target)?,
+        spec::resolve_feature_list(&workspace_root(), &selection)?,
         excluded,
     )?;
     println!("{}", list.join(","));

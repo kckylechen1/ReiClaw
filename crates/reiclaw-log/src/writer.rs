@@ -991,6 +991,22 @@ mod tests {
         }));
     }
 
+    fn broadcast_event_by_id(
+        rx: &mut tokio::sync::broadcast::Receiver<Value>,
+        event_id: &str,
+    ) -> Value {
+        // record_event sends synchronously, but other tasks share this bus.
+        // Correlate by identity without filtering on the content under test.
+        loop {
+            let frame = rx.try_recv().unwrap_or_else(|error| {
+                panic!("broadcast event {event_id} not delivered: {error}")
+            });
+            if frame["id"].as_str() == Some(event_id) {
+                return frame;
+            }
+        }
+    }
+
     #[test]
     fn flush_without_writer_is_noop() {
         let _guard = WRITER_TEST_LOCK.lock();
@@ -1126,6 +1142,12 @@ mod tests {
         let (tx, mut rx) = tokio::sync::broadcast::channel(8);
         crate::broadcast::set_broadcast_hook(tx);
 
+        // An unrelated lifecycle event can precede ours on both shared sinks.
+        record_event(LogEvent::new(
+            Severity::Info,
+            "unrelated",
+            EventCategory::Internal,
+        ));
         let mut ev = LogEvent::new(Severity::Info, "test", EventCategory::Channel);
         ev.message = Some("qr ready".to_string());
         ev.attributes = serde_json::json!({
@@ -1134,10 +1156,11 @@ mod tests {
         ev.ephemeral_attributes = serde_json::json!({
             "login": { "qr_payload": "SECRET-QR-PAYLOAD" }
         });
+        let event_id = ev.id.clone();
         record_event(ev);
 
         // Broadcast copy: ephemeral fields deep-merged into attributes.
-        let broadcast = rx.try_recv().expect("broadcast copy delivered");
+        let broadcast = broadcast_event_by_id(&mut rx, &event_id);
         assert_eq!(
             broadcast["attributes"]["login"]["qr_payload"],
             "SECRET-QR-PAYLOAD"
@@ -1156,7 +1179,11 @@ mod tests {
             contents.contains("\"state\":\"qr\""),
             "persisted JSONL keeps the lifecycle state: {contents}"
         );
-        let line: Value = serde_json::from_str(contents.lines().next().unwrap()).unwrap();
+        let line = contents
+            .lines()
+            .map(|line| serde_json::from_str::<Value>(line).unwrap())
+            .find(|line| line["id"].as_str() == Some(event_id.as_str()))
+            .expect("persisted copy of the emitted event");
         assert!(line["attributes"]["login"].get("qr_payload").is_none());
         assert!(line.get("ephemeral_attributes").is_none());
         // The broadcast-only fail-closed marker also never reaches disk.
@@ -1177,21 +1204,31 @@ mod tests {
         let (tx, mut rx) = tokio::sync::broadcast::channel(8);
         crate::broadcast::set_broadcast_hook(tx);
 
+        record_event(LogEvent::new(
+            Severity::Info,
+            "unrelated",
+            EventCategory::Internal,
+        ));
         let mut with_secret = LogEvent::new(Severity::Info, "test", EventCategory::Channel);
         with_secret.attributes = serde_json::json!({ "login": { "state": "qr" } });
         with_secret.ephemeral_attributes =
             serde_json::json!({ "login": { "qr_payload": "SECRET-QR-PAYLOAD" } });
+        let secret_id = with_secret.id.clone();
         record_event(with_secret);
-        let framed = rx.try_recv().expect("broadcast copy delivered");
+        let framed = broadcast_event_by_id(&mut rx, &secret_id);
         assert_eq!(
             framed[EPHEMERAL_BROADCAST_MARKER], true,
             "credential-bearing frame must be marked for fail-closed delivery: {framed}"
         );
 
+        let mut unrelated = LogEvent::new(Severity::Info, "unrelated", EventCategory::Internal);
+        unrelated.ephemeral_attributes = serde_json::json!({ "other_secret": "UNRELATED" });
+        record_event(unrelated);
         let mut no_secret = LogEvent::new(Severity::Info, "test", EventCategory::Channel);
         no_secret.attributes = serde_json::json!({ "login": { "state": "connected" } });
+        let plain_id = no_secret.id.clone();
         record_event(no_secret);
-        let plain = rx.try_recv().expect("broadcast copy delivered");
+        let plain = broadcast_event_by_id(&mut rx, &plain_id);
         assert!(
             plain.get(EPHEMERAL_BROADCAST_MARKER).is_none(),
             "credential-free frame must not be marked: {plain}"

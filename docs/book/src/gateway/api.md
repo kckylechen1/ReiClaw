@@ -9,7 +9,7 @@ the live surface.
 
 | Area | Routes |
 |---|---|
-| Liveness | `GET /health`, `GET /api/health`, `GET /api/status`, `GET /metrics` |
+| Liveness | `GET /health`, `GET /api/health`, `GET /api/status` |
 | Local ops (loopback only) | `POST /admin/shutdown`, `POST /admin/reload`, `GET /admin/paircode`, `POST /admin/paircode/new` |
 | Client pairing | `POST /pair`, `GET /pair/code`, `POST /api/pairing/initiate`, `POST /api/pair`, `GET /api/devices`, `POST /api/devices/me/capabilities`, `DELETE /api/devices/{id}`, `POST /api/devices/{id}/token/rotate` |
 | Chat | `GET /ws/chat` (WebSocket), `POST /webhook` |
@@ -68,7 +68,7 @@ and authorization still apply.
 
 ### Operator credentials and migration
 
-The existing Soul, User Model, review inbox, attention, backup/data-retention,
+The existing Soul, User Model, review inbox, attention,
 and Node identity management gates can use a separate operator credential class:
 
 ```toml
@@ -445,10 +445,10 @@ the sending socket first:
 
 - `turn` is `started` for a new turn, or `steered` when the message joined
   the running one.
-- `durable` is `true` when the receipt is in the session store (the default
-  SQLite backend) and survives a restart. It is `false` with the JSONL
-  backend or with persistence off; bounded in-memory receipts survive idle
-  conversation release for 16 minutes from first acceptance, but not restart.
+- `durable` is `true` when the receipt is in the SQLite session store and
+  survives a restart. It is `false` with persistence off; bounded in-memory
+  receipts survive idle conversation release for 16 minutes from first
+  acceptance, but not restart.
 - The ACK means accepted for processing, not finished. The turn's `done`,
   `aborted` or `error` frame carries the same `id`.
 - Sending an `id` again, for example after a lost ACK, runs nothing and
@@ -1197,8 +1197,7 @@ re-renders its persona only when that revision moved, so an unchanged Soul
 keeps the system prompt byte-identical. Delegated workers never receive the
 Soul or the User Model.
 
-Model file tools (`file_write`, `file_edit`, `file_download`, `browser` and
-`screenshot` targets, `git_operations` worktree paths) cannot write `SOUL.md`,
+Model file tools (`file_write`, `file_edit`, and `screenshot` targets) cannot write `SOUL.md`,
 `IDENTITY.md`, `USER.md`, `HEARTBEAT.md`, or `BOOTSTRAP.md` at an agent
 workspace root; they share one
 write-target check (`HEARTBEAT.md` is the heartbeat engine's task list and

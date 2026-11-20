@@ -7,7 +7,6 @@
 
 pub mod cli_input;
 pub mod identity;
-pub mod migration;
 pub mod spoken;
 pub mod util;
 
@@ -34,4 +33,3 @@ pub mod service;
 pub mod skills;
 pub mod subagent_v1;
 pub mod tools;
-pub mod tunnel;

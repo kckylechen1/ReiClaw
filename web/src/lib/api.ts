@@ -669,7 +669,7 @@ export interface SkillFrontmatter {
   version?: string | null;
   category?: string | null;
   /** Free-form skill tags. The `slash` tag opts the skill into Discord slash
-   *  commands (zeroclaw-labs/zeroclaw#7490); `open-skills` is loader-managed. */
+   *  commands (zeroclaw-labs/zeroclaw#7490). */
   tags?: string[];
   /** Typed slash-command options (zeroclaw-labs/zeroclaw#8021). Only meaningful
    *  with the `slash` tag; edited by the bespoke editor in SkillsBundleEditor.
@@ -699,7 +699,7 @@ export interface SkillDocument {
 }
 
 /** Where a skill in an agent's effective set was loaded from. */
-export type AgentSkillOrigin = "workspace" | "open-skills" | "bundle";
+export type AgentSkillOrigin = "workspace" | "bundle";
 
 /**
  * A lower-precedence same-name skill that a winning skill shadowed (it did
@@ -786,7 +786,7 @@ export function listSkillsInBundle(
 
 /**
  * The agent's EFFECTIVE skill set — every skill the runtime actually loads
- * for `alias`, across workspace / open-skills / bundle origins.
+ * for `alias`, across workspace and bundle origins.
  * Unlike {@link listSkillsInBundle} (which only sees configured bundles),
  * this reflects what the agent can really use.
  */

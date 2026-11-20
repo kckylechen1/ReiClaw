@@ -35,13 +35,13 @@ parse_cargo_toml() {
   EDITION=$(awk '/^\[workspace\.package\]/{p=1;next} /^\[/{p=0} p && /^edition *=/{split($0,a,"\"");print a[2]}' "$toml")
 
   DEFAULT_FEATURES=$(feature_members "$toml" default | paste -sd, -)
+  NON_ROW_FEATURES=$(feature_members "$toml" non_row_features | tr '\n' ' ')
 
   ALL_FEATURES=$(awk '/^\[features\]/{p=1;next} /^\[/{p=0} p && /^[a-z][a-z0-9_-]* *=/{sub(/ *=.*/,"");print}' "$toml")
 }
 
-# Print the members of one feature from `[features]`, one per line. Spans
-# multi-line array literals. The single source of truth for reading the
-# feature graph out of Cargo.toml.
+# Print the string members of a named array, one per line. Feature rows and
+# the non_row_features metadata use the same multiline array representation.
 feature_members() {
   awk -v key="$2" '
     $0 ~ "^" key " *= *\\[" {p=1}
@@ -50,17 +50,15 @@ feature_members() {
   ' "$1"
 }
 
-# Aggregate/meta features and deprecated aliases: internal groupings, not
-# individual picker rows. The single source of truth for what to skip when
-# rendering rows and what to expand when resolving `default`.
-NON_ROW_FEATURES="default default-channels channels-full ci-all landlock metrics embedded-web"
+# Populated from package.metadata.reiclaw by parse_cargo_toml.
+NON_ROW_FEATURES=""
 
 is_aggregate() {
   case " $NON_ROW_FEATURES " in *" $1 "*) return 0 ;; *) return 1 ;; esac
 }
 
 # Expand `default` to the picker rows it implies: walk aggregates
-# (default-channels, etc.) until only real feature names remain. Reads the
+# until only real feature names remain. Reads the
 # graph from Cargo.toml — no hardcoded channel list.
 expand_default_features() {
   local toml="$1" queue leaf=" " f members
@@ -108,12 +106,13 @@ validate_feature() {
     die "Feature '$1' was retired and is no longer available. Run: $0 --list-features"
     ;;
   landlock)
-    warn "'landlock' is deprecated — use 'sandbox-landlock'"
-    return 0
+    die "Feature 'landlock' was retired; use 'sandbox-landlock'."
     ;;
-  metrics)
-    warn "'metrics' is deprecated — use 'observability-prometheus'"
-    return 0
+  metrics | observability-prometheus)
+    die "Feature '$1' was retired; use the structured log and event surfaces."
+    ;;
+  channel-* | default-channels | channels-full | slim-control)
+    die "Feature '$1' was retired. Use agent-runtime,gateway for the controller; install Telegram and ACP as separate bridge binaries."
     ;;
   esac
   echo "$ALL_FEATURES" | grep -qx "$1" && return 0
@@ -139,11 +138,10 @@ list_features() {
   printf "    %s\n" "$DEFAULT_FEATURES"
   echo
 
-  channels="" observability="" platform="" other=""
+  observability="" platform="" other=""
   for feat in $ALL_FEATURES; do
     case "$feat" in
-    default | ci-all | landlock | metrics) continue ;;
-    channel-*) channels="${channels:+$channels, }$feat" ;;
+    default | ci-all) continue ;;
     observability-*) observability="${observability:+$observability, }$feat" ;;
     sandbox-* | browser-* | webauthn)
       platform="${platform:+$platform, }$feat"
@@ -152,7 +150,6 @@ list_features() {
     esac
   done
 
-  [ -n "$channels" ] && printf "  %s\n    %s\n\n" "$(bold "Channels:")" "$channels"
   [ -n "$observability" ] && printf "  %s\n    %s\n\n" "$(bold "Observability:")" "$observability"
   [ -n "$platform" ] && printf "  %s\n    %s\n\n" "$(bold "Platform:")" "$platform"
   [ -n "$other" ] && printf "  %s\n    %s\n\n" "$(bold "Other:")" "$other"
@@ -160,7 +157,7 @@ list_features() {
   printf "  %s\n" "$(bold "Build profiles:")"
   printf "    %s                                        # full (default features)\n" "$0"
   printf "    %s --minimal                              # kernel only (~6.6MB)\n" "$0"
-  printf "    %s --minimal --features agent-runtime,channel-telegram\n" "$0"
+  printf "    %s --minimal --features agent-runtime,gateway\n" "$0"
   echo
 }
 
@@ -230,8 +227,8 @@ Options:
   --source             Build this fork from source (default)
   --prebuilt           Unsupported: this fork has no verified binary channel
   --preset NAME        Named feature preset: 'minimal' (kernel only, ~6.6MB) or
-                       'full' (all heavyweight extras; the legacy channel-*
-                       features are empty stubs, so no preset adds channels).
+                       'full' (all optional kernel features). Telegram and ACP
+                       run as separate bridge binaries.
                        Source builds only.
   --full               Alias for --preset full
   --minimal            Alias for --preset minimal
@@ -253,7 +250,7 @@ Examples:
   $0                                           # build this fork from source
   $0 --source                                  # always build from source
   $0 --source --minimal                        # smallest possible binary
-  $0 --source --features agent-runtime,channel-telegram  # custom feature set
+  $0 --source --features agent-runtime,gateway  # custom feature set
   $0 --source --preset full                   # all heavyweight extras (no preset adds channels)
   $0 --full                                    # same as --preset full
   $0 --skip-quickstart                            # install only, configure later
@@ -361,10 +358,9 @@ quickstart_needed() {
 
 # ── Interactive feature picker ───────────────────────────────────
 #
-# POSIX-sh number-toggle picker over the OPTIONAL feature set (channel-*,
-# observability-*, sandbox/browser flavours). Default
-# features are always on; this only surfaces the opt-in extras. The output
-# is a comma-separated list of selected features written to stdout.
+# POSIX-sh number-toggle picker over selectable kernel features. Defaults
+# start checked and can be removed. The selected features are returned in
+# the USER_FEATURES global as a comma-separated list.
 #
 # Invoked from the interactive flow when the operator runs install.sh in a
 # TTY without `--minimal`, `--preset`, or `--features`. Skipped in
@@ -373,32 +369,17 @@ interactive_feature_picker() {
   toml="$1"
   parse_cargo_toml "$toml"
 
-  # Split features into channels (channel-*) and everything else. Skip
-  # aggregate/meta features (see $NON_ROW_FEATURES) — they are internal
-  # groupings, not individual toggles. Defaults are pre-checked below.
-  channel_features=""
-  other_features=""
+  # Skip aggregate/meta features — they are internal groupings, not
+  # individual toggles. Defaults are pre-checked below.
+  entries=""
   for feat in $ALL_FEATURES; do
     if is_aggregate "$feat"; then continue; fi
-    case "$feat" in
-    channel-*)
-      channel_features="${channel_features:+$channel_features }$feat"
-      ;;
-    *)
-      other_features="${other_features:+$other_features }$feat"
-      ;;
-    esac
+    entries="${entries:+$entries }$feat"
   done
 
   # Features pre-checked from the crate's `default = [...]` list, expanded
-  # transitively so aggregate defaults like `default-channels` pre-check
-  # their leaf channel-* rows.
+  # transitively so aggregate defaults pre-check their leaf rows.
   selected_features=$(expand_default_features "$toml")
-
-  # Flat entry list, in display order: features, then channels.
-  entries=""
-  for f in $other_features; do entries="${entries:+$entries }$f"; done
-  for c in $channel_features; do entries="${entries:+$entries }$c"; done
 
   # Prompt-side output goes to stderr; the result is returned via globals.
   echo >&2
@@ -409,18 +390,8 @@ interactive_feature_picker() {
 
   while :; do
     i=1
-    last_section=""
+    printf "  %s\n" "$(bold "Features (--features):")" >&2
     for name in $entries; do
-      # Section header when the group changes.
-      case "$name" in
-      channel-*) section="Channels (--features)" ;;
-      *) section="Features (--features)" ;;
-      esac
-      if [ "$section" != "$last_section" ]; then
-        [ -n "$last_section" ] && echo >&2
-        printf "  %s\n" "$(bold "$section:")" >&2
-        last_section="$section"
-      fi
       mark=" "
       case " $selected_features " in *" $name "*) mark="✓" ;; esac
       printf "    [%2d] %s %s\n" "$i" "$mark" "$name" >&2
@@ -737,21 +708,6 @@ fi
     fi
     info "Rust $RUST_VERSION (>= $MSRV)"
   fi
-
-  # ── Preflight: 32-bit ARM ────────────────────────────────────────
-
-  case "$(uname -m)" in
-  armv7l | armv6l | armhf)
-    die "32-bit ARM detected — the default feature 'observability-prometheus'
-requires 64-bit atomics and will not compile on this architecture.
-
-Example (full agent without prometheus):
-  $0 --minimal --features agent-runtime,schema-export
-
-See all available features:
-  $0 --list-features"
-    ;;
-  esac
 
   # ── Build feature flags ──────────────────────────────────────────
   #

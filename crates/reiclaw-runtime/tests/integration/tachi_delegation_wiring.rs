@@ -279,7 +279,6 @@ fn production_tools(
         Arc::new(reiclaw_memory::NoneMemory::new("none")),
         &cfg.http_request,
         &cfg.web_fetch,
-        &cfg.agent_workspace_dir("home"),
         &cfg.agents,
         None,
         cfg,

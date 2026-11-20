@@ -4,9 +4,8 @@
 
 use crate::domain_matcher::DomainMatcher;
 use crate::schema::{
-    Config, EmbeddingRouteConfig, ExternalRegistry, ExternalRegistryKind,
-    MAX_MEMORY_RERANK_CANDIDATE_MULTIPLIER, McpConfig, McpTransport, MemoryConfig,
-    ModelProviderConfig, NevisConfig, ProxyConfig, ProxyScope, REPLY_MIN_INTERVAL_MAX_SECS,
+    Config, EmbeddingRouteConfig, MAX_MEMORY_RERANK_CANDIDATE_MULTIPLIER, McpConfig, McpTransport,
+    MemoryConfig, ModelProviderConfig, ProxyConfig, ProxyScope, REPLY_MIN_INTERVAL_MAX_SECS,
     REPLY_QUEUE_DEPTH_CEILING, SearchMode, TEMPERATURE_RANGE, TelegramConfig,
     default_fts_early_return_score, default_otp_challenge_max_attempts, default_otp_gated_actions,
     default_rerank_threshold, default_retrieval_stages, normalize_proxy_url_option,
@@ -117,7 +116,6 @@ pub(crate) const SUPPORTED_PROXY_SERVICE_KEYS: &[&str] = &[
     "tool.http_request",
     "tool.web_search",
     "memory.embeddings",
-    "tunnel.custom",
     "transcription.groq",
 ];
 
@@ -144,7 +142,6 @@ pub(crate) const SUPPORTED_PROXY_SERVICE_SELECTORS: &[&str] = &[
     "channel.*",
     "tool.*",
     "memory.*",
-    "tunnel.*",
     "transcription.*",
 ];
 
@@ -510,50 +507,6 @@ impl TelegramConfig {
             self.enabled,
             &self.bot_token,
         )
-    }
-}
-
-impl NevisConfig {
-    /// Validate that required fields are present when Nevis is enabled.
-    ///
-    /// Call at config load time to fail fast on invalid configuration rather
-    /// than deferring errors to the first authentication request.
-    pub fn validate(&self) -> Result<(), String> {
-        if !self.enabled {
-            return Ok(());
-        }
-
-        if self.instance_url.trim().is_empty() {
-            return Err("nevis.instance_url is required when Nevis IAM is enabled".into());
-        }
-
-        if self.client_id.trim().is_empty() {
-            return Err("nevis.client_id is required when Nevis IAM is enabled".into());
-        }
-
-        if self.realm.trim().is_empty() {
-            return Err("nevis.realm is required when Nevis IAM is enabled".into());
-        }
-
-        match self.token_validation.as_str() {
-            "local" | "remote" => {}
-            other => {
-                return Err(format!(
-                    "nevis.token_validation has invalid value '{other}': \
-                     expected 'local' or 'remote'"
-                ));
-            }
-        }
-
-        if self.token_validation == "local" && self.jwks_url.is_none() {
-            return Err("nevis.jwks_url is required when token_validation is 'local'".into());
-        }
-
-        if self.session_timeout_secs == 0 {
-            return Err("nevis.session_timeout_secs must be greater than 0".into());
-        }
-
-        Ok(())
     }
 }
 
@@ -1133,37 +1086,6 @@ impl Config {
             validation_bail!(InvalidFormat, "allowed_tools", "{reason}");
         }
 
-        // Tunnel — OpenVPN
-        if self.tunnel.tunnel_provider.trim() == "openvpn" {
-            let openvpn = self.tunnel.openvpn.as_ref().ok_or_else(|| {
-                ::reiclaw_log::record!(
-                    WARN,
-                    ::reiclaw_log::Event::new(
-                        crate::schema::CONFIG_SCHEMA_LOG_TARGET,
-                        ::reiclaw_log::Action::Reject
-                    )
-                    .with_outcome(::reiclaw_log::EventOutcome::Failure),
-                    "tunnel.tunnel_provider='openvpn' rejected: [tunnel.openvpn] block missing"
-                );
-                anyhow::Error::msg("tunnel.tunnel_provider='openvpn' requires [tunnel.openvpn]")
-            })?;
-
-            if openvpn.config_file.trim().is_empty() {
-                validation_bail!(
-                    RequiredFieldEmpty,
-                    "tunnel.openvpn.config_file",
-                    "tunnel.openvpn.config_file must not be empty"
-                );
-            }
-            if openvpn.connect_timeout_secs == 0 {
-                validation_bail!(
-                    InvalidNumericRange,
-                    "tunnel.openvpn.connect_timeout_secs",
-                    "tunnel.openvpn.connect_timeout_secs must be greater than 0"
-                );
-            }
-        }
-
         // Reply-pacing bounds — both `reply_min_interval_secs` and
         // `reply_queue_depth_max` walk through one entry list so adding
         // a new paced channel only requires extending `reply_pacing_entries`.
@@ -1252,13 +1174,6 @@ impl Config {
                 InvalidNumericRange,
                 "transcription.max_audio_bytes",
                 "transcription.max_audio_bytes must be greater than zero"
-            );
-        }
-        if self.channels.max_concurrent_per_channel == 0 {
-            validation_bail!(
-                InvalidNumericRange,
-                "channels.max_concurrent_per_channel",
-                "channels.max_concurrent_per_channel must be greater than 0"
             );
         }
         // Typed-memory producers are a Tachi-only slice: the enabled write
@@ -1633,91 +1548,7 @@ impl Config {
             }
         }
 
-        // Security OTP / estop
-        if self.security.otp.challenge_max_attempts == 0 {
-            validation_bail!(
-                InvalidNumericRange,
-                "security.otp.challenge_max_attempts",
-                "security.otp.challenge_max_attempts must be greater than 0"
-            );
-        }
-        if self.security.otp.token_ttl_secs == 0 {
-            validation_bail!(
-                InvalidNumericRange,
-                "security.otp.token_ttl_secs",
-                "security.otp.token_ttl_secs must be greater than 0"
-            );
-        }
-        if self.security.otp.cache_valid_secs == 0 {
-            validation_bail!(
-                InvalidNumericRange,
-                "security.otp.cache_valid_secs",
-                "security.otp.cache_valid_secs must be greater than 0"
-            );
-        }
-        if self.security.otp.cache_valid_secs < self.security.otp.token_ttl_secs {
-            anyhow::bail!(
-                "security.otp.cache_valid_secs must be greater than or equal to security.otp.token_ttl_secs"
-            );
-        }
-        if self.security.otp.challenge_max_attempts == 0 {
-            validation_bail!(
-                InvalidNumericRange,
-                "security.otp.challenge_max_attempts",
-                "security.otp.challenge_max_attempts must be greater than 0"
-            );
-        }
-        for (i, action) in self.security.otp.gated_actions.iter().enumerate() {
-            let normalized = action.trim();
-            if normalized.is_empty() {
-                validation_bail!(
-                    RequiredFieldEmpty,
-                    format!("security.otp.gated_actions[{i}]"),
-                    "security.otp.gated_actions[{i}] must not be empty"
-                );
-            }
-            if !normalized
-                .chars()
-                .all(|c| c.is_ascii_alphanumeric() || c == '_' || c == '-')
-            {
-                anyhow::bail!(
-                    "security.otp.gated_actions[{i}] contains invalid characters: {normalized}"
-                );
-            }
-            if !default_otp_gated_actions()
-                .iter()
-                .any(|known| known == normalized)
-            {
-                ::reiclaw_log::record!(
-                    WARN,
-                    ::reiclaw_log::Event::new(
-                        crate::schema::CONFIG_SCHEMA_LOG_TARGET,
-                        ::reiclaw_log::Action::Note
-                    )
-                    .with_outcome(::reiclaw_log::EventOutcome::Unknown)
-                    .with_attrs(::serde_json::json!({
-                        "action": normalized,
-                        "known_actions": default_otp_gated_actions(),
-                    })),
-                    "security.otp.gated_actions is deprecated and never enforced (ReiClaw has no \
-                     OTP action-gating); entry does not match a known action name: "
-                );
-            }
-        }
-        DomainMatcher::new(
-            &self.security.otp.gated_domains,
-            &self.security.otp.gated_domain_categories,
-        )
-        .with_context(
-            || "Invalid security.otp.gated_domains or security.otp.gated_domain_categories",
-        )?;
-        if self.security.estop.state_file.trim().is_empty() {
-            validation_bail!(
-                RequiredFieldEmpty,
-                "security.estop.state_file",
-                "security.estop.state_file must not be empty"
-            );
-        }
+        validate_estop_config(&self.security.otp, &self.security.estop)?;
         if self.hooks.enabled
             && self.hooks.builtin.webhook_audit.enabled
             && !self.hooks.builtin.webhook_audit.url.trim().is_empty()
@@ -1976,67 +1807,6 @@ impl Config {
 
         // Proxy (delegate to existing validation)
         self.proxy.validate()?;
-
-        // Skills — extra registries
-        {
-            let mut seen = std::collections::HashSet::new();
-            for (i, reg) in self.skills.extra_registries.iter().enumerate() {
-                if reg.name.trim().is_empty() {
-                    anyhow::bail!("skills.extra_registries[{i}].name must not be empty");
-                }
-                if !ExternalRegistry::is_valid_name(&reg.name) {
-                    anyhow::bail!(
-                        "skills.extra_registries[{i}].name '{}' is invalid; use only lowercase ASCII letters, numbers, '-' or '_' so it can be addressed as registry:<name>/<skill>",
-                        reg.name
-                    );
-                }
-                if !seen.insert(reg.name.as_str()) {
-                    anyhow::bail!("skills.extra_registries has duplicate name '{}'", reg.name);
-                }
-                if reg.url.trim().is_empty() {
-                    anyhow::bail!(
-                        "skills.extra_registries[{}].url must not be empty",
-                        reg.name
-                    );
-                }
-                if reg.kind != ExternalRegistryKind::Git {
-                    anyhow::bail!(
-                        "skills.extra_registries[{}].kind must be 'git' (got '{}'); other protocols are not yet supported",
-                        reg.name,
-                        reg.kind
-                    );
-                }
-                match url::Url::parse(&reg.url) {
-                    Ok(u) if matches!(u.scheme(), "http" | "https" | "file") => {}
-                    Ok(u) => anyhow::bail!(
-                        "skills.extra_registries[{}].url scheme '{}' is unsupported (use http, https, or file)",
-                        reg.name,
-                        u.scheme()
-                    ),
-                    Err(e) => anyhow::bail!(
-                        "skills.extra_registries[{}].url is not a valid URL: {e}",
-                        reg.name
-                    ),
-                }
-            }
-        }
-
-        // Pinggy tunnel region — validate allowed values (case-insensitive, auto-lowercased at runtime).
-        if let Some(ref pinggy) = self.tunnel.pinggy
-            && let Some(ref region) = pinggy.region
-        {
-            let r = region.trim().to_ascii_lowercase();
-            if !r.is_empty() && !matches!(r.as_str(), "us" | "eu" | "ap" | "br" | "au") {
-                anyhow::bail!(
-                    "tunnel.pinggy.region must be one of: us, eu, ap, br, au (or omitted for auto)"
-                );
-            }
-        }
-
-        // Nevis IAM — delegate to NevisConfig::validate() for field-level checks
-        if let Err(msg) = self.security.nevis.validate() {
-            anyhow::bail!("security.nevis: {msg}");
-        }
 
         // Per-profile validation: the context-compression summarizer provider
         // ref must resolve to a configured `[providers.models.*]` alias.
@@ -2457,4 +2227,85 @@ impl Config {
 
         Ok(())
     }
+}
+
+/// Shared validation for both the full configuration and local emergency-stop CLI.
+pub(crate) fn validate_estop_config(
+    otp: &crate::schema::OtpConfig,
+    estop: &crate::schema::EstopConfig,
+) -> Result<()> {
+    if otp.challenge_max_attempts == 0 {
+        validation_bail!(
+            InvalidNumericRange,
+            "security.otp.challenge_max_attempts",
+            "security.otp.challenge_max_attempts must be greater than 0"
+        );
+    }
+    if otp.token_ttl_secs == 0 {
+        validation_bail!(
+            InvalidNumericRange,
+            "security.otp.token_ttl_secs",
+            "security.otp.token_ttl_secs must be greater than 0"
+        );
+    }
+    if otp.cache_valid_secs == 0 {
+        validation_bail!(
+            InvalidNumericRange,
+            "security.otp.cache_valid_secs",
+            "security.otp.cache_valid_secs must be greater than 0"
+        );
+    }
+    if otp.cache_valid_secs < otp.token_ttl_secs {
+        anyhow::bail!(
+            "security.otp.cache_valid_secs must be greater than or equal to security.otp.token_ttl_secs"
+        );
+    }
+    for (i, action) in otp.gated_actions.iter().enumerate() {
+        let normalized = action.trim();
+        if normalized.is_empty() {
+            validation_bail!(
+                RequiredFieldEmpty,
+                format!("security.otp.gated_actions[{i}]"),
+                "security.otp.gated_actions[{i}] must not be empty"
+            );
+        }
+        if !normalized
+            .chars()
+            .all(|c| c.is_ascii_alphanumeric() || c == '_' || c == '-')
+        {
+            anyhow::bail!(
+                "security.otp.gated_actions[{i}] contains invalid characters: {normalized}"
+            );
+        }
+        if !default_otp_gated_actions()
+            .iter()
+            .any(|known| known == normalized)
+        {
+            ::reiclaw_log::record!(
+                WARN,
+                ::reiclaw_log::Event::new(
+                    crate::schema::CONFIG_SCHEMA_LOG_TARGET,
+                    ::reiclaw_log::Action::Note
+                )
+                .with_outcome(::reiclaw_log::EventOutcome::Unknown)
+                .with_attrs(::serde_json::json!({
+                    "action": normalized,
+                    "known_actions": default_otp_gated_actions(),
+                })),
+                "security.otp.gated_actions is deprecated and never enforced (ReiClaw has no \
+                 OTP action-gating); entry does not match a known action name: "
+            );
+        }
+    }
+    DomainMatcher::new(&otp.gated_domains, &otp.gated_domain_categories).with_context(
+        || "Invalid security.otp.gated_domains or security.otp.gated_domain_categories",
+    )?;
+    if estop.state_file.trim().is_empty() {
+        validation_bail!(
+            RequiredFieldEmpty,
+            "security.estop.state_file",
+            "security.estop.state_file must not be empty"
+        );
+    }
+    Ok(())
 }

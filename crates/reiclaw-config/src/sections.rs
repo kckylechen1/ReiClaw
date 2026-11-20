@@ -19,7 +19,7 @@ pub enum SectionShape {
     /// `<section>.<type>.<alias>` two-tier map. Picker chooses `<type>`,
     /// alias-list step chooses `<alias>`, then the schema form opens.
     TypedFamilyMap,
-    /// Single non-alias choice (memory backend, tunnel provider). Picker
+    /// Single non-alias choice (memory backend). Picker
     /// flips a top-level field, then the schema form for the chosen
     /// backend/provider renders.
     BackendPicker,
@@ -420,16 +420,6 @@ sections! {
                 prompt, channel, and target.",
     },
 
-    // Tier 9 — Exposure. Gateway public-internet exposure. Only
-    // relevant when a webhook-mode channel needs a public URL.
-    Tunnel => {
-        key:   "tunnel",
-        shape: BackendPicker,
-        group: Foundation,
-        help:  "Optional: expose your gateway over the public internet via Cloudflare \
-                or ngrok. Pick `none` to keep it localhost-only.",
-    },
-
     QuickstartState => {
         key:   "onboard_state",
         shape: DirectForm,
@@ -498,7 +488,6 @@ pub fn section_has_signal(cfg: &crate::schema::Config, section: Section) -> bool
         Section::TtsProviders
         | Section::TranscriptionProviders
         | Section::Memory
-        | Section::Tunnel
         | Section::Agents
         | Section::Skills
         | Section::SkillBundles
@@ -761,13 +750,10 @@ mod tests {
         assert_eq!(section_group_for_key("secrets"), SectionGroup::Storage);
         // Kebab spelling of a SCHEMA-grouped (non-curated) root resolves
         // through the kebab→snake fallback to the snake-keyed
-        // `nested_section_group` arm. (`web_search`/`data_retention` are
+        // `nested_section_group` arm. (`web_search`/`http_request` are
         // schema `#[group]` fields, not curated `sections!` rows.)
         assert_eq!(section_group_for_key("web-search"), SectionGroup::Tools);
-        assert_eq!(
-            section_group_for_key("data-retention"),
-            SectionGroup::Operations
-        );
+        assert_eq!(section_group_for_key("http-request"), SectionGroup::Tools);
         // Unknown keys land in the catch-all, never disappear.
         assert_eq!(section_group_for_key("not_a_section"), SectionGroup::Other);
     }
@@ -786,12 +772,7 @@ mod tests {
         // runtime, never user-edited, so intentionally ungrouped.
         const HIDDEN: &[&str] = &["schema_version"];
 
-        const UNGROUPED: &[&str] = &[
-            "escalation",
-            "file_upload",
-            "file_upload_bundle",
-            "file_download",
-        ];
+        const UNGROUPED: &[&str] = &["escalation"];
 
         let violations: Vec<&String> = roots
             .iter()

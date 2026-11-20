@@ -68,7 +68,6 @@ fn sop_run_tools_stay_retired_from_the_registry() {
         mem,
         &http,
         &reiclaw_config::schema::WebFetchConfig::default(),
-        tmp.path(),
         &HashMap::new(),
         None,
         &cfg,
@@ -128,7 +127,6 @@ async fn retired_tools_stay_absent_without_removing_human_channel_tools() {
         mem,
         &reiclaw_config::schema::HttpRequestConfig::default(),
         &reiclaw_config::schema::WebFetchConfig::default(),
-        tmp.path(),
         &HashMap::new(),
         None,
         &cfg,
@@ -178,7 +176,10 @@ fn shared_store_tools_open_data_dir_not_per_agent_workspace() {
     std::fs::create_dir_all(&data_dir).unwrap();
     std::fs::create_dir_all(&workspace_dir).unwrap();
 
-    let security = Arc::new(SecurityPolicy::default());
+    let security = Arc::new(SecurityPolicy {
+        workspace_dir: workspace_dir.clone(),
+        ..SecurityPolicy::default()
+    });
     let mem_cfg = MemoryConfig {
         backend: "markdown".into(),
         ..MemoryConfig::default()
@@ -209,7 +210,6 @@ fn shared_store_tools_open_data_dir_not_per_agent_workspace() {
         mem,
         &http,
         &web,
-        workspace_dir.as_path(), // DIFFERENT from data_dir
         &HashMap::new(),
         None,
         &root_config,
@@ -358,7 +358,6 @@ fn minimal_composition_cuts_registry_to_membership() {
         mem,
         &http,
         &reiclaw_config::schema::WebFetchConfig::default(),
-        tmp.path(),
         &HashMap::new(),
         None,
         &cfg,
@@ -431,7 +430,6 @@ fn absent_composition_keeps_full_assembly() {
         mem,
         &http,
         &reiclaw_config::schema::WebFetchConfig::default(),
-        tmp.path(),
         &HashMap::new(),
         None,
         &cfg,
@@ -598,7 +596,6 @@ fn delegate_stays_absent_from_every_registry() {
             mem.clone(),
             &http,
             &reiclaw_config::schema::WebFetchConfig::default(),
-            tmp.path(),
             &agents,
             Some("delegate-test-credential"),
             &cfg,
@@ -722,7 +719,6 @@ fn registry_keeps_root_advisor_and_bridge_snapshot_separate_from_runtime_config(
             memory,
             &reiclaw_config::schema::HttpRequestConfig::default(),
             &reiclaw_config::schema::WebFetchConfig::default(),
-            tmp.path(),
             &HashMap::new(),
             None,
             &root_config,
@@ -810,7 +806,6 @@ async fn registry_rebuild_carries_spawn_lineage_and_cannot_reset_depth() {
         mem,
         &reiclaw_config::schema::HttpRequestConfig::default(),
         &reiclaw_config::schema::WebFetchConfig::default(),
-        tmp.path(),
         &cfg.agents,
         None,
         &lineage_registry_config(),
@@ -895,7 +890,6 @@ fn all_tools_includes_read_skill_in_compact_mode() {
         mem,
         &http,
         &reiclaw_config::schema::WebFetchConfig::default(),
-        tmp.path(),
         &HashMap::new(),
         None,
         &cfg,
@@ -929,7 +923,6 @@ fn all_tools_excludes_read_skill_in_full_mode() {
         mem,
         &http,
         &reiclaw_config::schema::WebFetchConfig::default(),
-        tmp.path(),
         &HashMap::new(),
         None,
         &cfg,
@@ -971,8 +964,6 @@ fn retired_operator_tools_absent_from_every_assembly_path() {
         cfg.composition = composition;
         if enable_retired_sections {
             cfg.security_ops.enabled = true;
-            cfg.backup.enabled = true;
-            cfg.data_retention.enabled = true;
         }
         let result = all_tools(
             Arc::new(cfg.clone()),
@@ -982,7 +973,6 @@ fn retired_operator_tools_absent_from_every_assembly_path() {
             mem,
             &reiclaw_config::schema::HttpRequestConfig::default(),
             &reiclaw_config::schema::WebFetchConfig::default(),
-            tmp.path(),
             &HashMap::new(),
             None,
             &cfg,
@@ -1061,7 +1051,6 @@ fn all_tools_registers_read_skill_for_compact_agent_override_over_global_full() 
         mem,
         &http,
         &reiclaw_config::schema::WebFetchConfig::default(),
-        tmp.path(),
         &HashMap::new(),
         None,
         &cfg,
@@ -1114,7 +1103,6 @@ fn all_tools_omits_read_skill_for_full_agent_override_over_global_compact() {
         mem,
         &http,
         &reiclaw_config::schema::WebFetchConfig::default(),
-        tmp.path(),
         &HashMap::new(),
         None,
         &cfg,
@@ -1154,7 +1142,6 @@ fn vi_verify_is_not_registered_even_when_verifiable_intent_is_enabled() {
         mem,
         &reiclaw_config::schema::HttpRequestConfig::default(),
         &reiclaw_config::schema::WebFetchConfig::default(),
-        tmp.path(),
         &HashMap::new(),
         None,
         &cfg,
@@ -1312,7 +1299,6 @@ async fn tone_proposals_resolve_defaults_in_fixed_and_live_registries() {
             mem,
             &Default::default(),
             &Default::default(),
-            tmp.path(),
             &cfg.agents,
             None,
             &cfg,

@@ -2,8 +2,9 @@
 
 The `memory-core` feature uses the shared Portable Kernel for two
 ReiClaw-owned databases. It is enabled by default on the root `reiclaw`
-crate (and stays optional on `reiclaw-memory`, so `--no-default-features` and
-`slim-control` builds remain free of AGPL dependencies). The backend name
+crate and stays optional on `reiclaw-memory`. Root builds using
+`--no-default-features --features agent-runtime,gateway` exclude this AGPL
+dependency; enabling those features without disabling defaults retains it. The backend name
 `memorycore`, the crate feature `reiclaw-memory/memorycore`, configuration keys and
 existing database locations are described below.
 
@@ -35,3 +36,10 @@ converts a leftover `brain.db`. A refused legacy or foreign kernel store is not
 upgraded in place. Restore a store written by a supported release or start a
 fresh one; do not change schema versions, role stamps or sidecars to bypass
 admission.
+
+## Retired OpenClaw importer
+
+The `rei migrate openclaw` command is retired. ReiClaw no longer imports an
+OpenClaw workspace through this CLI. Source workspaces and existing memory
+stores remain on disk. The `rei memory` commands continue to manage supported
+current stores, including listing, inspection, deletion and reindexing.

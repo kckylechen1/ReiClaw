@@ -2,7 +2,7 @@
 
 ZeroClaw has exactly one logging surface: the `zeroclaw_log::record!` macro. Every emission in the workspace, agent loop activity, channel I/O, cron runs, tool calls, memory ops, session lifecycle, errors, flows through it. The macro fires a `tracing` event that the installed subscriber feeds to two sibling layers: the stderr fmt layer (terminal output) and the `LogCaptureLayer`. The fmt layer prints colored, alias-prefixed lines on stderr (muted unless `--verbose`). The `LogCaptureLayer` materializes a structured `LogEvent` and fans it out, via `writer::record_event`, to:
 
-1. The Observer bridge (`observer_bridge::forward`) for Prometheus typed metrics.
+1. The Observer bridge (`observer_bridge::forward`) for typed runtime events.
 2. The process-wide broadcast channel so the dashboard's SSE stream sees every event live.
 3. The persisted JSONL log at `<workspace>/state/runtime-trace.jsonl` (when `[observability] log_persistence` is `"rolling"`, `"full"`, or `"rotating"`).
 
@@ -60,7 +60,7 @@ pub enum Role {
     Channel(ChannelKind),       // Telegram, Webhook, ACP, ...
     Tool(ToolKind),             // Shell, HttpRequest, FetchUrl, ...
     Cron(CronKind),             // Interval, At, Cron, Once
-    Provider(ProviderKind),     // Model, Tts, Transcription, Tunnel
+    Provider(ProviderKind),     // Model, Tts, Transcription
     Memory(MemoryKind),         // Sqlite, Json, InMemory, Markdown, Qdrant, ...
     PeerGroup,
     Skill,
@@ -71,7 +71,7 @@ pub enum Role {
 }
 ```
 
-`ChannelKind`, `ToolKind`, `CronKind`, `MemoryKind`, and the four `ProviderKind` sub-enums (`ModelProviderKind`, `TtsProviderKind`, `TranscriptionProviderKind`, `TunnelProviderKind`) are all closed. The variant's snake_case form via `strum::IntoStaticStr` is the canonical `<type>` portion of the `<type>.<alias>` composite. Adding a new implementation: extend the relevant `Kind` enum, that's it.
+`ChannelKind`, `ToolKind`, `CronKind`, `MemoryKind`, and the three `ProviderKind` sub-enums (`ModelProviderKind`, `TtsProviderKind`, `TranscriptionProviderKind`) are all closed. The variant's snake_case form via `strum::IntoStaticStr` is the canonical `<type>` portion of the `<type>.<alias>` composite. Adding a new implementation: extend the relevant `Kind` enum, that's it.
 
 ### Opening a span, do this at every entry point
 
@@ -185,7 +185,7 @@ The layer in `crates/zeroclaw-log/src/layer.rs` is a `tracing-subscriber` Layer 
 1. On span creation/record with target `"zeroclaw_log_internal_attribution"` (the target the `attribution_span!` macro opens with): parses the role + alias fields into a `ZeroclawAttribution` snapshot stored on the span's extensions.
 2. On span creation/record with target `"zeroclaw_log_internal_scope"` (`scope!`-opened): parses ad-hoc kvps and stashes them similarly.
 3. On event emission with target `"zeroclaw_log_event"` (the target the `record!` macro fires through): builds a `LogEvent` from the `zc_*` field set, walks the span scope leaf→root merging every attribution snapshot it finds, parses the `zc_attrs` JSON blob into the event `attributes`, attaches `_file`/`_line` from auto-captured source location, and hands the final event to `writer::record_event`, which fans out in this order:
-   - Observer bridge (`observer_bridge.rs`) for Prometheus typed metrics (unconditional).
+   - Observer bridge (`observer_bridge.rs`) for typed runtime events (unconditional).
    - Broadcast hook (`broadcast.rs`) for SSE/dashboard subscribers (unconditional).
    - JSONL persistence (`writer.rs`), appended last and only when `log_persistence` is enabled.
 
@@ -242,7 +242,7 @@ Two independent axes: the **recording floor** (what reaches `LogCaptureLayer`, r
 - **New channel impl**: add a variant to `ChannelKind`. The snake_case form is the on-disk `channel_type` string. Add `#[strum(serialize = "...")]` only when the variant name doesn't snake-case to the desired value (e.g. `OpenAi` → `"openai"`).
 - **New tool impl** (workspace built-in): add to `ToolKind`.
 - **New cron schedule shape**: add to `CronKind`.
-- **New model / TTS / transcription / tunnel provider**: add to the relevant `*ProviderKind` sub-enum under `ProviderKind`.
+- **New model / TTS / transcription provider**: add to the relevant `*ProviderKind` sub-enum under `ProviderKind`.
 - **New memory backend**: add to `MemoryKind`.
 - **New `Role` family altogether** (PeerGroup / Skill / Mcp gain sub-types): nest with its own `Kind` on the fly: the pattern is uniform.
 

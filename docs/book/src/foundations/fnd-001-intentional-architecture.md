@@ -135,7 +135,7 @@ This diagnosis should not obscure what is genuinely well-designed:
 
 - **The trait layer is excellent.** `Provider`, `Channel`, `Tool`, `Memory`, `Observer`, `RuntimeAdapter`, and `Peripheral` are clean, well-documented Rust traits. These are the right seams. The problem is they do not correspond to crate boundaries, so the compiler cannot enforce the layering.
 - **The WASM plugin system is partially built.** `PluginHost`, `WasmTool`, `WasmChannel`, `PluginManifest`, and Ed25519 signature verification all exist in `src/plugins/`. The execution bridge is a stub, but the structure is correct.
-- **The observability path has clear owners.** This fork uses the `Observer` trait, optional Prometheus metrics, and `zeroclaw-log` for structured logs and event broadcast. The in-process OpenTelemetry backend has been retired; DORA telemetry had no production emitter and is not supported. See [Logs & observability](../ops/observability.md).
+- **The observability path has clear owners.** This fork uses the `Observer` trait and `zeroclaw-log` for structured logs and event broadcast. The in-process OpenTelemetry backend has been retired; DORA telemetry had no production emitter and is not supported. See [Logs & observability](../ops/observability.md).
 - **The security model is thoughtful.** Pairing codes, autonomy levels, sandboxing, and policy enforcement show real design intent.
 
 We are not rewriting ZeroClaw. We are giving its existing good ideas a structure they can grow in.
@@ -341,7 +341,7 @@ Every release target enables exactly one backend: `cranelift` where it is suppor
 
 Two flags require a deliberate team decision before the v0.8.0 release and are surfaced here rather than resolved unilaterally:
 
-- **`observability-prometheus`**: currently in `default`. Prometheus metrics add measurable binary size overhead. The question is whether a production runtime should ship observability on by default, or whether operators opt in. Recommendation: keep in `default` for the standard release; operators on severely size-constrained targets can build with `--no-default-features`.
+- The in-process Prometheus observer and its feature were retired under ADR-026. Structured logs and event broadcasts remain the operational observability surface.
 - **`observability-otel`**: OTLP export carries a larger dependency footprint (opentelemetry + reqwest blocking client). Recommendation: remains opt-in, not in `default`. Production deployments that need trace export enable it explicitly.
 
 The `ci-all` meta-feature simplifies substantially as channel and tool flags retire. By v1.0.0 it covers only the remaining platform and infrastructure flags.
@@ -358,7 +358,7 @@ The binary published to GitHub Releases for each platform target is built with t
 | 10–12 core tools (see Phase 2 D2) | Any non-core tool |
 | SQLite + Markdown memory backends | Browser automation |
 | Plugin host (`plugins-wasm`, always-on) | `observability-otel` (operator opt-in) |
-| `observability-prometheus` | `voice-wake` (libasound2 dependency) |
+| Structured logs and event broadcasts | `observability-prometheus`, `voice-wake` |
 | `skill-creation` (zero-overhead) | `probe` (niche hardware debugging) |
 | IPC server | Web assets (moved to `zeroclaw-gw`) |
 | Platform sandbox where supported | `peripheral-rpi` (separate hardware build) |
@@ -426,7 +426,7 @@ Standards are agreements that have been made by many smart people over many year
 
 **What it is:** OpenTelemetry (OTel) is the industry standard for collecting traces, metrics, and logs from software systems. It is maintained by the Cloud Native Computing Foundation and supported by every major cloud provider and monitoring tool.
 
-**Current fork status:** Runtime events use `Observer`, optional Prometheus metrics, and the `zeroclaw-log` log/broadcast path described in [Logs & observability](../ops/observability.md). The in-process OpenTelemetry backend has been retired. DORA telemetry had no production emitter and is not supported. The recommendations below are the original RFC proposal, not a description of the current implementation.
+**Current fork status:** Runtime events use `Observer` and the `zeroclaw-log` log/broadcast path described in [Logs & observability](../ops/observability.md). The in-process OpenTelemetry backend has been retired. DORA telemetry had no production emitter and is not supported. The recommendations below are the original RFC proposal, not a description of the current implementation.
 
 **What we should do:**
 - Adopt OpenTelemetry as the single observability interface for all components

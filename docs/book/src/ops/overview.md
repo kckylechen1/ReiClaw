@@ -105,29 +105,18 @@ Each component carries `status` (`starting` / `ok` / `error`), `last_ok`, `last_
 
 ### 3. Provider reliability
 
-Providers surface as components in the same `/health` snapshot. For request-level signal (latency, success rate, token counts), scrape `/metrics` (see below) and read `zeroclaw_llm_requests_total` and `zeroclaw_request_latency_seconds`.
+Providers surface as components in the same `/health` snapshot. Use the structured
+log stream for request latency, failures, and token usage. See
+[Logs & observability](./observability.md) for event fields and filtering.
 
-### 4. Tool-call volume and metrics
+### 4. Tool-call events
 
-`/metrics` returns Prometheus text exposition. It requires `[observability] backend = "prometheus"` in config; without it the endpoint returns a one-line "backend not enabled" hint.
-
-<div class="os-tabs-src">
-
-#### sh
-
-```sh
-curl -s http://localhost:42617/metrics
-```
-
-</div>
-
-```
-zeroclaw_tool_calls_total{success="true",tool="shell"} 342
-zeroclaw_tool_calls_total{success="false",tool="shell"} 6
-zeroclaw_tool_calls_total{success="true",tool="file_write"} 89
-```
-
-The `zeroclaw_tool_calls_total` counter is labelled by `tool` and `success` (`"true"`/`"false"`). A rising `success="false"` count for one tool is worth looking at: either a policy block, a misbehaving agent, or a flaky tool. Other useful series include `zeroclaw_llm_requests_total`, `zeroclaw_errors_total`, `zeroclaw_active_sessions`, and `zeroclaw_tokens_input_total` / `zeroclaw_tokens_output_total`.
+Use authenticated `/api/logs` queries and the `/api/events` stream to inspect tool
+calls and failures. The retained `log` and `verbose` observers also report runtime
+activity. The in-process Prometheus observer and `/metrics` endpoint have been
+retired under ADR-026; `observability.backend = "prometheus"` loads as `none` with
+a retirement warning. Log persistence settings remain effective independently
+of that legacy backend selection.
 
 ## Capacity
 
@@ -142,6 +131,15 @@ Scale laterally by running one instance per workspace. Don't try to run two daem
 For multi-tenant hosting, see the proposal in #2765 (closed, historical, the architecture for in-process multi-workspace routing).
 
 ## Backups
+
+ReiClaw no longer runs an in-process backup or data-retention engine. The
+`[backup]` and `[data_retention]` sections emit retirement warnings and schedule
+no work; the corresponding gateway routes are removed. Configure backup,
+retention, encryption and scheduling with your host tools for the active
+configuration and data directories, including any agent workspace paths outside
+them. The retired engine's existing archives remain on disk. Previously injected
+declarative backup jobs disappear during the normal cron reconciliation;
+explicit `[cron.<id>]` jobs and their shared scheduler remain supported.
 
 What to back up:
 

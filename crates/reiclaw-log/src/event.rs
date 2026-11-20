@@ -168,6 +168,8 @@ pub const COMPOSITE_PREFIXES: &[&str] = &[
     "model_provider",
     "tts_provider",
     "transcription_provider",
+    // Historical JSONL attribution remains queryable after tunnel retirement.
+    // No live tunnel provider type or manager is retained.
     "tunnel_provider",
 ];
 
@@ -618,6 +620,37 @@ mod tests {
         assert!(is_attribution_field("model_provider_alias"));
         assert!(is_attribution_field("agent_alias"));
         assert!(!is_attribution_field("not_a_real_field"));
+    }
+
+    #[test]
+    fn retired_tunnel_attribution_remains_readable_and_queryable() {
+        let raw = serde_json::json!({
+            "id": "historical-tunnel-event",
+            "@timestamp": "2026-11-19T12:00:00Z",
+            "severity_number": 9,
+            "severity_text": "INFO",
+            "event": {"category": "system", "action": "start", "outcome": "success"},
+            "zeroclaw": {
+                "tunnel_provider": "cloudflared.primary",
+                "tunnel_provider_type": "cloudflared",
+                "tunnel_provider_alias": "primary"
+            },
+            "schema_version": 2
+        });
+        let event: LogEvent = serde_json::from_value(raw.clone()).unwrap();
+        for key in [
+            "tunnel_provider",
+            "tunnel_provider_type",
+            "tunnel_provider_alias",
+        ] {
+            assert!(
+                is_attribution_field(key),
+                "historical log filter {key} must remain valid"
+            );
+            assert_eq!(event.zeroclaw.get(key), raw["zeroclaw"][key].as_str());
+        }
+        let encoded = serde_json::to_value(event).unwrap();
+        assert_eq!(encoded["zeroclaw"], raw["zeroclaw"]);
     }
 
     #[test]

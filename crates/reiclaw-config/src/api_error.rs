@@ -29,7 +29,7 @@ pub enum ConfigApiCode {
     ValueTypeMismatch,
     /// A required scalar field was empty / missing / blank.
     /// Path identifies which one (e.g. `gateway.host`,
-    /// `tunnel.openvpn.config_file`).
+    /// `gateway.tls.cert_path`).
     RequiredFieldEmpty,
     /// A numeric field was out of its allowed range (zero, negative, or
     /// above an upper bound). Path identifies which one.
@@ -38,7 +38,7 @@ pub enum ConfigApiCode {
     /// scheme, invalid path prefix, characters outside the allowed set.
     InvalidFormat,
     /// An enum / discriminator field carried a value not in the allowed
-    /// set (e.g. `tunnel.tunnel_provider` with an unknown name).
+    /// set (e.g. `memory.backend` with an unknown name).
     InvalidEnumVariant,
     /// A reference to another config entry pointed at something that
     /// doesn't exist (e.g. `agents.<x>.delegate_to` naming a missing agent).

@@ -23,11 +23,10 @@ jiff.workspace = true
 futures-util = { version = "0.3", default-features = false }
 glob = "0.3"
 hex = "0.4"
-infer = { version = "0.19", default-features = false }
 nanohtml2text = "0.2"
 parking_lot = "0.12"
 regex = "1.10"
-reqwest = { version = "0.12", default-features = false, features = ["json", "rustls-tls-webpki-roots-no-provider", "__rustls-ring", "multipart", "stream"] }
+reqwest = { version = "0.12", default-features = false, features = ["json", "rustls-tls-webpki-roots-no-provider", "__rustls-ring", "stream"] }
 serde = { version = "1.0", default-features = false, features = ["derive"] }
 serde_json = { version = "1.0", default-features = false, features = ["std"] }
 sha2 = "0.10"
@@ -50,9 +49,6 @@ which = "8.0"
 # constructors panic on real use and exist purely to keep
 # daemon-side tests self-contained.
 test-helpers = []
-
-[target.'cfg(unix)'.dependencies]
-rustix = { version = "1.1", default-features = false, features = ["std", "fs"] }
 
 [dev-dependencies]
 axum = { version = "0.8", default-features = false, features = ["http1", "json", "tokio"] }

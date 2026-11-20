@@ -13,17 +13,18 @@ relates-to:
   - ADR-019
   - ADR-020
   - ADR-024
-  - crates/zeroclaw-infra/src/session_sqlite.rs
+  - ADR-027
+  - crates/reiclaw-infra/src/session_sqlite.rs
   - crates/reiclaw-memory/src/memorycore.rs
-  - crates/reiclaw-memory/src/consolidation.rs
-  - crates/zeroclaw-runtime/src/agent/turn/mod.rs
-  - crates/zeroclaw-runtime/src/agent/memory_inject.rs
-  - crates/zeroclaw-runtime/src/agent/soul_reflection.rs
-  - crates/zeroclaw-tools/src/tachi_staff.rs
-  - crates/zeroclaw-tools/src/tachi_delegation.rs
-  - crates/zeroclaw-tools/src/mcp_era.rs
-  - crates/zeroclaw-tools/src/mcp_task.rs
-  - crates/zeroclaw-gateway/src/ws.rs
+  - crates/reiclaw-runtime/src/agent/turn/mod.rs
+  - crates/reiclaw-runtime/src/agent/memory_inject.rs
+  - crates/reiclaw-runtime/src/agent/soul_reflection.rs
+  - crates/reiclaw-runtime/src/agent/sleep_compactor/
+  - crates/reiclaw-tools/src/tachi_staff.rs
+  - crates/reiclaw-tools/src/tachi_delegation.rs
+  - crates/reiclaw-tools/src/mcp_era.rs
+  - crates/reiclaw-tools/src/mcp_task.rs
+  - crates/reiclaw-gateway/src/ws.rs
 ---
 
 # ADR-025: Long-Context Stack, Sleep-Time Memory Subagent, and Delegation Continuity
@@ -32,16 +33,20 @@ relates-to:
 
 Proposed and accepted by the owner on 2026-11-18. Acceptance records the architecture and its ownership boundaries; it does not by itself change runtime behavior, modify a protected contract, delete code, or reorder the `#374` execution queue. Each implementation slice below requires its own bounded issue, PR review, and validation evidence.
 
+Amended on 2026-11-20 by [ADR-027](./ADR-027-owner-workflow-closure-and-scoped-services.md): the body owns the authorized workflow through acceptance and delivery; Tachi retains delegated execution truth. Sections 5 and 8 distinguish review from execution intent, confine continuation evidence to the delegated task, and require durable admission before an automatic continuation is sent. ADR-027 also extends the scheduled sleep pass with review-gated attention feedback. These decisions do not establish that the gateway resolver, SSE listener, candidate dispatch, or feedback pass is active in production.
+
 This record resolves the open observation-storage question in [ADR-020](./ADR-020-durable-turns-replay-and-attention.md) ("Where do observations live: the existing session store, or memory with a session scope"): rolling session checkpoints and message-row watermarks belong to `sessions.db` (`SessionBackend`), while cross-session `Episode` records, durable facts, entity anchors, the pinned memory index, and daily digests belong to `memorycore.db` (`portable-kernel`).
 
-When Slices 2 and 5 land, this record amends [ADR-017](./ADR-017-personal-agent-body-edges-and-delegation.md) §8 in two bounded respects:
+The Slice 2/5 contract amends [ADR-017](./ADR-017-personal-agent-body-edges-and-delegation.md) §8 in two bounded respects:
 
-1. `TachiStaffClient` adds the `continue` and `finish` operations already defined on Tachi's `tachi_staff` facade;
-2. `tachi-server` task status notifications over Streamable HTTP SSE (`rmcp` / MCP `2026-07-28`) wake the body on `TASK_STATE_INPUT_REQUIRED` and terminal transitions, retaining bounded `status` polling as fallback and requiring canonical `status` verification before acting.
+1. `TachiStaffClient` supports the facade's `continue` and `finish` operations; those transport helpers now exist, while production continuation wiring and recovery acceptance remain under ADR-027.
+2. Admitted Streamable HTTP SSE notifications wake the body for relevant Staff transitions, with canonical `status` verification and bounded polling fallback. Verify the installed facade's actual event contract; an upstream Tasks notification, protocol-version label, or closed issue alone does not establish Staff integration.
 
-All protected boundaries in `AGENTS.md` remain unchanged: Soul and User Model authority ([ADR-014](./ADR-014-reviewed-agentsoul-projection.md), [ADR-015](./ADR-015-one-governed-soul.md), [ADR-016](./ADR-016-growth-proposed-by-agent-approved-by-owner.md), [ADR-018](./ADR-018-soul-character-model.md)), local and delegated approvals, `/ws/chat`, the Node path, and L0/L1 availability when `tachi-server` is stopped.
+All protected boundaries in `AGENTS.md` remain unchanged: Soul and User Model authority ([ADR-014](./ADR-014-reviewed-agentsoul-projection.md), [ADR-015](./ADR-015-one-governed-soul.md), [ADR-016](./ADR-016-growth-proposed-by-agent-approved-by-owner.md), [ADR-018](./ADR-018-soul-character-model.md)), local and delegated approvals, `/ws/chat`, and the Node path. Delegation availability and inference availability are separate capabilities; the staged availability contract in §1 applies.
 
 ## Context
+
+This section records the adoption baseline on 2026-11-18, including historical source paths and then-open implementation gaps. It is not a current code inventory.
 
 1. **Hard-drop trimming loses working continuity.** Current history management (`crates/zeroclaw-runtime/src/agent/turn/mod.rs` and [History management](../../agents/history-management.md)) enforces `max_history_messages = 50` and token budgets by dropping oldest whole turns and inserting a static breadcrumb. `SqliteSessionBackend` (`crates/zeroclaw-infra/src/session_sqlite.rs`) already retains append-only `sessions` rows with `message_source` provenance and `sessions_fts` FTS5 indexing, so trimmed messages survive on disk, but the active model loses the reasoning thread and has no scoped tool to inspect earlier turns or episodes.
 2. **Single-turn consolidation is fragmented and bypassed on `/ws/chat`.** `crates/reiclaw-memory/src/consolidation.rs` runs an isolated LLM call after every turn on a 4,000-character truncated snippet without coordinating with `history_trim`. It spends one model call per turn while lacking multi-turn perspective to distinguish tentative exploration from settled decisions. In addition, `crates/zeroclaw-gateway/src/ws.rs` calls `consolidation::consolidate_turn` directly rather than `DefaultMemoryStrategy`, skipping the 12-hour `memorycore_enrichment` and `light_sleep_governance` passes.
@@ -52,13 +57,15 @@ All protected boundaries in `AGENTS.md` remain unchanged: Soul and User Model au
 
 ## Decision
 
+The context-stack layers called L0/L1/L2/L3 below are prompt layers, not the execution tiers in ADR-017/027. The scheduled sleep worker has its own narrowly admitted storage/governance operations; it is not a foreground read-only L1 child. Sharing the loop implementation does not transfer sleep write tools, background lifetime, or governance authority to that child pool.
+
 ### 1. Shared `portable-kernel` primitives, separate process-owned databases
 
-Shared memory record schemas, supersession transactions, and sleep-governance operators are implemented in Tachi's `portable-kernel` Rust library so ZeroClaw and Tachi share one storage engine implementation. Runtime database files remain strictly process-owned ([ADR-017](./ADR-017-personal-agent-body-edges-and-delegation.md), [ADR-024](./ADR-024-bounded-tachi-provider-broker.md)):
+Tachi's `portable-kernel` Rust library owns reusable storage primitives, including generic record, supersession, and time-window operations. ReiClaw owns its host-specific session, Episode, and digest projections and their source/authorization context. Adopt existing kernel primitives before adding shared types or requiring a pin bump; any missing primitive needs a demonstrated consumer gap. Runtime database files remain strictly process-owned ([ADR-017](./ADR-017-personal-agent-body-edges-and-delegation.md), [ADR-024](./ADR-024-bounded-tachi-provider-broker.md)):
 
 - ZeroClaw exclusively opens and mutates `<install>/data/memory/memorycore.db` and `<install>/data/sessions/sessions.db`.
 - `tachi-server` owns its separate execution and project databases; the two daemons never open or write the same SQLite file concurrently.
-- Stopping `tachi-server` leaves L0/L1 turns, local four-layer context assembly, session checkpoints, and local memory recall/consolidation working.
+- Local context assembly, session checkpoints, and memory storage do not require Tachi's delegation service. Model-dependent L0/L1 turns and consolidation additionally require their admitted inference route: a retained direct route remains independent of delegation; after the sole-broker cutover in [ADR-024](./ADR-024-bounded-tachi-provider-broker.md) §12, broker loss returns typed `inference-unavailable`. Local state and authorized non-model operations remain available, without a hidden direct-provider fallback or replay of unknown inference outcomes.
 
 ### 2. Single source of truth across `sessions.db` and `memorycore.db`
 
@@ -92,12 +99,14 @@ Per-turn `consolidation::consolidate_turn` and `ws_consolidation_model` are repl
 Background extraction enforces three distinct authority tiers:
 
 1. **Automatic durable knowledge (`memorycore.db`):** `Episode` records, objective project/technical facts, explicit owner decisions, and entity anchors are committed automatically by the background subagent. Contradicted or outdated entries are linked via atomic `supersede_entry(old_id, new_entry)` chains rather than silently overwritten or left conflicting.
-2. **Owner-approved identity and profile (`user_model.db`, `soul.db`):** Inferred owner values, goals, preferences, habits, or constraints, and any Soul Tone/Story changes, never auto-activate. `crates/zeroclaw-runtime/src/agent/soul_reflection.rs` remains physically separate on its `user`-role-only input rule ([ADR-016](./ADR-016-growth-proposed-by-agent-approved-by-owner.md) §4) so tool or delegation text cannot steer persona or User Model proposals.
-3. **Inbox-gated action candidates:** Follow-up todos, reminders, or proposed Tachi delegations extracted from conversations or digests are recorded only as non-executing review candidates. No reminder is scheduled and no `tachi_staff(start)` runs until the owner explicitly confirms the candidate on an authenticated surface.
+2. **Owner-approved identity and profile (`user_model.db`, `soul.db`):** Inferred owner values, goals, preferences, habits, or constraints, and any Soul Tone/Story changes, never auto-activate. `crates/reiclaw-runtime/src/agent/soul_reflection.rs` remains separate and retains authenticated original-owner source checks ([ADR-016](./ADR-016-growth-proposed-by-agent-approved-by-owner.md) §4). A `user` role label alone does not establish owner authorship, and tool or delegation text cannot become an owner directive by being quoted or summarized.
+3. **Inbox-gated action candidates:** Follow-up todos, reminders, or proposed Tachi delegations extracted from conversations or digests are recorded only as non-executing review candidates. Marking a candidate approved or dismissed records a review decision; it does not schedule a reminder or start a delegated run. Execution requires a distinct authenticated execution action through the existing authorization and dispatch path, as specified in [ADR-027](./ADR-027-owner-workflow-closure-and-scoped-services.md) §4. An active owner-authorized workflow can continue within its established scope without asking again; background extraction or candidate status cannot create that authority.
 
-### 6. Daily `04:00` deep-sleep compilation and quiet Daily Digest
+### 6. Daily sleep compilation and quiet Daily Digest
 
-Once per local day at the configured natural day boundary (`04:00` local time by default, with automatic catch-up on wake from host sleep if overdue), the daemon runs a cross-session deep-sleep pass ("Auto Dream"):
+The design calls for one cross-session deep-sleep pass ("Auto Dream") per owner-local day, with `04:00` as the initial day-boundary default and catch-up after host sleep. The schedule must state its timezone, day-window identity, and fallback explicitly; a host-local clock does not establish the owner's timezone. The `04:00` label is not evidence that a deployment has a configurable cutoff, fired on time, or completed the pass. DST transitions and catch-up must reuse the same logical day window rather than duplicate a completed pass.
+
+The pass:
 
 - Reads the prior day's `Episode` stream and recent `Core` / entity records from `memorycore.db`;
 - Reconciles cross-session contradictions via `supersedes`, archives stale transient notes, and publishes the refreshed **Pinned Memory Index** (`PinnedDigest`);
@@ -109,19 +118,20 @@ Once per local day at the configured natural day boundary (`04:00` local time by
 Background memory work separates high-frequency mechanical passes from daily synthesis:
 
 - **Fast route (watermark compaction, report dehydration, idle flush, light-sleep enrichment):** Supports an optional dedicated fast or local model-provider route in configuration; falls back to the agent's configured primary model when unset.
-- **Primary flagship route (daily `04:00` deep-sleep compilation):** Defaults to the agent's primary reasoning model so cross-day contradiction detection and latent insight extraction retain full reasoning depth.
+- **Primary flagship route (scheduled daily sleep compilation):** Defaults to the agent's primary reasoning model so cross-day contradiction detection and latent insight extraction retain full reasoning depth.
 
-### 8. Delegation continuity: redacted context, `rmcp` SSE wake-up, and proxy `continue`
+### 8. Delegation continuity: redacted context, MCP SSE wake-up, and proxy `continue`
 
-ZeroClaw and Tachi close the L2 loop without breaking `TachiStaffParams` wire compatibility or weakening authority boundaries:
+ReiClaw owns the owner's goal, authorized next steps, acceptance, and delivery. Tachi owns the execution and collaboration of admitted external workers, including durable, sandboxed, and cross-host work; this division is not limited to software engineering. Existing transport and authentication limits remain in force until their replacements pass acceptance. The two systems close the L2 loop without breaking `TachiStaffParams` wire compatibility or weakening authority boundaries:
 
-1. **Outbound redacted brief:** When starting a Staff run, ZeroClaw may prepend a compact, technical `[Task Context]` derived from the current session checkpoint and admitted project memories. Raw Soul bytes, User Model records, and unrelated private conversations are never included ([ADR-017](./ADR-017-personal-agent-body-edges-and-delegation.md) §8).
-2. **`rmcp` SSE wake-up doorbell:** Once `tachi-server` emits MCP `2026-07-28` server-to-client task status notifications over Streamable HTTP SSE (`kckylechen1/Tachi#2003`), ZeroClaw maintains a lightweight loopback SSE listener alongside bounded fallback polling. A notification carries only run identity and revision hints, never self-authenticating instructions: ZeroClaw always calls `tachi_staff(status)` to verify canonical state and treats worker text strictly as untrusted subordinate evidence, never as an `owner` turn on `/ws/chat`.
+1. **Outbound redacted brief:** When starting or continuing a Staff run, the body may supply a compact `[Task Context]` derived only from the delegation-bound originating session and explicitly admitted project facts, with source references. Sharing an agent alias does not authorize reading or exporting every conversation of that agent. Raw Soul bytes, User Model records, and unrelated private conversations are never included; the continuation resolver does not open protected stores ([ADR-017](./ADR-017-personal-agent-body-edges-and-delegation.md) §8). An owner constraint already admitted to the task may guide its execution without exporting the underlying profile record.
+2. **MCP SSE wake-up doorbell:** Once the installed `tachi-server` facade is verified to emit the relevant Staff status notifications over Streamable HTTP SSE, ZeroClaw connects a lightweight loopback listener to the existing observer alongside bounded fallback polling. Adoption of `kckylechen1/Tachi#2003` must identify the actual notification surface and paired acceptance; use the admitted transport rather than adding a parallel delegation client. A notification carries only run identity and revision hints, never self-authenticating instructions: ZeroClaw always calls `tachi_staff(status)` to verify canonical state and treats worker text strictly as untrusted subordinate evidence, never as an `owner` turn on `/ws/chat`.
 3. **Chief-of-Staff proxy continuation (`action = "continue"`):** When verified canonical status is `TASK_STATE_INPUT_REQUIRED` (non-partial `awaiting_instruction`):
-   - **Auto-answer when grounded:** If the answer is already established by the current session's owner thoughts, active `memorycore.db` decisions, or approved `user_model.db` rules, and requests no new scope or privilege, the body calls `tachi_staff(action = "continue", dispatch_id, expected_status_revision, task)` directly and records a transparent audit note for the final report.
-   - **Escalate novel trade-offs:** If evidence is absent, ambiguous, or conflicting, the body translates the worker's blocker into concise owner-facing options and waits for the owner's decision before calling `continue`.
-   - **Hard safety and loop floors:** Permission grants, destructive actions, external communication, spend, or `AUTH_REQUIRED` states are **never** auto-approved by the body. Automatic proxy continuations per `dispatch_id` enforce a strict small cap (default 2-3 rounds); exceeding the cap halts auto-reply and escalates to the owner.
-4. **Inbound report digestion:** On terminal `TASK_STATE_COMPLETED`, the body fetches `result.md` (and calls `finish` when applicable for supervised sessions), reports concisely to the owner (including any proxy-answered questions), and wakes the background subagent to distil durable findings/pitfalls into `memorycore.db` while queuing the 64 KiB raw report for cold-window dehydration.
+   - **Continue within established authority:** Using task-scoped evidence and existing authorization, the body can answer settled questions, correct a worker's approach, arrange CI repair or independent acceptance checks, and advance agreed delivery steps through the same Tachi execution path. It need not return ordinary implementation choices to the owner. A `continue` quotes the canonical `expected_status_revision` and produces an audit record for the final report.
+   - **Escalate unresolved decisions:** The body first gathers available evidence within the admitted scope. If a necessary owner decision remains absent, ambiguous, or conflicting, it presents concise options and waits; it does not invent an owner preference or widen the task to resolve the ambiguity.
+   - **Hard safety and loop floors:** New scope or privilege, unresolved approval requirements, new spend or budget increases, and `AUTH_REQUIRED` states require the owner's decision. Destructive actions and external communications remain subject to their existing grants and approval policy; a technical proxy answer cannot supply a missing grant. Existing task authorization never bypasses `always_ask` or renews an expired or consumed grant. Automatic proxy continuations per `dispatch_id` have a strict bounded budget; exceeding it stops automatic replies and surfaces the blocker.
+   - **Persist before sending:** The existing `sessions.db` delegation owner atomically reserves the continuation budget and records the pending `(dispatch_id, expected_status_revision)` attempt before transmission. A failed durable claim prevents sending. A crash or uncertain response retains the consumed reservation and an unresolved outcome for reconciliation; it never silently permits replay or a new revision to bypass the cap. Only proof that no request was sent can release that reservation. Tachi's revision check remains an additional guard, not a substitute for local recovery state.
+4. **Report acceptance and digestion:** A supervised run may be closed with `finish` only at a supported `INPUT_REQUIRED` boundary, under the caller's existing authorization and with `expected_status_revision` from canonical `status`. This state distinction grants no new automatic-finish authority; approval and unknown-outcome constraints remain in force. After canonical status becomes terminal `TASK_STATE_COMPLETED`, the body fetches `result.md`. A worker's completion receipt is execution evidence, not proof that the owner's acceptance criteria are met. The body checks those criteria, arranges bounded correction or independent verification within existing authority when needed, and reports the actual result and delivery state. Background digestion retains provenance and the distinction between execution and acceptance while extracting durable findings into `memorycore.db` and dehydrating bulky report bytes. No second worker lifecycle or execution ledger is introduced.
 
 ## Consequences
 
@@ -134,7 +144,7 @@ Positive:
 
 Negative:
 
-- Two repositories (`Tachi` `portable-kernel` / `tachi-server` and `ZeroClaw`) must coordinate Slice 2 primitives before Slices 3-5 consume them.
+- Cross-repository work is required only for a demonstrated missing primitive or notification contract. Existing kernel adoption, host DTO ownership, and paired SSE acceptance must be reconciled separately; do not make every host slice wait for an unnecessary kernel pin bump.
 - Double-buffered checkpoints, watermark tracking, and SSE wake-up handling add state transitions in `sessions.db` and `zeroclaw-runtime` that require crash, session-delete, and stale-revision tests.
 - Poorly tuned fast models could over-compress subtle reasoning if checkpoint prompts are not verified against multi-turn decision fixtures.
 
@@ -143,10 +153,10 @@ Negative:
 Each slice is one bounded issue/PR under `#374` following `AGENTS.md` replace-before-delete rules:
 
 1. **Slice 1: Architecture baseline (`ADR-025`).** Record this ADR in `docs/book` and link the follow-up slice sequence to `#374`.
-2. **Slice 2: Tachi `portable-kernel` primitives and `tachi-server` SSE task notifications.** Add typed `Episode`, `PinnedDigest`, and `DailyDigest` contracts, atomic `supersede_entry`, and day-window queries in `portable-kernel`; emit MCP `2026-07-28` SSE task status notifications from `tachi-server` (`kckylechen1/Tachi#2003`); bump the pinned `portable-kernel` revision in `reiclaw-memory`.
+2. **Slice 2: Kernel contract adoption and Tachi notification compatibility.** Map host-owned Episode/digest projections to the pinned kernel's generic records, immutable supersession, and time-window APIs. Add a primitive or bump the pin only for a proven gap. Separately verify the installed Staff notification surface and live wake-up contract; a Tasks/Staff upstream delivery does not close ReiClaw integration acceptance.
 3. **Slice 3: `sessions.db` checkpoints, four-layer context stack, asymmetric dehydration, and drill-down tools.** Add `session_checkpoints` to `SqliteSessionBackend` with cascade-on-delete; wire L0 pinned index, L1 checkpoint, cold-window report dehydration, tail-attached high-confidence recall, and scoped `session_search` / `episode_read` tools.
-4. **Slice 4: Background compaction and `04:00` deep-sleep subagent, Daily Digest UI, and `consolidate_turn` retirement.** Implement the confined sleep-time subagent with fast/flagship routing, 65% watermark snapshot-plus-delta swap, idle/startup Episode flush, `04:00` deep sleep, and Web/phone Daily Digest + candidate confirmation views; retire per-turn `consolidation.rs` and `ws_consolidation_model` once end-to-end parity tests pass.
-5. **Slice 5: `tachi_staff` `continue`/`finish`, SSE wake-up listener, and bounded proxy continuation.** Wire `continue` and `finish` in `TachiStaffClient`, attach the loopback SSE wake-up listener with canonical `status` verification, enforce proxy-answer grounding, `AUTH_REQUIRED` refusal, and per-dispatch turn caps, and route completed `result.md` reports into background Episode digestion.
+4. **Slice 4: Background compaction, scheduled daily sleep, Daily Digest UI, and `consolidate_turn` retirement.** Implement the confined sleep-time subagent with fast/flagship routing, 65% watermark snapshot-plus-delta swap, idle/startup Episode flush, the timezone-explicit daily window in §6, and Web/phone Daily Digest + candidate review views; retire per-turn `consolidation.rs` and `ws_consolidation_model` once end-to-end parity tests pass.
+5. **Slice 5: `tachi_staff` `continue`/`finish`, SSE wake-up listener, and bounded proxy continuation.** Wire `continue` and `finish` in `TachiStaffClient`, attach the loopback SSE wake-up listener with canonical `status` verification, enforce task-scoped evidence, `AUTH_REQUIRED` refusal, and durable before-send continuation admission, and route completed `result.md` reports into background Episode digestion. The remaining production activation and recovery work follows ADR-027; transport helpers and unit tests alone do not establish live acceptance.
 
 Rollback per slice: Slice 1 is docs-only (`git revert`). Slices 3-5 gate new runtime paths behind config/feature defaults until verified, retain append-only `sessions` rows so disabling checkpoints falls back to raw recent turns, and disable `[tachi]` SSE/proxy continuation cleanly back to explicit status reads.
 
@@ -157,8 +167,8 @@ This ADR is implemented when:
 1. a session exceeding 100 turns retains L0 prefix cache stability across warm turns, stages a background L1 checkpoint past the 65% watermark without blocking foreground replies, swaps atomically on a cold window, and retrieves pre-checkpoint verbatim text via `session_search` while denying cross-session/cross-agent reads;
 2. deleting a gateway session removes its `sessions`, `sessions_fts`, and `session_checkpoints` rows while leaving curated `memorycore.db` memories intact;
 3. short idle sessions flush unflushed turns into `memorycore.db` `Episode` rows and run light-sleep governance on `/ws/chat` with zero per-turn LLM calls, and legacy per-turn `consolidate_turn` is deleted with its exclusive dead code;
-4. the `04:00` deep-sleep pass (including overdue wake catch-up) supersedes contradicted facts, refreshes the `PinnedDigest`, writes a `DailyDigest` visible in the owner UI, keeps `soul_reflection` isolated on `user`-role messages, and never auto-executes extracted action candidates or mutates `user_model.db` / `soul.db` without owner approval;
-5. a delegated Tachi run entering `TASK_STATE_INPUT_REQUIRED` wakes ZeroClaw via SSE, verifies canonical `status`, auto-answers via `continue` when grounded in session/memory facts (with audit trail), escalates novel or `AUTH_REQUIRED` prompts to the owner, enforces the per-dispatch auto-continue cap, and digests terminal `result.md` into `memorycore.db` while dehydrating stale report bytes in subsequent turns.
+4. the scheduled sleep pass identifies its timezone and logical day window, catches up after host sleep without duplicating a completed window, supersedes contradicted facts, refreshes the `PinnedDigest`, and writes a `DailyDigest` visible in the owner UI; `soul_reflection` retains authenticated owner-source provenance, candidate review alone causes no execution, and protected stores never activate unreviewed changes;
+5. a delegated Tachi run entering `TASK_STATE_INPUT_REQUIRED` wakes the body through the admitted notification path, verifies canonical `status`, and continues within existing authority using task-scoped facts; tests reject unrelated same-agent sessions, new authority, and `AUTH_REQUIRED`, preserve the continuation cap and unknown outcomes across crash/write-failure boundaries, and keep worker completion distinct from body acceptance and result delivery.
 
 ## References
 
@@ -169,6 +179,7 @@ This ADR is implemented when:
 - [ADR-019: One body, many hands](./ADR-019-one-body-many-hands.md)
 - [ADR-020: Durable turns, replay classes, background work, and attention](./ADR-020-durable-turns-replay-and-attention.md)
 - [ADR-024: Bounded Tachi provider broker for inference](./ADR-024-bounded-tachi-provider-broker.md)
+- [ADR-027: Owner workflow closure and scoped services](./ADR-027-owner-workflow-closure-and-scoped-services.md)
 - [History management](../../agents/history-management.md)
 - [Memory and payload lifecycle](../memory-payload-lifecycle.md)
 - [Runtime state and persistence](../runtime-state-and-persistence.md)

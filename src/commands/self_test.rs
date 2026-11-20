@@ -212,9 +212,9 @@ fn check_tool_registry(config: &crate::config::Config) -> CheckResult {
 }
 
 fn check_channel_config(config: &crate::config::Config) -> CheckResult {
-    let channels = crate::channels::listing::compiled_channels(&config.channels);
+    let channels = crate::channels::listing::supported_channels(&config.channels);
     let configured = channels.iter().filter(|e| e.configured).count();
-    let uncompiled = crate::channels::listing::configured_uncompiled_channels(&config.channels);
+    let unsupported = crate::channels::listing::configured_unsupported_channels(&config.channels);
     let retired = crate::channels::listing::configured_retired_channels(&config.channels);
     if !retired.is_empty() {
         let names = retired
@@ -227,15 +227,15 @@ fn check_channel_config(config: &crate::config::Config) -> CheckResult {
             channel_config_retired_detail(channels.len(), configured, &names),
         );
     }
-    if !uncompiled.is_empty() {
-        let names = uncompiled
+    if !unsupported.is_empty() {
+        let names = unsupported
             .iter()
             .map(|entry| entry.name)
             .collect::<Vec<_>>()
             .join(", ");
         return CheckResult::fail(
             "channels",
-            channel_config_uncompiled_detail(channels.len(), configured, &names),
+            channel_config_unsupported_detail(channels.len(), configured, &names),
         );
     }
     CheckResult::pass(
@@ -248,30 +248,30 @@ fn check_channel_config(config: &crate::config::Config) -> CheckResult {
     )
 }
 
-fn channel_config_uncompiled_detail(
-    compiled: usize,
-    compiled_configured: usize,
+fn channel_config_unsupported_detail(
+    supported: usize,
+    supported_configured: usize,
     names: &str,
 ) -> String {
-    let compiled = compiled.to_string();
-    let configured = compiled_configured.to_string();
+    let supported = supported.to_string();
+    let configured = supported_configured.to_string();
     format!(
-        "{compiled} compiled channel types, {configured} compiled/configured; configured but not compiled: {names}. Build from source with `./install.sh --source --preset full`, `--features channels-full`, or the specific `channel-*` feature.",
-        compiled = compiled.as_str(),
+        "{supported} supported channel types, {configured} supported/configured; configured but unsupported: {names}. Enable the gateway build feature for webhook ingress. Telegram and ACP run as separate bridge binaries.",
+        supported = supported.as_str(),
         configured = configured.as_str()
     )
 }
 
 fn channel_config_retired_detail(
-    compiled: usize,
-    compiled_configured: usize,
+    supported: usize,
+    supported_configured: usize,
     names: &str,
 ) -> String {
-    let compiled = compiled.to_string();
-    let configured = compiled_configured.to_string();
+    let supported = supported.to_string();
+    let configured = supported_configured.to_string();
     format!(
-        "{compiled} channel types, {configured} configured; configured sections of retired transports (nothing runs): {names}. Remove those [channels.*] sections; live surfaces are the Telegram bridge and webhook ingress.",
-        compiled = compiled.as_str(),
+        "{supported} channel types, {configured} configured; configured sections of retired transports (nothing runs): {names}. Remove those [channels.*] sections; live surfaces are the Telegram bridge and webhook ingress.",
+        supported = supported.as_str(),
         configured = configured.as_str()
     )
 }

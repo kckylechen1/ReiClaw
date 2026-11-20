@@ -494,7 +494,7 @@ async fn prepare_messages_normalizes_tool_message_local_image_to_data_uri() {
     .unwrap();
 
     let messages = vec![ChatMessage::tool(format!(
-        "<tool_result name=\"image_gen\">\nGenerated image [IMAGE:{}]\n</tool_result>",
+        "<tool_result name=\"screenshot\">\nGenerated image [IMAGE:{}]\n</tool_result>",
         image_path.display()
     ))];
 
@@ -507,7 +507,7 @@ async fn prepare_messages_normalizes_tool_message_local_image_to_data_uri() {
     assert_eq!(prepared.messages[0].role, "tool");
 
     let (cleaned, refs) = parse_image_markers(&prepared.messages[0].content);
-    assert!(cleaned.contains("<tool_result name=\"image_gen\">"));
+    assert!(cleaned.contains("<tool_result name=\"screenshot\">"));
     assert!(cleaned.contains("Generated image"));
     assert_eq!(refs.len(), 1);
     assert!(refs[0].starts_with("data:image/png;base64,"));
@@ -782,7 +782,7 @@ async fn prepare_messages_strips_stale_prompt_tool_result_images() {
 
     let messages = vec![
         ChatMessage::user(format!(
-            "[Tool results]\n<tool_result name=\"image_gen\">Generated [IMAGE:{}]</tool_result>",
+            "[Tool results]\n<tool_result name=\"screenshot\">Generated [IMAGE:{}]</tool_result>",
             image_path.display()
         )),
         ChatMessage {

@@ -63,11 +63,13 @@ mod tests {
 
     #[test]
     fn record_compiles_minimal() {
+        let _writer_guard = crate::writer::WRITER_TEST_LOCK.lock();
         record!(INFO, Event::new(module_path!(), Action::Note), "hello");
     }
 
     #[test]
     fn record_compiles_with_attrs_and_outcome() {
+        let _writer_guard = crate::writer::WRITER_TEST_LOCK.lock();
         record!(
             WARN,
             Event::new(module_path!(), Action::Fail)
@@ -79,6 +81,7 @@ mod tests {
 
     #[test]
     fn record_compiles_with_duration() {
+        let _writer_guard = crate::writer::WRITER_TEST_LOCK.lock();
         record!(
             INFO,
             Event::new(module_path!(), Action::Complete)

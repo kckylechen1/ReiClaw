@@ -9,10 +9,11 @@ relates-to:
   - ADR-011
   - ADR-013
   - ADR-017
+  - ADR-026
+  - ADR-027
   - bridges/telegram
-  - crates/zeroclaw-gateway-client
-  - crates/zeroclaw-gateway/src/nodes.rs
-  - crates/zeroclaw-channels
+  - crates/reiclaw-gateway-client
+  - crates/reiclaw-gateway/src/nodes.rs
 ---
 
 # ADR-019: One Body, Many Hands - When to Split a Crate or Process, and How Messaging Platforms and Devices Attach
@@ -27,7 +28,9 @@ Acceptance establishes the crate, process, trait, and edge-attachment boundaries
 
 Amended on 2026-11-10 with the device evidence reported in #626 and the contract design in #630: the Node path carries intents and events, not control loops (§4); the vendor preset actions cannot supply the first body-language set (§6, §9, slices 4 and 5); the motor safety floor is still unproven and a reboot moves the robot (§6). Evidence from #626 that the reviewer has not accepted is marked as reported.
 
-This record keeps ADR-013 and ADR-017 unchanged. It writes down a rule both records already follow, so that new crates, processes, bridges, and device adapters are judged the same way. It also records how the next messaging platforms (WeChat, iMessage, Slack) attach after Telegram, and how the first physical body (the Yonbo X1 robot, #535) attaches.
+At adoption this record kept ADR-013 and ADR-017 unchanged. It writes down a rule both records already follow, so that new crates, processes, bridges, and device adapters are judged the same way. It also records how the next messaging platforms (WeChat, iMessage, Slack) attach after Telegram, and how the first physical body (the Yonbo X1 robot, #535) attaches.
+
+Amended on 2026-11-20 with [ADR-027](./ADR-027-owner-workflow-closure-and-scoped-services.md): bounded L1 communication reuses the body's shared runtime, independent peers retain their own identity and scope, and Tachi owns general external coordination and execution rather than only coding work. Sections 1, 4, and 5 clarify these relationships. No additional process, peer transport, gateway permission, or device capability is activated by this amendment.
 
 ## Context
 
@@ -60,7 +63,9 @@ account administrator, or device access to the conversation.
 
 The body is not split into further processes. Soul, User Model, memory, approvals, the agent loop, the scheduler, and the gateway stay in one process and share state directly. Co-location keeps their ownership boundaries straightforward; one source of truth remains a requirement independently of process placement. Proposals to move any of them into a separate process or service need a new ADR.
 
-This rule is about processes and authority, not code structure. Inside the body, replaceable implementations behind traits remain normal: memory backends (ADR-005), model providers, and tools (ADR-002). What configuration or an extension can never replace or override is the authority itself: Soul and User Model ownership, approvals, and safety boundaries. An extension, hook, or interceptor may refuse an action or narrow what is allowed. It may never approve an action that needs approval or widen what is allowed.
+This rule is about processes and authority, not code structure. Modules, crates, and traits follow the retained-consumer and dependency-boundary tests in ADR-026; the provider end state follows ADR-024. What configuration or an extension can never replace or override is the authority itself: Soul and User Model ownership, approvals, and safety boundaries. An extension, hook, or interceptor may refuse an action or narrow what is allowed. It may never approve an action that needs approval or widen what is allowed.
+
+ADR-027's foreground L1 children use that shared runtime with bounded read access, budgets, cancellation, and structured intermediate communication. Their parent remains the run owner. An independent peer remains a separate addressed identity under ADR-011; a peer relationship neither forces it into an L1 child nor justifies a new process or crate by itself.
 
 ### 2. Edges split only for a named reason
 
@@ -93,7 +98,9 @@ Conversation Clients enter through the gateway's existing `/ws/chat` contract. C
 
 The Node contract carries intents, their results, and device events once #630 adds them. A loop that must react faster than a turn does not run through it. Such a loop lives in the edge process next to the device link, chooses only among that edge's vetted behaviors, and holds no Soul, memory, approval authority or body tools. The body sets the intent; the edge decides the moment-to-moment behavior within it; the device enforces its own floor. The same split applies to any other edge with a fast loop, such as order execution.
 
-Tachi and other MCP services remain body-initiated MCP integrations. They do not become gateway Clients and are not required to speak a bridge protocol. Edges are language-agnostic and use the existing protocol for their role. For example, the Yonbo dialogue adapter is Python, and an iMessage bridge could be Swift.
+Tachi and other MCP services remain body-initiated MCP integrations. They do not become gateway Clients and are not required to speak a bridge protocol. Tachi provides general coordination and execution for admitted external or cross-host work, including research and operations as well as software development. The current loopback-only body connection and its grants remain in force; this broader responsibility does not authorize a new remote endpoint. Edges are language-agnostic and use the existing protocol for their role. For example, the Yonbo dialogue adapter is Python, and an iMessage bridge could be Swift.
+
+Peer communication uses an explicitly admitted transport with sender, recipient, and conversation or run scope. The identity relationship does not prescribe a CLI worker or a new delegated run. Under ADR-011 and ADR-027, message delivery, steering an existing run, and admitting new work remain separate operations; no bridge or peer message grants execution authority merely by arriving.
 
 ### 5. Talking to the owner is not acting for the owner
 
@@ -106,6 +113,8 @@ Each platform has two possible roles, implemented differently:
 | Implementation | a Client on `/ws/chat`, with channel intake and outbox only where authorized | a tool call or MCP server, behind the existing authorization and approval policy |
 
 This gives a home to the platform tools listed in #378 (`send_via`, `reaction`, `channel_room` and similar): conversation behavior moves into a bridge, and acting behavior becomes a tool or MCP integration, or is retired after caller analysis.
+
+Within an authorized L1 turn, a child may request context or report a partial finding and the parent may steer it within its existing grant. These internal messages do not send anything to the owner or other people, prompt for approval, or authorize a mutation. Independent peer messages follow their explicit communication grants; any resulting action still passes the receiving runtime's normal admission and approval policy.
 
 ### 6. Platform and device classes
 
@@ -223,6 +232,8 @@ It is implemented for an embodied device when:
 
 - [ADR-013: Channels are out-of-process gateway clients](./ADR-013-channels-as-gateway-clients.md)
 - [ADR-017: One personal agent body, edge devices, and delegation through Tachi](./ADR-017-personal-agent-body-edges-and-delegation.md)
+- [ADR-011: Configured agent identities and peer boundaries](./ADR-011-multi-agent-runtime-boundaries.md)
+- [ADR-027: Owner workflows and scoped collaboration](./ADR-027-owner-workflow-closure-and-scoped-services.md)
 - Issue #377: Durable Telegram intake, recovery and replacement acceptance
 - Issue #378: Replace legacy channel consumers, then remove `zeroclaw-channels`
 - PR #514: Safe v2 invocation and loopback info/echo host

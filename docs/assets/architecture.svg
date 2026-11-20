@@ -88,10 +88,10 @@
   <!-- Arrow: Security → Agent -->
   <line x1="295" y1="390" x2="295" y2="415" stroke="#f59e0b" stroke-width="2" marker-end="url(#arrowAmber)"/>
 
-  <!-- ═══════════ CENTER: Tunnel ═══════════ -->
+  <!-- ═══════════ CENTER: Host networking ═══════════ -->
   <rect x="405" y="80" width="180" height="200" rx="10" fill="#1c2333" stroke="#06b6d4" stroke-width="1.5" filter="url(#shadow)"/>
-  <text x="495" y="105" text-anchor="middle" fill="#67e8f9" font-size="13" font-weight="600">Agnostic Tunnel</text>
-  <text x="495" y="120" text-anchor="middle" fill="#7d8590" font-size="9">Bring Your Own</text>
+  <text x="495" y="105" text-anchor="middle" fill="#67e8f9" font-size="13" font-weight="600">Host Networking</text>
+  <text x="495" y="120" text-anchor="middle" fill="#7d8590" font-size="9">External services</text>
 
   <rect x="418" y="132" width="155" height="22" rx="5" fill="#1e293b"/>
   <text x="495" y="148" text-anchor="middle" fill="#22d3ee" font-size="10">Cloudflare</text>
@@ -102,9 +102,9 @@
   <rect x="418" y="216" width="155" height="22" rx="5" fill="#1e293b"/>
   <text x="495" y="232" text-anchor="middle" fill="#22d3ee" font-size="10">Custom (bore, frp, ssh...)</text>
 
-  <text x="495" y="265" text-anchor="middle" fill="#7d8590" font-size="9" font-style="italic">+ any Tunnel trait</text>
+  <text x="495" y="265" text-anchor="middle" fill="#7d8590" font-size="9" font-style="italic">Managed by the host</text>
 
-  <!-- Arrow: Tunnel → Agent -->
+  <!-- Arrow: Host networking → Agent -->
   <line x1="495" y1="280" x2="495" y2="415" stroke="#06b6d4" stroke-width="2" marker-end="url(#arrowCyan)"/>
 
   <!-- ═══════════ RIGHT: AI Providers ═══════════ -->
@@ -277,8 +277,8 @@
   <text x="375" y="845" text-anchor="middle" fill="#a78bfa" font-size="7">7 channels + live test</text>
 
   <rect x="450" y="815" width="130" height="38" rx="8" fill="#2d1f3d" stroke="#c084fc" stroke-width="1"/>
-  <text x="515" y="831" text-anchor="middle" fill="#e9d5ff" font-size="8" font-weight="600">4. Tunnel</text>
-  <text x="515" y="845" text-anchor="middle" fill="#a78bfa" font-size="7">5 providers or skip</text>
+  <text x="515" y="831" text-anchor="middle" fill="#e9d5ff" font-size="8" font-weight="600">4. Networking</text>
+  <text x="515" y="845" text-anchor="middle" fill="#a78bfa" font-size="7">Configure on the host</text>
 
   <rect x="590" y="815" width="130" height="38" rx="8" fill="#2d1f3d" stroke="#c084fc" stroke-width="1"/>
   <text x="655" y="831" text-anchor="middle" fill="#e9d5ff" font-size="8" font-weight="600">5. Tool Mode</text>
@@ -301,7 +301,7 @@
   <line x1="860" y1="834" x2="870" y2="834" stroke="#c084fc" stroke-width="1" marker-end="url(#arrowPurple)"/>
 
   <!-- Wizard output summary -->
-  <text x="550" y="872" text-anchor="middle" fill="#7d8590" font-size="9">Full summary: Provider, Model, Channels, Tunnel, Composio, Secrets, Gateway, Autonomy, Memory</text>
+  <text x="550" y="872" text-anchor="middle" fill="#7d8590" font-size="9">Full summary: Provider, Model, Channels, Networking, Composio, Secrets, Gateway, Autonomy, Memory</text>
 
   <!-- Ready badge -->
   <rect x="380" y="888" width="340" height="28" rx="14" fill="#166534" stroke="#4ade80" stroke-width="1"/>

@@ -165,7 +165,7 @@ mod tests {
     }
 
     #[test]
-    fn native_image_gen_path_still_promotes_through_to_provider_messages() {
+    fn native_screenshot_path_still_promotes_through_to_provider_messages() {
         // Default-allow preserved across the round trip: a real generated image
         // still becomes an `[IMAGE:...]` marker, so it routes to a vision
         // provider as before.
@@ -174,10 +174,10 @@ mod tests {
         let native = NativeToolDispatcher;
 
         let rendered =
-            native_to_provider_tool_content(&native, "image_gen", format!("saved to {path}"));
+            native_to_provider_tool_content(&native, "screenshot", format!("saved to {path}"));
         assert!(
             rendered.contains(&format!("[IMAGE:{path}]")),
-            "image_gen image must still canonicalize through the round trip"
+            "screenshot image must still canonicalize through the round trip"
         );
     }
 

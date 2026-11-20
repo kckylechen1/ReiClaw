@@ -1,66 +1,62 @@
-//! Enumerate the channel types compiled into this binary.
+//! List supported channel configuration surfaces and their actual transport owners.
 
 use reiclaw_api::config_metadata::ChannelInfo;
 use reiclaw_config::schema::ChannelsConfig;
 
-struct ChannelCompileSpec {
-    /// Display name from `ChannelsConfig::channels()`, when the channel lives
-    /// in the schema channel inventory. ACP is configured under `[acp]`, so it
-    /// participates in type readiness without appearing in `compiled_channels`.
+struct ChannelSupportSpec {
+    /// Display name from the channel configuration inventory. ACP is a separate
+    /// bridge and has no row in that inventory.
     schema_name: Option<&'static str>,
     /// Accepted config/API type keys. Include legacy underscore aliases where
     /// earlier channel references allowed them.
     type_keys: &'static [&'static str],
-    compiled: bool,
+    supported: bool,
 }
 
 // Single source of truth for both display inventory and per-config type
-// readiness. Keep this schema-backed: tests assert enabled display names exist
+// support. Keep this schema-backed: tests assert enabled display names exist
 // in the config crate's canonical channel inventory and that keys do not drift.
-const CHANNEL_COMPILE_SPECS: &[ChannelCompileSpec] = &[
-    ChannelCompileSpec {
+const CHANNEL_SUPPORT_SPECS: &[ChannelSupportSpec] = &[
+    ChannelSupportSpec {
         schema_name: Some("Telegram"),
         type_keys: &["telegram"],
-        compiled: cfg!(feature = "channel-telegram"),
+        supported: true,
     },
-    ChannelCompileSpec {
+    ChannelSupportSpec {
         schema_name: Some("Webhook"),
         type_keys: &["webhook"],
-        compiled: cfg!(feature = "channel-webhook"),
+        supported: cfg!(feature = "gateway"),
     },
-    ChannelCompileSpec {
+    ChannelSupportSpec {
         schema_name: None,
         type_keys: &["acp-server", "acp_server"],
-        compiled: cfg!(feature = "channel-acp-server"),
+        supported: true,
     },
 ];
 
-fn compiled_channel_names() -> impl Iterator<Item = &'static str> {
-    CHANNEL_COMPILE_SPECS
+fn supported_channel_names() -> impl Iterator<Item = &'static str> {
+    CHANNEL_SUPPORT_SPECS
         .iter()
-        .filter(|spec| spec.compiled)
+        .filter(|spec| spec.supported)
         .filter_map(|spec| spec.schema_name)
 }
 
-/// Channels available in this binary: compiled feature specs minus retired
-/// transports. Retired kinds (empty `channel-*` feature stubs since the
-/// runner retirement, #579/#581) must never be listed as connectable — the
-/// feature flag alone no longer proves a runner exists.
-pub fn compiled_channels(cfg: &ChannelsConfig) -> Vec<ChannelInfo> {
+/// Configuration surfaces supported by this build. Telegram and ACP run in
+/// separate bridge binaries; support here does not prove installation or health.
+pub fn supported_channels(cfg: &ChannelsConfig) -> Vec<ChannelInfo> {
     cfg.channels()
         .into_iter()
-        .filter(|info| !info.retired && compiled_channel_names().any(|name| name == info.name))
+        .filter(|info| !info.retired && supported_channel_names().any(|name| name == info.name))
         .collect()
 }
 
-/// Live channel kinds that are configured but whose feature is not enabled
-/// in this build. Retired transports are excluded — they belong to
-/// [`configured_retired_channels`], not to a rebuild hint (rebuilding with
-/// their stub feature would not bring a runner back).
-pub fn configured_uncompiled_channels(cfg: &ChannelsConfig) -> Vec<ChannelInfo> {
+/// Configured surfaces whose actual owner is absent from this build. The
+/// retained in-process webhook requires the gateway feature; external bridges
+/// are configured separately and are not controlled by empty Cargo flags.
+pub fn configured_unsupported_channels(cfg: &ChannelsConfig) -> Vec<ChannelInfo> {
     cfg.channels()
         .into_iter()
-        .filter(|info| info.configured && !info.retired && !is_channel_type_compiled(info.kind))
+        .filter(|info| info.configured && !info.retired && !is_channel_type_supported(info.kind))
         .collect()
 }
 
@@ -75,13 +71,13 @@ pub fn configured_retired_channels(cfg: &ChannelsConfig) -> Vec<ChannelInfo> {
         .collect()
 }
 
-/// Returns whether a schema channel type key is compiled into this binary.
+/// Returns whether this build supports a channel configuration type.
 /// Accepts both kebab-case keys emitted by the config schema and legacy
 /// underscore spellings used in channel references.
-pub fn is_channel_type_compiled(channel_type: &str) -> bool {
-    for spec in CHANNEL_COMPILE_SPECS {
+pub fn is_channel_type_supported(channel_type: &str) -> bool {
+    for spec in CHANNEL_SUPPORT_SPECS {
         if spec.type_keys.contains(&channel_type) {
-            return spec.compiled;
+            return spec.supported;
         }
     }
     false
@@ -89,23 +85,21 @@ pub fn is_channel_type_compiled(channel_type: &str) -> bool {
 
 #[cfg(test)]
 mod tests {
-    use super::{CHANNEL_COMPILE_SPECS, ChannelsConfig};
+    use super::{CHANNEL_SUPPORT_SPECS, ChannelsConfig};
     use super::{
-        compiled_channels, configured_retired_channels, configured_uncompiled_channels,
-        is_channel_type_compiled,
+        configured_retired_channels, configured_unsupported_channels, is_channel_type_supported,
+        supported_channels,
     };
     use std::collections::BTreeSet;
 
-    #[cfg(all(
-        feature = "channel-telegram",
-        feature = "channel-webhook",
-        feature = "channel-acp-server"
-    ))]
     #[test]
-    fn channel_type_compilation_tracks_enabled_features() {
-        assert!(is_channel_type_compiled("telegram"));
-        assert!(is_channel_type_compiled("webhook"));
-        assert!(is_channel_type_compiled("acp-server"));
+    fn channel_support_tracks_transport_owners() {
+        assert!(is_channel_type_supported("telegram"));
+        assert_eq!(
+            is_channel_type_supported("webhook"),
+            cfg!(feature = "gateway")
+        );
+        assert!(is_channel_type_supported("acp-server"));
         // Retired channel types (inbound webhook routes removed) resolve
         // as unknown, never as compiled.
         for retired in [
@@ -117,36 +111,36 @@ mod tests {
             "whatsapp-web",
             "whatsapp_web",
         ] {
-            assert!(!is_channel_type_compiled(retired), "{retired}");
+            assert!(!is_channel_type_supported(retired), "{retired}");
         }
     }
 
     #[test]
-    fn compiled_channel_names_are_schema_names() {
+    fn supported_channel_names_are_schema_names() {
         let cfg = ChannelsConfig::default();
         let schema_names: BTreeSet<_> = cfg.channels().into_iter().map(|info| info.name).collect();
 
-        for name in CHANNEL_COMPILE_SPECS
+        for name in CHANNEL_SUPPORT_SPECS
             .iter()
             .filter_map(|spec| spec.schema_name)
         {
             assert!(
                 schema_names.contains(name),
-                "compiled channel name `{name}` is missing from ChannelsConfig::channels()"
+                "supported channel name `{name}` is missing from ChannelsConfig::channels()"
             );
         }
     }
 
     #[test]
-    fn compiled_channels_match_expected_schema_names() {
+    fn supported_channels_match_expected_schema_names() {
         let cfg = ChannelsConfig::default();
-        let actual: BTreeSet<_> = compiled_channels(&cfg)
+        let actual: BTreeSet<_> = supported_channels(&cfg)
             .into_iter()
             .map(|info| info.name)
             .collect();
-        let expected: BTreeSet<_> = CHANNEL_COMPILE_SPECS
+        let expected: BTreeSet<_> = CHANNEL_SUPPORT_SPECS
             .iter()
-            .filter(|spec| spec.compiled)
+            .filter(|spec| spec.supported)
             .filter(|spec| !reiclaw_config::schema::is_retired_transport(spec.type_keys[0]))
             .filter_map(|spec| spec.schema_name)
             .collect();
@@ -155,35 +149,32 @@ mod tests {
     }
 
     #[test]
-    fn configured_uncompiled_channels_uses_schema_config_status() {
-        // Webhook is a live surface: with its feature off it is exactly
-        // "configured but not compiled" — a rebuild genuinely fixes it.
+    fn configured_unsupported_channels_uses_schema_config_status() {
+        // Webhook is owned by the gateway feature; bridge binaries do not
+        // depend on any root channel feature.
         let mut cfg = ChannelsConfig::default();
         cfg.webhook.insert(
             "default".to_string(),
             reiclaw_config::schema::WebhookConfig::default(),
         );
 
-        let names: BTreeSet<_> = configured_uncompiled_channels(&cfg)
+        let names: BTreeSet<_> = configured_unsupported_channels(&cfg)
             .into_iter()
             .map(|info| info.name)
             .collect();
 
-        assert_eq!(
-            names.contains("Webhook"),
-            !cfg!(feature = "channel-webhook")
-        );
+        assert_eq!(names.contains("Webhook"), !cfg!(feature = "gateway"));
     }
 
     #[test]
     fn schema_deleted_transports_have_no_listing_entries() {
         let cfg = ChannelsConfig::default();
 
-        let compiled: BTreeSet<_> = compiled_channels(&cfg)
+        let supported: BTreeSet<_> = supported_channels(&cfg)
             .into_iter()
             .map(|info| info.name)
             .collect();
-        let uncompiled: BTreeSet<_> = configured_uncompiled_channels(&cfg)
+        let unsupported: BTreeSet<_> = configured_unsupported_channels(&cfg)
             .into_iter()
             .map(|info| info.name)
             .collect();
@@ -221,51 +212,51 @@ mod tests {
             "Voice Duplex",
             "AMQP",
         ] {
-            assert!(!compiled.contains(removed));
-            assert!(!uncompiled.contains(removed));
+            assert!(!supported.contains(removed));
+            assert!(!unsupported.contains(removed));
             assert!(!retired.contains(removed));
         }
     }
 
     #[test]
-    fn channel_type_compilation_matches_inventory_specs() {
-        for spec in CHANNEL_COMPILE_SPECS {
+    fn channel_type_support_matches_inventory_specs() {
+        for spec in CHANNEL_SUPPORT_SPECS {
             for key in spec.type_keys {
                 assert_eq!(
-                    is_channel_type_compiled(key),
-                    spec.compiled,
-                    "channel type key `{key}` drifted from its compile spec"
+                    is_channel_type_supported(key),
+                    spec.supported,
+                    "channel type key `{key}` drifted from its support spec"
                 );
             }
         }
 
-        assert!(!is_channel_type_compiled("not-a-channel"));
+        assert!(!is_channel_type_supported("not-a-channel"));
     }
 
     #[test]
-    fn channel_compile_specs_do_not_duplicate_entries() {
+    fn channel_support_specs_do_not_duplicate_entries() {
         let mut seen_names = BTreeSet::new();
         let mut seen_keys = BTreeSet::new();
 
-        for spec in CHANNEL_COMPILE_SPECS {
+        for spec in CHANNEL_SUPPORT_SPECS {
             if let Some(name) = spec.schema_name {
                 assert!(
                     seen_names.insert(name),
-                    "compiled channel name `{name}` appears more than once"
+                    "supported channel name `{name}` appears more than once"
                 );
             }
 
             for key in spec.type_keys {
                 assert!(
                     seen_keys.insert(*key),
-                    "compiled channel type key `{key}` appears more than once"
+                    "supported channel type key `{key}` appears more than once"
                 );
             }
         }
     }
 
     #[test]
-    fn channel_compile_specs_cover_schema_channel_types() {
+    fn channel_support_specs_cover_schema_channel_types() {
         let live_types: Vec<_> = reiclaw_config::schema::Config::map_key_sections()
             .into_iter()
             .filter_map(|section| {
@@ -280,11 +271,11 @@ mod tests {
         for channel_type in live_types {
             let kebab = channel_type.replace('_', "-");
             assert!(
-                CHANNEL_COMPILE_SPECS.iter().any(|spec| spec
+                CHANNEL_SUPPORT_SPECS.iter().any(|spec| spec
                     .type_keys
                     .iter()
                     .any(|key| *key == channel_type || *key == kebab)),
-                "schema channel type `{channel_type}` is missing from CHANNEL_COMPILE_SPECS"
+                "schema channel type `{channel_type}` is missing from CHANNEL_SUPPORT_SPECS"
             );
         }
     }
