@@ -31,7 +31,6 @@ use crate::traits::{
     DailyDigest, EpisodeRecord, ExportFilter, Memory, MemoryCategory, MemoryEntry, MemoryStats,
     PinnedDigest, ProceduralMessage, RecallEntryPredicate, StoreOptions,
 };
-use async_trait::async_trait;
 use reiclaw_config::schema::MemoryPolicyConfig;
 use std::sync::Arc;
 
@@ -316,8 +315,60 @@ impl<M: Memory> ScannedMemory<M> {
     }
 }
 
-#[async_trait]
-impl<M: Memory> Memory for ScannedMemory<M> {
+crate::forwarding::forward_memory! {
+    [impl<M: Memory> Memory for ScannedMemory<M>]
+    inner {
+        async fn run_llm_enrichment(
+            &self,
+            provider: &dyn reiclaw_api::model_provider::ModelProvider,
+            model: &str,
+        ) -> anyhow::Result<usize>;
+        async fn forget(&self, key: &str) -> anyhow::Result<bool>;
+        async fn forget_for_agent(&self, key: &str, agent_id: &str) -> anyhow::Result<bool>;
+        async fn purge_namespace(&self, namespace: &str) -> anyhow::Result<usize>;
+        async fn purge_session(&self, session_id: &str) -> anyhow::Result<usize>;
+        async fn purge_session_for_agent(
+            &self,
+            session_id: &str,
+            agent_id: &str,
+        ) -> anyhow::Result<usize>;
+        async fn purge_agent(&self, agent_alias: &str) -> anyhow::Result<usize>;
+        async fn archive_and_purge_agent(
+            &self,
+            agent_alias: &str,
+            archive_path: &std::path::Path,
+        ) -> anyhow::Result<usize>;
+        async fn export_agent(&self, agent_alias: &str) -> anyhow::Result<Vec<MemoryEntry>>;
+        async fn rename_agent(&self, from: &str, to: &str) -> anyhow::Result<usize>;
+        async fn count_agent(&self, agent_alias: &str) -> anyhow::Result<usize>;
+        async fn count(&self) -> anyhow::Result<usize>;
+        async fn health_check(&self) -> bool;
+        async fn supersede(&self, superseded_ids: &[String], new_id: &str) -> anyhow::Result<()>;
+        async fn count_in_scope(
+            &self,
+            namespace: Option<&str>,
+            category: Option<&MemoryCategory>,
+        ) -> anyhow::Result<u64>;
+        async fn stats(&self) -> anyhow::Result<MemoryStats>;
+        async fn reindex(&self) -> anyhow::Result<usize>;
+        async fn export(&self, filter: &ExportFilter) -> anyhow::Result<Vec<MemoryEntry>>;
+        async fn ensure_agent_uuid(&self, agent_alias: &str) -> anyhow::Result<String>;
+        async fn read_episodes_in_window(
+            &self,
+            agent_id: &str,
+            since: Option<&str>,
+            until: Option<&str>,
+            session_id: Option<&str>,
+            limit: usize,
+        ) -> anyhow::Result<Vec<EpisodeRecord>>;
+        async fn load_pinned_digest(&self, agent_id: &str) -> anyhow::Result<Option<PinnedDigest>>;
+        async fn load_daily_digests(
+            &self,
+            agent_id: &str,
+            limit: usize,
+        ) -> anyhow::Result<Vec<DailyDigest>>;
+    }
+
     fn name(&self) -> &str {
         self.inner.name()
     }
@@ -335,14 +386,6 @@ impl<M: Memory> Memory for ScannedMemory<M> {
 
     fn run_light_sleep_governance(&self) -> anyhow::Result<()> {
         self.inner.run_light_sleep_governance()
-    }
-
-    async fn run_llm_enrichment(
-        &self,
-        provider: &dyn reiclaw_api::model_provider::ModelProvider,
-        model: &str,
-    ) -> anyhow::Result<usize> {
-        self.inner.run_llm_enrichment(provider, model).await
     }
 
     async fn store(
@@ -400,70 +443,6 @@ impl<M: Memory> Memory for ScannedMemory<M> {
         self.filter_recalled(entries)
     }
 
-    async fn forget(&self, key: &str) -> anyhow::Result<bool> {
-        self.inner.forget(key).await
-    }
-
-    async fn forget_for_agent(&self, key: &str, agent_id: &str) -> anyhow::Result<bool> {
-        self.inner.forget_for_agent(key, agent_id).await
-    }
-
-    async fn purge_namespace(&self, namespace: &str) -> anyhow::Result<usize> {
-        self.inner.purge_namespace(namespace).await
-    }
-
-    async fn purge_session(&self, session_id: &str) -> anyhow::Result<usize> {
-        self.inner.purge_session(session_id).await
-    }
-
-    async fn purge_session_for_agent(
-        &self,
-        session_id: &str,
-        agent_id: &str,
-    ) -> anyhow::Result<usize> {
-        self.inner
-            .purge_session_for_agent(session_id, agent_id)
-            .await
-    }
-
-    async fn purge_agent(&self, agent_alias: &str) -> anyhow::Result<usize> {
-        self.inner.purge_agent(agent_alias).await
-    }
-
-    async fn archive_and_purge_agent(
-        &self,
-        agent_alias: &str,
-        archive_path: &std::path::Path,
-    ) -> anyhow::Result<usize> {
-        self.inner
-            .archive_and_purge_agent(agent_alias, archive_path)
-            .await
-    }
-
-    async fn export_agent(&self, agent_alias: &str) -> anyhow::Result<Vec<MemoryEntry>> {
-        self.inner.export_agent(agent_alias).await
-    }
-
-    async fn rename_agent(&self, from: &str, to: &str) -> anyhow::Result<usize> {
-        self.inner.rename_agent(from, to).await
-    }
-
-    async fn count_agent(&self, agent_alias: &str) -> anyhow::Result<usize> {
-        self.inner.count_agent(agent_alias).await
-    }
-
-    async fn count(&self) -> anyhow::Result<usize> {
-        self.inner.count().await
-    }
-
-    async fn health_check(&self) -> bool {
-        self.inner.health_check().await
-    }
-
-    async fn supersede(&self, superseded_ids: &[String], new_id: &str) -> anyhow::Result<()> {
-        self.inner.supersede(superseded_ids, new_id).await
-    }
-
     async fn store_procedural(
         &self,
         messages: &[ProceduralMessage],
@@ -479,22 +458,6 @@ impl<M: Memory> Memory for ScannedMemory<M> {
             });
         }
         self.inner.store_procedural(&processed, session_id).await
-    }
-
-    async fn count_in_scope(
-        &self,
-        namespace: Option<&str>,
-        category: Option<&MemoryCategory>,
-    ) -> anyhow::Result<u64> {
-        self.inner.count_in_scope(namespace, category).await
-    }
-
-    async fn stats(&self) -> anyhow::Result<MemoryStats> {
-        self.inner.stats().await
-    }
-
-    async fn reindex(&self) -> anyhow::Result<usize> {
-        self.inner.reindex().await
     }
 
     async fn recall_namespaced(
@@ -517,10 +480,6 @@ impl<M: Memory> Memory for ScannedMemory<M> {
             None,
         )
         .await
-    }
-
-    async fn export(&self, filter: &ExportFilter) -> anyhow::Result<Vec<MemoryEntry>> {
-        self.inner.export(filter).await
     }
 
     async fn store_with_metadata(
@@ -613,10 +572,6 @@ impl<M: Memory> Memory for ScannedMemory<M> {
         .await
     }
 
-    async fn ensure_agent_uuid(&self, agent_alias: &str) -> anyhow::Result<String> {
-        self.inner.ensure_agent_uuid(agent_alias).await
-    }
-
     async fn recall_with_filter(
         &self,
         query: &str,
@@ -704,19 +659,6 @@ impl<M: Memory> Memory for ScannedMemory<M> {
         self.inner.commit_episode(&sanitized).await
     }
 
-    async fn read_episodes_in_window(
-        &self,
-        agent_id: &str,
-        since: Option<&str>,
-        until: Option<&str>,
-        session_id: Option<&str>,
-        limit: usize,
-    ) -> anyhow::Result<Vec<EpisodeRecord>> {
-        self.inner
-            .read_episodes_in_window(agent_id, since, until, session_id, limit)
-            .await
-    }
-
     async fn supersede_fact(
         &self,
         agent_id: &str,
@@ -742,10 +684,6 @@ impl<M: Memory> Memory for ScannedMemory<M> {
         self.inner.publish_pinned_digest(&sanitized).await
     }
 
-    async fn load_pinned_digest(&self, agent_id: &str) -> anyhow::Result<Option<PinnedDigest>> {
-        self.inner.load_pinned_digest(agent_id).await
-    }
-
     async fn publish_daily_digest(&self, digest: &DailyDigest) -> anyhow::Result<String> {
         let narrative = self.process_content(
             &digest.day_key,
@@ -757,19 +695,13 @@ impl<M: Memory> Memory for ScannedMemory<M> {
         self.inner.publish_daily_digest(&sanitized).await
     }
 
-    async fn load_daily_digests(
-        &self,
-        agent_id: &str,
-        limit: usize,
-    ) -> anyhow::Result<Vec<DailyDigest>> {
-        self.inner.load_daily_digests(agent_id, limit).await
-    }
 }
 
 #[cfg(all(test, feature = "memorycore"))]
 mod tests {
     use super::*;
     use crate::memorycore::MemoryCore;
+    use async_trait::async_trait;
     use std::sync::{Arc, Mutex};
     use tempfile::TempDir;
 

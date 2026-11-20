@@ -3,7 +3,6 @@ use super::traits::{
     ProceduralMessage, RecallEntryPredicate, StoreOptions,
 };
 use anyhow::Result;
-use async_trait::async_trait;
 use std::collections::HashSet;
 use std::sync::Arc;
 
@@ -101,18 +100,29 @@ impl AgentScopedMemory {
     }
 }
 
-#[async_trait]
-impl Memory for AgentScopedMemory {
+crate::forwarding::forward_memory! {
+    [impl Memory for AgentScopedMemory]
+    inner {
+        async fn health_check(&self) -> bool;
+        async fn run_llm_enrichment(
+            &self,
+            provider: &dyn reiclaw_api::model_provider::ModelProvider,
+            model: &str,
+        ) -> Result<usize>;
+        async fn store_procedural(
+            &self,
+            messages: &[ProceduralMessage],
+            session_id: Option<&str>,
+        ) -> Result<()>;
+        async fn ensure_agent_uuid(&self, alias: &str) -> Result<String>;
+    }
+
     fn name(&self) -> &str {
         // Kept identical to the inner backend so existing log lines
         // and dashboards keep working; the wrapper's existence is
         // visible only through the `agent_alias` tracing field bound
         // at agent-loop entry.
         self.inner.name()
-    }
-
-    async fn health_check(&self) -> bool {
-        self.inner.health_check().await
     }
 
     fn refresh_embedder(
@@ -131,14 +141,6 @@ impl Memory for AgentScopedMemory {
 
     fn run_light_sleep_governance(&self) -> Result<()> {
         self.inner.run_light_sleep_governance()
-    }
-
-    async fn run_llm_enrichment(
-        &self,
-        provider: &dyn reiclaw_api::model_provider::ModelProvider,
-        model: &str,
-    ) -> Result<usize> {
-        self.inner.run_llm_enrichment(provider, model).await
     }
 
     async fn store(
@@ -502,14 +504,6 @@ impl Memory for AgentScopedMemory {
         self.inner.reindex().await
     }
 
-    async fn store_procedural(
-        &self,
-        messages: &[ProceduralMessage],
-        session_id: Option<&str>,
-    ) -> Result<()> {
-        self.inner.store_procedural(messages, session_id).await
-    }
-
     async fn recall_namespaced(
         &self,
         namespace: &str,
@@ -666,10 +660,6 @@ impl Memory for AgentScopedMemory {
                 true
             })
             .collect())
-    }
-
-    async fn ensure_agent_uuid(&self, alias: &str) -> Result<String> {
-        self.inner.ensure_agent_uuid(alias).await
     }
 
     async fn commit_episode(&self, episode: &EpisodeRecord) -> Result<String> {

@@ -1297,8 +1297,8 @@ fn agent_config(tmp: &TempDir) -> reiclaw_config::schema::Config {
     }
 }
 
-/// The agent factory wraps the scoped handle in the retrieval decorator
-/// without introducing a handle-local cache over the shared store.
+/// The default agent factory retains the scoped handle without introducing a
+/// handle-local cache over the shared store.
 #[tokio::test]
 async fn create_memory_for_agent_keeps_cross_handle_reads_coherent() {
     let tmp = TempDir::new().unwrap();

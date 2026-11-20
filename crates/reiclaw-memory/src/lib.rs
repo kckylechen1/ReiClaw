@@ -18,6 +18,7 @@ pub mod conflict;
 pub mod decay;
 pub mod dedup;
 pub mod embeddings;
+mod forwarding;
 pub mod hygiene;
 pub mod importance;
 #[cfg(feature = "memorycore")]
@@ -651,16 +652,19 @@ pub fn create_memory_for_migration(config: &Config) -> anyhow::Result<Box<dyn Me
     )
 }
 
-/// Wrap an agent memory handle in the [`RetrievalPipeline`] decorator.
+/// Wrap an agent memory handle only when the hot cache is configured.
 ///
 /// The decorator makes one hybrid backend-recall call per query. Its only
 /// add-on is an optional in-process hot cache, enabled when `[memory]
-/// retrieval_stages` names `"cache"`. The default carries no `"cache"`, so
-/// activating the decorator does not change default per-agent recall. The
+/// retrieval_stages` names `"cache"`. The default carries no `"cache"`, so it
+/// returns the existing scoped/audited handle without another decorator. The
 /// reserved `"fts"` / `"vector"` names and `fts_early_return_score` are inert
 /// until `Memory` exposes distinct FTS and vector operations.
 fn wrap_in_retrieval_pipeline(memory: Arc<dyn Memory>, config: &MemoryConfig) -> Arc<dyn Memory> {
     let cache_enabled = config.retrieval_stages.iter().any(|stage| stage == "cache");
+    if !cache_enabled {
+        return memory;
+    }
     Arc::new(retrieval::RetrievalPipeline::new(
         memory,
         RetrievalConfig {
@@ -679,9 +683,10 @@ fn wrap_in_retrieval_pipeline(memory: Arc<dyn Memory>, config: &MemoryConfig) ->
 /// the resolved `read_memory_from` allowlist). `NoneMemory` agents
 /// pass through unwrapped.
 ///
-/// The scoped handle is then wrapped in the [`RetrievalPipeline`] decorator
-/// (outermost), so per-turn injection recall and memory tools share one
-/// `Memory` contract. `NoneMemory` agents skip the decorator.
+/// When the hot cache is configured, the scoped handle is wrapped in the
+/// [`RetrievalPipeline`] decorator (outermost). Per-turn injection recall and
+/// memory tools share one `Memory` contract with or without that cache.
+/// `NoneMemory` agents skip the decorator.
 ///
 /// Cross-backend allowlist entries are rejected at config load, so by
 /// the time we get here every entry on

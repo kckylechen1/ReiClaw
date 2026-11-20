@@ -620,18 +620,8 @@ async fn tick_agent(
         }
     }
 
-    if let Err(err) = memory.run_light_sleep_governance() {
-        ::reiclaw_log::record!(
-            WARN,
-            ::reiclaw_log::Event::new(module_path!(), ::reiclaw_log::Action::Note)
-                .with_outcome(::reiclaw_log::EventOutcome::Failure)
-                .with_attrs(::serde_json::json!({
-                    "agent": agent_alias,
-                    "error": err.to_string(),
-                })),
-            "light sleep governance failed"
-        );
-    }
+    // The memory factory above owns configured light-sleep governance and its
+    // hygiene cadence. A Dream tick must not run it again outside that window.
 
     let tz = resolve_dream_timezone(config);
     let window = due_dream_window(now, tz)?;
