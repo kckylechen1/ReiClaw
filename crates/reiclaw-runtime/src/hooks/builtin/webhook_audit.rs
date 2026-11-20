@@ -143,6 +143,70 @@ impl WebhookAuditHook {
         self.estop = estop;
         self
     }
+
+    fn spawn_delivery(&self, tool: &str, payload: Value) -> tokio::task::JoinHandle<()> {
+        let url = self.config.url.clone();
+        let tool = tool.to_string();
+        let estop = self.estop.clone();
+        let _base_client = &self.client;
+        #[cfg(test)]
+        let allow_loopback = self.allow_loopback_for_test;
+        #[cfg(not(test))]
+        let allow_loopback = false;
+
+        reiclaw_log::spawn!(async move {
+            let client = match resolve_and_pin_webhook_client(&url, allow_loopback).await {
+                Ok(client) => client,
+                Err(e) => {
+                    ::reiclaw_log::record!(
+                        ERROR,
+                        ::reiclaw_log::Event::new(module_path!(), ::reiclaw_log::Action::Reject)
+                            .with_outcome(::reiclaw_log::EventOutcome::Failure)
+                            .with_attrs(::serde_json::json!({"hook": "webhook-audit", "url": url, "error": format!("{e}")})),
+                        "webhook-audit blocked by SSRF/DNS validation"
+                    );
+                    return;
+                }
+            };
+            // The stop state can change while this task is queued or resolving DNS.
+            // Recheck after that await, immediately before the outbound request.
+            if !webhook_estop_allows_delivery(estop.as_deref(), &url, &tool) {
+                return;
+            }
+            match client.post(&url).json(&payload).send().await {
+                Ok(resp) => {
+                    if !resp.status().is_success() {
+                        ::reiclaw_log::record!(ERROR, ::reiclaw_log::Event::new(module_path!(), ::reiclaw_log::Action::Fail).with_outcome(::reiclaw_log::EventOutcome::Failure).with_attrs(::serde_json::json!({"hook": "webhook-audit", "url": url, "status": resp.status().to_string()})), "webhook endpoint returned non-success status");
+                    }
+                }
+                Err(e) => {
+                    ::reiclaw_log::record!(WARN, ::reiclaw_log::Event::new(module_path!(), ::reiclaw_log::Action::Note).with_outcome(::reiclaw_log::EventOutcome::Unknown).with_attrs(::serde_json::json!({"hook": "webhook-audit", "url": url, "error": format!("{}", e)})), "failed to POST audit payload");
+                }
+            }
+        })
+    }
+}
+
+fn webhook_estop_allows_delivery(estop: Option<&EstopHandle>, url: &str, tool: &str) -> bool {
+    let Some(estop) = estop else {
+        return true;
+    };
+    let url_host = reqwest::Url::parse(url)
+        .ok()
+        .and_then(|parsed| parsed.host_str().map(str::to_string));
+    if let Err(reason) = estop.enforce_network(url_host.as_deref()) {
+        ::reiclaw_log::record!(
+            WARN,
+            ::reiclaw_log::Event::new(module_path!(), ::reiclaw_log::Action::Reject)
+                .with_outcome(::reiclaw_log::EventOutcome::Failure)
+                .with_attrs(
+                    ::serde_json::json!({"hook": "webhook-audit", "tool": tool, "reason": reason})
+                ),
+            "webhook-audit suppressed by emergency stop"
+        );
+        return false;
+    }
+    true
 }
 
 /// Simple glob matching: `*` matches any sequence of characters.
@@ -292,20 +356,8 @@ impl HookHandler for WebhookAuditHook {
             Value::Null
         };
 
-        if let Some(ref estop) = self.estop {
-            let url_host = reqwest::Url::parse(&self.config.url)
-                .ok()
-                .and_then(|parsed| parsed.host_str().map(str::to_string));
-            if let Err(reason) = estop.enforce_network(url_host.as_deref()) {
-                ::reiclaw_log::record!(
-                    WARN,
-                    ::reiclaw_log::Event::new(module_path!(), ::reiclaw_log::Action::Reject)
-                        .with_outcome(::reiclaw_log::EventOutcome::Failure)
-                        .with_attrs(::serde_json::json!({"hook": "webhook-audit", "tool": tool, "reason": reason})),
-                    "webhook-audit suppressed by emergency stop"
-                );
-                return;
-            }
+        if !webhook_estop_allows_delivery(self.estop.as_deref(), &self.config.url, tool) {
+            return;
         }
 
         #[allow(clippy::cast_possible_truncation)]
@@ -321,39 +373,8 @@ impl HookHandler for WebhookAuditHook {
             "args": args_value,
         });
 
-        let url = self.config.url.clone();
-        let _base_client = &self.client;
-        #[cfg(test)]
-        let allow_loopback = self.allow_loopback_for_test;
-        #[cfg(not(test))]
-        let allow_loopback = false;
-
         // Fire-and-forget — never block the agent loop.
-        reiclaw_log::spawn!(async move {
-            let client = match resolve_and_pin_webhook_client(&url, allow_loopback).await {
-                Ok(client) => client,
-                Err(e) => {
-                    ::reiclaw_log::record!(
-                        ERROR,
-                        ::reiclaw_log::Event::new(module_path!(), ::reiclaw_log::Action::Reject)
-                            .with_outcome(::reiclaw_log::EventOutcome::Failure)
-                            .with_attrs(::serde_json::json!({"hook": "webhook-audit", "url": url, "error": format!("{e}")})),
-                        "webhook-audit blocked by SSRF/DNS validation"
-                    );
-                    return;
-                }
-            };
-            match client.post(&url).json(&payload).send().await {
-                Ok(resp) => {
-                    if !resp.status().is_success() {
-                        ::reiclaw_log::record!(ERROR, ::reiclaw_log::Event::new(module_path!(), ::reiclaw_log::Action::Fail).with_outcome(::reiclaw_log::EventOutcome::Failure).with_attrs(::serde_json::json!({"hook": "webhook-audit", "url": url, "status": resp.status().to_string()})), "webhook endpoint returned non-success status");
-                    }
-                }
-                Err(e) => {
-                    ::reiclaw_log::record!(WARN, ::reiclaw_log::Event::new(module_path!(), ::reiclaw_log::Action::Note).with_outcome(::reiclaw_log::EventOutcome::Unknown).with_attrs(::serde_json::json!({"hook": "webhook-audit", "url": url, "error": format!("{}", e)})), "failed to POST audit payload");
-                }
-            }
-        });
+        drop(self.spawn_delivery(tool, payload));
     }
 }
 
@@ -718,6 +739,96 @@ mod tests {
         hook.on_after_tool_call("shell", &result, Duration::from_millis(5))
             .await;
         tokio::time::sleep(Duration::from_millis(50)).await;
+    }
+
+    #[tokio::test(flavor = "current_thread")]
+    async fn webhook_audit_queued_delivery_observes_live_stop() {
+        use crate::security::estop::EstopState;
+
+        let stop_states = [
+            EstopState {
+                kill_all: true,
+                ..EstopState::default()
+            },
+            EstopState {
+                network_kill: true,
+                ..EstopState::default()
+            },
+            EstopState {
+                blocked_domains: vec!["localhost".into()],
+                ..EstopState::default()
+            },
+        ];
+        for stopped in stop_states {
+            let server = wiremock::MockServer::start().await;
+            wiremock::Mock::given(wiremock::matchers::method("POST"))
+                .respond_with(wiremock::ResponseTemplate::new(200))
+                .expect(1)
+                .mount(&server)
+                .await;
+            let dir = tempfile::tempdir().expect("state directory");
+            let state_path = dir.path().join("estop.json");
+            std::fs::write(
+                &state_path,
+                serde_json::to_vec(&EstopState::default()).expect("clear state JSON"),
+            )
+            .expect("write clear state");
+            let estop = EstopHandle::for_path(state_path.clone());
+            estop
+                .enforce_network(Some("localhost"))
+                .expect("initial state clear");
+            let hook = WebhookAuditHook {
+                config: WebhookAuditConfig {
+                    enabled: true,
+                    url: format!("http://localhost:{}/audit", server.address().port()),
+                    tool_patterns: vec!["*".into()],
+                    include_args: true,
+                    max_args_bytes: 1024,
+                },
+                client: reqwest::Client::new(),
+                pending_args: Arc::new(Mutex::new(PendingArgsStore::default())),
+                estop: Some(estop),
+                allow_loopback_for_test: true,
+            };
+
+            // Prove the real worker can resolve and deliver before the stop.
+            let allowed_payload = serde_json::json!({"event": "before-stop"});
+            tokio::time::timeout(
+                Duration::from_secs(5),
+                hook.spawn_delivery("shell", allowed_payload.clone()),
+            )
+            .await
+            .expect("allowed delivery completes")
+            .expect("allowed worker succeeds");
+            assert_eq!(server.received_requests().await.expect("requests").len(), 1);
+
+            let queued = hook.spawn_delivery(
+                "shell",
+                serde_json::json!({"event": "queued", "args": {"command": "private"}}),
+            );
+            // No await on this current-thread runtime: the worker is queued but
+            // cannot run until after the atomic state replacement below.
+            let next_path = dir.path().join("next-estop.json");
+            std::fs::write(&next_path, serde_json::to_vec(&stopped).expect("stop JSON"))
+                .expect("write stop state");
+            std::fs::rename(next_path, state_path).expect("engage live stop atomically");
+            tokio::time::timeout(Duration::from_secs(5), queued)
+                .await
+                .expect("queued delivery completes")
+                .expect("queued worker succeeds");
+
+            let received = server.received_requests().await.expect("requests");
+            assert_eq!(
+                received.len(),
+                1,
+                "queued delivery escaped stop {stopped:?}"
+            );
+            assert_eq!(
+                serde_json::from_slice::<Value>(&received[0].body).expect("audit payload"),
+                allowed_payload,
+                "only the clear-state delivery may reach the endpoint"
+            );
+        }
     }
 
     #[tokio::test]

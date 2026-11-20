@@ -1,6 +1,147 @@
 use super::*;
 
 #[tokio::test]
+async fn http_and_sse_posts_do_not_redirect_to_estop_blocked_host() {
+    use reiclaw_policy::estop::EstopState;
+    use wiremock::matchers::{any, method};
+    use wiremock::{Mock, MockServer, ResponseTemplate};
+
+    let dir = tempfile::tempdir().expect("state directory");
+    let state_path = dir.path().join("estop.json");
+    let state = EstopState {
+        blocked_domains: vec!["localhost".into()],
+        ..EstopState::default()
+    };
+    std::fs::write(&state_path, serde_json::to_vec(&state).expect("state JSON"))
+        .expect("write state");
+    let estop = EstopHandle::for_path(state_path);
+    estop
+        .enforce_network(Some("127.0.0.1"))
+        .expect("source allowed");
+    estop
+        .enforce_network(Some("localhost"))
+        .expect_err("redirect destination blocked");
+
+    for status in [307, 308] {
+        for transport_kind in [McpTransport::Http, McpTransport::Sse] {
+            let target = MockServer::start().await;
+            Mock::given(any())
+                .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({
+                    "jsonrpc": "2.0", "id": 7, "result": {"ok": true}
+                })))
+                .mount(&target)
+                .await;
+            let redirector = MockServer::start().await;
+            Mock::given(method("POST"))
+                .respond_with(ResponseTemplate::new(status).insert_header(
+                    "Location",
+                    format!("http://localhost:{}/mcp", target.address().port()),
+                ))
+                .expect(1)
+                .mount(&redirector)
+                .await;
+
+            let config = McpServerConfig {
+                name: format!("redirect-{transport_kind:?}-{status}"),
+                transport: transport_kind,
+                url: Some(redirector.uri()),
+                ..Default::default()
+            };
+            let transport = create_shared_transport_with_estop(&config, Some(estop.clone()))
+                .expect("build transport for allowed source");
+            let request = JsonRpcRequest::new(
+                7,
+                "tools/call",
+                serde_json::json!({"name": "echo", "arguments": {"value": "private"}}),
+            );
+            let lifecycle =
+                McpRequestLifecycle::uncoordinated_for_peer(0, &PeerProtocol::modern_default());
+            let error = tokio::time::timeout(
+                Duration::from_secs(5),
+                transport.send_and_recv(&request, &lifecycle),
+            )
+            .await
+            .expect("redirect response completes")
+            .expect_err("MCP POST must reject an unchecked redirect target");
+
+            assert!(
+                error.to_string().contains(&format!("HTTP {status}")),
+                "{error}"
+            );
+            assert!(
+                target
+                    .received_requests()
+                    .await
+                    .expect("target requests")
+                    .is_empty(),
+                "{} forwarded a request to the estop-blocked redirect target",
+                config.name
+            );
+            transport.close().await.expect("close transport");
+        }
+    }
+}
+
+#[tokio::test]
+async fn sse_get_does_not_redirect_to_estop_blocked_host() {
+    use reiclaw_policy::estop::EstopState;
+    use wiremock::matchers::{any, method};
+    use wiremock::{Mock, MockServer, ResponseTemplate};
+
+    let dir = tempfile::tempdir().expect("state directory");
+    let state_path = dir.path().join("estop.json");
+    let state = EstopState {
+        blocked_domains: vec!["localhost".into()],
+        ..EstopState::default()
+    };
+    std::fs::write(&state_path, serde_json::to_vec(&state).expect("state JSON"))
+        .expect("write state");
+    let estop = EstopHandle::for_path(state_path);
+
+    for status in [307, 308] {
+        let target = MockServer::start().await;
+        Mock::given(any())
+            .respond_with(ResponseTemplate::new(200))
+            .mount(&target)
+            .await;
+        let redirector = MockServer::start().await;
+        Mock::given(method("GET"))
+            .respond_with(ResponseTemplate::new(status).insert_header(
+                "Location",
+                format!("http://localhost:{}/events", target.address().port()),
+            ))
+            .expect(1)
+            .mount(&redirector)
+            .await;
+        let config = McpServerConfig {
+            name: format!("redirect-sse-get-{status}"),
+            transport: McpTransport::Sse,
+            url: Some(redirector.uri()),
+            ..Default::default()
+        };
+        let transport = SseTransport::new_with_estop(&config, Some(estop.clone()))
+            .expect("build SSE transport for allowed source");
+        let error = tokio::time::timeout(Duration::from_secs(5), transport.ensure_connected())
+            .await
+            .expect("redirect response completes")
+            .expect_err("SSE GET must reject an unchecked redirect target");
+
+        assert!(
+            error.to_string().contains(&format!("HTTP {status}")),
+            "{error}"
+        );
+        assert!(
+            target
+                .received_requests()
+                .await
+                .expect("target requests")
+                .is_empty(),
+            "SSE GET followed HTTP {status} to the estop-blocked redirect target"
+        );
+    }
+}
+
+#[tokio::test]
 async fn stdio_routes_only_exact_numeric_id_and_preserves_other_waiters() {
     let pending: PendingMap = Arc::new(ParkingMutex::new(HashMap::new()));
     let (sender, receiver) = oneshot::channel();
