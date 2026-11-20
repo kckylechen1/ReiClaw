@@ -19,7 +19,7 @@ pub enum SectionShape {
     /// `<section>.<type>.<alias>` two-tier map. Picker chooses `<type>`,
     /// alias-list step chooses `<alias>`, then the schema form opens.
     TypedFamilyMap,
-    /// Single non-alias choice (memory backend, tunnel provider). Picker
+    /// Single non-alias choice (memory backend). Picker
     /// flips a top-level field, then the schema form for the chosen
     /// backend/provider renders.
     BackendPicker,
@@ -420,16 +420,6 @@ sections! {
                 prompt, channel, and target.",
     },
 
-    // Tier 9 — Exposure. Gateway public-internet exposure. Only
-    // relevant when a webhook-mode channel needs a public URL.
-    Tunnel => {
-        key:   "tunnel",
-        shape: BackendPicker,
-        group: Foundation,
-        help:  "Optional: expose your gateway over the public internet via Cloudflare \
-                or ngrok. Pick `none` to keep it localhost-only.",
-    },
-
     QuickstartState => {
         key:   "onboard_state",
         shape: DirectForm,
@@ -498,7 +488,6 @@ pub fn section_has_signal(cfg: &crate::schema::Config, section: Section) -> bool
         Section::TtsProviders
         | Section::TranscriptionProviders
         | Section::Memory
-        | Section::Tunnel
         | Section::Agents
         | Section::Skills
         | Section::SkillBundles

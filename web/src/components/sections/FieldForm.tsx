@@ -1363,8 +1363,7 @@ const FieldForm = forwardRef<FieldFormHandle, FieldFormProps>(
 
     // When the parent's `includePath` predicate excludes every entry and the
     // user hasn't typed a filter, the section truly has nothing to configure
-    // (e.g. `[tunnel]` with `tunnel_provider = "none"` has only the
-    // discriminator field, which the parent excludes). Collapse the whole
+    // after picker-owned discriminator fields are excluded. Collapse the whole
     // form in that case so the operator doesn't see an empty "Foo settings"
     // header above a useless "No fields match." line.
     const trulyEmpty =

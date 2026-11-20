@@ -82,7 +82,7 @@ your config file (gateway.host / gateway.port).
 Examples:
   rei gateway start              # use config defaults
   rei gateway start -p 8080      # listen on port 8080
-  rei gateway start --host 0.0.0.0   # requires [gateway].allow_public_bind=true or a tunnel
+  rei gateway start --host 0.0.0.0   # acknowledge exposure with [gateway].allow_public_bind=true
   rei gateway start -p 0         # random available port")]
     Start {
         /// Port to listen on (use 0 for random available port); defaults to config gateway.port

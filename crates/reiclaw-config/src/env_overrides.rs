@@ -369,6 +369,45 @@ mod tests {
     use crate::schema::Config;
 
     #[tokio::test]
+    async fn walker_refuses_retired_tunnel_settings_and_only_warns_for_disabled_defaults() {
+        let _lock = env_test_lock().await;
+        for (name, value) in [
+            ("REI_tunnel", "{ tunnel_provider = 'ngrok' }"),
+            (
+                "REI_tunnel",
+                "{ cloudflare = { token = 'private-sentinel' } }",
+            ),
+            ("REI_tunnel__tunnel_provider", "tailscale"),
+            ("REI_tunnel__ngrok", "{ auth_token = 'private-sentinel' }"),
+            ("REI_tunnel__ngrok__auth_token", "private-sentinel"),
+            ("REI_tunnel__tailscale__funnel", "true"),
+            ("REI_tunnel__custom__start_command", "private-sentinel"),
+            ("REI_tunnel", "private-sentinel"),
+            ("REI_tunnel__tunnel_provider", "false"),
+        ] {
+            let _env = EnvVarGuard::set(name, value);
+            let error = apply_env_overrides(&mut Config::default()).unwrap_err();
+            assert!(error.is::<crate::current::RetiredSecurityConfigError>());
+            assert!(!format!("{error:#}").contains("private-sentinel"));
+        }
+        for (name, value) in [
+            ("REI_tunnel", "{}"),
+            ("REI_tunnel", "{ tunnel_provider = 'none' }"),
+            ("REI_tunnel__tunnel_provider", "none"),
+            ("REI_tunnel__cloudflare", "{}"),
+        ] {
+            let _env = EnvVarGuard::set(name, value);
+            let applied = apply_env_overrides(&mut Config::default()).unwrap();
+            assert!(applied.paths.is_empty());
+            assert_eq!(applied.tombstone_warnings.len(), 1);
+            assert_eq!(
+                applied.tombstone_warnings[0].code,
+                "in_process_tunnel_removed"
+            );
+        }
+    }
+
+    #[tokio::test]
     async fn walker_rejects_retired_security_before_warning_tombstones() {
         let _lock = env_test_lock().await;
         for (name, value) in [

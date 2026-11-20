@@ -60,7 +60,7 @@ pub enum Role {
     Channel(ChannelKind),       // Telegram, Webhook, ACP, ...
     Tool(ToolKind),             // Shell, HttpRequest, FetchUrl, ...
     Cron(CronKind),             // Interval, At, Cron, Once
-    Provider(ProviderKind),     // Model, Tts, Transcription, Tunnel
+    Provider(ProviderKind),     // Model, Tts, Transcription
     Memory(MemoryKind),         // Sqlite, Json, InMemory, Markdown, Qdrant, ...
     PeerGroup,
     Skill,
@@ -71,7 +71,7 @@ pub enum Role {
 }
 ```
 
-`ChannelKind`, `ToolKind`, `CronKind`, `MemoryKind`, and the four `ProviderKind` sub-enums (`ModelProviderKind`, `TtsProviderKind`, `TranscriptionProviderKind`, `TunnelProviderKind`) are all closed. The variant's snake_case form via `strum::IntoStaticStr` is the canonical `<type>` portion of the `<type>.<alias>` composite. Adding a new implementation: extend the relevant `Kind` enum, that's it.
+`ChannelKind`, `ToolKind`, `CronKind`, `MemoryKind`, and the three `ProviderKind` sub-enums (`ModelProviderKind`, `TtsProviderKind`, `TranscriptionProviderKind`) are all closed. The variant's snake_case form via `strum::IntoStaticStr` is the canonical `<type>` portion of the `<type>.<alias>` composite. Adding a new implementation: extend the relevant `Kind` enum, that's it.
 
 ### Opening a span, do this at every entry point
 
@@ -242,7 +242,7 @@ Two independent axes: the **recording floor** (what reaches `LogCaptureLayer`, r
 - **New channel impl**: add a variant to `ChannelKind`. The snake_case form is the on-disk `channel_type` string. Add `#[strum(serialize = "...")]` only when the variant name doesn't snake-case to the desired value (e.g. `OpenAi` → `"openai"`).
 - **New tool impl** (workspace built-in): add to `ToolKind`.
 - **New cron schedule shape**: add to `CronKind`.
-- **New model / TTS / transcription / tunnel provider**: add to the relevant `*ProviderKind` sub-enum under `ProviderKind`.
+- **New model / TTS / transcription provider**: add to the relevant `*ProviderKind` sub-enum under `ProviderKind`.
 - **New memory backend**: add to `MemoryKind`.
 - **New `Role` family altogether** (PeerGroup / Skill / Mcp gain sub-types): nest with its own `Kind` on the fly: the pattern is uniform.
 

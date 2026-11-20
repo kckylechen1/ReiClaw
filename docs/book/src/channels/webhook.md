@@ -156,7 +156,7 @@ When `send_url` is unset, agent replies are dropped silently (logged at `debug`)
 The channel binds to `0.0.0.0` directly. To expose it on the public internet:
 
 1. **Reverse proxy**: terminate TLS at nginx / Caddy / Traefik and proxy to the channel's port. See [Operations → Network deployment](../ops/network-deployment.md).
-2. **Tunnel**: configure `[tunnel]` (`ngrok`, `cloudflare`, or `tailscale`) and the daemon brings up the tunnel alongside the channel.
+2. **Tunnel**: run a host-managed service such as ngrok, `cloudflared`, or Tailscale and forward it to the intended listener. ReiClaw does not launch tunnels; the former `[tunnel]` settings must be migrated and removed.
 3. **Local-only**: run inside a private network and have your producer hit the LAN/loopback address directly.
 
 Always pair public exposure with `secret`. An unauthenticated webhook listener is an open ingress to the agent.

@@ -2866,60 +2866,37 @@ async fn legacy_pair_rolls_back_in_process_token_when_persist_fails() {
 #[test]
 fn public_bind_without_pairing_needs_an_explicit_opt_in() {
     use PublicBindPosture::*;
-    // Loopback is always fine, pairing or not.
-    assert_eq!(
-        public_bind_posture("127.0.0.1", false, false, true, false),
-        Local
-    );
-    assert_eq!(
-        public_bind_posture("::1", false, false, false, false),
-        Local
-    );
-    for host in ["127.0.0.2", "[0:0:0:0:0:0:0:1]"] {
-        assert_eq!(public_bind_posture(host, false, true, true, false), Local);
-    }
-    for host in ["0.0.0.0", "[::]", "192.168.1.10"] {
-        for allow_public_bind in [false, true] {
-            for no_tunnel in [false, true] {
+    // Loopback remains local regardless of either opt-in or pairing.
+    for host in ["127.0.0.1", "127.0.0.2", "::1", "[0:0:0:0:0:0:0:1]"] {
+        for require_pairing in [false, true] {
+            for allow_public_bind in [false, true] {
                 assert_eq!(
-                    public_bind_posture(host, false, allow_public_bind, no_tunnel, false),
-                    RefuseUnauthenticated
-                );
-                assert_eq!(
-                    public_bind_posture(host, false, allow_public_bind, no_tunnel, true),
-                    UnauthenticatedOptedIn
+                    public_bind_posture(host, require_pairing, allow_public_bind, false),
+                    Local
                 );
             }
         }
     }
-    // Network-facing without pairing: every client is anonymous, so any of
-    // them could attach to any shared session. Refused unless opted in; a
-    // tunnel is not an opt-in.
-    assert_eq!(
-        public_bind_posture("0.0.0.0", false, false, true, false),
-        RefuseUnauthenticated
-    );
-    assert_eq!(
-        public_bind_posture("192.168.1.10", false, false, false, false),
-        RefuseUnauthenticated
-    );
-    assert_eq!(
-        public_bind_posture("0.0.0.0", false, true, true, false),
-        RefuseUnauthenticated
-    );
-    // With pairing, the pre-existing warning is unchanged.
-    assert_eq!(
-        public_bind_posture("0.0.0.0", true, false, true, false),
-        ExposedWithoutOptIn
-    );
-    assert_eq!(
-        public_bind_posture("0.0.0.0", true, false, false, false),
-        Local
-    );
-    assert_eq!(
-        public_bind_posture("0.0.0.0", true, true, true, false),
-        Local
-    );
+    for host in ["0.0.0.0", "[::]", "192.168.1.10"] {
+        for allow_public_bind in [false, true] {
+            // Ordinary public-bind acknowledgement never permits anonymous
+            // access. Only the separate dangerous exemption does that.
+            assert_eq!(
+                public_bind_posture(host, false, allow_public_bind, false),
+                RefuseUnauthenticated
+            );
+            assert_eq!(
+                public_bind_posture(host, false, allow_public_bind, true),
+                UnauthenticatedOptedIn
+            );
+        }
+        // No in-process tunnel selector can suppress the exposure warning.
+        assert_eq!(
+            public_bind_posture(host, true, false, false),
+            ExposedWithoutOptIn
+        );
+        assert_eq!(public_bind_posture(host, true, true, false), Local);
+    }
 }
 
 /// Send a WebSocket upgrade for `/ws/chat` to a live server and return the

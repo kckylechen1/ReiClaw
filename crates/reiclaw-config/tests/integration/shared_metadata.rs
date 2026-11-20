@@ -87,19 +87,13 @@ fn channel_and_integration_metadata_remain_derived_from_config() {
 #[test]
 fn nested_option_metadata_uses_current_config_presence() {
     let mut config = Config::default();
-    let before: Vec<NestedOptionEntry> = config.tunnel.nested_option_entries();
-    let before = before
-        .iter()
-        .find(|entry| entry.field == "tailscale")
-        .unwrap();
+    let before: Vec<NestedOptionEntry> = config.gateway.nested_option_entries();
+    let before = before.iter().find(|entry| entry.field == "tls").unwrap();
     assert!(!before.present);
-    config.tunnel.tailscale = Some(Default::default());
+    config.gateway.tls = Some(Default::default());
     let after: Vec<reiclaw_config::traits::NestedOptionEntry> =
-        config.tunnel.nested_option_entries();
-    let after = after
-        .iter()
-        .find(|entry| entry.field == "tailscale")
-        .unwrap();
+        config.gateway.nested_option_entries();
+    let after = after.iter().find(|entry| entry.field == "tls").unwrap();
     assert!(after.present);
     assert_eq!(before.display_name, after.display_name);
     assert_eq!(before.description, after.description);

@@ -22,26 +22,39 @@ By default the gateway binds to `127.0.0.1`, unreachable from other devices. Thr
 
 ### Option 1: Public bind (LAN)
 
-Then any device on the LAN can reach `http://<pi-ip>:42617`. Doesn't help for internet-reachable webhooks, your router's public IP isn't forwarded to the Pi.
+Set the gateway's bind address and acknowledge that other devices can reach it:
 
-**Safety:** `allow_public_bind = true` is required because binding to `0.0.0.0` is a significant posture change. Without it, the daemon refuses. This is deliberate.
+```toml
+[gateway]
+host = "0.0.0.0"
+allow_public_bind = true
+require_pairing = true
+```
 
-### Option 2: Tunnel (internet-reachable)
+LAN clients can then reach `http://<pi-ip>:42617`. Internet access still depends
+on the host's network and firewall. With pairing enabled, omitting
+`allow_public_bind` emits an exposure warning. A non-loopback bind with pairing
+disabled is refused unless the separate dangerous exemption is explicitly set.
 
-Then restart the daemon, the tunnel is managed declaratively from config, starting alongside the gateway.
+### Option 2: Host-managed tunnel or VPN
 
-The tunnel forwards from a public URL to the gateway on `127.0.0.1`. No router config, no opened ports. Set `tunnel.tunnel_provider` to one of the supported values; each works similarly:
+Run Tailscale, `cloudflared`, ngrok, OpenVPN, or an SSH tunnel under the host's
+service manager. ReiClaw no longer starts, monitors, or stops these processes.
+Keep the gateway bound to `127.0.0.1` when the external service forwards to a
+local listener, and configure any public address in that service and its clients.
 
-| Provider | Setup friction | Cost | Good for |
-|---|---|---|---|
-| `tailscale` | Account + client | Free tier | Long-term, stable URLs |
-| `cloudflare` | Account + `cloudflared` + token | Free | Custom domains |
-| `ngrok` | Account + agent + token | Free with limits | Testing, short-lived |
-| `pinggy` | SSH, no account | Free tier | Quick one-shot URLs |
-| `openvpn` | Your own OpenVPN egress | Self-hosted | Existing VPN infra |
-| `custom` | A command under `[tunnel.custom]` | Depends | Anything else |
+The former `[tunnel]` section and `REI_tunnel__*` overrides are retired. Move
+credentials, commands, VPN files and exposure policy into the host service's
+configuration, verify that it forwards to the intended gateway, then remove
+those settings from ReiClaw. Configured or malformed tunnel settings stop config
+loading and saving; they are never silently discarded. Empty sections and the
+old disabled default `tunnel_provider = "none"` load with a retirement warning.
+Remove retired `tunnel.custom` or `tunnel.*` entries from `proxy.services` too;
+the host service owns its own outbound proxy configuration.
 
-`tunnel_provider = "none"` (the default) keeps the gateway local with no tunnel. `rei markdown-schema` lists, in its `tunnel` section, each provider's `[tunnel.<provider>]` fields.
+Pairing, gateway TLS and forwarded-header trust still belong to the gateway.
+A proxy or tunnel relaying from loopback does not prove that a caller is local;
+keep authentication enabled and use the existing admin credential rules.
 
 ### Option 3: Reverse proxy
 
@@ -122,7 +135,7 @@ In-process hardware features were removed from the core; physical devices join a
 - [ ] Configure your channels. Telegram needs no port; webhooks need a tunnel
 - [ ] Install the service: `zeroclaw service install && zeroclaw service start`
 - [ ] For LAN access: set `[gateway] host = "0.0.0.0"` + `allow_public_bind = true`
-- [ ] For webhooks: configure `[tunnel]` with a provider
+- [ ] For webhooks: configure a host-managed tunnel or reverse proxy
 
 ## Alpine Linux (OpenRC)
 

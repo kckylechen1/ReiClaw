@@ -149,7 +149,6 @@ pub enum ProviderKind {
     Model(ModelProviderKind),
     Tts(TtsProviderKind),
     Transcription(TranscriptionProviderKind),
-    Tunnel(TunnelProviderKind),
 }
 
 impl ProviderKind {
@@ -159,7 +158,6 @@ impl ProviderKind {
             Self::Model(k) => k.into(),
             Self::Tts(k) => k.into(),
             Self::Transcription(k) => k.into(),
-            Self::Tunnel(k) => k.into(),
         }
     }
 }
@@ -216,19 +214,6 @@ pub enum TranscriptionProviderKind {
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, IntoStaticStr)]
 #[strum(serialize_all = "snake_case")]
-pub enum TunnelProviderKind {
-    Ngrok,
-    Cloudflared,
-    OpenVpn,
-    Pinggy,
-    Tailscale,
-    None,
-    Custom,
-    Plugin,
-}
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq, IntoStaticStr)]
-#[strum(serialize_all = "snake_case")]
 pub enum MemoryKind {
     Sqlite,
     Json,
@@ -245,7 +230,7 @@ pub enum MemoryKind {
 
 impl Role {
     /// Composite prefix this role populates (`channel`, `model_provider`,
-    /// `tts_provider`, `transcription_provider`, `tunnel_provider`),
+    /// `tts_provider`, `transcription_provider`),
     /// or `None` for roles that use a plain attribution field.
     #[must_use]
     pub fn composite_prefix(self) -> Option<&'static str> {
@@ -254,7 +239,6 @@ impl Role {
             Self::Provider(ProviderKind::Model(_)) => Some("model_provider"),
             Self::Provider(ProviderKind::Tts(_)) => Some("tts_provider"),
             Self::Provider(ProviderKind::Transcription(_)) => Some("transcription_provider"),
-            Self::Provider(ProviderKind::Tunnel(_)) => Some("tunnel_provider"),
             _ => None,
         }
     }
@@ -304,7 +288,6 @@ impl Role {
             Self::Provider(ProviderKind::Model(_)) => "provider.model",
             Self::Provider(ProviderKind::Tts(_)) => "provider.tts",
             Self::Provider(ProviderKind::Transcription(_)) => "provider.transcription",
-            Self::Provider(ProviderKind::Tunnel(_)) => "provider.tunnel",
             Self::Memory(_) => "memory",
             Self::PeerGroup => "peer_group",
             Self::Skill => "skill",
