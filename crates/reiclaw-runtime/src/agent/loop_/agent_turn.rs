@@ -25,7 +25,7 @@ use crate::agent::turn::{
 /// every lifecycle observer event of the turn (agent_start, llm_request,
 /// llm_response, tool_call_start, tool_call, agent_end) carries the full
 /// `(channel, agent_alias, turn_id)` correlation triple that observer
-/// consumers (Prometheus, OTel, the gateway `/api/events` stream) rely on for
+/// consumers (structured logs and the gateway `/api/events` stream) rely on for
 /// per-agent attribution. `None` opts out for callers without a resolved
 /// alias (tests, benches). `turn_id` follows the same pattern: `Some` reuses
 /// a caller-minted id so pre-turn events (the `process_message` RAG

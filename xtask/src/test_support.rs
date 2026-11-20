@@ -4,11 +4,6 @@ use std::path::PathBuf;
 
 use crate::util::repo_root;
 
-#[track_caller]
-pub fn require_non_empty(subject: &str, len: usize) {
-    assert!(len > 0, "{subject} must contain a real assertion sample");
-}
-
 fn manifest() -> PathBuf {
     repo_root().join("Cargo.toml")
 }
@@ -46,35 +41,4 @@ fn string_list(value: Option<&toml::Value>) -> Vec<String> {
 /// not against the same in-memory value production already resolved.
 pub fn registry_string_list(key: &str) -> Vec<String> {
     string_list(reiclaw_metadata().get(key))
-}
-
-/// `[package.metadata.reiclaw.dist_target_exclusions]`, parsed straight out of
-/// Cargo.toml.
-pub fn registry_target_exclusions() -> std::collections::BTreeMap<String, Vec<String>> {
-    reiclaw_metadata()
-        .get("dist_target_exclusions")
-        .and_then(|v| v.as_table())
-        .map(|table| {
-            table
-                .iter()
-                .map(|(target, value)| (target.clone(), string_list(Some(value))))
-                .collect()
-        })
-        .unwrap_or_default()
-}
-
-/// Every feature name in the root package `[features]` table (Cargo's own
-/// resolver, same source the spec reads).
-pub fn live_feature_names() -> Vec<String> {
-    let meta = cargo_metadata::MetadataCommand::new()
-        .manifest_path(manifest())
-        .no_deps()
-        .exec()
-        .expect("cargo metadata for the workspace root");
-    let pkg = meta
-        .root_package()
-        .cloned()
-        .or_else(|| meta.workspace_packages().into_iter().next().cloned())
-        .expect("root package");
-    pkg.features.keys().cloned().collect()
 }

@@ -148,7 +148,7 @@ registry (`ATTRIBUTION_FIELDS` + `COMPOSITE_PREFIXES`), the
 `tracing-subscriber` Layer that captures every `tracing::*` call, the
 `record!` and `scope!` macros, the rolling-trim writer, the
 paginated cursor reader behind `/api/logs`, and the bridge to the
-typed `Observer` for Prometheus consumers. See
+typed `Observer` for runtime event consumers. See
 [`architecture/logging.md`](./logging.md).
 
 ### `reiclaw-spawn`
@@ -207,7 +207,7 @@ Derive macros for config schema, tool registration, and channel registration. Sa
 
 The microkernel roadmap (RFC #5574) defines a feature-flag taxonomy. The practical upshot for a user:
 
-- `default`: the agent runtime, gateway, portable memory, Prometheus observer, and schema export
+- `default`: the agent runtime, gateway, portable memory, and schema export
 - `agent-runtime`: the agent loop, tools, and runtime persistence
 - `gateway`: the HTTP/WebSocket gateway, including webhook ingress
 - `ci-all`: the feature combination exercised by CI
@@ -222,7 +222,7 @@ Build a controller with only the runtime and gateway features:
 cargo build --release --locked --no-default-features --features agent-runtime,gateway
 ```
 
-The command disables `memory-core`, `observability-prometheus`, and `schema-export`
+The command disables `memory-core` and `schema-export`
 along with other optional features. Without `--no-default-features`, Cargo retains
 the default capabilities. Bridge configuration remains readable independently
 of the root build; running a bridge requires its separate binary.

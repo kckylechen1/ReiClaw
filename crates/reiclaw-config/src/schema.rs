@@ -6231,7 +6231,6 @@ pub enum ObservabilityBackend {
     None,
     Log,
     Verbose,
-    Prometheus,
 }
 
 impl ObservabilityBackend {
@@ -6241,7 +6240,6 @@ impl ObservabilityBackend {
             Self::None => "none",
             Self::Log => "log",
             Self::Verbose => "verbose",
-            Self::Prometheus => "prometheus",
         }
     }
 }
@@ -6335,7 +6333,7 @@ impl LogLlmRequestPayload {
 #[cfg_attr(feature = "schema-export", derive(schemars::JsonSchema))]
 #[prefix = "observability"]
 pub struct ObservabilityConfig {
-    /// Observability sink: none | log | verbose | prometheus.
+    /// Observability sink: none | log | verbose.
     #[serde(default, deserialize_with = "deserialize_enum_lenient")]
     pub backend: ObservabilityBackend,
 

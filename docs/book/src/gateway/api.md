@@ -9,7 +9,7 @@ the live surface.
 
 | Area | Routes |
 |---|---|
-| Liveness | `GET /health`, `GET /api/health`, `GET /api/status`, `GET /metrics` |
+| Liveness | `GET /health`, `GET /api/health`, `GET /api/status` |
 | Local ops (loopback only) | `POST /admin/shutdown`, `POST /admin/reload`, `GET /admin/paircode`, `POST /admin/paircode/new` |
 | Client pairing | `POST /pair`, `GET /pair/code`, `POST /api/pairing/initiate`, `POST /api/pair`, `GET /api/devices`, `POST /api/devices/me/capabilities`, `DELETE /api/devices/{id}`, `POST /api/devices/{id}/token/rotate` |
 | Chat | `GET /ws/chat` (WebSocket), `POST /webhook` |
