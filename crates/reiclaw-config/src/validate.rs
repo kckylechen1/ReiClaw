@@ -1633,91 +1633,7 @@ impl Config {
             }
         }
 
-        // Security OTP / estop
-        if self.security.otp.challenge_max_attempts == 0 {
-            validation_bail!(
-                InvalidNumericRange,
-                "security.otp.challenge_max_attempts",
-                "security.otp.challenge_max_attempts must be greater than 0"
-            );
-        }
-        if self.security.otp.token_ttl_secs == 0 {
-            validation_bail!(
-                InvalidNumericRange,
-                "security.otp.token_ttl_secs",
-                "security.otp.token_ttl_secs must be greater than 0"
-            );
-        }
-        if self.security.otp.cache_valid_secs == 0 {
-            validation_bail!(
-                InvalidNumericRange,
-                "security.otp.cache_valid_secs",
-                "security.otp.cache_valid_secs must be greater than 0"
-            );
-        }
-        if self.security.otp.cache_valid_secs < self.security.otp.token_ttl_secs {
-            anyhow::bail!(
-                "security.otp.cache_valid_secs must be greater than or equal to security.otp.token_ttl_secs"
-            );
-        }
-        if self.security.otp.challenge_max_attempts == 0 {
-            validation_bail!(
-                InvalidNumericRange,
-                "security.otp.challenge_max_attempts",
-                "security.otp.challenge_max_attempts must be greater than 0"
-            );
-        }
-        for (i, action) in self.security.otp.gated_actions.iter().enumerate() {
-            let normalized = action.trim();
-            if normalized.is_empty() {
-                validation_bail!(
-                    RequiredFieldEmpty,
-                    format!("security.otp.gated_actions[{i}]"),
-                    "security.otp.gated_actions[{i}] must not be empty"
-                );
-            }
-            if !normalized
-                .chars()
-                .all(|c| c.is_ascii_alphanumeric() || c == '_' || c == '-')
-            {
-                anyhow::bail!(
-                    "security.otp.gated_actions[{i}] contains invalid characters: {normalized}"
-                );
-            }
-            if !default_otp_gated_actions()
-                .iter()
-                .any(|known| known == normalized)
-            {
-                ::reiclaw_log::record!(
-                    WARN,
-                    ::reiclaw_log::Event::new(
-                        crate::schema::CONFIG_SCHEMA_LOG_TARGET,
-                        ::reiclaw_log::Action::Note
-                    )
-                    .with_outcome(::reiclaw_log::EventOutcome::Unknown)
-                    .with_attrs(::serde_json::json!({
-                        "action": normalized,
-                        "known_actions": default_otp_gated_actions(),
-                    })),
-                    "security.otp.gated_actions is deprecated and never enforced (ReiClaw has no \
-                     OTP action-gating); entry does not match a known action name: "
-                );
-            }
-        }
-        DomainMatcher::new(
-            &self.security.otp.gated_domains,
-            &self.security.otp.gated_domain_categories,
-        )
-        .with_context(
-            || "Invalid security.otp.gated_domains or security.otp.gated_domain_categories",
-        )?;
-        if self.security.estop.state_file.trim().is_empty() {
-            validation_bail!(
-                RequiredFieldEmpty,
-                "security.estop.state_file",
-                "security.estop.state_file must not be empty"
-            );
-        }
+        validate_estop_config(&self.security.otp, &self.security.estop)?;
         if self.hooks.enabled
             && self.hooks.builtin.webhook_audit.enabled
             && !self.hooks.builtin.webhook_audit.url.trim().is_empty()
@@ -2457,4 +2373,85 @@ impl Config {
 
         Ok(())
     }
+}
+
+/// Shared validation for both the full configuration and local emergency-stop CLI.
+pub(crate) fn validate_estop_config(
+    otp: &crate::schema::OtpConfig,
+    estop: &crate::schema::EstopConfig,
+) -> Result<()> {
+    if otp.challenge_max_attempts == 0 {
+        validation_bail!(
+            InvalidNumericRange,
+            "security.otp.challenge_max_attempts",
+            "security.otp.challenge_max_attempts must be greater than 0"
+        );
+    }
+    if otp.token_ttl_secs == 0 {
+        validation_bail!(
+            InvalidNumericRange,
+            "security.otp.token_ttl_secs",
+            "security.otp.token_ttl_secs must be greater than 0"
+        );
+    }
+    if otp.cache_valid_secs == 0 {
+        validation_bail!(
+            InvalidNumericRange,
+            "security.otp.cache_valid_secs",
+            "security.otp.cache_valid_secs must be greater than 0"
+        );
+    }
+    if otp.cache_valid_secs < otp.token_ttl_secs {
+        anyhow::bail!(
+            "security.otp.cache_valid_secs must be greater than or equal to security.otp.token_ttl_secs"
+        );
+    }
+    for (i, action) in otp.gated_actions.iter().enumerate() {
+        let normalized = action.trim();
+        if normalized.is_empty() {
+            validation_bail!(
+                RequiredFieldEmpty,
+                format!("security.otp.gated_actions[{i}]"),
+                "security.otp.gated_actions[{i}] must not be empty"
+            );
+        }
+        if !normalized
+            .chars()
+            .all(|c| c.is_ascii_alphanumeric() || c == '_' || c == '-')
+        {
+            anyhow::bail!(
+                "security.otp.gated_actions[{i}] contains invalid characters: {normalized}"
+            );
+        }
+        if !default_otp_gated_actions()
+            .iter()
+            .any(|known| known == normalized)
+        {
+            ::reiclaw_log::record!(
+                WARN,
+                ::reiclaw_log::Event::new(
+                    crate::schema::CONFIG_SCHEMA_LOG_TARGET,
+                    ::reiclaw_log::Action::Note
+                )
+                .with_outcome(::reiclaw_log::EventOutcome::Unknown)
+                .with_attrs(::serde_json::json!({
+                    "action": normalized,
+                    "known_actions": default_otp_gated_actions(),
+                })),
+                "security.otp.gated_actions is deprecated and never enforced (ReiClaw has no \
+                 OTP action-gating); entry does not match a known action name: "
+            );
+        }
+    }
+    DomainMatcher::new(&otp.gated_domains, &otp.gated_domain_categories).with_context(
+        || "Invalid security.otp.gated_domains or security.otp.gated_domain_categories",
+    )?;
+    if estop.state_file.trim().is_empty() {
+        validation_bail!(
+            RequiredFieldEmpty,
+            "security.estop.state_file",
+            "security.estop.state_file must not be empty"
+        );
+    }
+    Ok(())
 }

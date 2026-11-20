@@ -3,6 +3,8 @@ mod config_patch_cli;
 mod config_persistence;
 mod config_schema;
 mod dockerignore_test;
+#[cfg(feature = "agent-runtime")]
+mod estop_cli;
 mod gateway;
 mod gemini_capabilities;
 mod provider_resolution;

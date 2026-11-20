@@ -1208,8 +1208,7 @@ fn main() -> Result<()> {
     // or blocking-pool threads exist, so the reading runtime is fully
     // dropped before anything is applied. Daemon reloads refresh the
     // runtime global only, keeping live-env application restart-only.
-    // Stdout-only invocations (completions, markdown-help/schema, help,
-    // version, parse errors) skip this read.
+    // Stdout-only invocations and the local emergency-stop path skip this read.
     if invocation_needs_config() {
         let proxy = {
             let pre_runtime = tokio::runtime::Builder::new_current_thread()
@@ -1233,8 +1232,8 @@ fn main() -> Result<()> {
 /// Decide pre-parse whether this invocation will need the config-driven
 /// runtime, using a non-exiting trial parse of the CLI. Parse errors,
 /// `--help` and `--version` surface as `Err` and re-parse inside
-/// `async_main` for the error/help path; the stdout-only subcommands are
-/// enumerated explicitly so they skip the proxy bootstrap read.
+/// `async_main` for the error/help path; stdout-only and local emergency-stop
+/// subcommands are enumerated explicitly so they skip the proxy bootstrap read.
 fn invocation_needs_config() -> bool {
     let command = Cli::command();
     let Ok(matches) = command.try_get_matches_from(std::env::args_os()) else {
@@ -1245,6 +1244,7 @@ fn invocation_needs_config() -> bool {
         matches.subcommand_matches("markdown-help").is_some(),
         matches.subcommand_matches("markdown-schema").is_some(),
         matches.subcommand_matches("help").is_some(),
+        matches.subcommand_matches("estop").is_some(),
     ];
     !config_free.into_iter().any(|excluded| excluded)
 }
@@ -1384,6 +1384,20 @@ async fn async_main(command: clap::Command) -> Result<()> {
             .map(std::path::Path::new)
             .context("launchd runner requires --config-dir")?;
         return service::run_launchd_daemon(config_dir).await;
+    }
+
+    // Emergency stop must remain reachable when unrelated model/Vault credentials
+    // cannot be resolved. Its local reader refuses malformed safety settings.
+    #[cfg(feature = "agent-runtime")]
+    if let Commands::Estop {
+        estop_command,
+        level,
+        domains,
+        tools,
+    } = cli.command
+    {
+        let config = reiclaw_config::estop::LocalEstopConfig::load().await?;
+        return handle_estop_command(&config, estop_command, level, domains, tools);
     }
 
     // All other commands need config loaded first
@@ -2069,12 +2083,7 @@ async fn async_main(command: clap::Command) -> Result<()> {
             Ok(())
         }
 
-        Commands::Estop {
-            estop_command,
-            level,
-            domains,
-            tools,
-        } => handle_estop_command(&config, estop_command, level, domains, tools),
+        Commands::Estop { .. } => unreachable!("estop is dispatched before full config loading"),
 
         Commands::Cron { cron_command } => cron::handle_command(cron_command, &config),
 
@@ -2249,24 +2258,21 @@ async fn async_main(command: clap::Command) -> Result<()> {
 
 #[cfg(feature = "agent-runtime")]
 fn handle_estop_command(
-    config: &Config,
+    config: &reiclaw_config::estop::LocalEstopConfig,
     estop_command: Option<EstopSubcommands>,
     level: Option<EstopLevelArg>,
     domains: Vec<String>,
     tools: Vec<String>,
 ) -> Result<()> {
-    let config_dir = config
-        .config_path
-        .parent()
-        .context("Config path must have a parent directory")?;
+    let config_dir = &config.config_dir;
 
     if matches!(estop_command, Some(EstopSubcommands::OtpInit)) {
-        if !config.security.otp.enabled {
+        if !config.otp.enabled {
             bail!("OTP is disabled. Enable [security.otp].enabled = true in config.toml");
         }
         let store = security::SecretStore::new(config_dir, config.secrets.encrypt);
         let (_validator, enrollment_uri) =
-            security::OtpValidator::from_config(&config.security.otp, config_dir, &store)?;
+            security::OtpValidator::from_config(&config.otp, config_dir, &store)?;
         if let Some(uri) = enrollment_uri {
             println!("Initialized OTP secret for ReiClaw.");
             println!("Enrollment URI: {uri}");
@@ -2279,11 +2285,11 @@ fn handle_estop_command(
         return Ok(());
     }
 
-    if !config.security.estop.enabled {
+    if !config.estop.enabled {
         bail!("Emergency stop is disabled. Enable [security.estop].enabled = true in config.toml");
     }
 
-    let mut manager = security::EstopManager::load(&config.security.estop, config_dir)?;
+    let mut manager = security::EstopManager::load(&config.estop, config_dir)?;
 
     match estop_command {
         Some(EstopSubcommands::Status) => {
@@ -2299,8 +2305,8 @@ fn handle_estop_command(
         }) => {
             let selector = build_resume_selector(network, domains, tools)?;
             let mut otp_code = otp;
-            let otp_validator = if config.security.estop.require_otp_to_resume {
-                if !config.security.otp.enabled {
+            let otp_validator = if config.estop.require_otp_to_resume {
+                if !config.otp.enabled {
                     bail!(
                         "security.estop.require_otp_to_resume=true but security.otp.enabled=false"
                     );
@@ -2314,11 +2320,8 @@ fn handle_estop_command(
                 }
 
                 let store = security::SecretStore::new(config_dir, config.secrets.encrypt);
-                let validator = security::OtpValidator::load_existing(
-                    &config.security.otp,
-                    config_dir,
-                    &store,
-                )?;
+                let validator =
+                    security::OtpValidator::load_existing(&config.otp, config_dir, &store)?;
                 Some(validator)
             } else {
                 None

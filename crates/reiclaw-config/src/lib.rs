@@ -19,6 +19,7 @@ pub mod composition;
 pub mod current;
 pub mod domain_matcher;
 pub mod env_overrides;
+pub mod estop;
 pub mod generate;
 pub mod helpers;
 mod install;

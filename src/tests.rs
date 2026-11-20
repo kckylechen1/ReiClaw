@@ -1605,12 +1605,19 @@ fn config_cli_exposes_current_validation_and_generation_only() {
 #[test]
 fn estop_engage_and_status_work_without_otp_secret_and_otp_init_enrolls_resume() {
     let dir = tempfile::tempdir().unwrap();
-    let mut config = Config::default();
-    config.config_path = dir.path().join("config.toml");
-    config.data_dir = dir.path().join("data");
-    config.security.estop.enabled = true;
-    config.security.estop.require_otp_to_resume = true;
-    config.security.otp.enabled = true;
+    let mut config = reiclaw_config::estop::LocalEstopConfig {
+        config_dir: dir.path().to_path_buf(),
+        estop: config::EstopConfig {
+            enabled: true,
+            state_file: "estop-state.json".into(),
+            ..config::EstopConfig::default()
+        },
+        otp: config::OtpConfig {
+            enabled: true,
+            ..config::OtpConfig::default()
+        },
+        secrets: config::SecretsConfig::default(),
+    };
 
     // 1. Parsing `rei estop otp-init` succeeds.
     assert!(matches!(
@@ -1642,7 +1649,7 @@ fn estop_engage_and_status_work_without_otp_secret_and_otp_init_enrolls_resume()
             network: false,
             domains: vec![],
             tools: vec![],
-            otp: Some("000000".into()),
+            otp: Some("invalid".into()),
         }),
         None,
         vec![],
@@ -1663,9 +1670,7 @@ fn estop_engage_and_status_work_without_otp_secret_and_otp_init_enrolls_resume()
     assert!(security::otp::secret_file_path(dir.path()).exists());
 
     let store = security::SecretStore::new(dir.path(), config.secrets.encrypt);
-    assert!(
-        security::OtpValidator::load_existing(&config.security.otp, dir.path(), &store).is_ok()
-    );
+    assert!(security::OtpValidator::load_existing(&config.otp, dir.path(), &store).is_ok());
     assert!(
         handle_estop_command(
             &config,
@@ -1673,7 +1678,7 @@ fn estop_engage_and_status_work_without_otp_secret_and_otp_init_enrolls_resume()
                 network: false,
                 domains: vec![],
                 tools: vec![],
-                otp: Some("000000".into()),
+                otp: Some("invalid".into()),
             }),
             None,
             vec![],
@@ -1682,7 +1687,7 @@ fn estop_engage_and_status_work_without_otp_secret_and_otp_init_enrolls_resume()
         .is_err()
     );
 
-    config.security.estop.require_otp_to_resume = false;
+    config.estop.require_otp_to_resume = false;
     handle_estop_command(
         &config,
         Some(EstopSubcommands::Resume {
