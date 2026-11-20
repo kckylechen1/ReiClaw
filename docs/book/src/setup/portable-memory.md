@@ -2,8 +2,9 @@
 
 The `memory-core` feature uses the shared Portable Kernel for two
 ReiClaw-owned databases. It is enabled by default on the root `reiclaw`
-crate (and stays optional on `reiclaw-memory`, so `--no-default-features` and
-`slim-control` builds remain free of AGPL dependencies). The backend name
+crate and stays optional on `reiclaw-memory`. Root builds using
+`--no-default-features --features agent-runtime,gateway` exclude this AGPL
+dependency; enabling those features without disabling defaults retains it. The backend name
 `memorycore`, the crate feature `reiclaw-memory/memorycore`, configuration keys and
 existing database locations are described below.
 

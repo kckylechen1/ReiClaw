@@ -125,7 +125,7 @@ accounting behavior; this crate does not schedule external harness work.
 
 ### `reiclaw-memory`
 
-Conversation memory and retrieval. Embedded MemoryCore (`portable-kernel`, enabled by default in `reiclaw` via `memory-core` and `reiclaw-memory/memorycore`) is the default durable backend; workspace `Markdown` and `none` are the alternatives (`SQLite`, `Lucid`, `PostgreSQL`, and `Qdrant` were retired). `reiclaw-memory` defaults keep `memorycore` off so `--no-default-features` and `slim-control` builds remain AGPL-free. Optional:
+Conversation memory and retrieval. Embedded MemoryCore (`portable-kernel`, enabled by default in `reiclaw` via `memory-core` and `reiclaw-memory/memorycore`) is the default durable backend; workspace `Markdown` and `none` are the alternatives (`SQLite`, `Lucid`, `PostgreSQL`, and `Qdrant` were retired). `reiclaw-memory` defaults keep `memorycore` off so `--no-default-features` and `agent-runtime,gateway` builds remain AGPL-free. Optional:
 
 - Embedding backends (OpenAI, Ollama, local)
 - Vector retrieval over stored conversations
@@ -207,28 +207,27 @@ Derive macros for config schema, tool registration, and channel registration. Sa
 
 The microkernel roadmap (RFC #5574) defines a feature-flag taxonomy. The practical upshot for a user:
 
-- `default`: a sensible core build
-- `slim-control`: an opt-in personal-agent build with the agent runtime, gateway,
-  ACP server, webhook, WeChat, WeCom, and WeCom WebSocket channels
-- `ci-all`: everything on, for CI
-- `channel-<name>`: opt-in per channel (e.g. `channel-telegram`, `channel-webhook`)
-- `gateway`: opt-in capability group
+- `default`: the agent runtime, gateway, portable memory, Prometheus observer, and schema export
+- `agent-runtime`: the agent loop, tools, and runtime persistence
+- `gateway`: the HTTP/WebSocket gateway, including webhook ingress
+- `ci-all`: the feature combination exercised by CI
 
-Providers are not feature-gated; they all compile in. Channel selection is the main per-build knob. Read the top-level `Cargo.toml` `[features]` table for the full list.
+Telegram and ACP run in separate bridge binaries. They do not have root-package
+Cargo flags. Providers are not feature-gated; they all compile in. Read the
+top-level `Cargo.toml` `[features]` table for the complete capability list.
 
-Build the slim profile with defaults disabled:
+Build a controller with only the runtime and gateway features:
 
 ```sh
-cargo build --release --locked --no-default-features --features slim-control
+cargo build --release --locked --no-default-features --features agent-runtime,gateway
 ```
 
-Enabling `slim-control` without `--no-default-features` adds it to the standard
-build. The profile leaves the standard defaults and distribution feature policy
-unchanged. It omits SaaS integration families, schema export, and channels outside
-the selected set; configuration for uncompiled channels remains readable and is
-preserved when saved.
+The command disables `memory-core`, `observability-prometheus`, and `schema-export`
+along with other optional features. Without `--no-default-features`, Cargo retains
+the default capabilities. Bridge configuration remains readable independently
+of the root build; running a bridge requires its separate binary.
 
-The slim build keeps the body's conversation, context, local tools, and permission
+This build keeps the body's conversation, context, local tools, and permission
 checks. External harness delegation uses the Tachi MCP client included in the
 agent runtime, following [ADR-017](./decisions/ADR-017-personal-agent-body-edges-and-delegation.md).
 The profile adds no local harness launcher or execution ledger. Delegation does

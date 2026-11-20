@@ -235,13 +235,13 @@ def main():
     config = args.config.resolve(strict=True)
     cargo = str(Path(args.cargo).resolve()) if os.sep in args.cargo else args.cargo
     # Route B enables memory-core by default on reiclaw; keep the lean
-    # core profiles (--no-default-features, slim-control, and reiclaw-memory
+    # core profiles (--no-default-features, agent-runtime,gateway, and reiclaw-memory
     # without `memorycore`) strictly AGPL-free.
     check_graph(cargo, repo, allow_reviewed_agpl=True)
     check_graph(cargo, repo, extra_args=("--no-default-features",),
                 scope_label="minimal (--no-default-features)")
-    check_graph(cargo, repo, extra_args=("--no-default-features", "--features", "slim-control"),
-                scope_label="slim-control")
+    check_graph(cargo, repo, extra_args=("--no-default-features", "--features", "agent-runtime,gateway"),
+                scope_label="agent-runtime,gateway")
     check_graph(cargo, repo, selection=("-p", "reiclaw-memory"),
                 expected_package="reiclaw-memory",
                 scope_label="reiclaw-memory default")

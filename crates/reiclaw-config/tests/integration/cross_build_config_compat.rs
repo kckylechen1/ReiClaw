@@ -18,7 +18,7 @@ name = "Production Control"
 [agents.default]
 acp_enable_mcp = false
 
-# Broad channels (not included in slim-control)
+# Broad channels (not included in agent-runtime,gateway)
 # Telegram channel settings
 [channels.telegram.default]
 enabled = true
