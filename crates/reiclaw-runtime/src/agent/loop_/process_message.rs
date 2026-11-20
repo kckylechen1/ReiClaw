@@ -14,13 +14,9 @@ use reiclaw_api::ingress::TurnOrigin;
 use reiclaw_config::schema::Config;
 use reiclaw_memory::{self, Memory};
 use reiclaw_providers::{ChatMessage, ModelProvider};
-use std::collections::HashSet;
 use std::sync::Arc;
 
-use super::{
-    apply_text_tool_prompt_policy, build_tool_instructions_for_names, compute_excluded_mcp_tools,
-    native_tool_specs_present_for_turn, resolved_agent_for_turn,
-};
+use super::{build_system_prompt_for_turn, compute_excluded_mcp_tools, resolved_agent_for_turn};
 
 /// Process a single message through the full agent (with tools and memory).
 /// Used by channels (Telegram, etc.) to enable tool use.
@@ -199,9 +195,9 @@ pub async fn process_message_with_hooks(
         })
         .await;
         // process_message injects one combined MCP prompt block: deferred tool-search
-        // listing + pinned resources, composed by the harness. `mut` because the
-        // text-tool prompt policy below may clear it for a non-native strict target.
-        let mut deferred_section = assembled.combined_mcp_prompt_section();
+        // listing + pinned resources, composed by the harness. The shared prompt
+        // helper applies the text-tool policy for a non-native strict target.
+        let deferred_section = assembled.combined_mcp_prompt_section();
         let scoped::ScopedAssembled {
             registry,
             task_owner,
@@ -274,65 +270,11 @@ pub async fn process_message_with_hooks(
             }
         }
 
-        // Filter tool descriptions to match the effective set.
-        tool_descs.retain(|(name, _)| !excluded_tools.iter().any(|ex| ex == name));
-
-        // Derive effective tool names from the filtered set so prompt builders
-        // and channel target guards see the correct state.
-        let effective_tool_names: HashSet<&str> = tools_registry
-            .iter()
-            .map(|tool| tool.name())
-            .filter(|name| !excluded_tools.iter().any(|ex| ex == *name))
-            .collect();
-        tool_descs.retain(|(name, _)| effective_tool_names.contains(name));
-
         let bootstrap_max_chars = if eff_compact_context {
             Some(crate::agent::system_prompt::COMPACT_BOOTSTRAP_MAX_CHARS)
         } else {
             None
         };
-        let native_tools = model_provider.supports_native_tools();
-        let native_tool_specs_present = native_tool_specs_present_for_turn(
-            model_provider.as_ref(),
-            &tools_registry,
-            &excluded_tools,
-            activated_handle_pm.as_ref(),
-        )?;
-        let expose_text_tool_protocol = apply_text_tool_prompt_policy(
-            native_tools,
-            agent.resolved.strict_tool_parsing,
-            &mut tool_descs,
-            &mut deferred_section,
-        );
-        let agent_workspace = config.agent_workspace_dir(agent_alias);
-        let mut system_prompt = crate::agent::system_prompt::build_system_prompt_with_persona(
-            &agent_workspace,
-            &model_name,
-            &tool_descs,
-            &skills,
-            Some(&agent.identity),
-            bootstrap_max_chars,
-            Some(&risk_profile),
-            native_tool_specs_present,
-            eff_prompt_injection_mode,
-            eff_compact_context,
-            eff_max_system_prompt_chars,
-            false,
-            config.channels.show_tool_calls,
-            persona_section.as_deref(),
-            persona.legacy_files,
-        );
-        if expose_text_tool_protocol {
-            system_prompt.push_str(&build_tool_instructions_for_names(
-                &tools_registry,
-                &effective_tool_names,
-            ));
-        }
-        if !deferred_section.is_empty() {
-            system_prompt.push('\n');
-            system_prompt.push_str(&deferred_section);
-        }
-
         let effective_message = message.to_string();
         let thinking_level = agent.resolved.thinking.default_level;
         let thinking_params = crate::agent::thinking::apply_thinking_level_with_config(
@@ -348,10 +290,30 @@ pub async fn process_message_with_hooks(
                 )
             });
 
-        // Prepend thinking system prompt prefix when present.
-        if let Some(ref prefix) = thinking_params.system_prompt_prefix {
-            system_prompt = format!("{prefix}\n\n{system_prompt}");
-        }
+        let agent_workspace = config.agent_workspace_dir(agent_alias);
+        let system_prompt = build_system_prompt_for_turn(
+            &agent_workspace,
+            &model_name,
+            &tool_descs,
+            &deferred_section,
+            &skills,
+            Some(&agent.identity),
+            bootstrap_max_chars,
+            &risk_profile,
+            model_provider.as_ref(),
+            &tools_registry,
+            &excluded_tools,
+            activated_handle_pm.as_ref(),
+            agent.resolved.strict_tool_parsing,
+            eff_prompt_injection_mode,
+            eff_compact_context,
+            eff_max_system_prompt_chars,
+            false,
+            config.channels.show_tool_calls,
+            persona_section.as_deref(),
+            persona.legacy_files,
+            thinking_params.system_prompt_prefix.as_deref(),
+        )?;
 
         let effective_msg_ref = effective_message.as_str();
         // Memory context is injected once in the engine, keyed on the ingress

@@ -8827,7 +8827,8 @@ fn native_tools_system_prompt_contains_zero_xml() {
         true, // native_tool_specs_present
         reiclaw_config::schema::SkillsPromptInjectionMode::Full,
         crate::security::AutonomyLevel::default(),
-    );
+    )
+    .unwrap();
 
     // Must contain zero XML protocol artifacts
     assert!(
@@ -8888,7 +8889,8 @@ fn native_tool_specs_prompt_allows_actions_without_text_tools() {
         native_tool_specs_present,
         reiclaw_config::schema::SkillsPromptInjectionMode::Full,
         crate::security::AutonomyLevel::default(),
-    );
+    )
+    .unwrap();
 
     assert!(
         !system_prompt.contains("No tools are available"),
@@ -8930,7 +8932,8 @@ fn native_capable_provider_with_zero_effective_tools_keeps_no_tools_boundary() {
         native_tool_specs_present,
         reiclaw_config::schema::SkillsPromptInjectionMode::Full,
         crate::security::AutonomyLevel::default(),
-    );
+    )
+    .unwrap();
 
     assert!(
         system_prompt.contains("No tools are available for this turn"),
@@ -9171,7 +9174,8 @@ fn non_native_system_prompt_with_no_tools_contains_zero_tool_protocol() {
         false,
         reiclaw_config::schema::SkillsPromptInjectionMode::Full,
         crate::security::AutonomyLevel::default(),
-    );
+    )
+    .unwrap();
 
     assert!(
         !system_prompt.contains("## Tools"),

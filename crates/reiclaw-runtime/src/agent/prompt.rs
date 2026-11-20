@@ -148,16 +148,66 @@ impl SystemPromptBuilder {
     }
 
     pub fn build(&self, ctx: &PromptContext<'_>) -> Result<String> {
-        let mut output = String::new();
+        self.build_with_budget(ctx, 0)
+    }
+
+    /// Render once, then let optional Soul layers yield before truncating the
+    /// whole prompt. Only the persona section is eligible: headings in tools,
+    /// skills or model-writable notes cannot change authority or budget order.
+    pub(crate) fn build_with_budget(
+        &self,
+        ctx: &PromptContext<'_>,
+        max_bytes: usize,
+    ) -> Result<String> {
+        let mut rendered = Vec::with_capacity(self.sections.len());
         for section in &self.sections {
-            let part = section.build(ctx)?;
+            let mut part = section.build(ctx)?;
             if part.trim().is_empty() {
                 continue;
             }
-            output.push_str(part.trim_end());
-            output.push_str("\n\n");
+            part.truncate(part.trim_end().len());
+            part.push_str("\n\n");
+            rendered.push((section.name(), part));
+        }
+        if max_bytes > 0 {
+            // ADR-018 precedence: Story, then Tone. Identity and Principles
+            // remain in place, as do the safety and approval sections.
+            for heading in [crate::agent::persona_projection::STORY_HEADING, "## Tone"] {
+                if rendered.iter().map(|(_, part)| part.len()).sum::<usize>() <= max_bytes {
+                    break;
+                }
+                if let Some((_, persona)) = rendered.iter_mut().find(|(name, _)| *name == "tone") {
+                    trim_persona_tail(persona, heading);
+                }
+            }
+        }
+
+        let mut output: String = rendered.into_iter().map(|(_, part)| part).collect();
+        if max_bytes > 0 && output.len() > max_bytes {
+            let mut end = max_bytes;
+            while !output.is_char_boundary(end) {
+                end -= 1;
+            }
+            output.truncate(end);
+            output.push_str("\n\n[System prompt truncated to fit context budget]\n");
         }
         Ok(output)
+    }
+}
+
+fn trim_persona_tail(persona: &mut String, heading: &str) {
+    let marker = format!("{heading}\n");
+    let start = if persona.starts_with(&marker) {
+        Some(0)
+    } else {
+        persona.rfind(&format!("\n{marker}")).map(|index| index + 1)
+    };
+    if let Some(start) = start {
+        persona.truncate(start);
+        persona.truncate(persona.trim_end().len());
+        if !persona.is_empty() {
+            persona.push_str("\n\n");
+        }
     }
 }
 
@@ -274,17 +324,23 @@ impl PromptSection for ToolHonestySection {
     }
 
     fn build(&self, ctx: &PromptContext<'_>) -> Result<String> {
-        if ctx.tools.is_empty() {
-            return Ok(String::new());
-        }
+        Ok(Self::render(!ctx.tools.is_empty()).into())
+    }
+}
 
-        Ok(
+impl ToolHonestySection {
+    /// Both prompt profiles use the same honesty floor. The loop has a short
+    /// tool-description catalog, so it supplies availability without inventing
+    /// Tool instances or mutating PromptContext's registry.
+    pub(crate) fn render(has_tools: bool) -> &'static str {
+        if has_tools {
             "## CRITICAL: Tool Honesty\n\n\
              - NEVER fabricate, invent, or guess tool results. If a tool returns empty results, say \"No results found.\"\n\
              - If a tool call fails, report the error — never make up data to fill the gap.\n\
              - When unsure whether a tool call succeeded, ask the user rather than guessing."
-                .into(),
-        )
+        } else {
+            ""
+        }
     }
 }
 
@@ -944,6 +1000,8 @@ mod tests {
             );
             let rendered = builder.build(&ctx).unwrap();
             assert!(!rendered.contains("CRITICAL CONTEXT: CURRENT DATE"));
+            assert!(!rendered.contains("## Current Date"));
+            assert!(!rendered.contains("## Channel Capabilities"));
             assert!(rendered.contains("The fixture milestone is 2026-01-02."));
         }
         let before = governed.build(&ctx).unwrap();
@@ -952,6 +1010,56 @@ mod tests {
             legacy_files: crate::agent::persona_projection::LegacyPersonaFiles::SuppressAll,
         });
         assert_eq!(governed.build(&ctx).unwrap(), before);
+    }
+
+    #[test]
+    fn device_persona_refresh_never_restores_private_context_sections() {
+        use crate::agent::persona_projection::{LegacyPersonaFiles, PersonaProjection};
+
+        let workspace = tempfile::tempdir().unwrap();
+        for file in [
+            "SOUL.md",
+            "IDENTITY.md",
+            "USER.md",
+            "AGENTS.md",
+            "TOOLS.md",
+            "MEMORY.md",
+            "BOOTSTRAP.md",
+            "HEARTBEAT.md",
+        ] {
+            std::fs::write(workspace.path().join(file), format!("PRIVATE_{file}")).unwrap();
+        }
+        let skills = [serde_json::from_value::<Skill>(serde_json::json!({
+            "name": "private_skill",
+            "description": "Private installed instructions",
+            "version": "1.0.0",
+            "prompts": ["PRIVATE_SKILL_BODY"]
+        }))
+        .unwrap()];
+        let mut ctx = notes_test_ctx(workspace.path(), &[]);
+        ctx.skills = &skills;
+        let projection = PersonaProjection {
+            section: Some("## Identity\n\nPublic device identity.\n\n## Tone\n\nBe clear.".into()),
+            legacy_files: LegacyPersonaFiles::Inject,
+        };
+        // Confirm that the fixture exercises real private content on the owner
+        // path, then check that both construction and refresh exclude it.
+        let owner = SystemPromptBuilder::with_persona(projection.clone())
+            .build(&ctx)
+            .unwrap();
+        assert!(owner.contains("PRIVATE_SOUL.md") && owner.contains("PRIVATE_MEMORY.md"));
+        assert!(owner.contains("PRIVATE_SKILL_BODY"));
+        let mut device = SystemPromptBuilder::with_device_persona(projection.clone());
+        for refresh in [false, true] {
+            if refresh {
+                device.set_persona(projection.clone());
+            }
+            let prompt = device.build(&ctx).unwrap();
+            assert!(prompt.contains("Public device identity.") && prompt.contains("Be clear."));
+            assert!(!prompt.contains("PRIVATE_") && !prompt.contains("private_skill"));
+            assert!(!prompt.contains("## Current Date") && !prompt.contains("CURRENT DATE"));
+            assert!(!prompt.contains("## Channel Capabilities"));
+        }
     }
 
     #[test]

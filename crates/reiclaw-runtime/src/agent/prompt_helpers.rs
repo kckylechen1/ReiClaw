@@ -108,7 +108,7 @@ pub(crate) fn build_system_prompt_for_turn(
         show_tool_calls,
         persona_section,
         legacy_persona_files,
-    );
+    )?;
 
     if expose_text_tool_protocol {
         system_prompt.push_str(&build_tool_instructions_for_names(

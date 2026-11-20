@@ -2,9 +2,14 @@
 //! These functions were originally in `channels/mod.rs` but live here to
 //! break a circular dependency between the channels and agent modules.
 
+use super::prompt::{
+    PromptContext, PromptSection, RuntimeSection, SkillsSection, SystemPromptBuilder, ToneSection,
+    ToolHonestySection, WorkspaceSection,
+};
 use crate::identity;
 use crate::security::AutonomyLevel;
 use crate::skills::Skill;
+use anyhow::Result;
 
 /// Maximum characters per injected workspace file (matches `OpenClaw` default).
 pub const BOOTSTRAP_MAX_CHARS: usize = 20_000;
@@ -15,7 +20,7 @@ pub const COMPACT_BOOTSTRAP_MAX_CHARS: usize = 6_000;
 pub const NO_TOOLS_TASK_FRAMING: &str = "No tools are available for this turn";
 pub const NATIVE_TOOLS_TASK_FRAMING: &str = "Use tools when the request requires action";
 
-use crate::agent::persona_projection::{LegacyPersonaFiles, STORY_HEADING};
+use crate::agent::persona_projection::LegacyPersonaFiles;
 use crate::agent::personality::{NOTES_FILES, NOTES_FRAMING_LINE, NOTES_HEADING};
 
 /// Workspace files `doctor` scans (plus the conditional `BOOTSTRAP.md` /
@@ -90,55 +95,6 @@ fn load_openclaw_bootstrap_files(
     }
 }
 
-pub fn build_system_prompt(
-    workspace_dir: &std::path::Path,
-    model_name: &str,
-    tools: &[(&str, &str)],
-    skills: &[Skill],
-    identity_config: Option<&reiclaw_config::schema::IdentityConfig>,
-    bootstrap_max_chars: Option<usize>,
-) -> String {
-    build_system_prompt_with_mode(
-        workspace_dir,
-        model_name,
-        tools,
-        skills,
-        identity_config,
-        bootstrap_max_chars,
-        false,
-        reiclaw_config::schema::SkillsPromptInjectionMode::Full,
-        AutonomyLevel::default(),
-    )
-}
-
-/// Like [`build_system_prompt`] but accepts `show_tool_calls` to control
-/// whether the system prompt instructs the model to hide tool narration.
-pub fn build_system_prompt_with_tool_calls(
-    workspace_dir: &std::path::Path,
-    model_name: &str,
-    tools: &[(&str, &str)],
-    skills: &[Skill],
-    identity_config: Option<&reiclaw_config::schema::IdentityConfig>,
-    bootstrap_max_chars: Option<usize>,
-    show_tool_calls: bool,
-) -> String {
-    build_system_prompt_with_mode_and_autonomy(
-        workspace_dir,
-        model_name,
-        tools,
-        skills,
-        identity_config,
-        bootstrap_max_chars,
-        Some(&reiclaw_config::schema::RiskProfileConfig::default()),
-        false,
-        reiclaw_config::schema::SkillsPromptInjectionMode::Full,
-        false,
-        0,
-        true,
-        show_tool_calls,
-    )
-}
-
 pub fn build_system_prompt_with_mode(
     workspace_dir: &std::path::Path,
     model_name: &str,
@@ -149,7 +105,7 @@ pub fn build_system_prompt_with_mode(
     native_tool_specs_present: bool,
     skills_prompt_mode: reiclaw_config::schema::SkillsPromptInjectionMode,
     autonomy_level: AutonomyLevel,
-) -> String {
+) -> Result<String> {
     let autonomy_cfg = reiclaw_config::schema::RiskProfileConfig {
         level: autonomy_level,
         ..Default::default()
@@ -191,7 +147,7 @@ pub fn build_system_prompt_with_mode_and_autonomy(
     // response. When `false` (default), the system prompt instructs
     // the model to treat tool calls as invisible infrastructure.
     show_tool_calls: bool,
-) -> String {
+) -> Result<String> {
     build_system_prompt_with_persona(
         workspace_dir,
         model_name,
@@ -214,9 +170,8 @@ pub fn build_system_prompt_with_mode_and_autonomy(
 /// Like [`build_system_prompt_with_mode_and_autonomy`] but additionally
 /// accepts a pre-rendered persona `## Tone` section
 /// ([`reiclaw_config::persona::PersonaKnobs::to_prompt_section`]).
-/// `persona_section: None` (the case `build_system_prompt_with_mode_and_autonomy`
-/// always passes) produces byte-identical output to before this section
-/// existed.
+/// `persona_section: None` contributes no section or separator bytes. Section
+/// failures propagate through the same builder used by the Agent entry point.
 #[allow(clippy::too_many_arguments)]
 pub fn build_system_prompt_with_persona(
     workspace_dir: &std::path::Path,
@@ -242,292 +197,315 @@ pub fn build_system_prompt_with_persona(
     // `USER.md` once the User Model holds an owner-authorized revision
     // (ADR-018 §6).
     legacy_persona_files: LegacyPersonaFiles,
-) -> String {
-    use std::fmt::Write;
-    let mut prompt = String::with_capacity(8192);
+) -> Result<String> {
     let has_tools = !tools.is_empty() || native_tool_specs_present;
+    let ctx = PromptContext {
+        workspace_dir,
+        agent_workspace_dir: workspace_dir,
+        model_name,
+        tools: &[],
+        skills,
+        skills_prompt_mode,
+        identity_config,
+        dispatcher_instructions: "",
+        sends_native_tool_specs: native_tool_specs_present,
+        security_summary: None,
+        autonomy_level: autonomy_config.map(|cfg| cfg.level).unwrap_or_default(),
+    };
 
-    // ── 0. Anti-narration (top priority) ───────────────────────
-    // When show_tool_calls is true, the model is allowed to describe
-    // its tool usage so channel users see what tools are being called.
-    if has_tools && !show_tool_calls {
-        prompt.push_str(
-            "## CRITICAL: No Tool Narration\n\n\
+    // The loop and Agent now share one assembler, common sections and persona
+    // budget rules. Loop-only sections retain their bootstrap and approval
+    // semantics; device/default builders never opt into channel capabilities.
+    // Every live loop entry timestamps user turns, so this prefix stays undated.
+    SystemPromptBuilder::default()
+        .add_section(Box::new(LoopBehaviorSection {
+            has_tools,
+            show_tool_calls,
+        }))
+        .add_section(Box::new(ToneSection(persona_section.map(str::to_owned))))
+        .add_section(Box::new(LoopToolsSection {
+            tools: tools
+                .iter()
+                .map(|(name, desc)| ((*name).into(), (*desc).into()))
+                .collect(),
+            compact_context,
+        }))
+        .add_section(Box::new(LoopSafetySection))
+        .add_section(Box::new(SkillsSection))
+        .add_section(Box::new(WorkspaceSection))
+        .add_section(Box::new(BootstrapSection {
+            max_chars: bootstrap_max_chars.unwrap_or(BOOTSTRAP_MAX_CHARS),
+            inject_memory,
+            compact_context,
+            legacy_persona_files,
+        }))
+        .add_section(Box::new(RuntimeSection))
+        .add_section(Box::new(ChannelCapabilitiesSection {
+            enabled: !compact_context,
+            show_tool_calls,
+        }))
+        .build_with_budget(&ctx, max_system_prompt_chars)
+}
+
+struct LoopBehaviorSection {
+    has_tools: bool,
+    show_tool_calls: bool,
+}
+
+impl PromptSection for LoopBehaviorSection {
+    fn name(&self) -> &str {
+        "tool_behavior"
+    }
+
+    fn build(&self, _ctx: &PromptContext<'_>) -> Result<String> {
+        let mut prompt = String::new();
+        let Self {
+            has_tools,
+            show_tool_calls,
+        } = *self;
+        // ── 0. Anti-narration (top priority) ───────────────────────
+        // When show_tool_calls is true, the model is allowed to describe
+        // its tool usage so channel users see what tools are being called.
+        if has_tools && !show_tool_calls {
+            prompt.push_str(
+                "## CRITICAL: No Tool Narration\n\n\
              NEVER narrate, announce, describe, or explain your tool usage to the user. \
              Do NOT say things like 'Let me check...', 'I will use http_request to...', \
              'I'll fetch that for you', 'Searching now...', or 'Using the web_search tool'. \
              The user must ONLY see the final answer. Tool calls are invisible infrastructure — \
              never reference them. If you catch yourself starting a sentence about what tool \
              you are about to use or just used, DELETE it and give the answer directly.\n\n",
-        );
-    }
-
-    // ── 0b. Tool Honesty ───────────────────────────────────────
-    if has_tools {
-        prompt.push_str(
-            "## CRITICAL: Tool Honesty\n\n\
-             - NEVER fabricate, invent, or guess tool results. If a tool returns empty results, say \"No results found.\"\n\
-             - If a tool call fails, report the error — never make up data to fill the gap.\n\
-             - When unsure whether a tool call succeeded, ask the user rather than guessing.\n\n",
-        );
-    }
-
-    // ── 0c. Tone (persona dials) ────────────────────────────────
-    // Must sit after the two hard behavioural blocks above (a persona dial
-    // must never be able to displace anti-narration or tool honesty) and
-    // before the tools list below. If the prompt exceeds its budget, discard
-    // the optional tail first, lowest precedence first (ADR-018 §2): Story,
-    // then Tone if still over budget, so style and shared history cannot
-    // displace safety, approval guidance or the governed Identity/Principles
-    // layers.
-    let mut tone_range = None;
-    let mut story_range = None;
-    if let Some(section) = persona_section
-        && !section.is_empty()
-    {
-        let tone_start = if section.starts_with("## Tone\n") {
-            Some(0)
-        } else {
-            section.rfind("\n## Tone\n")
-        };
-        let story_start = section.find(&format!("\n{STORY_HEADING}\n"));
-        let start = prompt.len();
-        prompt.push_str(section);
-        prompt.push('\n');
-        let end = prompt.len();
-        story_range = story_start.map(|offset| start + offset..end - 1);
-        tone_range = tone_start.map(|offset| {
-            let tone_end = story_start.map_or(end - usize::from(offset > 0), |story| start + story);
-            start + offset..tone_end
-        });
-    }
-
-    // ── 1. Tooling ──────────────────────────────────────────────
-    if !tools.is_empty() && !native_tool_specs_present {
-        prompt.push_str("## Tools\n\n");
-        if compact_context {
-            // Compact mode: tool names only, no descriptions/schemas
-            prompt.push_str("Available tools: ");
-            let names: Vec<&str> = tools.iter().map(|(name, _)| *name).collect();
-            prompt.push_str(&names.join(", "));
-            prompt.push_str("\n\n");
-        } else {
-            prompt.push_str("You have access to the following tools:\n\n");
-            for (name, desc) in tools {
-                let _ = writeln!(prompt, "- **{name}**: {desc}");
-            }
-            prompt.push('\n');
+            );
         }
+
+        prompt.push_str(ToolHonestySection::render(has_tools));
+        Ok(prompt)
+    }
+}
+
+/// The loop supplies short descriptions rather than a Tool registry. Keep its
+/// catalog, action framing and Full-autonomy authorization together so each
+/// statement describes the same filtered tool set.
+struct LoopToolsSection {
+    tools: Vec<(String, String)>,
+    compact_context: bool,
+}
+
+impl PromptSection for LoopToolsSection {
+    fn name(&self) -> &str {
+        "tools"
     }
 
-    // ── 1d. Tool Authorization (Full autonomy) ──────────────────────
-    // At Full autonomy the user has explicitly opted into letting the model
-    // act without per-call approval. The generic Safety block alone isn't
-    // enough to overcome model safety-priors that produce simulated
-    // refusal text without ever dispatching a tool call.
-    // Name the power tools the autonomy policy authorizes and tell the model
-    // it is authorized to *call/attempt* them (not that they are exempt from
-    // policy): command policy, forbidden_commands, forbidden_paths, and OS
-    // sandboxing may still reject a real call, so the model must not
-    // self-refuse merely because the request uses these tools.
-    if has_tools && autonomy_config.map(|cfg| cfg.level) == Some(AutonomyLevel::Full) {
-        let power_tools: Vec<&str> = ["shell", "file_write", "file_edit"]
-            .into_iter()
-            .filter(|name| tools.iter().any(|(t, _)| t == name))
-            .collect();
-        if !power_tools.is_empty() {
-            prompt.push_str(
+    fn build(&self, ctx: &PromptContext<'_>) -> Result<String> {
+        use std::fmt::Write;
+        let mut prompt = String::new();
+        let tools = &self.tools;
+        let compact_context = self.compact_context;
+        let native_tool_specs_present = ctx.sends_native_tool_specs;
+        let has_tools = !tools.is_empty() || native_tool_specs_present;
+        // ── 1. Tooling ──────────────────────────────────────────────
+        if !tools.is_empty() && !native_tool_specs_present {
+            prompt.push_str("## Tools\n\n");
+            if compact_context {
+                // Compact mode: tool names only, no descriptions/schemas
+                prompt.push_str("Available tools: ");
+                let names: Vec<&str> = tools.iter().map(|(name, _)| name.as_str()).collect();
+                prompt.push_str(&names.join(", "));
+                prompt.push_str("\n\n");
+            } else {
+                prompt.push_str("You have access to the following tools:\n\n");
+                for (name, desc) in tools {
+                    let _ = writeln!(prompt, "- **{name}**: {desc}");
+                }
+                prompt.push('\n');
+            }
+        }
+
+        // ── 1d. Tool Authorization (Full autonomy) ──────────────────────
+        // At Full autonomy the user has explicitly opted into letting the model
+        // act without per-call approval. The generic Safety block alone isn't
+        // enough to overcome model safety-priors that produce simulated
+        // refusal text without ever dispatching a tool call.
+        // Name the power tools the autonomy policy authorizes and tell the model
+        // it is authorized to *call/attempt* them (not that they are exempt from
+        // policy): command policy, forbidden_commands, forbidden_paths, and OS
+        // sandboxing may still reject a real call, so the model must not
+        // self-refuse merely because the request uses these tools.
+        if has_tools && ctx.autonomy_level == AutonomyLevel::Full {
+            let power_tools: Vec<&str> = ["shell", "file_write", "file_edit"]
+                .into_iter()
+                .filter(|name| tools.iter().any(|(tool, _)| tool.as_str() == *name))
+                .collect();
+            if !power_tools.is_empty() {
+                prompt.push_str(
                 "## Tool Authorization\n\n\
                  The runtime autonomy policy is set to `full`. The user has granted the agent permission to act without per-call approval, so the following tools are registered and authorized to call (to attempt) under Full autonomy: ",
             );
-            prompt.push_str(&power_tools.join(", "));
-            prompt.push_str(
+                prompt.push_str(&power_tools.join(", "));
+                prompt.push_str(
                 ".\n\
                  When the user asks you to run a shell command, write or edit a file, or otherwise act through these tools, CALL the tool directly — do NOT self-refuse with simulated text such as \"blocked by security policy\" or \"restricted in this environment\" merely because the request uses shell or file-write tooling.\n\
                  Full autonomy removes the approval prompt, not the runtime safeguards: command policy, `forbidden_commands`, `forbidden_paths`, and OS sandboxing still apply, and a call can still return a real tool error. If such an error occurs, it is reported as a tool error in the conversation; only then should you explain what was blocked. Never invent a block that did not happen.\n\n",
             );
+            }
         }
-    }
 
-    // ── 1c. Action instruction (avoid meta-summary) ───────────────
-    if !has_tools {
-        prompt.push_str(
+        // ── 1c. Action instruction (avoid meta-summary) ───────────────
+        if !has_tools {
+            prompt.push_str(
             "## Your Task\n\n\
              When the user sends a message, respond naturally and answer directly from conversation context.\n\
              ",
         );
-        prompt.push_str(NO_TOOLS_TASK_FRAMING);
-        prompt.push_str(
+            prompt.push_str(NO_TOOLS_TASK_FRAMING);
+            prompt.push_str(
             ", so do not emit tool calls or describe unavailable actions.\n\
              Do NOT: summarize this configuration, describe your capabilities, or output step-by-step meta-commentary.\n\n",
         );
-    } else if native_tool_specs_present {
-        prompt.push_str(
-            "## Your Task\n\n\
+        } else if native_tool_specs_present {
+            prompt.push_str(
+                "## Your Task\n\n\
              When the user sends a message, respond naturally. ",
-        );
-        prompt.push_str(NATIVE_TOOLS_TASK_FRAMING);
-        prompt.push_str(
+            );
+            prompt.push_str(NATIVE_TOOLS_TASK_FRAMING);
+            prompt.push_str(
             " (running commands, reading files, etc.).\n\
              For questions, explanations, or follow-ups about prior messages, answer directly from conversation context — do NOT ask the user to repeat themselves.\n\
              Do NOT: summarize this configuration, describe your capabilities, or output step-by-step meta-commentary.\n\n",
         );
-    } else {
-        prompt.push_str(
+        } else {
+            prompt.push_str(
             "## Your Task\n\n\
              When the user sends a message, ACT on it. Use the tools to fulfill their request.\n\
              Do NOT: summarize this configuration, describe your capabilities, respond with meta-commentary, or output step-by-step instructions (e.g. \"1. First... 2. Next...\").\n\
              Instead: emit actual <tool_call> tags when you need to act. Just do what they ask.\n\n",
         );
+        }
+
+        Ok(prompt)
+    }
+}
+
+/// Preserve the loop's existing policy wording; the Agent profile adds its
+/// concrete security summary through SafetySection instead.
+struct LoopSafetySection;
+
+impl PromptSection for LoopSafetySection {
+    fn name(&self) -> &str {
+        "safety"
     }
 
-    // ── 2. Safety ───────────────────────────────────────────────
-    prompt.push_str("## Safety\n\n");
-    prompt.push_str("- Do not exfiltrate private data.\n");
-    if autonomy_config.map(|cfg| cfg.level) != Some(crate::security::AutonomyLevel::Full) {
-        prompt.push_str(
-            "- Do not run destructive commands without asking.\n\
+    fn build(&self, ctx: &PromptContext<'_>) -> Result<String> {
+        let mut prompt = String::new();
+        // ── 2. Safety ───────────────────────────────────────────────
+        prompt.push_str("## Safety\n\n");
+        prompt.push_str("- Do not exfiltrate private data.\n");
+        if ctx.autonomy_level != AutonomyLevel::Full {
+            prompt.push_str(
+                "- Do not run destructive commands without asking.\n\
              - Do not bypass oversight or approval mechanisms.\n",
-        );
-    }
-    prompt.push_str("- Prefer `trash` over `rm` (recoverable beats gone forever).\n");
-    prompt.push_str(match autonomy_config.map(|cfg| cfg.level) {
-        Some(crate::security::AutonomyLevel::Full) => {
+            );
+        }
+        prompt.push_str("- Prefer `trash` over `rm` (recoverable beats gone forever).\n");
+        prompt.push_str(match ctx.autonomy_level {
+        AutonomyLevel::Full => {
             "- Respect the runtime autonomy policy: if a tool or action is allowed, execute it directly instead of asking the user for extra approval.\n\
              - If a tool or action is blocked by policy or unavailable, explain that concrete restriction instead of simulating an approval dialog.\n"
         }
-        Some(crate::security::AutonomyLevel::ReadOnly) => {
+        AutonomyLevel::ReadOnly => {
             "- Respect the runtime autonomy policy: this runtime is read-only for side effects unless a tool explicitly reports otherwise.\n\
              - If a requested action is blocked by policy, explain the restriction directly instead of simulating an approval dialog.\n"
         }
-        _ => {
+        AutonomyLevel::Supervised => {
             "- When in doubt, ask before acting externally.\n\
              - Respect the runtime autonomy policy: ask for approval only when the current runtime policy actually requires it.\n\
              - If a tool or action is blocked by policy or unavailable, explain that concrete restriction instead of simulating an approval dialog.\n"
         }
     });
-    prompt.push('\n');
+        prompt.push('\n');
 
-    // ── 3. Skills (full or compact, based on config) ─────────────
-    if !skills.is_empty() {
-        prompt.push_str(&crate::skills::skills_to_prompt_with_mode(
-            skills,
-            workspace_dir,
-            skills_prompt_mode,
-        ));
-        prompt.push_str("\n\n");
+        Ok(prompt)
+    }
+}
+
+/// Capped workspace context used by the legacy loop and by `rei doctor`.
+/// Agent's governed/personality loader retains its separate file policy.
+struct BootstrapSection {
+    max_chars: usize,
+    inject_memory: bool,
+    compact_context: bool,
+    legacy_persona_files: LegacyPersonaFiles,
+}
+
+impl PromptSection for BootstrapSection {
+    fn name(&self) -> &str {
+        "identity"
     }
 
-    // ── 4. Workspace ────────────────────────────────────────────
-    let _ = writeln!(
-        prompt,
-        "## Workspace\n\nWorking directory: `{}`\n",
-        workspace_dir.display()
-    );
-
-    // ── 5. Bootstrap files (injected into context) ──────────────
-    prompt.push_str("## Project Context\n\n");
-
-    // Check if AIEOS identity is configured
-    if let Some(config) = identity_config {
-        if identity::is_aieos_configured(config) {
-            // Load AIEOS identity
-            match identity::load_aieos_identity(config, workspace_dir) {
-                Ok(Some(aieos_identity)) => {
-                    let aieos_prompt = identity::aieos_to_system_prompt(&aieos_identity);
-                    if !aieos_prompt.is_empty() {
-                        prompt.push_str(&aieos_prompt);
+    fn build(&self, ctx: &PromptContext<'_>) -> Result<String> {
+        let mut prompt = String::from("## Project Context\n\n");
+        if let Some(config) = ctx.identity_config
+            && identity::is_aieos_configured(config)
+        {
+            match identity::load_aieos_identity(config, ctx.agent_workspace_dir) {
+                Ok(Some(aieos)) => {
+                    let rendered = identity::aieos_to_system_prompt(&aieos);
+                    if !rendered.is_empty() {
+                        prompt.push_str(&rendered);
                         prompt.push_str("\n\n");
                     }
+                    return Ok(prompt);
                 }
-                Ok(None) => {
-                    // No AIEOS identity loaded (shouldn't happen if is_aieos_configured returned true)
-                    // Fall back to OpenClaw bootstrap files
-                    let max_chars = bootstrap_max_chars.unwrap_or(BOOTSTRAP_MAX_CHARS);
-                    load_openclaw_bootstrap_files(
-                        &mut prompt,
-                        workspace_dir,
-                        max_chars,
-                        inject_memory,
-                        compact_context,
-                        legacy_persona_files,
-                    );
-                }
-                Err(e) => {
-                    // Log error but don't fail - fall back to OpenClaw
-                    eprintln!(
-                        "Warning: Failed to load AIEOS identity: {e}. Using OpenClaw format."
-                    );
-                    let max_chars = bootstrap_max_chars.unwrap_or(BOOTSTRAP_MAX_CHARS);
-                    load_openclaw_bootstrap_files(
-                        &mut prompt,
-                        workspace_dir,
-                        max_chars,
-                        inject_memory,
-                        compact_context,
-                        legacy_persona_files,
-                    );
-                }
+                Ok(None) => {}
+                Err(error) => eprintln!(
+                    "Warning: Failed to load AIEOS identity: {error}. Using OpenClaw format."
+                ),
             }
-        } else {
-            // OpenClaw format
-            let max_chars = bootstrap_max_chars.unwrap_or(BOOTSTRAP_MAX_CHARS);
-            load_openclaw_bootstrap_files(
-                &mut prompt,
-                workspace_dir,
-                max_chars,
-                inject_memory,
-                compact_context,
-                legacy_persona_files,
-            );
         }
-    } else {
-        // No identity config - use OpenClaw format
-        let max_chars = bootstrap_max_chars.unwrap_or(BOOTSTRAP_MAX_CHARS);
         load_openclaw_bootstrap_files(
             &mut prompt,
-            workspace_dir,
-            max_chars,
-            inject_memory,
-            compact_context,
-            legacy_persona_files,
+            ctx.agent_workspace_dir,
+            self.max_chars,
+            self.inject_memory,
+            self.compact_context,
+            self.legacy_persona_files,
         );
+        Ok(prompt)
+    }
+}
+
+/// Messaging-channel guidance is opt-in and absent from compact, default and
+/// device prompts. It never supplies an approval path that the runtime lacks.
+struct ChannelCapabilitiesSection {
+    enabled: bool,
+    show_tool_calls: bool,
+}
+
+impl PromptSection for ChannelCapabilitiesSection {
+    fn name(&self) -> &str {
+        "channel_capabilities"
     }
 
-    // ── 6. Date ─────────────────────────────────────────────────
-    let now = jiff::Zoned::now();
-    let _ = writeln!(
-        prompt,
-        "## Current Date\n\n{} ({})\n",
-        now.strftime("%Y-%m-%d"),
-        now.strftime("%:z")
-    );
-
-    // ── 7. Runtime ──────────────────────────────────────────────
-    let host =
-        hostname::get().map_or_else(|_| "unknown".into(), |h| h.to_string_lossy().to_string());
-    let _ = writeln!(
-        prompt,
-        "## Runtime\n\nHost: {host} | OS: {} | Model: {model_name}\n",
-        std::env::consts::OS,
-    );
-
-    // ── 8. Channel Capabilities (skipped in compact_context mode) ──
-    if !compact_context {
+    fn build(&self, ctx: &PromptContext<'_>) -> Result<String> {
+        if !self.enabled {
+            return Ok(String::new());
+        }
+        let mut prompt = String::new();
+        let show_tool_calls = self.show_tool_calls;
         prompt.push_str("## Channel Capabilities\n\n");
         prompt.push_str("- You are running as a messaging bot. Your response is automatically sent back to the user's channel.\n");
         prompt
             .push_str("- You do NOT need to ask permission to respond — just respond directly.\n");
-        prompt.push_str(match autonomy_config.map(|cfg| cfg.level) {
-        Some(crate::security::AutonomyLevel::Full) => {
+        prompt.push_str(match ctx.autonomy_level {
+        AutonomyLevel::Full => {
             "- If the runtime policy already allows a tool, use it directly; do not ask the user for extra approval.\n\
              - Never pretend you are waiting for a human approval click or confirmation when the runtime policy already permits the action.\n\
              - If the runtime policy blocks an action, say that directly instead of simulating an approval flow.\n"
         }
-        Some(crate::security::AutonomyLevel::ReadOnly) => {
+        AutonomyLevel::ReadOnly => {
             "- This runtime may reject write-side effects; if that happens, explain the policy restriction directly instead of simulating an approval flow.\n"
         }
-        _ => {
+        AutonomyLevel::Supervised => {
             "- Ask for approval only when the runtime policy actually requires it.\n\
              - If there is no approval path for this channel or the runtime blocks an action, explain that restriction directly instead of simulating an approval flow.\n"
         }
@@ -539,32 +517,7 @@ pub fn build_system_prompt_with_persona(
             prompt.push_str("- NEVER narrate or describe your tool usage. Do NOT say 'Let me fetch...', 'I will use...', 'Searching...', or similar. Give the FINAL ANSWER only — no intermediate steps, no tool mentions, no progress updates.\n");
         }
         prompt.push_str("- Calibration note: agents in this system currently err on the side of silence when a response would be appropriate, which users find frustrating. Skew toward replying. Memory is supplementary context that informs how you respond, not a gate on whether you respond.\n\n");
-    } // end if !compact_context (Channel Capabilities)
-
-    // ── 9. Truncation (max_system_prompt_chars budget) ──────────
-    // Story renders after Tone, so removing it first leaves the Tone range
-    // valid.
-    for range in [story_range, tone_range].into_iter().flatten() {
-        if max_system_prompt_chars > 0 && prompt.len() > max_system_prompt_chars {
-            prompt.replace_range(range, "");
-        }
-    }
-    if max_system_prompt_chars > 0 && prompt.len() > max_system_prompt_chars {
-        // Truncate on a char boundary, keeping the top portion (identity + safety).
-        let mut end = max_system_prompt_chars;
-        // Ensure we don't split a multi-byte UTF-8 character.
-        while !prompt.is_char_boundary(end) && end > 0 {
-            end -= 1;
-        }
-        prompt.truncate(end);
-        prompt.push_str("\n\n[System prompt truncated to fit context budget]\n");
-    }
-
-    if prompt.is_empty() {
-        "You are ReiClaw, a fast and efficient AI assistant built in Rust. Be helpful, concise, and direct."
-            .to_string()
-    } else {
-        prompt
+        Ok(prompt)
     }
 }
 
@@ -693,6 +646,57 @@ mod tests {
     static TRUNCATION_WARN_TEST_LOCK: std::sync::Mutex<()> = std::sync::Mutex::new(());
 
     #[test]
+    fn loop_prefix_stays_undated_and_channel_guidance_is_gated() {
+        let workspace = tempfile::tempdir().unwrap();
+        std::fs::write(workspace.path().join("AGENTS.md"), "Milestone: 2026-01-02.").unwrap();
+        let policy = reiclaw_config::schema::RiskProfileConfig::default();
+        for compact in [false, true] {
+            for show_tool_calls in [false, true] {
+                let render = || {
+                    build_system_prompt_with_persona(
+                        workspace.path(),
+                        "test-model",
+                        &[("shell", "Run a command")],
+                        &[],
+                        None,
+                        Some(512),
+                        Some(&policy),
+                        true,
+                        SkillsPromptInjectionMode::Full,
+                        compact,
+                        0,
+                        false,
+                        show_tool_calls,
+                        Some("## Identity\n\nGoverned identity.\n\n## Tone\n\nBe clear.\n"),
+                        LegacyPersonaFiles::Suppress,
+                    )
+                    .unwrap()
+                };
+                let prompt = render();
+                assert_eq!(prompt, render());
+                assert!(!prompt.contains("## Current Date") && !prompt.contains("CURRENT DATE"));
+                assert!(prompt.contains("Milestone: 2026-01-02."));
+                assert_eq!(prompt.contains("## Channel Capabilities"), !compact);
+                assert_eq!(prompt.contains("TTS is handled by the channel"), !compact);
+                assert_eq!(
+                    prompt.contains("## CRITICAL: No Tool Narration"),
+                    !show_tool_calls
+                );
+                assert!(!prompt.contains("<tool_call>"));
+                assert!(!prompt.contains("## Tools"));
+                assert!(prompt.contains("## CRITICAL: Tool Honesty"));
+                assert!(prompt.contains("Do not bypass oversight or approval mechanisms."));
+                assert!(prompt.contains(
+                    "ask for approval only when the current runtime policy actually requires it"
+                ));
+                for section in ["## Safety", "## Workspace", "## Runtime", "## Identity"] {
+                    assert_eq!(prompt.matches(section).count(), 1, "{section}");
+                }
+            }
+        }
+    }
+
+    #[test]
     fn bootstrap_truncation_warns_once_per_workspace_file() {
         let _cache_guard = TRUNCATION_WARN_TEST_LOCK
             .lock()
@@ -789,7 +793,8 @@ mod tests {
                     0,
                     false,
                     false,
-                );
+                )
+                .unwrap();
                 let event = std::iter::from_fn(|| rx.try_recv().ok())
                     .find(|event| {
                         event["attributes"]["error_key"] == "agent.bootstrap_file_truncated"
@@ -833,6 +838,7 @@ mod tests {
             true,
             false,
         )
+        .unwrap()
     }
 
     #[test]
@@ -956,6 +962,7 @@ mod tests {
             persona_section,
             LegacyPersonaFiles::Inject,
         )
+        .unwrap()
     }
 
     fn build_in(workspace: &std::path::Path, legacy: LegacyPersonaFiles) -> String {
@@ -977,6 +984,7 @@ mod tests {
             Some("## Identity\n\nYou are Nova.\n"),
             legacy,
         )
+        .unwrap()
     }
 
     /// Once the owner has written a governed Identity, the legacy persona
@@ -1107,6 +1115,7 @@ mod tests {
                 Some(persona),
                 LegacyPersonaFiles::Suppress,
             )
+            .unwrap()
         };
         let baseline = render(&identity, 0);
         assert!(baseline.contains("## Safety"));
@@ -1170,7 +1179,8 @@ mod tests {
             0,
             true,
             false,
-        );
+        )
+        .unwrap();
         let via_new_entry_point_with_no_persona = build_system_prompt_with_persona(
             workspace.path(),
             "test-model",
@@ -1187,7 +1197,8 @@ mod tests {
             false,
             None,
             LegacyPersonaFiles::Inject,
-        );
+        )
+        .unwrap();
         assert_eq!(via_old_entry_point, via_new_entry_point_with_no_persona);
     }
 
@@ -1256,12 +1267,13 @@ mod tests {
         ] {
             assert!(prompt.find(governed).unwrap() < heading, "{governed}");
         }
-        // The three notes files all sit under it, in order, before the date.
+        // The three notes files all sit under it, in order, before the retained
+        // runtime section. The shared system prefix intentionally has no date.
         let agents = prompt.find("### AGENTS.md").unwrap();
         let tools = prompt.find("### TOOLS.md").unwrap();
         let memory = prompt.find("### MEMORY.md").unwrap();
-        let date = prompt.find("## Current Date").unwrap();
-        assert!(heading < agents && agents < tools && tools < memory && memory < date);
+        let runtime = prompt.find("## Runtime").unwrap();
+        assert!(heading < agents && agents < tools && tools < memory && memory < runtime);
     }
 
     #[test]
@@ -1292,7 +1304,8 @@ mod tests {
             false,
             Some("## Identity\n\nYou are Nova.\n"),
             LegacyPersonaFiles::Inject,
-        );
+        )
+        .unwrap();
         assert!(!without_memory.contains("MEMORY_MARKER"));
         assert!(!without_memory.contains("## Notes you wrote"));
     }
@@ -1320,7 +1333,8 @@ mod tests {
             false,
             None,
             LegacyPersonaFiles::Inject,
-        );
+        )
+        .unwrap();
         let heading = prompt.find("## Notes you wrote").unwrap();
         let agents = prompt.find("### AGENTS.md").unwrap();
         assert!(heading < agents);
