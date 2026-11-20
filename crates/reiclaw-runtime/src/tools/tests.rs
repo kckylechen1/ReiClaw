@@ -964,8 +964,6 @@ fn retired_operator_tools_absent_from_every_assembly_path() {
         cfg.composition = composition;
         if enable_retired_sections {
             cfg.security_ops.enabled = true;
-            cfg.backup.enabled = true;
-            cfg.data_retention.enabled = true;
         }
         let result = all_tools(
             Arc::new(cfg.clone()),

@@ -186,6 +186,8 @@ pub const RETIRED_CONFIG_SURFACES: &[(&str, &str)] = &[
     ("trust", "unused_kernel_config_removed"),
     ("media_pipeline", "unused_kernel_config_removed"),
     ("link_enricher", "unused_kernel_config_removed"),
+    ("backup", "backup_retention_engine_removed"),
+    ("data_retention", "backup_retention_engine_removed"),
     ("pipeline", "overlapping_builtin_tool_removed"),
     ("image_gen", "overlapping_builtin_tool_removed"),
     ("file_upload", "overlapping_builtin_tool_removed"),
@@ -757,6 +759,8 @@ pub fn retired_section_tombstones(contents: &str) -> Vec<ValidationWarning> {
             }
             let message = if *path == "eval" && table_path_exists(root.as_table(), path) {
                 "[eval] in config.toml is no longer used: the evaluation harness moved to the development CLI. Pass suite_dir as --suite and mode as --mode; [runtime_profiles.<alias>.eval] is unchanged.".to_string()
+            } else if *code == "backup_retention_engine_removed" && table_path_exists(root.as_table(), path) {
+                format!("[{path}] in config.toml is ignored: the in-process backup and retention engine was retired. Configure host-managed backups and retention, including encryption and scheduling, for the active config/data directories. Existing archives are unchanged; no backup or purge is scheduled from this section. Remove the section.")
             } else if table_path_exists(root.as_table(), path) {
                 format!(
                     "[{path}] in config.toml is ignored: the section was removed from the \

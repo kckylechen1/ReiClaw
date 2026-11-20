@@ -10,8 +10,7 @@
 //!   each step holds a real descriptor, later resolution is pinned to
 //!   inodes: a symlink swap of any ancestor or leaf cannot redirect the
 //!   walk. This closes the check-then-use race class that path-based
-//!   guards (including the tools-crate `fs_guard` helpers, which
-//!   re-verify path identities instead) can only narrow.
+//!   identity rechecks can only narrow.
 //! - **Ancestry is verified, not assumed.** A directory descriptor pins
 //!   an inode, not its path: renaming an interior directory would let
 //!   writes follow the inode to its new (attacker-chosen) location.

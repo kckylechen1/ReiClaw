@@ -8,7 +8,6 @@ pub mod agent_owned_state;
 pub mod api;
 pub mod api_attachments;
 pub mod api_attention;
-pub mod api_backup_retention;
 pub mod api_config;
 mod api_delegation;
 pub mod api_logs;
@@ -1630,12 +1629,6 @@ pub async fn run_gateway(
             "/api/soul/proposals/{id}/resolve",
             post(api_soul::post_resolve_proposal),
         )
-        // ── Backup / data-retention operator surface ──
-        // Thin operator-bearer-gated entries over the same BackupTool /
-        // DataManagementTool command methods the model-visible tools use;
-        // restore keeps its confirm/dry-run guard, purge keeps its
-        // dry-run default. Route table lives with the handlers.
-        .merge(api_backup_retention::routes())
         // ── SSE event stream ──
         .route("/api/events", get(sse::handle_sse_events))
         .route("/api/events/history", get(sse::handle_events_history))

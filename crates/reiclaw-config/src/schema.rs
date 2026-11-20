@@ -173,18 +173,6 @@ pub struct Config {
     #[group = "Operations"]
     pub security: SecurityConfig,
 
-    /// Backup tool configuration (`[backup]`).
-    #[serde(default)]
-    #[nested]
-    #[group = "Operations"]
-    pub backup: BackupConfig,
-
-    /// Data retention and purge configuration (`[data_retention]`).
-    #[serde(default)]
-    #[nested]
-    #[group = "Operations"]
-    pub data_retention: DataRetentionConfig,
-
     /// Managed cybersecurity service configuration (`[security_ops]`).
     #[serde(default)]
     #[nested]
@@ -5095,119 +5083,6 @@ impl Default for WebSearchConfig {
     }
 }
 
-// ── Backup ──────────────────────────────────────────────────────
-
-/// Backup tool configuration (`[backup]` section).
-#[derive(Debug, Clone, Serialize, Deserialize, Configurable)]
-#[cfg_attr(feature = "schema-export", derive(schemars::JsonSchema))]
-#[prefix = "backup"]
-pub struct BackupConfig {
-    /// Kept for config compatibility. This no longer registers a
-    /// model-callable tool: backup create/list/verify/restore live on the
-    /// operator-only gateway API (`/api/agents/{alias}/backup*`), whose
-    /// authorization is the operator bearer gate — this flag does not
-    /// gate that API. The section's parameters (`max_keep`,
-    /// `include_dirs`) configure it; enabling the flag never widens the
-    /// model-visible tool registry.
-    #[serde(default = "default_true")]
-    pub enabled: bool,
-    /// Maximum number of backups to keep (oldest are pruned).
-    #[serde(default = "default_backup_max_keep")]
-    pub max_keep: usize,
-    /// Workspace subdirectories to include in backups.
-    #[serde(default = "default_backup_include_dirs")]
-    pub include_dirs: Vec<String>,
-    /// Output directory for backup archives (relative to workspace root).
-    #[serde(default = "default_backup_destination_dir")]
-    pub destination_dir: String,
-    /// Optional cron expression for scheduled automatic backups.
-    #[serde(default)]
-    pub schedule_cron: Option<String>,
-    /// IANA timezone for `schedule_cron`.
-    #[serde(default)]
-    pub schedule_timezone: Option<String>,
-    /// Compress backup archives.
-    #[serde(default = "default_true")]
-    pub compress: bool,
-    /// Encrypt backup archives (requires a configured secret store key).
-    #[serde(default)]
-    pub encrypt: bool,
-}
-
-fn default_backup_max_keep() -> usize {
-    10
-}
-
-fn default_backup_include_dirs() -> Vec<String> {
-    vec![
-        "config".into(),
-        "memory".into(),
-        "audit".into(),
-        "knowledge".into(),
-    ]
-}
-
-fn default_backup_destination_dir() -> String {
-    "state/backups".into()
-}
-
-impl Default for BackupConfig {
-    fn default() -> Self {
-        Self {
-            enabled: true,
-            max_keep: default_backup_max_keep(),
-            include_dirs: default_backup_include_dirs(),
-            destination_dir: default_backup_destination_dir(),
-            schedule_cron: None,
-            schedule_timezone: None,
-            compress: true,
-            encrypt: false,
-        }
-    }
-}
-
-// ── Data Retention ──────────────────────────────────────────────
-
-/// Data retention and purge configuration (`[data_retention]` section).
-#[derive(Debug, Clone, Serialize, Deserialize, Configurable)]
-#[cfg_attr(feature = "schema-export", derive(schemars::JsonSchema))]
-#[prefix = "data_retention"]
-pub struct DataRetentionConfig {
-    /// Kept for config compatibility. This no longer registers a
-    /// model-callable tool: retention status/stats/purge live on the
-    /// operator-only gateway API
-    /// (`/api/agents/{alias}/data-retention*`), whose authorization is
-    /// the operator bearer gate — this flag does not gate that API. The
-    /// section's parameters (`retention_days`) configure it; enabling
-    /// the flag never widens the model-visible tool registry.
-    #[serde(default)]
-    pub enabled: bool,
-    /// Days of data to retain before purge eligibility.
-    #[serde(default = "default_retention_days")]
-    pub retention_days: u64,
-    /// Preview what would be deleted without actually removing anything.
-    #[serde(default)]
-    pub dry_run: bool,
-    /// Limit retention enforcement to specific data categories (empty = all).
-    #[serde(default)]
-    pub categories: Vec<String>,
-}
-
-fn default_retention_days() -> u64 {
-    90
-}
-
-impl Default for DataRetentionConfig {
-    fn default() -> Self {
-        Self {
-            enabled: false,
-            retention_days: default_retention_days(),
-            dry_run: false,
-            categories: Vec::new(),
-        }
-    }
-}
-
 // ── Proxy ───────────────────────────────────────────────────────
 
 /// Proxy application scope — determines which outbound traffic uses the proxy.
@@ -8381,8 +8256,6 @@ impl Default for Config {
             model_routes: Vec::new(),
             embedding_routes: Vec::new(),
             observability: ObservabilityConfig::default(),
-            backup: BackupConfig::default(),
-            data_retention: DataRetentionConfig::default(),
             security: SecurityConfig::default(),
             security_ops: SecurityOpsConfig::default(),
             runtime: RuntimeConfig::default(),

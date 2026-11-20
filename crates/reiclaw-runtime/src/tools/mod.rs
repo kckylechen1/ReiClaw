@@ -30,9 +30,7 @@ pub mod task_section;
 // Tool types from zeroclaw-tools (direct imports, no shims)
 pub use reiclaw_tools::ask_user::AskUserTool;
 pub use reiclaw_tools::ask_user::ChannelMapHandle;
-pub use reiclaw_tools::backup_tool::BackupTool;
 pub use reiclaw_tools::content_search::ContentSearchTool;
-pub use reiclaw_tools::data_management::DataManagementTool;
 pub use reiclaw_tools::episode_read::EpisodeReadTool;
 pub use reiclaw_tools::escalate::EscalateToHumanTool;
 pub use reiclaw_tools::file_edit::FileEditTool;
@@ -876,13 +874,6 @@ pub fn all_tools_with_runtime(
     // admits it to any registry (the daemon notes the withheld section at
     // boot and reload instead).
     //
-    // Backup and data management: operator-only surfaces. The gateway
-    // operator API (`/api/agents/{alias}/backup*`,
-    // `/api/agents/{alias}/data-retention*`) dispatches to the same
-    // BackupTool / DataManagementTool command methods; the `[backup]` and
-    // `[data_retention]` sections keep configuring that surface, not a
-    // model tool.
-
     // Vision tools are always available
     tool_arcs.push(Arc::new(ScreenshotTool::new(security.clone())));
 

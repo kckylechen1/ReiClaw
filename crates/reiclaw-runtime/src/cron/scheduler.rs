@@ -14,7 +14,6 @@ use futures_util::{StreamExt, stream};
 use jiff::Timestamp;
 use reiclaw_api::time::format_rfc3339;
 use reiclaw_config::schema::Config;
-use reiclaw_config::schema::{CronJobDecl, CronScheduleDecl};
 use reiclaw_infra::process::{OverflowBehavior, ProcessLimits, ProcessOutcome, run_bounded};
 use reiclaw_log::Instrument;
 use std::future::Future;
@@ -483,40 +482,13 @@ async fn run_scheduler(
     crate::health::mark_component_ok(SCHEDULER_COMPONENT);
 
     // ── Declarative job sync: reconcile config-defined jobs with the DB.
-    let mut jobs_with_builtin = config.cron.clone();
-    if let Some(ref schedule_cron) = config.backup.schedule_cron {
-        let backup_job = CronJobDecl {
-            name: Some("Scheduled backup".to_string()),
-            job_type: "shell".to_string(),
-            schedule: CronScheduleDecl::Cron {
-                expr: schedule_cron.clone(),
-                tz: config.backup.schedule_timezone.clone(),
-            },
-            command: Some("backup create".to_string()),
-            prompt: None,
-            enabled: true,
-            model: None,
-            allowed_tools: None,
-            uses_memory: true,
-            session_target: None,
-            delivery: None,
-        };
-        ::reiclaw_log::record!(
-            DEBUG,
-            ::reiclaw_log::Event::new(module_path!(), ::reiclaw_log::Action::Note)
-                .with_attrs(::serde_json::json!({"schedule": schedule_cron})),
-            "Synthesizing builtin backup cron job from config.backup.schedule_cron"
-        );
-        jobs_with_builtin.insert("__builtin_backup".to_string(), backup_job);
-    }
-
-    match sync_declarative_jobs(&config, &jobs_with_builtin) {
+    match sync_declarative_jobs(&config, &config.cron) {
         Ok(()) => {
-            if !jobs_with_builtin.is_empty() {
+            if !config.cron.is_empty() {
                 ::reiclaw_log::record!(
                     INFO,
                     ::reiclaw_log::Event::new(module_path!(), ::reiclaw_log::Action::Note)
-                        .with_attrs(::serde_json::json!({"count": jobs_with_builtin.len()})),
+                        .with_attrs(::serde_json::json!({"count": config.cron.len()})),
                     "Synced declarative cron jobs from config"
                 );
             }

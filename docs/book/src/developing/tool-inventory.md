@@ -59,7 +59,7 @@ boundaries because they add platform, dependency, network, or UI surface area.
 | WASM plugin tools | Removed with the WASM plugin host. | Retired: extensions go through MCP servers. |
 | `calculator`, `weather` | Removed from the model surface; implementations deleted. | Retired outright. The names stay reserved in `RETIRED_OPERATOR_TOOL_NAMES` so no assembly path can re-register them. A weather lookup, if ever wanted again, belongs to an HTTP skill or MCP wrapper. |
 | `knowledge` | Removed from the model surface; tool, graph store and config retired. | Retired: its private `knowledge.db` graph was a second store next to the Tachi memory kernel's own edges. `[knowledge]` / `[knowledge_bundles]` sections warn via the retired-surface tombstone. |
-| `backup`, `data_management` | Retired from the model surface. | Operator-only via the gateway operator API (`/api/agents/<alias>/backup*`, `/api/agents/<alias>/data-retention*`), which the `[backup]` / `[data_retention]` sections configure. See "Retired Operator Tools" below. |
+| `backup`, `data_management` | Implementations and operator routes retired. | Host-managed backup and retention own the active config/data directories. Existing archives remain on disk; `[backup]` / `[data_retention]` warn and schedule no work. |
 | `screenshot` | Captures the retained visual/UI surface. | Uses the shared filesystem and policy guards. |
 | `security_ops` | Retired from the model surface. | Default-off diagnostics with no operator surface; the module stays compiled but unreachable, and enabling the section only emits a startup/reload notice. See "Retired Operator Tools" below. |
 | `verifiable_intent` | Config-gated trust policy. **The `vi_verify` tool is temporarily withheld from the model-visible registry.** | Keep gated and first-party; intent issuance and verification affect trust policy and should stay first-party until the credential boundary is stable. No chain verifier exists yet, so `vi_verify` is not registered even when `verifiable_intent.enabled = true`; enabling the section now only emits a warning naming that gap, at process startup and again on each daemon reload. The issuance and verification library paths are unchanged. Restore registration only behind a verify-and-evaluate path that consumes a verified chain result. |
@@ -80,15 +80,14 @@ block an MCP or plugin tool that reuses one of these names.
 | `model_switch` | Explicit owner selection. The web model selector and `/model <type>.<alias>` command write `agents.<alias>.model_provider` through the gateway config API and reconnect the chat session. The agent cannot switch its own model through a tool. |
 | `proxy_config` | `PUT /api/config/proxy.*` persists the canonical `[proxy]` config; the daemon applies it at process startup (runtime global plus, for `scope = "environment"`, process env) and refreshes the runtime global on daemon reload. The `apply_env` / `clear_env` actions were deleted outright: live process-env manipulation had no consumer and restart application replaces it. |
 | `security_ops` | None (default-off diagnostics, unreachable by design). `security_ops.enabled` stays parseable; enabling it emits a startup/reload notice. |
-| `backup` | `POST/GET /api/agents/<alias>/backup`, `.../backup/{name}/verify`, `.../backup/{name}/restore` (operator bearer gated; restore keeps its `confirm` guard). |
-| `data_management` | `GET /api/agents/<alias>/data-retention/status`, `.../stats`, `POST .../purge` (operator bearer gated; purge keeps its `dry_run` default). |
+| `backup` | Host-managed backups; the in-process engine and `/api/agents/<alias>/backup*` routes are retired. |
+| `data_management` | Host-managed retention; the in-process engine and `/api/agents/<alias>/data-retention*` routes are retired. |
 
-Config sections that used to enable these as model tools still parse. Sections
-that keep configuring an operator surface (`[backup]`, `[data_retention]`)
-log a startup/reload notice naming that surface when enabled; nothing widens
-the model-visible registry. The retired names are reserved against external tool
-registration so no extension can claim one and ride it back onto the provider
-wire.
+`[backup]` and `[data_retention]` are retired config tombstones. Remove them
+after arranging host-managed scheduling, encryption and retention; their old
+values no longer create backups or purge data. Existing archives are unchanged.
+The retired names remain reserved against external tool registration so no
+extension can claim one and ride it back onto the provider wire.
 
 ## Externalize Later
 
