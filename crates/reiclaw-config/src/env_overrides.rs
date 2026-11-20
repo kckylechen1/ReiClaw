@@ -99,13 +99,23 @@ pub struct AppliedOverrides {
 /// for each. Hard-errors on any env var that doesn't resolve to a known
 /// schema path or whose alias fails validation.
 pub fn apply_env_overrides(config: &mut Config) -> Result<AppliedOverrides> {
+    apply_env_overrides_matching(config, |_| true)
+}
+
+/// Reuse the canonical override walker for a local command's selected settings.
+/// The predicate receives the lowercase env tail before any path is applied.
+pub(crate) fn apply_env_overrides_matching(
+    config: &mut Config,
+    include_tail: impl Fn(&str) -> bool,
+) -> Result<AppliedOverrides> {
     let mut entries: Vec<(String, String, String)> = std::env::vars()
         .filter_map(|(k, v)| {
             let tail = k.strip_prefix(PREFIX)?;
             (!tail.is_empty()
                 && tail
                     .chars()
-                    .all(|c| c.is_ascii_lowercase() || c.is_ascii_digit() || c == '_'))
+                    .all(|c| c.is_ascii_lowercase() || c.is_ascii_digit() || c == '_')
+                && include_tail(tail))
             .then(|| (k.clone(), v, tail.to_string()))
         })
         .collect();
