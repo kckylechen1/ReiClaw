@@ -49,7 +49,6 @@ pub mod channels;
 pub mod commands {
     #[cfg(feature = "agent-runtime")]
     pub mod self_test;
-    pub mod update;
 }
 pub mod config;
 #[cfg(feature = "agent-runtime")]
@@ -582,25 +581,6 @@ pub enum SkillBundleCommands {
     },
 }
 
-/// Migration subcommands
-#[derive(Subcommand, Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
-pub enum MigrateCommands {
-    #[command(about = "Import memory from an OpenClaw workspace into this ReiClaw workspace")]
-    Openclaw {
-        /// Optional path to `OpenClaw` workspace (defaults to ~/.openclaw/workspace)
-        #[arg(long)]
-        source: Option<std::path::PathBuf>,
-
-        /// Validate and preview migration without writing any data
-        #[arg(long)]
-        dry_run: bool,
-
-        /// Rebuild backend indexes after importing entries
-        #[arg(long)]
-        reindex: bool,
-    },
-}
-
 /// Cron subcommands
 #[derive(Subcommand, Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 pub enum CronCommands {
@@ -809,9 +789,9 @@ pub enum MemoryCommands {
         yes: bool,
     },
     // Rebuild backend indexes: FTS tables + any missing embedding vectors.
-    // Run after `rei migrate openclaw` or other bulk writes that land rows
-    // with `embedding = NULL`. Safe to re-run; only touches entries whose
-    // vector is missing. No-op for backends without a vector index.
+    // Run after bulk writes that leave entries without embedding vectors.
+    // Safe to re-run; only touches entries whose vector is missing.
+    // No-op for backends without a vector index.
     Reindex,
 }
 
