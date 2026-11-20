@@ -140,6 +140,39 @@ pub struct ToolLoop<'a> {
     pub turn_id: &'a str,
 }
 
+impl<'a> ToolLoop<'a> {
+    /// Assemble a non-streaming round from its already resolved execution and
+    /// ingress. CLI and message entries use these same defaults; callers add
+    /// memory or transport handles explicitly before dispatch.
+    pub fn for_turn(
+        exec: ResolvedAgentExecution<'a>,
+        history: &'a mut Vec<ChatMessage>,
+        meta: TurnMeta<'a>,
+        ingress: IngressContext,
+    ) -> Self {
+        Self {
+            exec,
+            history,
+            channel_name: meta.channel_name,
+            channel_reply_target: None,
+            cancellation_token: None,
+            on_delta: None,
+            shared_budget: None,
+            channel: None,
+            collected_receipts: None,
+            event_tx: None,
+            steering: None,
+            new_messages_out: None,
+            image_cache: None,
+            ingress,
+            memory: None,
+            agent_alias: meta.agent_alias,
+            parent_agent_alias: meta.parent_agent_alias,
+            turn_id: meta.turn_id,
+        }
+    }
+}
+
 async fn enforce_reported_budget(
     history: &mut Vec<ChatMessage>,
     reported_input_tokens: usize,
@@ -387,18 +420,16 @@ async fn run_tool_call_loop_turn(
         multimodal_config,
         config,
         max_tool_iterations,
-        hooks,
         excluded_tools,
-        dedup_exempt_tools,
         activated_tools,
         pacing,
-        strict_tool_parsing,
         parallel_tools,
         max_tool_result_chars,
         keep_tool_context_turns,
         context_token_budget,
         receipt_generator,
         knobs,
+        ..
     } = exec;
 
     let mut turn_state = TurnState::new(raw_history, raw_canonical);
@@ -499,20 +530,12 @@ async fn run_tool_call_loop_turn(
     // owns stays a loop local passed as an explicit argument (RUN_SHEET
     // `turn.context.TurnCtx`).
     let ctx = TurnCtx {
-        observer,
-        provider_name,
-        model,
-        temperature,
-        approval,
+        exec: &exec,
         channel_name,
         channel_reply_target,
         cancellation_token: cancellation_token.as_ref(),
         on_delta: on_delta.as_ref(),
         event_tx: event_tx.as_ref(),
-        hooks,
-        dedup_exempt_tools,
-        pacing,
-        strict_tool_parsing,
         channel,
         turn_id,
         agent_alias,

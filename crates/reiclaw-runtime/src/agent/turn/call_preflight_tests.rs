@@ -1,4 +1,5 @@
 use super::*;
+use crate::agent::turn::{ResolvedModelAccess, execution};
 use crate::approval::ApprovalManager;
 use crate::hooks::{HookHandler, HookResult, HookRunner};
 use crate::observability::{Observer, ObserverEvent};
@@ -130,21 +131,28 @@ async fn prepare(
     });
     let pacing = PacingConfig::default();
     let (tx, mut rx) = tokio::sync::mpsc::channel(32);
+    let mut exec = execution::test_support::execution(
+        ResolvedModelAccess {
+            model_provider: &execution::test_support::UncalledModelProvider,
+            provider_name: "fixture",
+            model: "fixture",
+            temperature: None,
+        },
+        &observer,
+        &pacing,
+    );
+    exec.approval = Some(&approval);
+    exec.hooks = hooks;
+    exec.tools_registry = dispatch.tools_registry;
+    exec.activated_tools = dispatch.activated_tools;
+    exec.excluded_tools = dispatch.excluded_tools;
     let ctx = TurnCtx {
-        observer: &observer,
-        provider_name: "fixture",
-        model: "fixture",
-        temperature: None,
-        approval: Some(&approval),
+        exec: &exec,
         channel_name: "fixture",
         channel_reply_target: None,
         cancellation_token: None,
         on_delta: None,
         event_tx: Some(&tx),
-        hooks,
-        dedup_exempt_tools: &[],
-        pacing: &pacing,
-        strict_tool_parsing: false,
         channel: Some(&channel),
         turn_id: "preflight-turn",
         agent_alias: None,
@@ -339,21 +347,24 @@ async fn device_prompt_denial_never_calls_or_waits_for_an_approver() {
     })
     .with_prompt_denial(true);
     let pacing = PacingConfig::default();
+    let mut exec = execution::test_support::execution(
+        ResolvedModelAccess {
+            model_provider: &execution::test_support::UncalledModelProvider,
+            provider_name: "fixture",
+            model: "fixture",
+            temperature: None,
+        },
+        &observer,
+        &pacing,
+    );
+    exec.approval = Some(&approval);
     let ctx = TurnCtx {
-        observer: &observer,
-        provider_name: "fixture",
-        model: "fixture",
-        temperature: None,
-        approval: Some(&approval),
+        exec: &exec,
         channel_name: "fixture",
         channel_reply_target: None,
         cancellation_token: None,
         on_delta: None,
         event_tx: None,
-        hooks: None,
-        dedup_exempt_tools: &[],
-        pacing: &pacing,
-        strict_tool_parsing: false,
         channel: Some(&channel),
         turn_id: "device-denial",
         agent_alias: None,

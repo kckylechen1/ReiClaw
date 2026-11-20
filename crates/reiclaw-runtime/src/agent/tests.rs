@@ -589,6 +589,47 @@ async fn turn_bails_out_at_max_iterations() {
         err.contains("maximum tool iterations"),
         "Expected max iterations error, got: {err}"
     );
+    assert!(agent.side_query_handle().active_turn_id().is_none());
+}
+
+#[tokio::test]
+async fn streamed_turn_summarizes_at_iteration_cap_and_replays_the_completed_round() {
+    let (tool, calls) = CountingTool::new();
+    let provider = Box::new(ScriptedModelProvider::new(vec![
+        tool_response(vec![ToolCall {
+            id: "bounded-call".into(),
+            name: "counter".into(),
+            arguments: "{}".into(),
+            extra_content: None,
+        }]),
+        text_response("Summary after the allowed tool call."),
+    ]));
+    let config = AliasedAgentConfig {
+        resolved: reiclaw_config::schema::ResolvedRuntime {
+            max_tool_iterations: 1,
+            ..Default::default()
+        },
+        ..Default::default()
+    };
+    let mut agent = build_agent_with_config(provider, vec![Box::new(tool)], config);
+    let (tx, _rx) = tokio::sync::mpsc::channel::<TurnEvent>(64);
+    let (response, messages) = agent.turn_streamed("count once", tx, None).await.unwrap();
+
+    assert_eq!(*calls.lock().unwrap(), 1);
+    assert!(response.contains("Summary after the allowed tool call."));
+    assert!(messages.iter().any(|message| matches!(
+        message,
+        ConversationMessage::ToolResults(results) if !results.is_empty()
+    )));
+    for transcript in [&messages[..], agent.history()] {
+        assert!(matches!(
+            transcript.last(),
+            Some(ConversationMessage::Chat(message))
+                if message.role == "assistant"
+                    && message.content == "Summary after the allowed tool call."
+        ));
+    }
+    assert!(agent.side_query_handle().active_turn_id().is_none());
 }
 
 // ═══════════════════════════════════════════════════════════════════════════

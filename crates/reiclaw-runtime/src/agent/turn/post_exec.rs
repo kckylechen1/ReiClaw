@@ -44,7 +44,7 @@ pub(crate) async fn record_executed_outcomes(
                 .with_attrs(tool_log_attributes(
                     &call.name,
                     ::serde_json::json!({
-                        "model": ctx.model,
+                        "model": ctx.exec.model_access.model,
                         "iteration": iteration + 1,
                         "tool": call.name.clone(),
                         "error_reason": outcome.error_reason,
@@ -56,7 +56,7 @@ pub(crate) async fn record_executed_outcomes(
         );
 
         // ── Hook: after_tool_call (void) ─────────────────
-        if let Some(hooks) = ctx.hooks {
+        if let Some(hooks) = ctx.exec.hooks {
             let tool_result_obj = crate::tools::ToolResult {
                 success: outcome.success,
                 output: outcome.output.clone().into(),

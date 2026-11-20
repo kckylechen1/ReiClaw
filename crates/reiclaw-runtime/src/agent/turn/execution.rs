@@ -181,6 +181,30 @@ pub struct ResolvedRuntimeKnobs<'a> {
     pub knobs: &'a LoopKnobs,
 }
 
+impl<'a> ResolvedRuntimeKnobs<'a> {
+    /// Read the Agent's existing resolved runtime at the turn boundary. Entry
+    /// modes supply their own loop behavior without copying config-derived
+    /// limits or changing the policy-filtered registry.
+    pub(crate) fn for_agent(
+        runtime: &'a reiclaw_config::schema::ResolvedRuntime,
+        pacing: &'a PacingConfig,
+        knobs: &'a LoopKnobs,
+    ) -> Self {
+        Self {
+            max_tool_iterations: runtime.max_tool_iterations,
+            excluded_tools: &[],
+            dedup_exempt_tools: &runtime.tool_call_dedup_exempt,
+            pacing,
+            strict_tool_parsing: runtime.strict_tool_parsing,
+            parallel_tools: runtime.parallel_tools,
+            max_tool_result_chars: runtime.max_tool_result_chars,
+            keep_tool_context_turns: runtime.keep_tool_context_turns,
+            context_token_budget: runtime.effective_context_budget(),
+            knobs,
+        }
+    }
+}
+
 impl<'a> ResolvedAgentExecution<'a> {
     pub fn resolve(
         model_access: ResolvedModelAccess<'a>,
@@ -218,6 +242,66 @@ impl<'a> ResolvedAgentExecution<'a> {
     ) -> Self {
         self.task_owner = owner;
         self
+    }
+}
+
+#[cfg(test)]
+pub(crate) mod test_support {
+    use super::*;
+    use std::sync::LazyLock;
+
+    /// Step-only fixtures do not issue a model request. Fail loudly if a test
+    /// accidentally expands into provider I/O instead of hiding it in a client.
+    pub(crate) struct UncalledModelProvider;
+
+    #[async_trait::async_trait]
+    impl ModelProvider for UncalledModelProvider {
+        async fn chat_with_system(
+            &self,
+            _system_prompt: Option<&str>,
+            _message: &str,
+            _model: &str,
+            _temperature: Option<f64>,
+        ) -> anyhow::Result<String> {
+            panic!("turn-step fixture must not issue a model request")
+        }
+    }
+
+    impl reiclaw_api::attribution::Attributable for UncalledModelProvider {
+        fn role(&self) -> reiclaw_api::attribution::Role {
+            use reiclaw_api::attribution::{ModelProviderKind, ProviderKind, Role};
+            Role::Provider(ProviderKind::Model(ModelProviderKind::Custom))
+        }
+
+        fn alias(&self) -> &str {
+            "uncalled-turn-fixture"
+        }
+    }
+
+    pub(crate) fn execution<'a>(
+        model_access: ResolvedModelAccess<'a>,
+        observer: &'a dyn Observer,
+        pacing: &'a PacingConfig,
+    ) -> ResolvedAgentExecution<'a> {
+        static MULTIMODAL: LazyLock<MultimodalConfig> = LazyLock::new(MultimodalConfig::default);
+        static RUNTIME: LazyLock<reiclaw_config::schema::ResolvedRuntime> =
+            LazyLock::new(reiclaw_config::schema::ResolvedRuntime::default);
+        static KNOBS: LazyLock<LoopKnobs> = LazyLock::new(LoopKnobs::default);
+        ResolvedAgentExecution::resolve(
+            model_access,
+            ResolvedIo {
+                tools_registry: &[],
+                observer,
+                silent: true,
+                approval: None,
+                multimodal_config: &MULTIMODAL,
+                config: None,
+                hooks: None,
+                activated_tools: None,
+                receipt_generator: None,
+            },
+            ResolvedRuntimeKnobs::for_agent(&RUNTIME, pacing, &KNOBS),
+        )
     }
 }
 

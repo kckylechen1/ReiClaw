@@ -10,13 +10,16 @@ use crate::security::{AutonomyLevel, SecurityPolicy};
 use crate::tools;
 use crate::tools::scoped;
 use anyhow::{Context, Result};
-use reiclaw_api::ingress::TurnOrigin;
+use reiclaw_api::ingress::{IngressContext, TurnOrigin};
 use reiclaw_config::schema::Config;
 use reiclaw_memory::{self, Memory};
 use reiclaw_providers::{ChatMessage, ModelProvider};
 use std::sync::Arc;
 
-use super::{build_system_prompt_for_turn, compute_excluded_mcp_tools, resolved_agent_for_turn};
+use super::{
+    LoopKnobs, ResolvedAgentExecution, ResolvedIo, ResolvedModelAccess, ResolvedRuntimeKnobs,
+    ToolLoop, build_system_prompt_for_turn, compute_excluded_mcp_tools, resolved_agent_for_turn,
+};
 
 /// Process a single message through the full agent (with tools and memory).
 /// Used by channels (Telegram, etc.) to enable tool use.
@@ -315,7 +318,6 @@ pub async fn process_message_with_hooks(
             thinking_params.system_prompt_prefix.as_deref(),
         )?;
 
-        let effective_msg_ref = effective_message.as_str();
         // Memory context is injected once in the engine, keyed on the ingress
         // origin (agent::memory_inject); recall is scoped to this entry's
         // session_id.
@@ -328,64 +330,64 @@ pub async fn process_message_with_hooks(
             ChatMessage::system(&system_prompt),
             ChatMessage::user(&enriched),
         ];
-        let mut excluded_tools = compute_excluded_mcp_tools(
-            &tools_registry,
-            &agent.resolved.tool_filter_groups,
-            effective_msg_ref,
-            &mcp_tool_names_pm,
+        let loop_knobs = LoopKnobs::default();
+        // Keep the direct-message entry's previous pacing until its config
+        // wiring is validated separately from this assembly refactor.
+        let pacing = reiclaw_config::schema::PacingConfig::default();
+        let exec = ResolvedAgentExecution::resolve(
+            ResolvedModelAccess {
+                model_provider: model_provider.as_ref(),
+                provider_name,
+                model: &model_name,
+                temperature: effective_temperature,
+            },
+            ResolvedIo {
+                tools_registry: &tools_registry,
+                observer: observer.as_ref(),
+                silent: true,
+                approval: Some(&approval_manager),
+                multimodal_config: &config.multimodal,
+                config: Some(&config),
+                hooks: hooks.as_deref(),
+                activated_tools: activated_handle_pm.as_ref(),
+                receipt_generator: None,
+            },
+            ResolvedRuntimeKnobs {
+                excluded_tools: &excluded_tools,
+                // This entry historically uses the raw resolved ceiling;
+                // CLI run uses effective_context_budget through for_agent.
+                context_token_budget: agent.resolved.max_context_tokens,
+                ..ResolvedRuntimeKnobs::for_agent(&agent.resolved, &pacing, &loop_knobs)
+            },
+        )
+        .with_task_owner(task_owner.as_ref());
+        let mut turn = ToolLoop::for_turn(
+            exec,
+            &mut history,
+            crate::agent::TurnMeta {
+                channel_name: "daemon",
+                agent_alias: Some(agent_alias),
+                parent_agent_alias: None,
+                turn_id: &turn_id,
+            },
+            IngressContext::from_origin(origin),
         );
-        {
-            let active_profile = &risk_profile;
-            if active_profile.level != AutonomyLevel::Full {
-                excluded_tools.extend(active_profile.excluded_tools.iter().cloned());
-            }
-        }
-
+        // This direct-message entry has no approval back-channel; gated tools
+        // retain the non-interactive auto-deny from the resolved I/O above.
+        turn.memory = Some(crate::agent::memory_inject::TurnMemory {
+            handle: mem.as_ref(),
+            query: effective_message.clone(),
+            sessions: vec![session_id.map(str::to_string)],
+            suppress: false,
+            cfg: crate::agent::memory_inject::MemoryInjectConfig::from_memory_config(
+                &config.memory,
+                crate::agent::memory_inject::DEFAULT_RECALL_LIMIT,
+            ),
+        });
         reiclaw_api::NATIVE_THINKING_OVERRIDE
             .scope(
                 thinking_params.native_thinking,
-                super::agent_turn::agent_turn_with_security_and_hooks(
-                    Some(&config),
-                    model_provider.as_ref(),
-                    &mut history,
-                    &tools_registry,
-                    observer.as_ref(),
-                    provider_name,
-                    &model_name,
-                    effective_temperature,
-                    true,
-                    "daemon",
-                    None,
-                    &config.multimodal,
-                    agent.resolved.max_tool_iterations,
-                    Some(&approval_manager),
-                    &excluded_tools,
-                    &agent.resolved.tool_call_dedup_exempt,
-                    activated_handle_pm.as_ref(),
-                    agent.resolved.strict_tool_parsing,
-                    agent.resolved.parallel_tools,
-                    agent.resolved.max_tool_result_chars,
-                    agent.resolved.max_context_tokens,
-                    // This direct-turn entry has no approval back-channel;
-                    // gated tools keep the non-interactive auto-deny.
-                    None,
-                    origin,
-                    Some(crate::agent::memory_inject::TurnMemory {
-                        handle: mem.as_ref(),
-                        query: effective_message.clone(),
-                        sessions: vec![session_id.map(str::to_string)],
-                        suppress: false,
-                        cfg: crate::agent::memory_inject::MemoryInjectConfig::from_memory_config(
-                            &config.memory,
-                            crate::agent::memory_inject::DEFAULT_RECALL_LIMIT,
-                        ),
-                    }),
-                    Some(agent_alias),
-                    Some(&turn_id),
-                    task_owner.as_ref(),
-                    Some(security.as_ref()),
-                    hooks.as_deref(),
-                ),
+                super::agent_turn::agent_turn(turn, Some(security.as_ref())),
             )
             .await
     };

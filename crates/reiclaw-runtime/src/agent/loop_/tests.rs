@@ -7923,6 +7923,140 @@ async fn run_tool_call_loop_routed_streaming_uses_live_provider_deltas_once() {
     );
 }
 
+fn agent_turn_fixture<'a>(
+    model_provider: &'a dyn ModelProvider,
+    tools_registry: &'a [Box<dyn Tool>],
+    observer: &'a dyn Observer,
+    history: &'a mut Vec<ChatMessage>,
+    turn_id: &'a str,
+) -> ToolLoop<'a> {
+    static PACING: std::sync::LazyLock<reiclaw_config::schema::PacingConfig> =
+        std::sync::LazyLock::new(reiclaw_config::schema::PacingConfig::default);
+    let mut exec = crate::agent::turn::execution::test_support::execution(
+        ResolvedModelAccess {
+            model_provider,
+            provider_name: "mock-provider",
+            model: "mock-model",
+            temperature: Some(0.0),
+        },
+        observer,
+        &PACING,
+    );
+    exec.tools_registry = tools_registry;
+    exec.max_tool_iterations = 4;
+    exec.strict_tool_parsing = false;
+    exec.parallel_tools = false;
+    exec.max_tool_result_chars = 0;
+    exec.context_token_budget = 0;
+    exec.excluded_tools = &[];
+    exec.dedup_exempt_tools = &[];
+    ToolLoop::for_turn(
+        exec,
+        history,
+        TurnMeta {
+            channel_name: "daemon",
+            agent_alias: None,
+            parent_agent_alias: None,
+            turn_id,
+        },
+        IngressContext::from_origin(TurnOrigin::SubTurn),
+    )
+}
+
+#[tokio::test]
+async fn agent_turn_bundle_keeps_exclusions_hooks_and_enclosing_cost_scope() {
+    struct CancelOneTool;
+    #[async_trait]
+    impl crate::hooks::HookHandler for CancelOneTool {
+        fn name(&self) -> &str {
+            "turn-bundle-fixture"
+        }
+
+        async fn before_tool_call(
+            &self,
+            name: String,
+            args: serde_json::Value,
+        ) -> crate::hooks::HookResult<(String, serde_json::Value)> {
+            if name == "hooked_tool" {
+                crate::hooks::HookResult::Cancel("fixture cancellation".into())
+            } else {
+                crate::hooks::HookResult::Continue((name, args))
+            }
+        }
+    }
+
+    let provider = ScriptedModelProvider::from_native_tool_calls(
+        vec![
+            ("blocked", "blocked_tool", r#"{"value":"blocked"}"#),
+            ("hooked", "hooked_tool", r#"{"value":"hooked"}"#),
+            ("allowed", "allowed_tool", r#"{"value":"allowed"}"#),
+        ],
+        "done",
+    );
+    for response in provider.responses.lock().unwrap().iter_mut() {
+        response.usage = Some(reiclaw_providers::traits::TokenUsage {
+            input_tokens: Some(10),
+            output_tokens: Some(3),
+            cached_input_tokens: None,
+        });
+    }
+    let blocked = Arc::new(AtomicUsize::new(0));
+    let hooked = Arc::new(AtomicUsize::new(0));
+    let allowed = Arc::new(AtomicUsize::new(0));
+    let registry: Vec<Box<dyn Tool>> = vec![
+        Box::new(CountingTool::new("blocked_tool", Arc::clone(&blocked))),
+        Box::new(CountingTool::new("hooked_tool", Arc::clone(&hooked))),
+        Box::new(CountingTool::new("allowed_tool", Arc::clone(&allowed))),
+    ];
+    let exclusions = vec!["blocked_tool".to_string()];
+    let mut hooks = crate::hooks::HookRunner::new();
+    hooks.register(Box::new(CancelOneTool));
+    let observer = CapturingObserver::default();
+    let mut history = vec![ChatMessage::user("exercise the resolved turn")];
+    let mut turn = agent_turn_fixture(&provider, &registry, &observer, &mut history, "bundle-turn");
+    turn.agent_alias = Some("bundle-agent");
+    turn.exec.excluded_tools = &exclusions;
+    turn.exec.hooks = Some(&hooks);
+    let context = ToolLoopCostTrackingContext::usage_only();
+    // Nested callers already own their accumulator. The lifecycle adapter
+    // must keep its cumulative usage instead of creating/resetting a scope.
+    context.turn_usage.lock().input_tokens = 100;
+    let result = TOOL_LOOP_COST_TRACKING_CONTEXT
+        .scope(Some(context.clone()), agent_turn(turn, None))
+        .await
+        .expect("resolved bundle should reach the same tool engine");
+    assert_eq!(result, "done");
+    assert_eq!(blocked.load(Ordering::SeqCst), 0);
+    assert_eq!(hooked.load(Ordering::SeqCst), 0);
+    assert_eq!(allowed.load(Ordering::SeqCst), 1);
+    let usage = context.snapshot_turn_usage();
+    assert_eq!((usage.input_tokens, usage.output_tokens), (120, 6));
+    let events = observer.events.lock();
+    assert_eq!(lifecycle_events_for_alias(&events, "bundle-agent"), (1, 1));
+    assert_all_events_share_turn_id(&events, Some("bundle-agent"), Some("daemon"));
+    let end_usage = events
+        .iter()
+        .find_map(|event| match event {
+            ObserverEvent::AgentEnd { tokens_used, .. } => tokens_used.as_ref(),
+            _ => None,
+        })
+        .expect("AgentEnd retains caller-scoped token usage");
+    assert_eq!((end_usage.input_tokens, end_usage.output_tokens), (120, 6));
+}
+
+#[tokio::test]
+async fn agent_turn_bundle_closes_lifecycle_on_provider_error() {
+    let provider = ScriptedModelProvider::from_text_responses(Vec::new());
+    let observer = CapturingObserver::default();
+    let mut history = vec![ChatMessage::user("provider fails")];
+    let mut turn = agent_turn_fixture(&provider, &[], &observer, &mut history, "error-turn");
+    turn.agent_alias = Some("error-agent");
+    assert!(agent_turn(turn, None).await.is_err());
+    let events = observer.events.lock();
+    assert_eq!(lifecycle_events_for_alias(&events, "error-agent"), (1, 1));
+    assert_all_events_share_turn_id(&events, Some("error-agent"), Some("daemon"));
+}
+
 #[test]
 fn agent_turn_executes_activated_tool_from_wrapper() {
     let runtime = tokio::runtime::Builder::new_current_thread()
@@ -7956,37 +8090,18 @@ fn agent_turn_executes_activated_tool_from_wrapper() {
         ];
         let observer = NoopObserver;
 
-        let result = agent_turn(
-            None,
+        let turn_id = uuid::Uuid::new_v4().to_string();
+        let mut turn = agent_turn_fixture(
             &model_provider,
-            &mut history,
             &tools_registry,
             &observer,
-            "mock-provider",
-            "mock-model",
-            Some(0.0),
-            true,
-            "daemon",
-            None,
-            &reiclaw_config::schema::MultimodalConfig::default(),
-            4,
-            None,
-            &[],
-            &[],
-            Some(&activated),
-            false,
-            false, // parallel_tools
-            0,     // max_tool_result_chars: disabled for test
-            0,     // context_token_budget: disabled for test
-            None,  // channel
-            TurnOrigin::SubTurn,
-            None,
-            None, // agent_alias: not under test here
-            None, // turn_id: self-minted
-            None,
-        )
-        .await
-        .expect("wrapper path should execute activated tools");
+            &mut history,
+            &turn_id,
+        );
+        turn.exec.activated_tools = Some(&activated);
+        let result = agent_turn(turn, None)
+            .await
+            .expect("wrapper path should execute activated tools");
 
         assert!(
             result.ends_with("done"),
@@ -8029,37 +8144,19 @@ fn agent_turn_strict_tool_parsing_ignores_activated_tool_text_from_wrapper() {
         ];
         let observer = NoopObserver;
 
-        let result = agent_turn(
-            None,
+        let turn_id = uuid::Uuid::new_v4().to_string();
+        let mut turn = agent_turn_fixture(
             &model_provider,
-            &mut history,
             &tools_registry,
             &observer,
-            "mock-provider",
-            "mock-model",
-            Some(0.0),
-            true,
-            "daemon",
-            None,
-            &reiclaw_config::schema::MultimodalConfig::default(),
-            4,
-            None,
-            &[],
-            &[],
-            Some(&activated),
-            true,
-            false, // parallel_tools
-            0,     // max_tool_result_chars: disabled for test
-            0,     // context_token_budget: disabled for test
-            None,  // channel
-            TurnOrigin::SubTurn,
-            None,
-            None, // agent_alias: not under test here
-            None, // turn_id: self-minted
-            None,
-        )
-        .await
-        .expect("strict wrapper path should preserve fallback-looking text");
+            &mut history,
+            &turn_id,
+        );
+        turn.exec.activated_tools = Some(&activated);
+        turn.exec.strict_tool_parsing = true;
+        let result = agent_turn(turn, None)
+            .await
+            .expect("strict wrapper path should preserve fallback-looking text");
 
         assert_eq!(invocations.load(Ordering::SeqCst), 0);
         assert!(
@@ -8156,37 +8253,18 @@ fn agent_turn_forwards_max_tool_result_chars_to_truncate_tool_result() {
         ];
         let observer = NoopObserver;
 
-        let _result = agent_turn(
-            None,
+        let turn_id = uuid::Uuid::new_v4().to_string();
+        let mut turn = agent_turn_fixture(
             &model_provider,
-            &mut history,
             &tools_registry,
             &observer,
-            "mock-provider",
-            "mock-model",
-            Some(0.0),
-            true,
-            "daemon",
-            None,
-            &reiclaw_config::schema::MultimodalConfig::default(),
-            4,
-            None,
-            &[],
-            &[],
-            None,
-            false,
-            false,
-            100, // max_tool_result_chars: truncate at 100 chars
-            0,   // context_token_budget: disabled
-            None,
-            TurnOrigin::SubTurn,
-            None,
-            None, // agent_alias: not under test here
-            None, // turn_id: self-minted
-            None,
-        )
-        .await
-        .expect("agent_turn should complete");
+            &mut history,
+            &turn_id,
+        );
+        turn.exec.max_tool_result_chars = 100;
+        let _result = agent_turn(turn, None)
+            .await
+            .expect("agent_turn should complete");
 
         assert_eq!(
             invocations.load(Ordering::SeqCst),
@@ -8237,35 +8315,9 @@ fn agent_turn_with_zero_budget_preserves_full_tool_result() {
         ];
         let observer = NoopObserver;
 
-        let _result = agent_turn(
-            None,
-            &model_provider,
-            &mut history,
-            &tools_registry,
-            &observer,
-            "mock-provider",
-            "mock-model",
-            Some(0.0),
-            true,
-            "daemon",
-            None,
-            &reiclaw_config::schema::MultimodalConfig::default(),
-            4,
-            None,
-            &[],
-            &[],
-            None,
-            false,
-            false,
-            0, // max_tool_result_chars: disabled (no truncation)
-            0, // context_token_budget: disabled
-            None,
-            TurnOrigin::SubTurn,
-            None,
-            None, // agent_alias: not under test here
-            None, // turn_id: self-minted
-            None,
-        )
+        let turn_id = uuid::Uuid::new_v4().to_string();
+        let turn = agent_turn_fixture(&model_provider, &tools_registry, &observer, &mut history, &turn_id);
+        let _result = agent_turn(turn, None)
         .await
         .expect("agent_turn should complete");
 
@@ -11311,37 +11363,18 @@ async fn agent_turn_propagates_resolved_agent_alias_to_observer_events() {
     let observer: Arc<dyn Observer> = capturing.clone();
     let mut history = vec![ChatMessage::system("test"), ChatMessage::user("hello")];
 
-    let result = agent_turn(
-        None,
+    let turn_id = uuid::Uuid::new_v4().to_string();
+    let mut turn = agent_turn_fixture(
         &model_provider,
-        &mut history,
         &tools_registry,
         observer.as_ref(),
-        "mock-provider",
-        "mock-model",
-        Some(0.0),
-        true,
-        "daemon",
-        None,
-        &reiclaw_config::schema::MultimodalConfig::default(),
-        4,
-        None,
-        &[],
-        &[],
-        None,
-        false,
-        false,
-        0,
-        0,
-        None,
-        TurnOrigin::SubTurn,
-        None,
-        Some("test-agent"),
-        None, // turn_id: self-minted
-        None,
-    )
-    .await
-    .expect("agent_turn should complete");
+        &mut history,
+        &turn_id,
+    );
+    turn.agent_alias = Some("test-agent");
+    let result = agent_turn(turn, None)
+        .await
+        .expect("agent_turn should complete");
 
     assert_eq!(result, "done");
     assert_eq!(invocations.load(Ordering::SeqCst), 1);
@@ -11364,37 +11397,16 @@ async fn agent_turn_brackets_turn_with_agent_start_and_agent_end() {
     let capturing = Arc::new(CapturingObserver::default());
     let mut history = vec![ChatMessage::system("test"), ChatMessage::user("hello")];
 
-    let result = agent_turn(
-        None, // config: configless test
+    let turn_id = uuid::Uuid::new_v4().to_string();
+    let mut turn = agent_turn_fixture(
         &model_provider,
-        &mut history,
         &tools_registry,
         capturing.as_ref(),
-        "mock-provider",
-        "mock-model",
-        Some(0.0),
-        true,
-        "daemon",
-        None,
-        &reiclaw_config::schema::MultimodalConfig::default(),
-        4,
-        None,
-        &[],
-        &[],
-        None,
-        false,
-        false, // parallel_tools
-        0,     // max_tool_result_chars: disabled for test
-        0,     // context_token_budget: disabled for test
-        None,  // channel
-        TurnOrigin::SubTurn,
-        None,
-        Some("test-agent"),
-        None, // turn_id: self-minted
-        None,
-    )
-    .await
-    .expect("turn should succeed");
+        &mut history,
+        &turn_id,
+    );
+    turn.agent_alias = Some("test-agent");
+    let result = agent_turn(turn, None).await.expect("turn should succeed");
     assert_eq!(result, "done");
 
     let events = capturing.events.lock();
@@ -11428,37 +11440,15 @@ async fn agent_turn_uses_the_pre_minted_turn_id_on_its_bracket() {
     let capturing = Arc::new(CapturingObserver::default());
     let mut history = vec![ChatMessage::system("test"), ChatMessage::user("hello")];
 
-    let result = agent_turn(
-        None, // config
+    let mut turn = agent_turn_fixture(
         &model_provider,
-        &mut history,
         &tools_registry,
         capturing.as_ref(),
-        "mock-provider",
-        "mock-model",
-        Some(0.0),
-        true,
-        "daemon",
-        None,
-        &reiclaw_config::schema::MultimodalConfig::default(),
-        4,
-        None,
-        &[],
-        &[],
-        None,
-        false,
-        false, // parallel_tools
-        0,     // max_tool_result_chars: disabled for test
-        0,     // context_token_budget: disabled for test
-        None,  // channel
-        TurnOrigin::SubTurn,
-        None,
-        Some("test-agent"),
-        Some("pre-minted-turn"),
-        None,
-    )
-    .await
-    .expect("turn should succeed");
+        &mut history,
+        "pre-minted-turn",
+    );
+    turn.agent_alias = Some("test-agent");
+    let result = agent_turn(turn, None).await.expect("turn should succeed");
     assert_eq!(result, "done");
 
     let events = capturing.events.lock();

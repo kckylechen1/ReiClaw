@@ -150,21 +150,28 @@ impl Fixture {
             }
         };
         let pacing = PacingConfig::default();
+        let mut exec = crate::agent::turn::execution::test_support::execution(
+            crate::agent::turn::ResolvedModelAccess {
+                model_provider: &Provider,
+                provider_name: "fixture",
+                model: "fixture",
+                temperature: None,
+            },
+            &NoopObserver,
+            &pacing,
+        );
+        exec.approval = approval;
+        exec.hooks = hooks;
+        exec.tools_registry = &self.tools;
+        exec.activated_tools = Some(&self.activated);
+        exec.excluded_tools = excluded;
         let ctx = TurnCtx {
-            observer: &NoopObserver,
-            provider_name: "fixture",
-            model: "fixture",
-            temperature: None,
-            approval,
+            exec: &exec,
             channel_name: "test",
             channel_reply_target: None,
             cancellation_token: None,
             on_delta: None,
             event_tx: None,
-            hooks,
-            dedup_exempt_tools: &[],
-            pacing: &pacing,
-            strict_tool_parsing: false,
             channel: None,
             agent_alias: None,
             parent_agent_alias: None,

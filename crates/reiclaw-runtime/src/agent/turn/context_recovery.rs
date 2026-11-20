@@ -23,9 +23,9 @@ pub(crate) fn record_llm_failure(
     } else {
         reiclaw_providers::sanitize_api_error(&e.to_string())
     };
-    ctx.observer.record_event(&ObserverEvent::LlmResponse {
-        model_provider: ctx.provider_name.to_string(),
-        model: ctx.model.to_string(),
+    ctx.exec.observer.record_event(&ObserverEvent::LlmResponse {
+        model_provider: ctx.exec.model_access.provider_name.to_string(),
+        model: ctx.exec.model_access.model.to_string(),
         duration: llm_started_at.elapsed(),
         success: false,
         error_message: Some(safe_error.clone()),
@@ -45,7 +45,7 @@ pub(crate) fn record_llm_failure(
             .with_outcome(::reiclaw_log::EventOutcome::Failure)
             .with_duration(u64::try_from(llm_started_at.elapsed().as_millis()).unwrap_or(u64::MAX))
             .with_attrs(::serde_json::json!({
-                "model": ctx.model,
+                "model": ctx.exec.model_access.model,
                 "iteration": iteration + 1,
                 "error": safe_error,
                 "trace_id": ctx.turn_id,
