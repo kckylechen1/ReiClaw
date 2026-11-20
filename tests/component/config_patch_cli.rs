@@ -243,6 +243,22 @@ fn config_patch_json_success_emits_envelope_and_persists_change() {
     assert_eq!(parsed.gateway.host, "127.0.0.2");
 }
 
+#[test]
+fn config_patch_writes_op_comment_into_saved_config() {
+    let config_dir = tempfile::tempdir().expect("temp config dir");
+    run_cli_patch_success(
+        config_dir.path(),
+        br#"[{"op":"replace","path":"/gateway/host","value":"127.0.0.3","comment":"loopback alias for tests"}]"#,
+    );
+
+    let saved =
+        std::fs::read_to_string(config_dir.path().join("config.toml")).expect("read saved config");
+    assert!(
+        saved.contains("# loopback alias for tests\nhost = \"127.0.0.3\""),
+        "op comment must decorate gateway.host:\n{saved}"
+    );
+}
+
 #[tokio::test]
 async fn config_patch_json_failed_op_matches_http_error_envelope() {
     let patch_doc = br#"[{"op":"replace","path":"/not/a/path","value":"x"}]"#;

@@ -6,21 +6,18 @@ use reiclaw_config::api_error::{ConfigApiCode, ConfigApiError};
 
 use crate::config::Config;
 
-/// Decorate the value at `path` in `config.toml` with a leading `# {comment}`
-/// line, preserving any non-comment whitespace. Mirrors the gateway's
+/// Decorate the value at each `(path, comment)` in `config.toml` with a
+/// leading `# {comment}` line, preserving any non-comment whitespace; an
+/// empty comment clears the existing one. Mirrors the gateway's
 /// `apply_comments`. Best-effort — silently bails on parse errors so a
-/// successful set isn't downgraded to a failure for a metadata problem.
-async fn apply_comment_inline(
+/// successful write isn't downgraded to a failure for a metadata problem.
+async fn apply_comments_inline(
     config_path: &std::path::Path,
-    path: &str,
-    comment: &str,
+    annotations: &[(String, String)],
 ) -> Result<()> {
-    reiclaw_config::comment_writer::apply_comments(
-        config_path,
-        &[(path.to_string(), comment.to_string())],
-    )
-    .await
-    .context("failed to write comment annotation")
+    reiclaw_config::comment_writer::apply_comments(config_path, annotations)
+        .await
+        .context("failed to write comment annotation")
 }
 
 pub(crate) fn config_patch_prop_kind(
@@ -509,7 +506,7 @@ pub async fn handle(config_command: crate::ConfigCommands, config: &mut Config) 
             if let Some(c) = comment.as_ref()
                 && !c.is_empty()
             {
-                apply_comment_inline(&config.config_path, &path, c).await?;
+                apply_comments_inline(&config.config_path, &[(path.clone(), c.clone())]).await?;
             }
             if json {
                 let envelope = if Config::prop_is_secret(&path) {
@@ -647,6 +644,9 @@ pub async fn handle(config_command: crate::ConfigCommands, config: &mut Config) 
             };
 
             let mut results: Vec<serde_json::Value> = Vec::with_capacity(ops.len());
+            // (path, comment) for every op that carries a `comment`, written
+            // after the save like `PATCH /api/config` does.
+            let mut annotations: Vec<(String, String)> = Vec::new();
 
             for (idx, op) in ops.iter().enumerate() {
                 let object = match op.as_object() {
@@ -693,17 +693,21 @@ pub async fn handle(config_command: crate::ConfigCommands, config: &mut Config) 
                     );
                     config_patch_fail_json_or_human(json, err, human)?;
                 }
-                if object
-                    .get("comment")
-                    .is_some_and(|value| !value.is_string())
-                {
-                    let message = format!("JSON Patch op[{idx}] `comment` field must be a string");
-                    let api_err = config_patch_json_value_type_error(
-                        message.clone(),
-                        Some(path.clone()),
-                        Some(idx),
-                    );
-                    config_patch_fail_json_or_human(json, api_err, message)?;
+                if let Some(comment) = object.get("comment") {
+                    let comment = match comment.as_str() {
+                        Some(comment) => comment,
+                        None => {
+                            let message =
+                                format!("JSON Patch op[{idx}] `comment` field must be a string");
+                            let api_err = config_patch_json_value_type_error(
+                                message.clone(),
+                                Some(path.clone()),
+                                Some(idx),
+                            );
+                            config_patch_fail_json_or_human(json, api_err, message)?
+                        }
+                    };
+                    annotations.push((path.clone(), comment.to_string()));
                 }
                 let is_secret = Config::prop_is_secret(&path);
 
@@ -891,6 +895,7 @@ pub async fn handle(config_command: crate::ConfigCommands, config: &mut Config) 
                 config_patch_fail_json_or_human(json, api_err, human)?;
             }
             Box::pin(config.save_dirty()).await?;
+            apply_comments_inline(&config.config_path, &annotations).await?;
 
             if json {
                 let body = serde_json::json!({"saved": true, "results": results});
