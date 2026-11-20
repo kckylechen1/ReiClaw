@@ -51,6 +51,7 @@
     - [ADR-024: Bounded Tachi provider broker for inference](./architecture/decisions/ADR-024-bounded-tachi-provider-broker.md)
     - [ADR-025: Long-context stack, sleep-time memory, and delegation continuity](./architecture/decisions/ADR-025-long-context-sleep-memory-and-delegation-continuity.md)
     - [ADR-026: Headless pure-Rust kernel, external workbenches, and complexity budget](./architecture/decisions/ADR-026-headless-rust-kernel-external-workbenches-and-complexity-budget.md)
+    - [ADR-027: Owner workflow closure, bounded collaboration, and scoped services](./architecture/decisions/ADR-027-owner-workflow-closure-and-scoped-services.md)
   - [Logging](./architecture/logging.md)
   - [Runtime state and persistence](./architecture/runtime-state-and-persistence.md)
   - [Memory and payload lifecycle](./architecture/memory-payload-lifecycle.md)

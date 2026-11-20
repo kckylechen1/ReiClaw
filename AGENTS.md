@@ -8,7 +8,8 @@ ReiClaw is a **personal controller**: one agent with a lasting identity and memo
 
 - one always-on body on the owner's computer;
 - edge devices (speaker, phone, robot) join through the gateway as Clients and Nodes;
-- the body answers directly, reasons, or hands work to external harnesses (Codex, Claude Code) only through Tachi.
+- the body answers directly, uses bounded read-only L1 help, and manages authorized external work through Tachi;
+- mid-run communication and named-peer collaboration are retained capabilities with explicit scope, identity, and execution ownership. Tachi supports general external execution and collaboration, including independent verification, not only coding.
 
 Read in this order:
 
@@ -16,7 +17,7 @@ Read in this order:
 2. **#374**, the only execution index (follow its dispatch order);
 3. the child issue for your slice.
 
-The decisions are recorded in [ADR-013](docs/book/src/architecture/decisions/ADR-013-channels-as-gateway-clients.md), [ADR-017](docs/book/src/architecture/decisions/ADR-017-personal-agent-body-edges-and-delegation.md), and [ADR-026](docs/book/src/architecture/decisions/ADR-026-headless-rust-kernel-external-workbenches-and-complexity-budget.md) (headless kernel, complexity budget).
+The decisions are recorded in [ADR-013](docs/book/src/architecture/decisions/ADR-013-channels-as-gateway-clients.md), [ADR-017](docs/book/src/architecture/decisions/ADR-017-personal-agent-body-edges-and-delegation.md), [ADR-026](docs/book/src/architecture/decisions/ADR-026-headless-rust-kernel-external-workbenches-and-complexity-budget.md) (headless kernel, capability-preserving complexity budget), and [ADR-027](docs/book/src/architecture/decisions/ADR-027-owner-workflow-closure-and-scoped-services.md) (workflow closure, bounded collaboration, scoped services). Accepted target contracts do not establish runtime delivery; retain current behavior until each replacement passes its own acceptance.
 
 Protected (never weaken; stop and ask if a change seems to need it):
 

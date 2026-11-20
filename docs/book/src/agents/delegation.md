@@ -1,5 +1,17 @@
 # Delegation & SubAgents
 
+## Current behavior and accepted follow-up
+
+This guide describes the production paths at `cd6ca4f5`.
+[ADR-027](../architecture/decisions/ADR-027-owner-workflow-closure-and-scoped-services.md)
+accepts a broader collaboration contract; this documentation change does not
+activate it. The live L1 entrypoint is still the zero-tool Advisor. Read-only
+Scout/Recall pooling, mid-run requests/partial results, and parent steering
+need their implementation slice. Existing message types alone do not establish
+a working channel. Named-peer messaging remains a separate retained capability;
+its current detached-start behavior and replacement boundary are documented in
+[Peer groups](../channels/peer-groups.md).
+
 ## Restricted bridge control
 
 An edge client can use `POST /api/agents/{agent}/delegations/{operation}` with
@@ -105,8 +117,14 @@ L2 work uses the thin `tachi_start`, `tachi_status`, `tachi_result`,
 `tachi_cancel`, and `tachi_watch` tools. Their execution settings come from
 owner-admitted `[tachi.harnesses]` profiles. They are included in minimal
 composition, but `[tachi]` stays disabled and its harness map empty by default.
-There is no local external-worker fallback; ordinary tools and L1 reasoning
-continue without Tachi.
+There is no local external-worker fallback. L1 does not require Tachi
+**delegation**, but its inference path follows
+[ADR-024](../architecture/decisions/ADR-024-bounded-tachi-provider-broker.md):
+before broker cutover it can use the retained direct provider; after a
+sole-broker cutover unavailable inference returns typed `inference-unavailable`
+without direct fallback. Non-model operations retain their own availability.
+External work includes research, review, and end-to-end/computer-use evaluation
+as well as coding; this Staff adapter is not Tachi's entire product scope.
 
 A start requires task-specific text, a harness alias, a truthful staffing
 reason, and a stable `request_id`. For example:
@@ -244,21 +262,23 @@ The report remains untrusted worker evidence, with secret patterns scrubbed;
 it is not body acceptance or permission to change identity, secrets or policy.
 L1 profiles cannot grant these L2/control tools.
 
-This is #381's production tool slice. Real DSH execution, one-then-two-harness
-proof, automatic completion delivery through #63/#377, harness advisors and
-retirement of the duplicate driver remain separate acceptance work. The driver
-stays compiling until the replacement is proven.
+This is #381's production tool slice. The duplicate local driver has retired.
+The existing notification observer supports polling and configured terminal
+delivery; ADR-027 still requires production resolver/SSE integration and its
+paired live acceptance. Source delivery does not by itself prove real-harness
+execution, independent end-to-end acceptance, or a configured notification
+destination. Harness-backed advisors remain a separate adoption decision.
 
 ## Which spawn tools exist
 
 - **`reasoning_subagent`**: the V1 bounded SubAgent entrypoint and the single spawn surface on every composition. Profile-admitted, typed `SubAgentReportV1` result, no ambient parent inheritance, no detached/background mode, no tool execution in the v1 child. See the [Tools overview](../tools/overview.md).
 - **`spawn_subagent`**: RETIRED (#197 spawn wall). The legacy entry point ran the same agent again under its own identity: the child got the parent's whole `Arc<Config>` (every provider credential), rebuilt the full tool registry under the parent's security policy, received a fresh memory backend over the parent's same-UUID memory rows with live memory tools, and, in the CLI process, a live channel map that could reach the user. The detached (`background: true`) arm handed children to the coordinator, which ran them through the same full-parent-config path. Every one of those inheritance axes is forbidden for child paths by the frozen contract (SA-7a/7c/7d/7e, SA-13, SA-17), and the tool's only value proposition was that inheritance, so it was deleted rather than reduced. The name is reserved in `RETIRED_OPERATOR_TOOL_NAMES`: no plugin or skill can re-register it.
-- **`delegate`**: RETIRED (#197 wall 1). The legacy delegation tool handed children the parent's live tool Arcs, per-alias API-key clones, the parent's fallback credential, and channel-wired handles. Running work under a different configured agent identity moves to the Tachi bridge (durable/heavy work) and to admitted V1 SubAgent profiles.
+- **`delegate`**: RETIRED (#197 wall 1). The legacy delegation tool handed children the parent's live tool Arcs, per-alias API-key clones, the parent's fallback credential, and channel-wired handles. External delegated execution uses the Tachi bridge; ephemeral child work uses admitted SubAgent profiles. An independent configured peer keeps its own identity and session. Retaining that relationship does not restore the retired full-parent-inheritance launcher.
 
 ## Where the capabilities went
 
 - **Run a bounded subtask out of the main conversation** → the V1 `reasoning_subagent` entrypoint: profile-admitted, content-only context bundles, typed `SubAgentReportV1` results, run-scoped child identity, no parent credentials or registry.
-- **Run durable/heavy work under another configured agent or an external harness** → the Tachi bridge (Task/Procedure execution), not an in-kernel delegation tool.
+- **Run external or durable delegated work** → the Tachi bridge and canonical run receipts. **Communicate with an independent configured peer** → the retained peer relationship with its own receiving authority; message delivery, ongoing work, and new execution are distinct operations under ADR-027.
 - **Background fan-out with task ids and result polling** → Tachi-owned durable work. The local coordinator child store was deleted with the control-plane migration wall; durable task/attempt truth lives in Tachi through the bridge.
 
 ## Advisor
@@ -284,22 +304,22 @@ advisor_max_calls_per_turn = 2       # optional; default 2
 
 ## Recursion
 
-Local recursion stays denied (frozen contract D1): a v1 child cannot spawn a child: the `reasoning_subagent` admission refuses any spawning lineage deeper than the parent's root. One immutable spawn lineage (`LineageRef`, SA-9) still threads every agent boundary, so no future spawn surface can reset depth by rebuilding a registry. The runtime-profile `max_delegation_depth` key retired with the spawn tools: legacy files carrying it are ignored with a load warning. Cron `JobType::Agent` runs are top-level roots, not continuations of an interactive parent's lineage.
+Local recursion stays denied (frozen contract D1): a v1 child cannot spawn a child: the `reasoning_subagent` admission refuses any spawning lineage deeper than the parent's root. One immutable spawn lineage (`LineageRef`, SA-9) threads L1 admission, so a child cannot reset its depth by rebuilding a registry. Independent peer communication needs its own bounded request/reply and cycle controls under ADR-027; it is not another L1 lineage. The runtime-profile `max_delegation_depth` key retired with the spawn tools: legacy files carrying it are ignored with a load warning. Cron `JobType::Agent` runs are top-level roots, not continuations of an interactive parent's lineage.
 
-## What a child may and may not reach
+## Current Advisor boundary and future read-only admission
 
 1. **No parent credentials or config tree.** Model access is an opaque host-resolved binding (SA-7d); the child never holds provider keys.
-2. **No parent memory.** No `memory_store`/`memory_forget`/`memory_purge`, no live parent backend, no parent agent UUID (SA-7e/SA-17). Personal-memory changes can only return as typed candidates in the report; the parent decides disposition.
-3. **No channel handles.** Child construction takes no parent channel handles. Profile admission and the child tool catalog refuse `ask_user` and `escalate_to_human`. User input is requested through typed parent-request events (SA-7c/SA-25).
+2. **No ambient parent memory or write authority.** The current Advisor receives only its admitted objective, not memory tools, a live parent backend, or a parent agent UUID (SA-7e/SA-17). ADR-027 Scout/Recall may receive host-mediated, explicitly scoped read tools; it cannot acquire `memory_store`/`memory_forget`/`memory_purge` or bypass device/session privacy. Suggested changes return to the parent for disposition.
+3. **No channel handles.** Child construction takes no parent channel handles. Profile admission and the child tool catalog refuse `ask_user` and `escalate_to_human`. The current run returns a terminal report. ADR-027 retains typed mid-run parent requests (SA-7c/SA-25) as implementation work; only the parent may decide to ask the owner.
 4. **No parent-alias identity.** The child runs under a run-scoped principal (SA-13), auditable as its own actor.
-5. **One result channel.** The child returns a `SubAgentReportV1` (SA-21); there is no prose relay contract and no second durable task ledger for the v1 path (SA-26).
+5. **One parent-owned result path.** The current child returns a `SubAgentReportV1` (SA-21). ADR-027 adds bounded structured interim events and steering to the same run contract, followed by one terminal report. Raw tool streams, external messaging, and a second durable task ledger remain excluded (SA-26).
 
-## What's not supported
+## Current limits and accepted follow-up
 
 1. **Local recursion beyond the parent.** Structural refusal at admission, not a budget.
 2. **A separate long-lived identity for the child.** Children are run-scoped principals; the long-lived personal Agent identity remains the parent's.
 3. **Detached/background local children.** The retired tools' detached arms died with them; durable background work belongs to the Tachi bridge.
-4. **Streaming progress back to the parent.** The parent sees the structured report after the bounded run completes.
+4. **Mid-run communication is not wired yet.** The current parent receives the terminal report. ADR-027 explicitly retains structured progress, partial findings, context requests, and parent steering within the original admission/budget; raw tool-output streaming is not the target.
 5. **A child messaging the user directly.** User input and final wording belong to the parent (SA-7c/SA-25).
 
 ## History

@@ -8,6 +8,9 @@ relates-to:
   - https://github.com/zeroclaw-labs/zeroclaw/pull/6398
   - ADR-005
   - ADR-010
+  - ADR-017
+  - ADR-026
+  - ADR-027
   - docs/book/src/agents/overview.md
   - docs/book/src/agents/internals.md
   - docs/book/src/channels/peer-groups.md
@@ -18,6 +21,8 @@ relates-to:
 This is a retroactive record of the multi-agent architecture shipped through [#6398](https://github.com/zeroclaw-labs/zeroclaw/pull/6398) in v0.8.0-beta-1. The date above is the date this ADR was added, not the original implementation date.
 
 Accepted RFC [#5890](https://github.com/zeroclaw-labs/zeroclaw/issues/5890) proposed a broader multi-agent UX and configuration model. This record captures five durable boundaries that shipped: named identities, one supervising daemon, explicit channel relationships, agent-scoped memory, and per-agent runtime-policy and workspace scope. It does not ratify the RFC's unshipped alias-only join requirement, `memory_namespaces` schema, bundle taxonomy, swarm shape, or deferred dashboard and observability contracts.
+
+Amended on 2026-11-20 by [ADR-027](./ADR-027-owner-workflow-closure-and-scoped-services.md): peer collaboration and its current peer-group/channel authorization contracts remain product capabilities. A peer is an independently addressed identity with an explicit communication relationship; it need not be an L1 child or a CLI worker. Message delivery, continuation of an existing run, and admission of new work have separate authority checks. The current internal peer path's implicit detached-launch coupling awaits replacement; `send_message_to_peer` and `peer_groups` have not retired. The old channel orchestrator retired separately under [ADR-026](./ADR-026-headless-rust-kernel-external-workbenches-and-complexity-budget.md). This amendment does not restore it or claim that the replacement peer execution path has shipped.
 
 ## Context
 
@@ -37,13 +42,19 @@ One `zeroclaw daemon` process supervises the enabled configured agents and their
 
 ### Explicit communication
 
-The durable rule is that authorized channel relationships are explicit. The current implementation uses per-agent channel bindings and peer groups. Co-residence in one daemon does not make agents channel peers.
+The durable rule is that authorized communication relationships are explicit. Co-residence in one daemon, use of the same provider, and access to the same MCP server do not make agents peers or grant access to each other's sessions, memory, or tools.
 
-Cross-agent channel messaging currently requires a shared peer-group relationship on the relevant channel. Peer groups are mutual routing and inbound-acceptance boundaries; agents outside that relationship do not become reachable merely because they are configured in the same install.
+A peer relationship names the sender, recipient, permitted conversation or run, and accepted message scope. Each peer retains its own identity and policy. The L0/L1/L2 split in [ADR-017](./ADR-017-personal-agent-body-edges-and-delegation.md) classifies how work executes; it does not classify every communicating identity. A bounded L1 child shares its parent turn's lifetime, while an independent peer can outlive that turn.
 
-For compatibility, the runtime deterministically assigns channel ownership when no configured agent declares any channel binding. That fallback preserves older installs; it does not establish implicit sharing as the multi-agent contract.
+| Operation | Required boundary |
+| --- | --- |
+| Deliver a question, finding, or progress update | Authenticate the sender and authorize the recipient and message scope. Delivery is evidence, not a grant to execute its contents. |
+| Steer or continue an existing run | Bind the message to that run and its current grant, state, and budget. A stale or terminal run cannot be revived by message delivery. |
+| Start new work | Use the target runtime's admission path. External execution and cross-host coordination belong to Tachi; a message alone cannot launch a worker or widen a grant. |
 
-Delegation and other cross-agent capabilities may impose additional gates. This ADR does not make peer-group membership a universal authorization mechanism for every capability.
+Current peer groups and channel authorization retain routing, inbound acceptance, external-peer, and administration consumers. Preserve those permission contracts and their configuration while replacing the internal message path's implicit detached-launch coupling. Retirement of the old in-process channel orchestrator does not retire `peer_groups` or the retained peer paths. Any replacement must cover those consumers and enforce the boundaries above before activation. Tachi provides general cross-host coordination and execution; its use does not turn every peer into a newly spawned CLI worker.
+
+For L1 children, ADR-027 allows bounded intermediate requests, progress or partial findings, and parent steering within the original turn grant. These messages do not grant recursion, direct user contact, approvals, or durable background execution. They use the parent run's existing ownership rather than a second supervisor or task ledger.
 
 ### Workspace and runtime-policy scope
 
@@ -59,7 +70,7 @@ The configured agent identity is the scope consumed by the memory contract. Back
 
 Cross-agent recall is additive and explicit. It requires compatible same-backend access; the runtime does not silently bridge different backend kinds.
 
-[ADR-005](./ADR-005-pluggable-memory-backends.md) owns storage, attribution, recall allowlists, backend compatibility, and destructive-operation constraints. [ADR-010](./ADR-010-memory-authority-boundaries.md) separately assigns authority between session history, curated memory, and enrichment.
+At adoption, [ADR-005](./ADR-005-pluggable-memory-backends.md) owned storage and cross-agent recall constraints, and [ADR-010](./ADR-010-memory-authority-boundaries.md) assigned memory authority. [ADR-025](./ADR-025-long-context-sleep-memory-and-delegation-continuity.md) now governs the retained session and memory stores. A peer message or L1 relationship never grants cross-agent recall by itself; any shared content is a scoped projection admitted by its owner.
 
 ### Schema evolution boundary
 
@@ -94,6 +105,8 @@ Follow-up decisions:
 - [Running agents](../../agents/operating.md)
 - [Runtime internals](../../agents/internals.md)
 - [Peer groups](../../channels/peer-groups.md)
+- [ADR-017: Body, edges, and work levels](./ADR-017-personal-agent-body-edges-and-delegation.md)
+- [ADR-027: Owner workflows and scoped collaboration](./ADR-027-owner-workflow-closure-and-scoped-services.md)
 - `crates/zeroclaw-config/src/schema.rs`
 - `crates/zeroclaw-config/src/multi_agent.rs`
 - `crates/zeroclaw-policy/src/lib.rs`

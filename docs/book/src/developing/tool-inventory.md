@@ -41,7 +41,8 @@ product integrations.
 |---|---|
 | `memory_store`, `memory_recall`, `memory_forget`, `memory_export`, `memory_purge` | Long-term memory is a first-party runtime contract and uses shared memory ownership rules. |
 | `cron_add`, `cron_list`, `cron_remove`, `cron_update`, `cron_run`, `cron_runs`, `schedule` | Scheduling affects autonomous execution, ownership, and run history; keep it policy-visible in core. |
-| `send_message_to_peer`, `reasoning_subagent` | Agent-child execution and peer messaging are part of the agent execution model and must share risk profiles, tools, memory, and parent/child constraints. (The legacy `spawn_subagent` and `delegate` tools are retired; see the delegation retirement record.) |
+| `reasoning_subagent` | The live zero-tool Advisor is a bounded child with explicit context, lineage, and budgets. ADR-027 adds confined read-only modes and mid-run communication without handing out the parent registry or memory authority. |
+| `send_message_to_peer` | Retain authorized named-peer collaboration and each recipient's identity/policy. ADR-027 replaces implicit detached launching with distinct delivery, continuation, and new-work admission; peer membership is not shared memory or tool authority. Legacy `spawn_subagent` and `delegate` remain retired. |
 | `ask_user`, `escalate_to_human`, `reaction`, `poll`, `channel_room` | These are channel-bridging operator interaction primitives with late-bound channel handles and receipts. |
 | `sessions_current`, `sessions_list`, `sessions_history`, `sessions_send` | Session visibility and message sending must share the daemon/gateway session backend and agent ownership boundaries. |
 | `read_skill` and skill-defined tools with `kind = "shell"`, `kind = "http"`, or `kind = "builtin"` | Skills are an intended extension surface, but the runtime bridge that turns installed skills into tools is core. |
