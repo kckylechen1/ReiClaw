@@ -400,7 +400,8 @@ async fn assemble_turn(req: TurnRequest<'_>) -> (ScopedAssembled, WireBudget) {
         false,
         None,
         crate::agent::persona_projection::LegacyPersonaFiles::Inject,
-    );
+    )
+    .unwrap();
     let mcp_section = assembled.combined_mcp_prompt_section();
     if !mcp_section.is_empty() {
         system_prompt.push('\n');
