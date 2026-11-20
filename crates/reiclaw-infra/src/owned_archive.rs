@@ -94,11 +94,18 @@ fn verify_bytes(path: &Path, expected: &[u8]) -> Result<()> {
 /// retry; a different, truncated, symlinked or unreadable file blocks deletion.
 pub fn write_verified_json(path: &Path, value: &Value) -> Result<()> {
     let bytes = serde_json::to_vec_pretty(value).context("serialize owned-state archive")?;
+    write_verified_bytes(path, &bytes)
+}
+
+/// Preserve an existing store's exact bytes with the same private, durable,
+/// no-overwrite contract as structured archives. No second data store is owned
+/// here; the caller retains ownership of the source and its transaction.
+pub fn write_verified_bytes(path: &Path, bytes: &[u8]) -> Result<()> {
     let parent = path.parent().context("archive path has no parent")?;
     create_private_dir(parent)?;
     let mut temporary = tempfile::NamedTempFile::new_in(parent)?;
     temporary
-        .write_all(&bytes)
+        .write_all(bytes)
         .context("write complete owned-state archive")?;
     temporary
         .as_file()
@@ -124,7 +131,7 @@ pub fn write_verified_json(path: &Path, value: &Value) -> Result<()> {
                 .context("sync archive directory ancestry")?;
         }
     }
-    verify_bytes(path, &bytes)
+    verify_bytes(path, bytes)
 }
 
 #[cfg(test)]

@@ -50,7 +50,7 @@ fn open_sqlite_with_jsonl_import(
             ::reiclaw_log::Event::new(module_path!(), ::reiclaw_log::Action::Note),
             &format!(
                 "session_backend=sqlite: imported {n} legacy JSONL session(s) from \
-             {}/sessions; renamed to *.jsonl.migrated.",
+             {}/sessions; archived as *.jsonl.migrated.",
                 workspace_dir.display()
             )
         ),
@@ -59,9 +59,10 @@ fn open_sqlite_with_jsonl_import(
             ::reiclaw_log::Event::new(module_path!(), ::reiclaw_log::Action::Note)
                 .with_outcome(::reiclaw_log::EventOutcome::Unknown)
                 .with_attrs(::serde_json::json!({"e": e.to_string()})),
-            "session_backend=sqlite: JSONL import skipped: . Existing JSONL \
-             sessions remain on disk; review the import error and repair the source \
-             before retrying. The JSONL runtime backend is retired."
+            "session_backend=sqlite: legacy JSONL import or finalization failed. \
+             Retained sources can be retried without replaying committed imports; \
+             review the error before changing a source or its archive. \
+             The JSONL runtime backend is retired."
         ),
     }
     Ok(backend)

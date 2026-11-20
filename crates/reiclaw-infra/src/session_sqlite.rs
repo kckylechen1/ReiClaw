@@ -14,6 +14,7 @@ pub mod agent_tasks;
 mod bridge_intake;
 mod checkpoints;
 mod delegation;
+mod jsonl_import;
 pub mod reminder_occurrences;
 #[cfg(test)]
 mod review_source_tests;
@@ -156,6 +157,7 @@ impl SqliteSessionBackend {
 
         bridge_intake::initialize(&tx)?;
         checkpoints::initialize(&tx)?;
+        jsonl_import::initialize(&tx)?;
 
         // Historical messages have no attributable ingress source. Leave
         // them NULL rather than guessing from the session's latest sender.
@@ -327,12 +329,23 @@ impl SqliteSessionBackend {
             .transaction_with_behavior(rusqlite::TransactionBehavior::Immediate)
             .map_err(std::io::Error::other)?;
         let now = reiclaw_api::time::format_rfc3339(jiff::Timestamp::now());
+        Self::insert_message(&tx, session_key, message, source.as_deref(), &now)
+            .map_err(std::io::Error::other)?;
+        tx.commit().map_err(std::io::Error::other)
+    }
+
+    fn insert_message(
+        tx: &rusqlite::Transaction<'_>,
+        session_key: &str,
+        message: &ChatMessage,
+        source: Option<&str>,
+        now: &str,
+    ) -> rusqlite::Result<()> {
         tx.execute(
             "INSERT INTO sessions (session_key, role, content, created_at, message_source)
              VALUES (?1, ?2, ?3, ?4, ?5)",
             params![session_key, message.role, message.content, now, source],
-        )
-        .map_err(std::io::Error::other)?;
+        )?;
         tx.execute(
             "INSERT INTO session_metadata (session_key, created_at, last_activity, message_count)
              VALUES (?1, ?2, ?3, 1)
@@ -340,62 +353,8 @@ impl SqliteSessionBackend {
                 last_activity = excluded.last_activity,
                 message_count = message_count + 1",
             params![session_key, now, now],
-        )
-        .map_err(std::io::Error::other)?;
-        tx.commit().map_err(std::io::Error::other)
-    }
-
-    /// Migrate JSONL session files into SQLite. Renames migrated files to `.jsonl.migrated`.
-    pub fn migrate_from_jsonl(&self, workspace_dir: &Path) -> Result<usize> {
-        let sessions_dir = workspace_dir.join("sessions");
-        let entries = match std::fs::read_dir(&sessions_dir) {
-            Ok(e) => e,
-            Err(_) => return Ok(0),
-        };
-
-        let mut migrated = 0;
-        for entry in entries {
-            let entry = match entry {
-                Ok(e) => e,
-                Err(_) => continue,
-            };
-            let name = match entry.file_name().into_string() {
-                Ok(n) => n,
-                Err(_) => continue,
-            };
-            let Some(key) = name.strip_suffix(".jsonl") else {
-                continue;
-            };
-
-            let path = entry.path();
-            let file = match std::fs::File::open(&path) {
-                Ok(f) => f,
-                Err(_) => continue,
-            };
-
-            let reader = std::io::BufReader::new(file);
-            let mut count = 0;
-            for line in std::io::BufRead::lines(reader) {
-                let Ok(line) = line else { continue };
-                let trimmed = line.trim();
-                if trimmed.is_empty() {
-                    continue;
-                }
-                if let Ok(msg) = serde_json::from_str::<ChatMessage>(trimmed)
-                    && self.append(key, &msg).is_ok()
-                {
-                    count += 1;
-                }
-            }
-
-            if count > 0 {
-                let migrated_path = path.with_extension("jsonl.migrated");
-                let _ = std::fs::rename(&path, &migrated_path);
-                migrated += 1;
-            }
-        }
-
-        Ok(migrated)
+        )?;
+        Ok(())
     }
 }
 

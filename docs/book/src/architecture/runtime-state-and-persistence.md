@@ -71,13 +71,17 @@ unknown values and non-string values reject configuration admission before
 another store can be selected. Review the existing history before making
 that operator edit.
 
-The startup importer still reads legacy `data/sessions/*.jsonl` and renames
-successfully imported source files to `*.jsonl.migrated`. Keep those files:
-the compatibility window has not closed. The importer retains its existing
-line-level tolerance, including skipping unreadable or malformed lines. A
-reported imported-file count is not evidence that every source record was
-imported. This backend retirement does not establish full migration or
-retire the importer.
+The retained importer still reads legacy `data/sessions/*.jsonl` and preserves
+successfully imported files as byte-identical `*.jsonl.migrated` archives before
+committing and removing the scanned sources. Keep those archives: the
+compatibility window has not closed. Malformed or invalid UTF-8 lines remain
+skipped and preserved in the archive; hard read, SQL, receipt and archive errors
+fail the affected file. A reported imported-file count is not evidence that
+every source record was valid. Durable import receipts prevent replaying
+committed files after failed cleanup. See
+[JSONL import integrity](../contributing/fork-notes.md#retained-jsonl-session-import-integrity-772)
+for retry, ownership and reconciliation boundaries. This backend retirement
+does not establish full migration or retire the importer.
 
 ## Reload and restart
 
