@@ -1805,7 +1805,6 @@ async fn config_toml_roundtrip() {
             filesystem: HashMap::new(),
             show_tool_calls: true,
             session_persistence: true,
-            session_backend: default_session_backend(),
             session_ttl_hours: 0,
         },
         memory: MemoryConfig::default(),

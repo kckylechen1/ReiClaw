@@ -933,7 +933,7 @@ mod tests {
     #[test]
     fn collects_only_the_owners_user_messages() {
         let dir = tempfile::tempdir().unwrap();
-        let backend = reiclaw_infra::make_session_backend(dir.path(), "sqlite").unwrap();
+        let backend = reiclaw_infra::make_session_backend(dir.path()).unwrap();
         let add = |key: &str, agent: &str, message: ChatMessage| {
             let source = match key {
                 "telegram_owner" => UserMessageSource::Channel {

@@ -138,6 +138,7 @@ pub(crate) fn apply_env_overrides_matching(
         // the environment being clean.
         let tail_segments: Vec<&str> = tail.split(SEP).collect();
         crate::retired_security::reject_retired_security_env(&tail, &value)?;
+        crate::retired_session_backend::reject_retired_session_backend_env(&tail, &value)?;
         if tail_segments.first() == Some(&"sop") {
             return Err(crate::current::RetiredSopConfigError.into());
         }
@@ -426,6 +427,72 @@ mod tests {
         let error = apply_env_overrides(&mut config).unwrap_err();
         assert!(error.to_string().contains("REI_security"));
         assert!(!format!("{error:#}").contains("private-sentinel"));
+    }
+
+    #[tokio::test]
+    async fn walker_rejects_retired_session_backend_without_silently_selecting_sqlite() {
+        let _lock = env_test_lock().await;
+        for value in [
+            "jsonl",
+            "private-unknown-backend",
+            "default",
+            "",
+            "false",
+            "7",
+            "[]",
+            "{ sqlite = true }",
+            "\"sqlite\"\ninjected = true",
+        ] {
+            let _env = EnvVarGuard::set("REI_channels__session_backend", value);
+            let mut config = Config::default();
+            let error = apply_env_overrides(&mut config).unwrap_err();
+            assert!(error.is::<crate::current::RetiredSessionBackendError>());
+            assert!(!format!("{error:#}").contains("private-unknown-backend"));
+            assert!(config.retired_surface_warnings.is_empty());
+        }
+        let _child = EnvVarGuard::set("REI_channels__session_backend__name", "sqlite");
+        assert!(
+            apply_env_overrides(&mut Config::default())
+                .unwrap_err()
+                .is::<crate::current::RetiredSessionBackendError>()
+        );
+    }
+
+    #[tokio::test]
+    async fn walker_warns_only_for_the_retired_sqlite_default() {
+        let _lock = env_test_lock().await;
+        let _live = EnvVarGuard::set("REI_channels__show_tool_calls", "true");
+        for value in ["sqlite", "\"sqlite\"", "'sqlite'"] {
+            let _env = EnvVarGuard::set("REI_channels__session_backend", value);
+            let mut config = Config::default();
+            let applied = apply_env_overrides(&mut config).unwrap();
+            assert!(config.channels.show_tool_calls);
+            assert!(!applied.paths.contains("channels.session_backend"));
+            assert!(!applied.snapshots.contains_key("channels.session_backend"));
+            assert_eq!(applied.tombstone_warnings.len(), 1);
+            assert_eq!(
+                applied.tombstone_warnings[0].path,
+                "channels.session_backend"
+            );
+            assert_eq!(
+                applied.tombstone_warnings[0].code,
+                "session_backend_selector_removed"
+            );
+        }
+    }
+
+    #[tokio::test]
+    async fn walker_rejects_channel_ancestor_without_discarding_backend_selection() {
+        let _lock = env_test_lock().await;
+        let _env = EnvVarGuard::set(
+            "REI_channels",
+            "{ session_backend = 'private-unknown-backend' }",
+        );
+        let mut config = Config::default();
+        assert!(!config.prop_paths().iter().any(|path| path == "channels"));
+        let error = apply_env_overrides(&mut config).unwrap_err();
+        assert!(error.to_string().contains("REI_channels"));
+        assert!(!format!("{error:#}").contains("private-unknown-backend"));
     }
 
     struct EnvVarGuard(&'static str);

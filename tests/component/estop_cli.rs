@@ -127,6 +127,35 @@ async fn engage_does_not_invoke_a_failing_vault_cli() {
 }
 
 #[tokio::test]
+async fn local_estop_ignores_retired_session_history_selection() {
+    for value in ["'jsonl'", "false"] {
+        let contents = format!("{CONFIG}\n[channels]\nsession_backend = {value}\n");
+        let dir = fixture(&contents);
+        let overrides = [("REI_channels__session_backend", "jsonl")];
+        assert_success(&run_cli(dir.path(), &["estop"], &overrides).await);
+        assert_success(&run_cli(dir.path(), &["estop", "status"], &overrides).await);
+        assert!(
+            state(dir.path(), "control/estop.json")["kill_all"]
+                .as_bool()
+                .unwrap()
+        );
+        assert_eq!(
+            std::fs::read_to_string(dir.path().join("config.toml")).unwrap(),
+            contents
+        );
+
+        // The normal loader refuses the history selection before a replacement
+        // SQLite store or model credentials can be selected.
+        let normal = run_cli(dir.path(), &["status"], &[]).await;
+        assert!(!normal.status.success());
+        assert!(
+            String::from_utf8_lossy(&normal.stderr).contains("channels.session_backend is retired")
+        );
+        assert!(!dir.path().join("data/sessions/sessions.db").exists());
+    }
+}
+
+#[tokio::test]
 async fn local_safety_env_overrides_and_cli_config_directory_are_honored() {
     let ignored = fixture(CONFIG);
     let selected = fixture(&CONFIG.replace("enabled = true", "enabled = false"));

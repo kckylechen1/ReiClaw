@@ -25,8 +25,12 @@ pub async fn apply_comments(
         .map_err(|error| std::io::Error::new(std::io::ErrorKind::InvalidData, error))?;
     crate::current::reject_retired_channel_config(&toml::Value::Table(table.clone()))
         .map_err(|error| std::io::Error::new(std::io::ErrorKind::InvalidData, error))?;
-    crate::retired_security::reject_retired_security_config(&toml::Value::Table(table))
+    crate::retired_security::reject_retired_security_config(&toml::Value::Table(table.clone()))
         .map_err(|error| std::io::Error::new(std::io::ErrorKind::InvalidData, error))?;
+    crate::retired_session_backend::reject_retired_session_backend_config(&toml::Value::Table(
+        table,
+    ))
+    .map_err(|error| std::io::Error::new(std::io::ErrorKind::InvalidData, error))?;
     for (path, comment) in annotations {
         decorate_key(doc.as_table_mut(), path, comment);
     }

@@ -1,9 +1,5 @@
 use super::*;
 use axum::response::IntoResponse;
-use serde_json::{Value, json};
-use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
-use std::thread::ThreadId;
-use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use reiclaw_api::bridge_intake::{BridgeInput, BridgeReceipt, BridgeResume, BridgeSource};
 use reiclaw_config::schema::{
     AliasedAgentConfig, CustomModelProviderConfig, ModelProviderConfig, RiskProfileConfig,
@@ -15,6 +11,10 @@ use reiclaw_infra::session_backend::{
 };
 use reiclaw_infra::session_sqlite::SqliteSessionBackend;
 use reiclaw_providers::ChatMessage;
+use serde_json::{Value, json};
+use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
+use std::thread::ThreadId;
+use tokio::io::{AsyncReadExt, AsyncWriteExt};
 
 struct AliasPauseGate {
     target_call: usize,
@@ -882,26 +882,25 @@ async fn ws_chat_shutdown_during_attach_stamp_holds_lifecycle_against_delete() {
 }
 
 #[tokio::test]
-async fn ws_chat_jsonl_backend_runs_on_blocking_pool_and_skips_warm_attach_load() {
+async fn ws_chat_sqlite_backend_runs_on_blocking_pool_and_skips_warm_attach_load() {
     let runtime_thread = std::thread::current().id();
     let tmp = tempfile::tempdir().unwrap();
-    let jsonl = reiclaw_infra::make_session_backend(tmp.path(), "jsonl").unwrap();
-    jsonl
-        .append("gw_lazy-jsonl", &ChatMessage::user("seeded-jsonl-0"))
+    let sqlite = reiclaw_infra::make_session_backend(tmp.path()).unwrap();
+    sqlite
+        .append("gw_lazy-sqlite", &ChatMessage::user("seeded-sqlite-0"))
         .unwrap();
-    jsonl
-        .append(
-            "gw_lazy-jsonl",
-            &ChatMessage::assistant("seeded-jsonl-1"),
-        )
+    sqlite
+        .append("gw_lazy-sqlite", &ChatMessage::assistant("seeded-sqlite-1"))
         .unwrap();
 
-    let counting = Arc::new(CountingSessionBackend::new(jsonl, runtime_thread));
+    let counting = Arc::new(CountingSessionBackend::new(sqlite, runtime_thread));
     let harness = spawn_lazy_harness(&tmp, Arc::clone(&counting)).await;
 
     let mut pre_connect =
-        RawWsClient::connect(harness.address, "/ws/chat?agent=web&session_id=lazy-jsonl").await;
-    let start = pre_connect.until("jsonl_pre_connect", "session_start").await;
+        RawWsClient::connect(harness.address, "/ws/chat?agent=web&session_id=lazy-sqlite").await;
+    let start = pre_connect
+        .until("sqlite_pre_connect", "session_start")
+        .await;
     assert_eq!(start["resumed"], true);
     assert_eq!(start["message_count"], 2);
     assert_eq!(counting.counts(), (0, 1, 0));
@@ -909,26 +908,26 @@ async fn ws_chat_jsonl_backend_runs_on_blocking_pool_and_skips_warm_attach_load(
 
     counting.reset();
     let mut client_a =
-        RawWsClient::connect(harness.address, "/ws/chat?agent=web&session_id=lazy-jsonl").await;
-    client_a.until("jsonl_a", "session_start").await;
+        RawWsClient::connect(harness.address, "/ws/chat?agent=web&session_id=lazy-sqlite").await;
+    client_a.until("sqlite_a", "session_start").await;
     client_a.send_json(json!({"type": "connect"})).await;
-    client_a.until("jsonl_a", "connected").await;
+    client_a.until("sqlite_a", "connected").await;
     client_a
         .send_json(json!({"type": "turn_control", "version": 1, "op": "negotiate"}))
         .await;
-    client_a.until("jsonl_a", "turn_ready").await;
+    client_a.until("sqlite_a", "turn_ready").await;
     assert_eq!(counting.counts(), (1, 1, 0));
 
     counting.reset();
     let mut client_b =
-        RawWsClient::connect(harness.address, "/ws/chat?agent=web&session_id=lazy-jsonl").await;
-    client_b.until("jsonl_b", "session_start").await;
+        RawWsClient::connect(harness.address, "/ws/chat?agent=web&session_id=lazy-sqlite").await;
+    client_b.until("sqlite_b", "session_start").await;
     client_b.send_json(json!({"type": "connect"})).await;
-    client_b.until("jsonl_b", "connected").await;
+    client_b.until("sqlite_b", "connected").await;
     client_b
         .send_json(json!({"type": "turn_control", "version": 1, "op": "negotiate"}))
         .await;
-    client_b.until("jsonl_b", "turn_ready").await;
+    client_b.until("sqlite_b", "turn_ready").await;
     assert_eq!(counting.counts(), (0, 1, 0));
 
     client_a.close().await;

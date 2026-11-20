@@ -445,10 +445,10 @@ the sending socket first:
 
 - `turn` is `started` for a new turn, or `steered` when the message joined
   the running one.
-- `durable` is `true` when the receipt is in the session store (the default
-  SQLite backend) and survives a restart. It is `false` with the JSONL
-  backend or with persistence off; bounded in-memory receipts survive idle
-  conversation release for 16 minutes from first acceptance, but not restart.
+- `durable` is `true` when the receipt is in the SQLite session store and
+  survives a restart. It is `false` with persistence off; bounded in-memory
+  receipts survive idle conversation release for 16 minutes from first
+  acceptance, but not restart.
 - The ACK means accepted for processing, not finished. The turn's `done`,
   `aborted` or `error` frame carries the same `id`.
 - Sending an `id` again, for example after a lost ACK, runs nothing and

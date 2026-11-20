@@ -287,7 +287,7 @@ fn build_owned_state_handles(config: &Config) -> Result<OwnedStateHandles> {
     };
     let session_backend = if config.gateway.session_persistence {
         Some(
-            reiclaw_infra::make_session_backend(&config.data_dir, &config.channels.session_backend)
+            reiclaw_infra::make_session_backend(&config.data_dir)
                 .context("open session backend for the owned-state cascade")?,
         )
     } else {

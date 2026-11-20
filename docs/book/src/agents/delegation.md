@@ -194,8 +194,8 @@ If session setup fails before any start is transmitted, its matching pending
 claim is released and the same request ID may safely retry. After transmission,
 an ambiguous outcome always retains the claim; a crash also remains conservative.
 SQLite WAL/NORMAL preserves process-crash safety, not a stronger power-loss
-guarantee. Delegation requires the SQLite session backend; JSONL chat remains
-supported without this capability.
+guarantee. Delegation uses the SQLite session store. The JSONL runtime backend
+is retired; the legacy chat-history importer remains available at startup.
 
 Existing route-hashed claim keys survive schema upgrade unchanged. A unique
 legacy row can be read or replayed only on its recorded route; unresolved rows

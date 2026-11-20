@@ -7,7 +7,7 @@ use crate::session_backend::{
 use anyhow::{Context, Result};
 use parking_lot::Mutex;
 use reiclaw_api::model_provider::ChatMessage;
-use rusqlite::{Connection, params};
+use rusqlite::{Connection, OptionalExtension, params};
 use std::path::{Path, PathBuf};
 
 pub mod agent_tasks;
@@ -502,38 +502,40 @@ impl SessionBackend for SqliteSessionBackend {
     /// Efficiently update the last message in-place (single UPDATE instead of
     /// DELETE + INSERT). Used for incremental persistence during streaming.
     fn update_last(&self, session_key: &str, message: &ChatMessage) -> std::io::Result<bool> {
-        let conn = self.conn.lock();
+        let mut conn = self.conn.lock();
+        // Serialize with appenders on other handles and keep the history,
+        // FTS trigger and metadata update atomic if any write fails.
+        let tx = conn
+            .transaction_with_behavior(rusqlite::TransactionBehavior::Immediate)
+            .map_err(std::io::Error::other)?;
 
-        let last_id: Option<i64> = conn
+        let last_id: Option<i64> = tx
             .query_row(
                 "SELECT id FROM sessions WHERE session_key = ?1 ORDER BY id DESC LIMIT 1",
                 params![session_key],
                 |row| row.get(0),
             )
-            .ok();
+            .optional()
+            .map_err(std::io::Error::other)?;
 
         let Some(id) = last_id else {
             return Ok(false);
         };
 
-        conn.execute(
+        tx.execute(
             "UPDATE sessions SET role = ?1, content = ?2 WHERE id = ?3",
             params![message.role, message.content, id],
         )
         .map_err(std::io::Error::other)?;
 
-        // NOTE: FTS index becomes stale here (no UPDATE trigger, only
-        // INSERT/DELETE triggers). This is acceptable — update_last is
-        // used for transient streaming snapshots. The final content will
-        // be correct in the sessions table for load().
-
         let now = reiclaw_api::time::format_rfc3339(jiff::Timestamp::now());
-        conn.execute(
+        tx.execute(
             "UPDATE session_metadata SET last_activity = ?1 WHERE session_key = ?2",
             params![now, session_key],
         )
         .map_err(std::io::Error::other)?;
 
+        tx.commit().map_err(std::io::Error::other)?;
         Ok(true)
     }
 
@@ -1319,6 +1321,140 @@ mod tests {
     }
 
     #[test]
+    fn normalized_session_key_and_history_survive_restart() {
+        let tmp = TempDir::new().unwrap();
+        let runtime_key =
+            reiclaw_api::session_keys::sanitize_session_key("telegram_C123_1.2_user one");
+        {
+            let store = SqliteSessionBackend::new(tmp.path()).unwrap();
+            let backend: &dyn SessionBackend = &store;
+            assert!(backend.load("nonexistent").is_empty());
+            backend
+                .append(&runtime_key, &ChatMessage::user("first"))
+                .unwrap();
+            backend
+                .append(&runtime_key, &ChatMessage::assistant("ack"))
+                .unwrap();
+        }
+        let store = SqliteSessionBackend::new(tmp.path()).unwrap();
+        let listed = store.list_sessions();
+        assert_eq!(listed, vec![runtime_key]);
+        let messages = store.load(&listed[0]);
+        assert_eq!(messages.len(), 2);
+        assert_eq!(messages[0].role, "user");
+        assert_eq!(messages[0].content, "first");
+        assert_eq!(messages[1].role, "assistant");
+        assert_eq!(messages[1].content, "ack");
+
+        // Keys are bound SQL values, including punctuation that used to need
+        // filename escaping in the retired backend.
+        store
+            .append("telegram/thread:123/user", &ChatMessage::user("test"))
+            .unwrap();
+        assert_eq!(store.load("telegram/thread:123/user").len(), 1);
+    }
+
+    #[test]
+    fn update_last_via_trait_is_atomic_with_metadata_and_fts() {
+        let tmp = TempDir::new().unwrap();
+        let store = SqliteSessionBackend::new(tmp.path()).unwrap();
+        let backend: &dyn SessionBackend = &store;
+        let key = "update_test";
+        assert!(
+            !backend
+                .update_last("missing", &ChatMessage::assistant("new"))
+                .unwrap()
+        );
+        backend.append(key, &ChatMessage::user("first")).unwrap();
+        backend.append(key, &ChatMessage::assistant("old")).unwrap();
+        let before = backend.get_session_metadata(key).unwrap();
+        store
+            .conn
+            .lock()
+            .execute_batch(
+                "CREATE TEMP TRIGGER reject_last_activity BEFORE UPDATE ON session_metadata
+             BEGIN SELECT RAISE(ABORT, 'injected metadata failure'); END;",
+            )
+            .unwrap();
+
+        assert!(
+            backend
+                .update_last(key, &ChatMessage::assistant("new"))
+                .is_err()
+        );
+        let messages = backend.load(key);
+        assert_eq!(messages.len(), 2);
+        assert_eq!(messages[0].content, "first");
+        assert_eq!(messages[1].content, "old");
+        let after = backend.get_session_metadata(key).unwrap();
+        assert_eq!(after.last_activity, before.last_activity);
+        assert_eq!(after.message_count, 2);
+        let matches = |keyword: &str| {
+            backend.search(&SessionQuery {
+                keyword: Some(keyword.into()),
+                limit: Some(10),
+            })
+        };
+        assert_eq!(matches("old").len(), 1);
+        assert!(matches("new").is_empty());
+
+        store
+            .conn
+            .lock()
+            .execute_batch("DROP TRIGGER reject_last_activity;")
+            .unwrap();
+        assert!(
+            backend
+                .update_last(key, &ChatMessage::assistant("new"))
+                .unwrap()
+        );
+        let messages = backend.load(key);
+        assert_eq!(messages.len(), 2);
+        assert_eq!(messages[0].content, "first");
+        assert_eq!(messages[1].content, "new");
+        assert!(matches("old").is_empty());
+        assert_eq!(matches("new").len(), 1);
+    }
+
+    #[test]
+    fn concurrent_update_and_append_preserve_a_serial_history_across_handles() {
+        for _ in 0..16 {
+            let tmp = TempDir::new().unwrap();
+            let updater = SqliteSessionBackend::new(tmp.path()).unwrap();
+            let appender = SqliteSessionBackend::new(tmp.path()).unwrap();
+            let key = "concurrent_update";
+            updater.append(key, &ChatMessage::user("first")).unwrap();
+            updater.append(key, &ChatMessage::assistant("old")).unwrap();
+            let start = std::sync::Barrier::new(3);
+            std::thread::scope(|scope| {
+                let update = scope.spawn(|| {
+                    start.wait();
+                    updater.update_last(key, &ChatMessage::assistant("new"))
+                });
+                let append = scope.spawn(|| {
+                    start.wait();
+                    appender.append(key, &ChatMessage::user("concurrent"))
+                });
+                start.wait();
+                assert!(update.join().unwrap().unwrap());
+                append.join().unwrap().unwrap();
+            });
+            let messages = updater.load(key);
+            let contents: Vec<_> = messages
+                .iter()
+                .map(|message| message.content.as_str())
+                .collect();
+            // Either writer can acquire SQLite's transaction first. The append
+            // must never be lost by an overlapping history rewrite.
+            assert!(
+                contents == ["first", "new", "concurrent"] || contents == ["first", "old", "new"],
+                "non-serial history: {contents:?}"
+            );
+            assert_eq!(updater.get_session_metadata(key).unwrap().message_count, 3);
+        }
+    }
+
+    #[test]
     fn remove_last_sqlite() {
         let tmp = TempDir::new().unwrap();
         let backend = SqliteSessionBackend::new(tmp.path()).unwrap();
@@ -1750,13 +1886,11 @@ mod tests {
         let sessions_dir = tmp.path().join("sessions");
         std::fs::create_dir_all(&sessions_dir).unwrap();
 
-        // Create a JSONL file
+        // The retained importer keeps its historical line-level tolerance;
+        // the original bytes, including malformed lines, stay in the archive.
         let jsonl_path = sessions_dir.join("test_user.jsonl");
-        std::fs::write(
-            &jsonl_path,
-            "{\"role\":\"user\",\"content\":\"hello\"}\n{\"role\":\"assistant\",\"content\":\"hi\"}\n",
-        )
-        .unwrap();
+        let original = "{\"role\":\"user\",\"content\":\"hello\"}\n\ninvalid legacy line\n{\"role\":\"assistant\",\"content\":\"hi\"}\n";
+        std::fs::write(&jsonl_path, original).unwrap();
 
         let backend = SqliteSessionBackend::new(tmp.path()).unwrap();
         let migrated = backend.migrate_from_jsonl(tmp.path()).unwrap();
@@ -1765,11 +1899,16 @@ mod tests {
         // JSONL should be renamed
         assert!(!jsonl_path.exists());
         assert!(sessions_dir.join("test_user.jsonl.migrated").exists());
+        assert_eq!(
+            std::fs::read_to_string(sessions_dir.join("test_user.jsonl.migrated")).unwrap(),
+            original
+        );
 
         // Messages should be in SQLite
         let msgs = backend.load("test_user");
         assert_eq!(msgs.len(), 2);
         assert_eq!(msgs[0].content, "hello");
+        assert_eq!(msgs[1].content, "hi");
     }
 
     #[test]
