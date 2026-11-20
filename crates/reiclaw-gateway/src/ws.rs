@@ -25,6 +25,7 @@ use std::sync::Arc;
 use std::time::Duration;
 use surface::ChatSurface;
 
+mod checkpoint_history;
 mod device;
 pub(crate) mod intake;
 pub(crate) mod surface;
@@ -971,11 +972,17 @@ pub struct WsSession {
     agent: reiclaw_runtime::agent::Agent,
     /// Per-agent memory for turn-end consolidation; `None` disables it.
     ws_memory: Option<Arc<dyn reiclaw_memory::Memory>>,
+    /// Watermark of the canonical checkpoint currently projected into `agent`.
+    checkpoint_watermark: i64,
+    /// A failed append makes a durable refresh unsafe until a cold restore/reset.
+    history_persisted: bool,
 }
 
 impl WsSession {
     pub(crate) fn clear_history(&mut self) {
         self.agent.clear_history();
+        self.checkpoint_watermark = 0;
+        self.history_persisted = true;
     }
 }
 
@@ -1059,9 +1066,26 @@ async fn build_ws_session(
     // what lets ask_user/poll/escalate_to_human default to this conversation.
     agent.set_channel_name(WS_CHANNEL_KEY.to_string());
     agent.set_memory_session_id(Some(memory_session_id));
-    let stored_messages = if let Some(backend) = state.session_backend.as_ref().map(Arc::clone) {
+    let device_bound = binding.is_some_and(device::Binding::device_bound);
+    let stored_window = if let Some(backend) = state.session_backend.as_ref().map(Arc::clone) {
         let key = session_key.to_string();
-        tokio::task::spawn_blocking(move || backend.load(&key))
+        Some(
+            tokio::task::spawn_blocking(move || {
+                if device_bound {
+                    // Device sessions never inherit owner-derived checkpoints.
+                    Ok(reiclaw_infra::session_backend::SessionWindow {
+                        active_checkpoint: None,
+                        staged_checkpoint: None,
+                        delta_messages: backend
+                            .load_with_timestamps(&key)
+                            .into_iter()
+                            .map(|message| (0, message))
+                            .collect(),
+                    })
+                } else {
+                    backend.load_session_window(&key)
+                }
+            })
             .await
             .map_err(|err| {
                 ::reiclaw_log::record!(
@@ -1075,15 +1099,19 @@ async fn build_ws_session(
                     "WS session history load blocking task panicked"
                 );
                 anyhow::Error::msg(format!("failed to join WS history load task: {err}"))
-            })?
+            })??,
+        )
     } else {
-        Vec::new()
-    };
-    let restore_trim_event = if stored_messages.is_empty() {
         None
-    } else {
-        agent.seed_history_with_event(&stored_messages)
     };
+    let checkpoint_watermark = stored_window
+        .as_ref()
+        .and_then(|window| window.active_checkpoint.as_ref())
+        .map_or(0, |checkpoint| checkpoint.up_to_message_id);
+    let restore_trim_event = stored_window
+        .as_ref()
+        .filter(|window| window.active_checkpoint.is_some() || !window.delta_messages.is_empty())
+        .and_then(|window| agent.seed_session_window_with_event(window));
 
     let Seed {
         pending_approvals,
@@ -1116,7 +1144,15 @@ async fn build_ws_session(
         approval_leak_detection
     ));
 
-    Ok((WsSession { agent, ws_memory }, restore_trim_event))
+    Ok((
+        WsSession {
+            agent,
+            ws_memory,
+            checkpoint_watermark,
+            history_persisted: true,
+        },
+        restore_trim_event,
+    ))
 }
 
 /// Publish prompts to current subscribers. Offline requests remain in the
@@ -2315,13 +2351,16 @@ fn persist_conversation_messages(
     session_key: &str,
     messages: &[reiclaw_providers::ConversationMessage],
     ingress: Option<&reiclaw_api::review::UserMessageIngress>,
-) {
+) -> std::io::Result<()> {
     // if the user deleted the session between the turn starting and
     // the post-turn persistence, don't resurrect it. The `aborted` / `done`
     // / `error` frames are still sent to the client; we just refuse to
     // re-create the row that `DELETE /api/sessions/{id}` just wiped.
     if !backend.session_exists(session_key) {
-        return;
+        return Err(std::io::Error::new(
+            std::io::ErrorKind::NotFound,
+            "session was deleted before transcript persistence",
+        ));
     }
     let mut initial_user = true;
     for message in messages {
@@ -2335,11 +2374,12 @@ fn persist_conversation_messages(
             && std::mem::take(&mut initial_user)
             && let Some(ingress) = ingress
         {
-            let _ = backend.append_with_ingress(session_key, message, ingress);
+            backend.append_with_ingress(session_key, message, ingress)?;
         } else {
-            let _ = backend.append(session_key, message);
+            backend.append(session_key, message)?;
         }
     }
+    Ok(())
 }
 
 fn has_assistant_chat_message(messages: &[reiclaw_providers::ConversationMessage]) -> bool {
@@ -2419,7 +2459,13 @@ async fn process_chat_message(
     let initial_operator_input = initial_operator_input
         && scope.surface != Some(ChatSurface::Voice)
         && scope.bridge.is_none();
-    let WsSession { agent, ws_memory } = session;
+    let checkpoint_trim_event = checkpoint_history::refresh(state, session, scope).await;
+    let WsSession {
+        agent,
+        ws_memory,
+        history_persisted,
+        ..
+    } = session;
     let session_key = scope.session_key.as_str();
     // Resolve canonical paired-device membership when storing this input.
     // Bridge/anonymous sockets and unbound steering receive no owner source.
@@ -2502,6 +2548,9 @@ async fn process_chat_message(
 
     // Channel for streaming turn events from the agent.
     let (event_tx, mut event_rx) = tokio::sync::mpsc::channel::<TurnEvent>(64);
+    if let Some(event) = checkpoint_trim_event {
+        let _ = event_tx.send(event).await;
+    }
 
     let content_owned = content.to_string();
     let session_key_owned = session_key.to_string();
@@ -2657,12 +2706,15 @@ async fn process_chat_message(
     };
 
     if was_cancelled {
+        // Interrupted transcripts can include a durable display marker that is
+        // absent from the native in-memory tail. Preserve that tail until reset.
+        *history_persisted = false;
         if let Some(ref backend) = state.session_backend {
             let still_exists = backend.session_exists(session_key);
             if still_exists {
                 match &result {
                     Err(error) if !error.new_messages.is_empty() => {
-                        persist_conversation_messages(
+                        let _ = persist_conversation_messages(
                             backend.as_ref(),
                             session_key,
                             &error.new_messages,
@@ -2745,12 +2797,16 @@ async fn process_chat_message(
     match result {
         Ok(outcome) => {
             if let Some(ref backend) = state.session_backend {
-                persist_conversation_messages(
+                let persisted = persist_conversation_messages(
                     backend.as_ref(),
                     session_key,
                     &outcome.new_messages,
                     owner_ingress().as_ref(),
                 );
+                *history_persisted &= persisted.is_ok();
+                if let Err(error) = persisted {
+                    checkpoint_history::log_failure(session_key, &error.to_string());
+                }
             }
 
             // Non-blocking sleep-time watermark compaction & checkpoint promotion (ADR-025).
@@ -2877,10 +2933,11 @@ async fn process_chat_message(
             );
         }
         Err(e) => {
+            *history_persisted = false;
             if let Some(ref backend) = state.session_backend
                 && !e.new_messages.is_empty()
             {
-                persist_conversation_messages(
+                let _ = persist_conversation_messages(
                     backend.as_ref(),
                     session_key,
                     &e.new_messages,
@@ -3833,6 +3890,8 @@ mod tests {
                             WsSession {
                                 agent,
                                 ws_memory: None,
+                                checkpoint_watermark: 0,
+                                history_persisted: true,
                             },
                             (),
                         ))
@@ -4566,7 +4625,7 @@ mod tests {
             ConversationMessage::Chat(ChatMessage::assistant("[interrupted by user]")),
         ];
 
-        persist_conversation_messages(&backend, "gw_deleted", &messages, None);
+        assert!(persist_conversation_messages(&backend, "gw_deleted", &messages, None).is_err());
 
         assert!(
             backend.append_calls.lock().unwrap().is_empty(),

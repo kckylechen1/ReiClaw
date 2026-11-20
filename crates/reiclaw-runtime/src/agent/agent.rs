@@ -55,6 +55,7 @@ async fn forward_history_trim_notice(
 }
 
 mod construction;
+mod session_window;
 mod turn_entry;
 
 pub struct Agent {
@@ -92,8 +93,8 @@ pub struct Agent {
     auto_save: bool,
     memory_session_id: Option<String>,
     history: Vec<ConversationMessage>,
-    /// True only when `history` contains the synthetic trim breadcrumb inserted
-    /// by this Agent. User text is never inferred to be synthetic by content.
+    /// True only when `history` starts with a synthetic trim breadcrumb or a
+    /// checkpoint loaded by this Agent. User text never establishes this flag.
     history_has_trim_breadcrumb: bool,
     classification_config: reiclaw_config::schema::QueryClassificationConfig,
     available_hints: Vec<String>,
@@ -1127,6 +1128,7 @@ impl Agent {
             self.sync_side_query_snapshot(None);
             return None;
         }
+        let checkpoint = self.leading_session_checkpoint().cloned();
         let result = crate::agent::history_trim::trim_conversation_to_recent_turns(
             std::mem::take(&mut self.history),
             max,
@@ -1138,7 +1140,18 @@ impl Agent {
             return None;
         }
 
-        crate::agent::history_trim::insert_conversation_breadcrumb(&mut self.history);
+        if let Some(checkpoint) = checkpoint {
+            let index = self
+                .history
+                .iter()
+                .take_while(|message| {
+                    matches!(message, ConversationMessage::Chat(chat) if chat.role == "system")
+                })
+                .count();
+            self.history.insert(index, checkpoint);
+        } else {
+            crate::agent::history_trim::insert_conversation_breadcrumb(&mut self.history);
+        }
         self.history_has_trim_breadcrumb = true;
         self.sync_side_query_snapshot(None);
         let reason = "history message limit exceeded".to_string();

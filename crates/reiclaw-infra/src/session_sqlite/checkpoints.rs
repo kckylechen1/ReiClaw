@@ -300,6 +300,35 @@ impl SqliteSessionBackend {
         }))
     }
 
+    pub(super) fn load_session_window_if_advanced_impl(
+        &self,
+        session_key: &str,
+        applied_watermark: i64,
+    ) -> io::Result<Option<SessionWindow>> {
+        let watermark = {
+            let conn = self.conn.lock();
+            conn.query_row(
+                "SELECT up_to_message_id FROM session_checkpoints
+                 WHERE session_key = ?1 AND slot = 'active' AND format_version = ?2",
+                params![session_key, CURRENT_CHECKPOINT_FORMAT_VERSION],
+                |row| row.get::<_, i64>(0),
+            )
+            .optional()
+            .map_err(io::Error::other)?
+        };
+        if watermark.is_none_or(|value| value <= applied_watermark) {
+            return Ok(None);
+        }
+        // The full window is an atomic snapshot. Recheck after reacquiring the
+        // connection in case the session was cleared between these two reads.
+        let window = self.load_session_window_impl(session_key)?;
+        Ok(window
+            .active_checkpoint
+            .as_ref()
+            .is_some_and(|checkpoint| checkpoint.up_to_message_id > applied_watermark)
+            .then_some(window))
+    }
+
     pub(super) fn load_session_window_impl(&self, session_key: &str) -> io::Result<SessionWindow> {
         let mut conn = self.conn.lock();
         let tx = conn.transaction().map_err(io::Error::other)?;

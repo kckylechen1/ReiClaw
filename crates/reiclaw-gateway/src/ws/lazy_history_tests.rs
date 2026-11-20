@@ -32,6 +32,7 @@ struct CountingSessionBackend {
     alias_calls: AtomicUsize,
     name_calls: AtomicUsize,
     async_thread_violations: AtomicUsize,
+    fail_next_append: AtomicBool,
     alias_pause: Option<AliasPauseGate>,
 }
 
@@ -45,6 +46,7 @@ impl CountingSessionBackend {
             alias_calls: AtomicUsize::new(0),
             name_calls: AtomicUsize::new(0),
             async_thread_violations: AtomicUsize::new(0),
+            fail_next_append: AtomicBool::new(false),
             alias_pause: None,
         }
     }
@@ -88,10 +90,39 @@ impl SessionBackend for CountingSessionBackend {
     }
 
     fn load_with_timestamps(&self, session_key: &str) -> Vec<TimestampedMessage> {
+        self.record_blocking_check();
+        self.load_calls.fetch_add(1, Ordering::SeqCst);
         self.inner.load_with_timestamps(session_key)
     }
 
+    fn load_session_window(
+        &self,
+        session_key: &str,
+    ) -> std::io::Result<reiclaw_infra::session_backend::SessionWindow> {
+        self.record_blocking_check();
+        self.load_calls.fetch_add(1, Ordering::SeqCst);
+        self.inner.load_session_window(session_key)
+    }
+
+    fn load_session_window_if_advanced(
+        &self,
+        session_key: &str,
+        applied_watermark: i64,
+    ) -> std::io::Result<Option<reiclaw_infra::session_backend::SessionWindow>> {
+        self.record_blocking_check();
+        let window = self
+            .inner
+            .load_session_window_if_advanced(session_key, applied_watermark)?;
+        if window.is_some() {
+            self.load_calls.fetch_add(1, Ordering::SeqCst);
+        }
+        Ok(window)
+    }
+
     fn append(&self, session_key: &str, message: &ChatMessage) -> std::io::Result<()> {
+        if self.fail_next_append.swap(false, Ordering::SeqCst) {
+            return Err(std::io::Error::other("injected transcript append failure"));
+        }
         self.inner.append(session_key, message)
     }
 
@@ -101,6 +132,9 @@ impl SessionBackend for CountingSessionBackend {
         message: &ChatMessage,
         ingress: &reiclaw_api::review::UserMessageIngress,
     ) -> std::io::Result<()> {
+        if self.fail_next_append.swap(false, Ordering::SeqCst) {
+            return Err(std::io::Error::other("injected transcript append failure"));
+        }
         self.inner
             .append_with_ingress(session_key, message, ingress)
     }
@@ -291,6 +325,10 @@ impl SessionBackend for CountingSessionBackend {
 }
 
 const LAZY_OWNER_TOKEN: &str = "lazy-history-owner-token";
+
+mod checkpoint_tests {
+    include!("checkpoint_history_tests.rs");
+}
 
 struct RawWsClient {
     stream: tokio::net::TcpStream,
