@@ -1,7 +1,7 @@
 use super::*;
 
 #[cfg(test)]
-mod registry_tests {
+mod catalog_tests {
     use super::*;
 
     #[test]
@@ -72,122 +72,61 @@ mod registry_tests {
     }
 
     #[test]
-    fn test_is_registry_source_accepts_bare_names() {
-        assert!(is_registry_source("auto-coder"));
-        assert!(is_registry_source("web-researcher"));
-        assert!(is_registry_source("telegram-assistant"));
-        assert!(is_registry_source("data_analyst"));
-        assert!(is_registry_source("ci-helper"));
-        assert!(is_registry_source("selfimproving"));
+    fn test_is_skill_name_accepts_bare_names() {
+        assert!(is_skill_name("auto-coder"));
+        assert!(is_skill_name("web-researcher"));
+        assert!(is_skill_name("telegram-assistant"));
+        assert!(is_skill_name("data_analyst"));
+        assert!(is_skill_name("ci-helper"));
+        assert!(is_skill_name("selfimproving"));
     }
 
     #[test]
-    fn test_is_registry_source_rejects_empty() {
-        assert!(!is_registry_source(""));
+    fn test_is_skill_name_rejects_empty() {
+        assert!(!is_skill_name(""));
     }
 
     #[test]
-    fn test_is_registry_source_rejects_paths() {
-        assert!(!is_registry_source("./my-skill"));
-        assert!(!is_registry_source("../my-skill"));
-        assert!(!is_registry_source("/abs/path"));
-        assert!(!is_registry_source("skills/auto-coder"));
-        assert!(!is_registry_source("some\\path"));
-        assert!(!is_registry_source("~/.rei/skills/foo"));
+    fn test_is_skill_name_rejects_paths() {
+        assert!(!is_skill_name("./my-skill"));
+        assert!(!is_skill_name("../my-skill"));
+        assert!(!is_skill_name("/abs/path"));
+        assert!(!is_skill_name("skills/auto-coder"));
+        assert!(!is_skill_name("some\\path"));
+        assert!(!is_skill_name("~/.rei/skills/foo"));
     }
 
     #[test]
-    fn test_is_registry_source_rejects_urls() {
-        assert!(!is_registry_source("https://github.com/foo/bar"));
-        assert!(!is_registry_source("http://example.com"));
-        assert!(!is_registry_source("ssh://git@host/repo"));
-        assert!(!is_registry_source("git://host/repo"));
-        assert!(!is_registry_source("git@github.com:user/repo"));
+    fn test_is_skill_name_rejects_urls() {
+        assert!(!is_skill_name("https://github.com/foo/bar"));
+        assert!(!is_skill_name("http://example.com"));
+        assert!(!is_skill_name("ssh://git@host/repo"));
+        assert!(!is_skill_name("git://host/repo"));
+        assert!(!is_skill_name("git@github.com:user/repo"));
     }
 
     #[test]
-    fn test_is_registry_source_rejects_prefixed() {
-        assert!(!is_registry_source("external:my-skill"));
+    fn test_is_skill_name_rejects_prefixed() {
+        assert!(!is_skill_name("external:my-skill"));
     }
 
     #[test]
-    fn test_is_registry_source_rejects_traversal() {
-        assert!(!is_registry_source(".."));
-        assert!(!is_registry_source("foo..bar"));
+    fn test_is_skill_name_rejects_traversal() {
+        assert!(!is_skill_name(".."));
+        assert!(!is_skill_name("foo..bar"));
     }
 
     #[test]
-    fn test_is_registry_source_rejects_special_chars() {
-        assert!(!is_registry_source(".hidden"));
-        assert!(!is_registry_source("~tilde"));
-    }
-
-    #[test]
-    fn test_is_extra_registry_source_accepts_valid() {
-        assert!(is_extra_registry_source("registry:myreg/auto-coder"));
-        assert!(is_extra_registry_source("registry:co_op/data_analyst"));
-        assert!(is_extra_registry_source("registry:r1/ci-helper"));
-    }
-
-    #[test]
-    fn test_is_extra_registry_source_rejects_malformed() {
-        assert!(!is_extra_registry_source(""));
-        assert!(!is_extra_registry_source("registry:"));
-        assert!(!is_extra_registry_source("registry:onlyname"));
-        assert!(!is_extra_registry_source("registry:a/b/c"));
-        assert!(!is_extra_registry_source("registry:../x"));
-        assert!(!is_extra_registry_source("registry:a /b"));
-        assert!(!is_extra_registry_source("registry:a/b:c"));
-        assert!(!is_extra_registry_source("registry:/skill"));
-        assert!(!is_extra_registry_source("registry:name/"));
-        // A bare name has no prefix and stays a Tier-1 registry install.
-        assert!(!is_extra_registry_source("auto-coder"));
-    }
-
-    #[test]
-    fn test_is_extra_registry_source_rejects_competing_schemes() {
-        assert!(!is_extra_registry_source("external:x"));
-        assert!(!is_extra_registry_source("https://github.com/o/r"));
-        assert!(!is_extra_registry_source("git@github.com:o/r"));
-        assert!(!is_extra_registry_source("./local"));
-    }
-
-    #[test]
-    fn test_parse_extra_registry_source_splits() {
-        assert_eq!(
-            parse_extra_registry_source("registry:myreg/auto-coder"),
-            Some(("myreg".to_string(), "auto-coder".to_string()))
-        );
-        assert_eq!(parse_extra_registry_source("registry:onlyname"), None);
-        assert_eq!(parse_extra_registry_source("registry:a/b/c"), None);
-        assert_eq!(parse_extra_registry_source("auto-coder"), None);
-    }
-
-    #[test]
-    fn test_install_extra_registry_unknown_name_errors() {
-        let tmp = tempfile::tempdir().unwrap();
-        let skills_path = tmp.path().join("skills");
-        std::fs::create_dir_all(&skills_path).unwrap();
-        let workspace = tmp.path().join("ws");
-        std::fs::create_dir_all(&workspace).unwrap();
-
-        let err = install_extra_registry_skill_source(
-            "registry:nope/demo",
-            &skills_path,
-            false,
-            &workspace,
-            &[],
-            true,
-        )
-        .expect_err("unknown registry must error before any git work");
-        assert!(err.to_string().contains("nope"), "got: {err}");
+    fn test_is_skill_name_rejects_special_chars() {
+        assert!(!is_skill_name(".hidden"));
+        assert!(!is_skill_name("~tilde"));
     }
 
     #[test]
     fn test_install_git_catalog_rejects_non_bare_skill_name() {
         // The bare-name guard must reject anything with a path separator before
         // any network/git work happens (hermetic — no clone is attempted).
-        assert!(!is_registry_source("a/b"));
+        assert!(!is_skill_name("a/b"));
 
         let tmp = tempfile::tempdir().unwrap();
         let skills_path = tmp.path().join("skills");
@@ -406,7 +345,7 @@ mod registry_tests {
         std::fs::write(&external_marker, "must remain unchanged").unwrap();
 
         let catalog = init_git_skill_catalog(tmp.path(), &["demo-skill"]);
-        std::os::unix::fs::symlink(&external_marker, catalog.join(SKILLS_REGISTRY_SYNC_MARKER))
+        std::os::unix::fs::symlink(&external_marker, catalog.join(".rei-skills-registry-sync"))
             .unwrap();
         git_commit_all(&catalog, "add hostile registry sync marker symlink");
 
@@ -653,127 +592,6 @@ mod registry_tests {
         assert!(
             !leftover,
             "clone scratch dir must be removed after rejection"
-        );
-    }
-
-    #[test]
-    fn tier_from_tags_recognizes_official() {
-        assert_eq!(
-            tier_from_tags(&["Official".into(), "Featured".into()]),
-            SkillTier::Official
-        );
-        // Case-insensitive match.
-        assert_eq!(tier_from_tags(&["official".into()]), SkillTier::Official);
-    }
-
-    #[test]
-    fn tier_from_tags_recognizes_community() {
-        assert_eq!(tier_from_tags(&["Community".into()]), SkillTier::Community);
-    }
-
-    #[test]
-    fn tier_from_tags_recognizes_featured_only() {
-        assert_eq!(tier_from_tags(&["Featured".into()]), SkillTier::Featured);
-    }
-
-    #[test]
-    fn tier_from_tags_falls_back_to_unknown_when_no_tier_tag() {
-        assert_eq!(tier_from_tags(&[]), SkillTier::Unknown);
-        assert_eq!(
-            tier_from_tags(&["productivity".into(), "automation".into()]),
-            SkillTier::Unknown
-        );
-    }
-
-    #[test]
-    fn build_install_tier_banner_official_is_single_line() {
-        let banner = build_install_tier_banner("auto-coder", Some("0.3.0"), SkillTier::Official);
-        assert!(banner.contains("Official (zeroclaw-labs maintained)"));
-        assert!(banner.contains("Installing auto-coder v0.3.0"));
-        assert!(!banner.contains("not audited"));
-        // One trailing newline, no warn block.
-        assert_eq!(banner.lines().count(), 1);
-    }
-
-    #[test]
-    fn build_install_tier_banner_community_warns() {
-        let banner =
-            build_install_tier_banner("discord-moderator", Some("0.1.2"), SkillTier::Community);
-        assert!(banner.contains("Community submission"));
-        assert!(banner.contains("not audited by ReiClaw"));
-        assert!(banner.contains("rei skills audit discord-moderator"));
-    }
-
-    #[test]
-    fn build_install_tier_banner_featured_uses_community_warning() {
-        let banner = build_install_tier_banner("hand-picked", Some("1.0"), SkillTier::Featured);
-        assert!(banner.contains("Community submission"));
-        assert!(banner.contains("not audited by ReiClaw"));
-    }
-
-    #[test]
-    fn build_install_tier_banner_unknown_falls_back_to_community() {
-        let banner = build_install_tier_banner("legacy", None, SkillTier::Unknown);
-        assert!(banner.contains("Community submission"));
-        assert!(banner.contains("not audited by ReiClaw"));
-        // Missing version is rendered as `v?` rather than panicking.
-        assert!(banner.contains("v?"));
-    }
-
-    #[test]
-    fn lookup_registry_skill_tier_resolves_from_registry_json() {
-        let tmp = tempfile::TempDir::new().unwrap();
-        let json = r#"{
-            "version": 1,
-            "skills": [
-                { "name": "auto-coder", "version": "0.3.0", "tags": ["Official", "Featured"] },
-                { "name": "discord-moderator", "version": "0.1.2", "tags": ["Community"] },
-                { "name": "hand-picked", "version": "1.0.0", "tags": ["Featured"] },
-                { "name": "untagged", "version": "0.0.1", "tags": ["productivity"] }
-            ]
-        }"#;
-        std::fs::write(tmp.path().join("registry.json"), json).unwrap();
-
-        assert_eq!(
-            lookup_registry_skill_tier(tmp.path(), "auto-coder"),
-            (SkillTier::Official, Some("0.3.0".to_string()))
-        );
-        assert_eq!(
-            lookup_registry_skill_tier(tmp.path(), "discord-moderator"),
-            (SkillTier::Community, Some("0.1.2".to_string()))
-        );
-        assert_eq!(
-            lookup_registry_skill_tier(tmp.path(), "hand-picked"),
-            (SkillTier::Featured, Some("1.0.0".to_string()))
-        );
-        // Skill present but no tier tag → Unknown (treated as Community by the banner).
-        assert_eq!(
-            lookup_registry_skill_tier(tmp.path(), "untagged"),
-            (SkillTier::Unknown, Some("0.0.1".to_string()))
-        );
-        // Skill not in registry.json at all → Unknown with no version.
-        assert_eq!(
-            lookup_registry_skill_tier(tmp.path(), "missing"),
-            (SkillTier::Unknown, None)
-        );
-    }
-
-    #[test]
-    fn lookup_registry_skill_tier_handles_missing_index() {
-        let tmp = tempfile::TempDir::new().unwrap();
-        assert_eq!(
-            lookup_registry_skill_tier(tmp.path(), "anything"),
-            (SkillTier::Unknown, None)
-        );
-    }
-
-    #[test]
-    fn lookup_registry_skill_tier_handles_malformed_json() {
-        let tmp = tempfile::TempDir::new().unwrap();
-        std::fs::write(tmp.path().join("registry.json"), "{ not json").unwrap();
-        assert_eq!(
-            lookup_registry_skill_tier(tmp.path(), "anything"),
-            (SkillTier::Unknown, None)
         );
     }
 }
@@ -1216,6 +1034,11 @@ description = "fine"
             "---\nname: script-skill\ndescription: bundles a shell helper\n---\n# Script Skill\n",
         )
         .unwrap();
+        let (initial, dropped) = load_skills_from_directory(&skills_dir, false);
+        assert_eq!(initial.len(), 1);
+        assert!(dropped.is_empty());
+        // Every load re-audits the current directory. A newly added script
+        // must not inherit the earlier clean result for the same manifest.
         std::fs::write(script_dir.join("helper.sh"), "echo hi\n").unwrap();
 
         let (skills, dropped) = load_skills_from_directory(&skills_dir, false);
@@ -1252,51 +1075,6 @@ description = "fine"
         assert!(
             dropped.is_empty(),
             "no drops expected with allow_scripts=true; got: {dropped:?}"
-        );
-    }
-    #[test]
-    fn open_skills_swallow_site_skips_invalid_toml_without_panicking() {
-        use tempfile::TempDir;
-        let tmp = TempDir::new().unwrap();
-        let skills_dir = tmp.path().join("open-skills");
-        std::fs::create_dir_all(&skills_dir).unwrap();
-
-        let bad_dir = skills_dir.join("bad-open-skill");
-        std::fs::create_dir_all(&bad_dir).unwrap();
-        std::fs::write(
-            bad_dir.join("SKILL.toml"),
-            r#"
-[skill]
-name = "bad-open"
-description = "has a typo"
-autor = "oops"
-"#,
-        )
-        .unwrap();
-
-        let good_dir = skills_dir.join("good-open-skill");
-        std::fs::create_dir_all(&good_dir).unwrap();
-        std::fs::write(
-            good_dir.join("SKILL.toml"),
-            r#"
-[skill]
-name = "good-open"
-description = "fine"
-"#,
-        )
-        .unwrap();
-
-        let (skills, dropped) = load_open_skills_from_directory(&skills_dir, false);
-        let names: Vec<&str> = skills.iter().map(|s| s.name.as_str()).collect();
-        assert_eq!(dropped.len(), 1, "the bad open-skill TOML must be reported");
-        assert_eq!(dropped[0].origin_hint, "open-skills");
-        assert!(
-            names.contains(&"good-open"),
-            "good open-skill must load; got: {names:?}"
-        );
-        assert!(
-            !names.contains(&"bad-open"),
-            "bad open-skill must be skipped, not silently accepted; got: {names:?}"
         );
     }
 }
@@ -1721,7 +1499,6 @@ version = "0.1.0"
             agent_workspace.path().to_path_buf(),
         );
 
-        cache::invalidate();
         let (skills, dropped, _shadows) =
             load_skills_for_agent_from_config_audited(&config, agent_alias);
         let names: Vec<&str> = skills.iter().map(|s| s.name.as_str()).collect();

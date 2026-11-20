@@ -354,18 +354,6 @@ pub async fn process_message_with_hooks(
         }
 
         let effective_msg_ref = effective_message.as_str();
-        let runtime_capability_names: Vec<&str> = effective_tool_names.iter().copied().collect();
-        if let Some(suggestion) = crate::skills::render_missing_skill_install_suggestion(
-            effective_msg_ref,
-            &skills,
-            &runtime_capability_names,
-            &config.data_dir,
-            &config.skills.extra_registries,
-            config.skills.install_suggestions.enabled,
-        ) {
-            return Ok(suggestion);
-        }
-
         // Memory context is injected once in the engine, keyed on the ingress
         // origin (agent::memory_inject); recall is scoped to this entry's
         // session_id.

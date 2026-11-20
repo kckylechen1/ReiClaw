@@ -437,7 +437,7 @@ pub enum SkillCommands {
     /// List all installed skills
     List {
         /// Show exactly what this agent loads at runtime (its workspace +
-        /// open-skills + assigned bundles). --bundle takes precedence
+        /// assigned bundles). --bundle takes precedence
         /// when both are passed.
         #[arg(long)]
         agent: Option<String>,
@@ -515,10 +515,6 @@ Examples:
         /// Install into this bundle directly. Takes precedence over --agent.
         #[arg(long)]
         bundle: Option<String>,
-        /// Suppress only the install-time tier banner; other install
-        /// progress output (resolving, installed, audited) is unaffected.
-        #[arg(long)]
-        no_tier_banner: bool,
         /// Install a single named skill from a git catalog repo (its `skills/<name>/` directory).
         #[arg(long)]
         skill: Option<String>,
@@ -533,14 +529,6 @@ Examples:
         /// Remove from this bundle directly (disambiguates duplicates).
         #[arg(long)]
         bundle: Option<String>,
-    },
-    /// Run TEST.sh validation for a skill (or all skills)
-    Test {
-        /// Skill name to test; omit for all skills
-        name: Option<String>,
-        /// Show verbose output
-        #[arg(long)]
-        verbose: bool,
     },
 }
 

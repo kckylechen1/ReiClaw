@@ -23,11 +23,10 @@ pub use schema::{
     MultimodalConfig, NodesConfig, ObservabilityConfig, OpenAiSttConfig, OtpConfig, OtpMethod,
     PacingConfig, ProxyConfig, ProxyScope, QueryClassificationConfig, ReliabilityConfig,
     RiskProfileConfig, RuntimeConfig, SandboxBackend, SandboxConfig, SchedulerConfig, SearchMode,
-    SecretsConfig, SecurityConfig, SecurityOpsConfig, ShellToolConfig, SkillCreationConfig,
-    SkillImprovementConfig, SkillsConfig, SkillsPromptInjectionMode, StorageConfig, StreamMode,
-    TelegramConfig, ToolFilterGroup, ToolFilterGroupMode, TranscriptionConfig, TtsConfig,
-    TtsProviderConfig, VerifiableIntentConfig, WebFetchConfig, WebSearchConfig, WebhookConfig,
-    read_persisted_proxy_for_boot,
+    SecretsConfig, SecurityConfig, SecurityOpsConfig, ShellToolConfig, SkillsConfig,
+    SkillsPromptInjectionMode, StorageConfig, StreamMode, TelegramConfig, ToolFilterGroup,
+    ToolFilterGroupMode, TranscriptionConfig, TtsConfig, TtsProviderConfig, VerifiableIntentConfig,
+    WebFetchConfig, WebSearchConfig, WebhookConfig, read_persisted_proxy_for_boot,
 };
 
 pub use schema::ModelProviderConfig;

@@ -49,7 +49,7 @@ pub struct SkillsListResult {
 pub struct AgentSkillEntry {
     pub name: String,
     pub description: String,
-    /// `"workspace"` | `"open-skills"` | `"bundle"`.
+    /// `"workspace"` | `"bundle"`.
     pub origin: String,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub bundle: Option<String>,
@@ -66,7 +66,7 @@ pub struct AgentSkillEntry {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ShadowedSkillEntry {
     pub name: String,
-    /// `"workspace"` | `"open-skills"` | `"bundle"`.
+    /// `"workspace"` | `"bundle"`.
     pub origin: String,
 }
 
@@ -248,7 +248,6 @@ pub async fn handle_agent_skills(
 fn agent_skill_entry(s: EffectiveSkill) -> AgentSkillEntry {
     let (origin, bundle) = match s.origin {
         SkillOrigin::Workspace => ("workspace", None),
-        SkillOrigin::OpenSkills => ("open-skills", None),
         SkillOrigin::Bundle(a) => ("bundle", Some(a)),
     };
     AgentSkillEntry {

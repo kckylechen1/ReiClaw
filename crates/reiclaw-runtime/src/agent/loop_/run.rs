@@ -14,7 +14,6 @@ use reiclaw_api::ingress::{IngressContext, TurnOrigin};
 use reiclaw_config::schema::Config;
 use reiclaw_memory::{self, Memory, MemoryCategory};
 use reiclaw_providers::{self, ChatMessage, ModelProvider};
-use std::collections::HashSet;
 use std::path::PathBuf;
 use std::sync::Arc;
 
@@ -453,29 +452,6 @@ pub async fn run(
                 thinking_params.system_prompt_prefix.as_deref(),
             )?;
 
-            let excluded_tool_names: HashSet<&str> =
-                excluded_tools.iter().map(String::as_str).collect();
-            let runtime_capability_names = tools_registry
-                .iter()
-                .map(|tool| tool.name())
-                .filter(|name| !excluded_tool_names.contains(*name))
-                .collect::<Vec<_>>();
-            if let Some(suggestion) = crate::skills::render_missing_skill_install_suggestion(
-                &effective_msg,
-                &skills,
-                &runtime_capability_names,
-                &config.data_dir,
-                &config.skills.extra_registries,
-                config.skills.install_suggestions.enabled,
-            ) {
-                final_output = suggestion;
-                if interactive {
-                    println!("{final_output}");
-                }
-                observer.record_event(&ObserverEvent::TurnComplete);
-                return Ok(final_output);
-            }
-
             // Auto-save user message to memory (skip short/trivial messages)
             if config.memory.auto_save
                 && effective_msg.chars().count() >= AUTOSAVE_MIN_MESSAGE_CHARS
@@ -620,114 +596,11 @@ pub async fn run(
                 )
                 .await?;
 
-            // After successful multi-step execution, attempt autonomous skill creation.
-            if config.skills.skill_creation.enabled {
-                let tool_calls = crate::skills::creator::extract_tool_calls_from_history(&history);
-                if tool_calls.len() >= 2 {
-                    let creator = crate::skills::creator::SkillCreator::new(
-                        config.data_dir.clone(),
-                        config.skills.skill_creation.clone(),
-                    );
-                    // Opt-in reflection synthesizes a `SKILL.md` from a bounded
-                    // slice of the execution; it falls back to `SKILL.toml`
-                    // internally when the provider call or its output is
-                    // unusable. Default path stays the deterministic generator.
-                    let creation_result = if config.skills.skill_creation.reflection_enabled {
-                        crate::agent::turn::execution::CURRENT_TURN_ESTOP
-                            .scope(
-                                security.estop_handle().cloned(),
-                                TOOL_LOOP_COST_TRACKING_CONTEXT.scope(
-                                    cost_tracking_context.clone(),
-                                    creator.create_from_execution_reflected(
-                                        &msg,
-                                        &tool_calls,
-                                        &response,
-                                        None,
-                                        &provider_name,
-                                        model_provider.as_ref(),
-                                        &model_name,
-                                    ),
-                                ),
-                            )
-                            .await
-                    } else {
-                        creator.create_from_execution(&msg, &tool_calls, None).await
-                    };
-                    match creation_result {
-                        Ok(Some(slug)) => {
-                            ::reiclaw_log::record!(
-                                INFO,
-                                ::reiclaw_log::Event::new(
-                                    module_path!(),
-                                    ::reiclaw_log::Action::Register
-                                )
-                                .with_category(::reiclaw_log::EventCategory::Agent)
-                                .with_attrs(::serde_json::json!({"slug": slug})),
-                                "Auto-created skill from execution"
-                            );
-                        }
-                        Ok(None) => {
-                            ::reiclaw_log::record!(
-                                DEBUG,
-                                ::reiclaw_log::Event::new(
-                                    module_path!(),
-                                    ::reiclaw_log::Action::Skip
-                                )
-                                .with_category(::reiclaw_log::EventCategory::Agent),
-                                "Skill creation skipped (duplicate or disabled)"
-                            );
-                        }
-                        Err(e) => ::reiclaw_log::record!(
-                            WARN,
-                            ::reiclaw_log::Event::new(module_path!(), ::reiclaw_log::Action::Fail)
-                                .with_category(::reiclaw_log::EventCategory::Agent)
-                                .with_outcome(::reiclaw_log::EventOutcome::Failure)
-                                .with_attrs(::serde_json::json!({"error": format!("{}", e)})),
-                            "Skill creation failed"
-                        ),
-                    }
-                }
-            }
-            // Emit the user-visible response before any background work so the
-            // skill-review fork can never delay the user's answer.
             final_output = response;
             if interactive {
                 println!("{final_output}");
             }
             observer.record_event(&ObserverEvent::TurnComplete);
-
-            if config.skills.skill_improvement.enabled {
-                let review_workspace = config.agent_workspace_dir(agent_alias);
-                let review_config = config.skills.skill_improvement.clone();
-                let failed_slugs: Vec<String> =
-                    crate::skills::improver::extract_skill_executions_from_history(&history)
-                        .into_iter()
-                        .filter_map(|(slug, ok)| if ok { None } else { Some(slug) })
-                        .collect();
-                TOOL_LOOP_COST_TRACKING_CONTEXT
-                    .scope(
-                        cost_tracking_context.clone(),
-                        crate::skills::review::maybe_run_skill_review(
-                            Some(&config),
-                            review_workspace,
-                            review_config,
-                            config.skills.allow_scripts,
-                            history.clone(),
-                            failed_slugs,
-                            model_provider.as_ref(),
-                            &provider_name,
-                            &model_name,
-                            observer.as_ref(),
-                            &config.multimodal,
-                            &config.pacing,
-                            agent.resolved.max_tool_result_chars,
-                            agent.resolved.max_context_tokens,
-                            None, // cancellation_token — no parent token in single-shot run
-                            Some(agent_alias),
-                        ),
-                    )
-                    .await;
-            }
         } else {
             // Interactive chat is a gateway client now (`zeroclaw chat`); a
             // local run always has a message.

@@ -21,7 +21,6 @@ pub mod scoped;
 pub mod send_message_to_peer;
 pub mod shell;
 pub mod skill_http;
-pub mod skill_manage;
 pub mod skill_tool;
 pub mod task_context;
 pub mod task_list;

@@ -4,9 +4,8 @@
 
 use crate::domain_matcher::DomainMatcher;
 use crate::schema::{
-    Config, EmbeddingRouteConfig, ExternalRegistry, ExternalRegistryKind,
-    MAX_MEMORY_RERANK_CANDIDATE_MULTIPLIER, McpConfig, McpTransport, MemoryConfig,
-    ModelProviderConfig, ProxyConfig, ProxyScope, REPLY_MIN_INTERVAL_MAX_SECS,
+    Config, EmbeddingRouteConfig, MAX_MEMORY_RERANK_CANDIDATE_MULTIPLIER, McpConfig, McpTransport,
+    MemoryConfig, ModelProviderConfig, ProxyConfig, ProxyScope, REPLY_MIN_INTERVAL_MAX_SECS,
     REPLY_QUEUE_DEPTH_CEILING, SearchMode, TEMPERATURE_RANGE, TelegramConfig,
     default_fts_early_return_score, default_otp_challenge_max_attempts, default_otp_gated_actions,
     default_rerank_threshold, default_retrieval_stages, normalize_proxy_url_option,
@@ -1808,50 +1807,6 @@ impl Config {
 
         // Proxy (delegate to existing validation)
         self.proxy.validate()?;
-
-        // Skills — extra registries
-        {
-            let mut seen = std::collections::HashSet::new();
-            for (i, reg) in self.skills.extra_registries.iter().enumerate() {
-                if reg.name.trim().is_empty() {
-                    anyhow::bail!("skills.extra_registries[{i}].name must not be empty");
-                }
-                if !ExternalRegistry::is_valid_name(&reg.name) {
-                    anyhow::bail!(
-                        "skills.extra_registries[{i}].name '{}' is invalid; use only lowercase ASCII letters, numbers, '-' or '_' so it can be addressed as registry:<name>/<skill>",
-                        reg.name
-                    );
-                }
-                if !seen.insert(reg.name.as_str()) {
-                    anyhow::bail!("skills.extra_registries has duplicate name '{}'", reg.name);
-                }
-                if reg.url.trim().is_empty() {
-                    anyhow::bail!(
-                        "skills.extra_registries[{}].url must not be empty",
-                        reg.name
-                    );
-                }
-                if reg.kind != ExternalRegistryKind::Git {
-                    anyhow::bail!(
-                        "skills.extra_registries[{}].kind must be 'git' (got '{}'); other protocols are not yet supported",
-                        reg.name,
-                        reg.kind
-                    );
-                }
-                match url::Url::parse(&reg.url) {
-                    Ok(u) if matches!(u.scheme(), "http" | "https" | "file") => {}
-                    Ok(u) => anyhow::bail!(
-                        "skills.extra_registries[{}].url scheme '{}' is unsupported (use http, https, or file)",
-                        reg.name,
-                        u.scheme()
-                    ),
-                    Err(e) => anyhow::bail!(
-                        "skills.extra_registries[{}].url is not a valid URL: {e}",
-                        reg.name
-                    ),
-                }
-            }
-        }
 
         // Per-profile validation: the context-compression summarizer provider
         // ref must resolve to a configured `[providers.models.*]` alias.
