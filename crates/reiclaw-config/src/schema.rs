@@ -220,12 +220,6 @@ pub struct Config {
     #[nested]
     pub skills: SkillsConfig,
 
-    /// Pipeline tool configuration (`[pipeline]`).
-    #[serde(default)]
-    #[nested]
-    #[group = "Agent"]
-    pub pipeline: PipelineConfig,
-
     /// Automatic query classification — maps user messages to model hints.
     #[serde(default)]
     #[nested]
@@ -445,28 +439,6 @@ pub struct Config {
     #[serde(default)]
     #[nested]
     pub onboard_state: OnboardStateConfig,
-
-    /// Standalone image generation tool configuration (`[image_gen]`).
-    #[serde(default)]
-    #[nested]
-    #[group = "Tools"]
-    pub image_gen: ImageGenConfig,
-
-    /// Standalone file upload tool configuration (`[file_upload]`).
-    #[serde(default)]
-    #[nested]
-    pub file_upload: FileUploadConfig,
-
-    /// Standalone multi-file bundle upload tool configuration
-    /// (`[file_upload_bundle]`).
-    #[serde(default)]
-    #[nested]
-    pub file_upload_bundle: FileUploadBundleConfig,
-
-    /// Standalone file download tool configuration (`[file_download]`).
-    #[serde(default)]
-    #[nested]
-    pub file_download: FileDownloadConfig,
 
     /// Verifiable Intent (VI) credential issuance and constraint checking
     /// (`[verifiable_intent]`). No credential chain verifier exists yet, so the
@@ -4019,39 +3991,6 @@ impl Default for SkillImprovementConfig {
     }
 }
 
-/// Pipeline tool configuration (`[pipeline]` section).
-#[derive(Debug, Clone, Serialize, Deserialize, Configurable)]
-#[cfg_attr(feature = "schema-export", derive(schemars::JsonSchema))]
-#[prefix = "pipeline"]
-pub struct PipelineConfig {
-    /// Enable the `execute_pipeline` meta-tool.
-    /// Default: `false`.
-    #[serde(default)]
-    pub enabled: bool,
-    /// Maximum number of steps allowed in a single pipeline invocation.
-    /// Default: `20`.
-    #[serde(default = "default_pipeline_max_steps")]
-    pub max_steps: usize,
-    /// Tools allowed in pipeline steps. Steps referencing tools not on this
-    /// list are rejected before execution.
-    #[serde(default)]
-    pub allowed_tools: Vec<String>,
-}
-
-fn default_pipeline_max_steps() -> usize {
-    20
-}
-
-impl Default for PipelineConfig {
-    fn default() -> Self {
-        Self {
-            enabled: false,
-            max_steps: 20,
-            allowed_tools: Vec::new(),
-        }
-    }
-}
-
 /// Multimodal (image) handling configuration (`[multimodal]` section).
 ///
 /// # Privacy and cost note
@@ -5269,282 +5208,6 @@ impl Default for DataRetentionConfig {
     }
 }
 
-// ── Standalone Image Generation ─────────────────────────────────
-
-/// Standalone image generation tool configuration (`[image_gen]`).
-///
-/// When enabled, registers an `image_gen` tool that generates images via
-/// fal.ai's synchronous API (Flux / Nano Banana models) and saves them
-/// to the workspace `images/` directory.
-#[derive(Debug, Clone, Serialize, Deserialize, Configurable)]
-#[cfg_attr(feature = "schema-export", derive(schemars::JsonSchema))]
-#[prefix = "image_gen"]
-pub struct ImageGenConfig {
-    /// Enable the standalone image generation tool. Default: false.
-    #[serde(default)]
-    pub enabled: bool,
-
-    /// Default fal.ai model identifier.
-    #[serde(default = "default_image_gen_model")]
-    pub default_model: String,
-
-    /// Environment variable name holding the fal.ai API key.
-    #[serde(default = "default_image_gen_api_key_env")]
-    #[credential_class = "legacy_env_path"]
-    pub api_key_env: String,
-}
-
-fn default_image_gen_model() -> String {
-    "fal-ai/flux/schnell".into()
-}
-
-fn default_image_gen_api_key_env() -> String {
-    "FAL_API_KEY".into()
-}
-
-impl Default for ImageGenConfig {
-    fn default() -> Self {
-        Self {
-            enabled: false,
-            default_model: default_image_gen_model(),
-            api_key_env: default_image_gen_api_key_env(),
-        }
-    }
-}
-
-// ── File Upload ─────────────────────────────────────────────────
-
-/// Standalone file upload tool configuration (`[file_upload]`).
-///
-/// When `url` is set to a non-empty value, registers a `file_upload` tool that
-/// POSTs files from the agent's local filesystem to the configured endpoint
-/// using `multipart/form-data`. The LLM provides only a file path; the host
-/// reads the bytes and uploads them without ever including file content in
-/// the model context.
-///
-/// When `url` is `None` or empty, the tool is not registered.
-#[derive(Debug, Clone, Serialize, Deserialize, Configurable)]
-#[cfg_attr(feature = "schema-export", derive(schemars::JsonSchema))]
-#[prefix = "file_upload"]
-pub struct FileUploadConfig {
-    /// Upload endpoint URL. Tool is disabled when this is `None` or empty.
-    #[serde(default)]
-    pub url: Option<String>,
-
-    /// HTTP method. Only `POST` (default) and `PUT` are accepted.
-    #[serde(default = "default_file_upload_method")]
-    pub method: String,
-
-    /// Multipart form-field name for the file part. Default: `file`.
-    #[serde(default = "default_file_upload_field_name")]
-    pub field_name: String,
-
-    /// Maximum file size in bytes. Larger files are rejected before any
-    /// bytes hit the network. Default: 25 MiB.
-    #[serde(default = "default_file_upload_max_size_bytes")]
-    pub max_file_size_bytes: u64,
-
-    /// Request timeout in seconds. Default: 60.
-    #[serde(default = "default_file_upload_timeout_secs")]
-    pub timeout_secs: u64,
-
-    /// Static HTTP headers attached to every upload request. Same shape as
-    /// `[mcp.servers.*.headers]`.
-    #[serde(default)]
-    #[secret]
-    #[cfg_attr(feature = "schema-export", schemars(extend("x-secret" = true)))]
-    pub headers: HashMap<String, String>,
-}
-
-fn default_file_upload_method() -> String {
-    "POST".into()
-}
-
-fn default_file_upload_field_name() -> String {
-    "file".into()
-}
-
-fn default_file_upload_max_size_bytes() -> u64 {
-    25 * 1024 * 1024
-}
-
-fn default_file_upload_timeout_secs() -> u64 {
-    60
-}
-
-impl Default for FileUploadConfig {
-    fn default() -> Self {
-        Self {
-            url: None,
-            method: default_file_upload_method(),
-            field_name: default_file_upload_field_name(),
-            max_file_size_bytes: default_file_upload_max_size_bytes(),
-            timeout_secs: default_file_upload_timeout_secs(),
-            headers: HashMap::new(),
-        }
-    }
-}
-
-// ── File Upload Bundle ──────────────────────────────────────────
-
-/// Standalone multi-file bundle upload tool configuration
-/// (`[file_upload_bundle]`).
-///
-/// When `url` is set to a non-empty value, registers a `file_upload_bundle`
-/// tool that POSTs N files from the agent's local filesystem to the
-/// configured endpoint as a single `multipart/form-data` request. The LLM
-/// provides only file paths; the host reads the bytes.
-///
-/// When `url` is `None` or empty, the tool is not registered.
-#[derive(Debug, Clone, Serialize, Deserialize, Configurable)]
-#[cfg_attr(feature = "schema-export", derive(schemars::JsonSchema))]
-#[prefix = "file-upload-bundle"]
-pub struct FileUploadBundleConfig {
-    /// Upload endpoint URL. Tool is disabled when this is `None` or empty.
-    #[serde(default)]
-    pub url: Option<String>,
-
-    /// HTTP method. Only `POST` (default) and `PUT` are accepted.
-    #[serde(default = "default_file_upload_bundle_method")]
-    pub method: String,
-
-    /// Multipart form-field name reused across every file part. Default: `file`.
-    #[serde(default = "default_file_upload_bundle_field_name")]
-    pub field_name: String,
-
-    /// Maximum per-file size in bytes. Default: 10 MiB.
-    #[serde(default = "default_file_upload_bundle_max_file_size_bytes")]
-    pub max_file_size_bytes: u64,
-
-    /// Maximum cumulative size across every file in one call. Default: 32 MiB.
-    #[serde(default = "default_file_upload_bundle_max_total_size_bytes")]
-    pub max_total_size_bytes: u64,
-
-    /// Maximum number of files per call. Default: 16.
-    #[serde(default = "default_file_upload_bundle_max_files")]
-    pub max_files: u32,
-
-    /// Request timeout in seconds. Default: 120.
-    #[serde(default = "default_file_upload_bundle_timeout_secs")]
-    pub timeout_secs: u64,
-
-    /// Maximum response body bytes to read from the upload endpoint.
-    /// Prevents unbounded memory use from a malicious or verbose receiver.
-    /// Default: 4096 (4 KiB).
-    #[serde(default = "default_file_upload_bundle_max_response_body_bytes")]
-    pub max_response_body_bytes: usize,
-
-    /// Static HTTP headers attached to every upload request.
-    #[serde(default)]
-    #[secret]
-    #[cfg_attr(feature = "schema-export", schemars(extend("x-secret" = true)))]
-    pub headers: HashMap<String, String>,
-}
-
-fn default_file_upload_bundle_method() -> String {
-    "POST".into()
-}
-
-fn default_file_upload_bundle_field_name() -> String {
-    "file".into()
-}
-
-fn default_file_upload_bundle_max_file_size_bytes() -> u64 {
-    10 * 1024 * 1024
-}
-
-fn default_file_upload_bundle_max_total_size_bytes() -> u64 {
-    32 * 1024 * 1024
-}
-
-fn default_file_upload_bundle_max_files() -> u32 {
-    16
-}
-
-fn default_file_upload_bundle_timeout_secs() -> u64 {
-    120
-}
-
-fn default_file_upload_bundle_max_response_body_bytes() -> usize {
-    4 * 1024
-}
-
-impl Default for FileUploadBundleConfig {
-    fn default() -> Self {
-        Self {
-            url: None,
-            method: default_file_upload_bundle_method(),
-            field_name: default_file_upload_bundle_field_name(),
-            max_file_size_bytes: default_file_upload_bundle_max_file_size_bytes(),
-            max_total_size_bytes: default_file_upload_bundle_max_total_size_bytes(),
-            max_files: default_file_upload_bundle_max_files(),
-            timeout_secs: default_file_upload_bundle_timeout_secs(),
-            max_response_body_bytes: default_file_upload_bundle_max_response_body_bytes(),
-            headers: HashMap::new(),
-        }
-    }
-}
-
-// ── File Download ───────────────────────────────────────────────
-
-/// Standalone file download tool configuration (`[file_download]`).
-///
-/// When `url` is set to a non-empty value, registers a `file_download` tool
-/// that GETs a file from the configured endpoint and writes it to the agent's
-/// workspace filesystem. The LLM supplies only a document identifier and a
-/// workspace-relative destination path; the endpoint URL comes solely from this
-/// config and is never model-controlled. Response bytes are streamed to disk
-/// and never loaded into model context.
-///
-/// When `url` is `None` or empty, the tool is not registered.
-#[derive(Debug, Clone, Serialize, Deserialize, Configurable)]
-#[cfg_attr(feature = "schema-export", derive(schemars::JsonSchema))]
-#[prefix = "file-download"]
-pub struct FileDownloadConfig {
-    /// Download endpoint URL. Tool is disabled when this is `None` or empty.
-    /// The file to fetch is selected by the `document_id` query parameter.
-    #[serde(default)]
-    pub url: Option<String>,
-
-    /// Maximum download size in bytes. Enforced while streaming: the transfer
-    /// is aborted and the partial file removed once this ceiling is exceeded,
-    /// so an oversized or unbounded body never fully buffers in memory or lands
-    /// on disk. Default: 25 MiB.
-    #[serde(default = "default_file_download_max_size_bytes")]
-    pub max_file_size_bytes: u64,
-
-    /// Request timeout in seconds. Default: 120.
-    #[serde(default = "default_file_download_timeout_secs")]
-    pub timeout_secs: u64,
-
-    /// Static HTTP headers attached to every download request — typically an
-    /// `Authorization: Bearer …` token for the upstream endpoint. Same shape as
-    /// `[mcp.servers.*.headers]`.
-    #[serde(default)]
-    #[secret]
-    #[cfg_attr(feature = "schema-export", schemars(extend("x-secret" = true)))]
-    pub headers: HashMap<String, String>,
-}
-
-fn default_file_download_max_size_bytes() -> u64 {
-    25 * 1024 * 1024
-}
-
-fn default_file_download_timeout_secs() -> u64 {
-    120
-}
-
-impl Default for FileDownloadConfig {
-    fn default() -> Self {
-        Self {
-            url: None,
-            max_file_size_bytes: default_file_download_max_size_bytes(),
-            timeout_secs: default_file_download_timeout_secs(),
-            headers: HashMap::new(),
-        }
-    }
-}
-
 // ── Proxy ───────────────────────────────────────────────────────
 
 /// Proxy application scope — determines which outbound traffic uses the proxy.
@@ -6597,7 +6260,6 @@ pub fn default_auto_approve() -> Vec<String> {
         "web_fetch".into(),
         "glob_search".into(),
         "content_search".into(),
-        "image_info".into(),
         "tool_search".into(),
     ]
 }
@@ -8728,7 +8390,6 @@ impl Default for Config {
             scheduler: SchedulerConfig::default(),
             pacing: PacingConfig::default(),
             skills: SkillsConfig::default(),
-            pipeline: PipelineConfig::default(),
             heartbeat: HeartbeatConfig::default(),
             cron: HashMap::new(),
             channels: ChannelsConfig::default(),
@@ -8760,10 +8421,6 @@ impl Default for Config {
             tachi: crate::tachi::TachiConfig::default(),
             nodes: NodesConfig::default(),
             onboard_state: OnboardStateConfig::default(),
-            image_gen: ImageGenConfig::default(),
-            file_upload: FileUploadConfig::default(),
-            file_upload_bundle: FileUploadBundleConfig::default(),
-            file_download: FileDownloadConfig::default(),
             verifiable_intent: VerifiableIntentConfig::default(),
             sop: HashMap::new(),
             shell_tool: ShellToolConfig::default(),

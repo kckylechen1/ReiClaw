@@ -164,7 +164,6 @@ pub async fn process_message_with_hooks(
             mem.clone(),
             &config.http_request,
             &config.web_fetch,
-            &config.data_dir,
             &config.agents,
             agent_model_provider
                 .as_ref()
@@ -251,7 +250,6 @@ pub async fn process_message_with_hooks(
             ("memory_recall", "Search memory."),
             ("memory_forget", "Delete a memory entry."),
             ("screenshot", "Capture a screenshot."),
-            ("image_info", "Read image metadata."),
         ];
         if matches!(
             eff_prompt_injection_mode,

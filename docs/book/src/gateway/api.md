@@ -1197,8 +1197,7 @@ re-renders its persona only when that revision moved, so an unchanged Soul
 keeps the system prompt byte-identical. Delegated workers never receive the
 Soul or the User Model.
 
-Model file tools (`file_write`, `file_edit`, `file_download`, `browser` and
-`screenshot` targets, `git_operations` worktree paths) cannot write `SOUL.md`,
+Model file tools (`file_write`, `file_edit`, and `screenshot` targets) cannot write `SOUL.md`,
 `IDENTITY.md`, `USER.md`, `HEARTBEAT.md`, or `BOOTSTRAP.md` at an agent
 workspace root; they share one
 write-target check (`HEARTBEAT.md` is the heartbeat engine's task list and

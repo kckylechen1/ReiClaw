@@ -44,7 +44,6 @@ product integrations.
 | `send_message_to_peer`, `reasoning_subagent` | Agent-child execution and peer messaging are part of the agent execution model and must share risk profiles, tools, memory, and parent/child constraints. (The legacy `spawn_subagent` and `delegate` tools are retired; see the delegation retirement record.) |
 | `ask_user`, `escalate_to_human`, `reaction`, `poll`, `channel_room` | These are channel-bridging operator interaction primitives with late-bound channel handles and receipts. |
 | `sessions_current`, `sessions_list`, `sessions_history`, `sessions_send` | Session visibility and message sending must share the daemon/gateway session backend and agent ownership boundaries. |
-| `TodoWrite` | Maintains the agent's structured task list inside the runtime tool surface; keep its stable tool name and lifecycle behavior in core. |
 | `read_skill` and skill-defined tools with `kind = "shell"`, `kind = "http"`, or `kind = "builtin"` | Skills are an intended extension surface, but the runtime bridge that turns installed skills into tools is core. |
 
 ## Feature-Gate Candidates
@@ -59,12 +58,9 @@ boundaries because they add platform, dependency, network, or UI surface area.
 | SOP tools (`sop_list`, `sop_execute`, `sop_advance`, `sop_approve`, `sop_status`, `sop_workshop`) | Removed with the SOP run side. | Retired: no agent-facing SOP run tools remain; runs are Tachi-side ProcedureRuns through the procedure_v1 seam. |
 | WASM plugin tools | Removed with the WASM plugin host. | Retired: extensions go through MCP servers. |
 | `calculator`, `weather` | Removed from the model surface; implementations deleted. | Retired outright. The names stay reserved in `RETIRED_OPERATOR_TOOL_NAMES` so no assembly path can re-register them. A weather lookup, if ever wanted again, belongs to an HTTP skill or MCP wrapper. |
-| `execute_pipeline` | Config-gated tool chaining. | Keep gated until tool chaining policy, per-step receipts, and caller allowlists are stable enough to judge whether it is core. |
 | `knowledge` | Removed from the model surface; tool, graph store and config retired. | Retired: its private `knowledge.db` graph was a second store next to the Tachi memory kernel's own edges. `[knowledge]` / `[knowledge_bundles]` sections warn via the retired-surface tombstone. |
-| `file_upload`, `file_upload_bundle`, `file_download` | Config-gated data movement. | Keep gated; these are policy-sensitive data movement tools and need an explicit replacement before externalization. |
 | `backup`, `data_management` | Retired from the model surface. | Operator-only via the gateway operator API (`/api/agents/<alias>/backup*`, `/api/agents/<alias>/data-retention*`), which the `[backup]` / `[data_retention]` sections configure. See "Retired Operator Tools" below. |
-| `screenshot`, `image_info` | Visual/UI tool surface. | Keep for now; classify with the visual/UI tool surface once plugin and dashboard boundaries settle. |
-| `llm_task` | Provider-dependent subtask execution. | Keep until provider-scoped subtask execution has a separate contract from delegation. |
+| `screenshot` | Captures the retained visual/UI surface. | Uses the shared filesystem and policy guards. |
 | `security_ops` | Retired from the model surface. | Default-off diagnostics with no operator surface; the module stays compiled but unreachable, and enabling the section only emits a startup/reload notice. See "Retired Operator Tools" below. |
 | `verifiable_intent` | Config-gated trust policy. **The `vi_verify` tool is temporarily withheld from the model-visible registry.** | Keep gated and first-party; intent issuance and verification affect trust policy and should stay first-party until the credential boundary is stable. No chain verifier exists yet, so `vi_verify` is not registered even when `verifiable_intent.enabled = true`; enabling the section now only emits a warning naming that gap, at process startup and again on each daemon reload. The issuance and verification library paths are unchanged. Restore registration only behind a verify-and-evaluate path that consumes a verified chain result. |
 
@@ -103,8 +99,6 @@ replacement surface exists. Until then, keep them compatible and policy-visible.
 |---|---|---|
 | `composio` | MCP server or CLI-backed integration. | These mostly wrap third-party products and authentication models that can evolve independently from the core runtime. |
 | `claude_code`, `claude_code_runner`, `codex_cli`, `gemini_cli`, `opencode_cli` | Removed; retired raw launchers. | These Parent-visible raw CLI launchers were removed from the registry (#197 wall 2); harness execution goes through the typed subagent / Tachi paths instead. |
-| `image_gen` | Skill package or MCP server. | These are optional workflows or vendor/data-service wrappers rather than core execution primitives. |
-| `git_operations` | CLI-backed integration or narrowly scoped plugin. | It has local and remote repository side effects, so any external replacement must preserve policy checks, receipts, and explicit operator visibility. |
 
 ## No Action Yet
 
@@ -142,3 +136,18 @@ request-binding store, with no local worker launch. They remain closed under
 `[tachi]` defaults and are excluded from L1 profiles. See
 [external work through Tachi](../agents/delegation.md#external-work-through-tachi)
 for their request, polling and recovery contract.
+
+## ADR-026 retired overlapping builtins
+
+`git_operations`, `execute_pipeline`, `llm_task`, `file_upload`,
+`file_upload_bundle`, `file_download`, `image_gen`, `image_info`, and `TodoWrite`
+are removed from the runtime registry. Repository and file operations use the
+retained policy-controlled shell and file primitives; optional network/media
+workflows can be supplied by explicitly admitted MCP tools. `reasoning_subagent`
+remains the bounded reasoning entry point. `task_list` keeps durable commitments,
+and `schedule` retains its minimal-profile membership.
+
+The retired `pipeline`, `image_gen`, `file_upload`, `file_upload_bundle`, and
+`file_download` config sections produce retirement warnings and cannot register
+a capability. Existing authentication, allowlists, approval policy, and Node or
+Tachi access are not transferred to a replacement automatically.

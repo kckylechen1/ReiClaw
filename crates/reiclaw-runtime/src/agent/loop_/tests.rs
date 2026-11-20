@@ -11288,7 +11288,6 @@ async fn process_message_seam_narrows_safe_defaults_outside_allowed_tools() {
         mem,
         &config.http_request,
         &config.web_fetch,
-        &security.workspace_dir,
         &config.agents,
         None,
         &config,

@@ -181,7 +181,6 @@ pub async fn run(
             mem.clone(),
             &config.http_request,
             &config.web_fetch,
-            &config.data_dir,
             &config.agents,
             agent_model_provider.and_then(|e| e.api_key.as_deref()),
             &config,
@@ -371,10 +370,6 @@ pub async fn run(
         tool_descs.push((
         "screenshot",
         "Capture a screenshot of the current screen. Returns file path and base64-encoded PNG. Use when: visual verification, UI inspection, debugging displays.",
-    ));
-        tool_descs.push((
-        "image_info",
-        "Read image file metadata (format, dimensions, size); the image is also made available to vision-capable models via an inline image marker. Use when: inspecting images, preparing visual data for analysis.",
     ));
         tool_descs.push((
         "schedule",

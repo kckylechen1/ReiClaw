@@ -284,7 +284,6 @@ impl Agent {
             memory.clone(),
             &config.http_request,
             &config.web_fetch,
-            &security.workspace_dir,
             &config.agents,
             agent_model_provider.and_then(|e| e.api_key.as_deref()),
             config,

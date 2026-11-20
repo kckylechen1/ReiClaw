@@ -846,7 +846,6 @@ pub async fn run_gateway(
                 Arc::clone(&mem),
                 &config.http_request,
                 &config.web_fetch,
-                &config.data_dir,
                 &config.agents,
                 config
                     .model_provider_for_agent(agent_alias)
@@ -951,7 +950,6 @@ pub async fn run_gateway(
             Arc::clone(&mem),
             &config.http_request,
             &config.web_fetch,
-            &config.data_dir,
             &config.agents,
             config
                 .model_provider_for_agent(&alias)

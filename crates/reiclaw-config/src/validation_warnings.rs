@@ -186,6 +186,11 @@ pub const RETIRED_CONFIG_SURFACES: &[(&str, &str)] = &[
     ("trust", "unused_kernel_config_removed"),
     ("media_pipeline", "unused_kernel_config_removed"),
     ("link_enricher", "unused_kernel_config_removed"),
+    ("pipeline", "overlapping_builtin_tool_removed"),
+    ("image_gen", "overlapping_builtin_tool_removed"),
+    ("file_upload", "overlapping_builtin_tool_removed"),
+    ("file_upload_bundle", "overlapping_builtin_tool_removed"),
+    ("file_download", "overlapping_builtin_tool_removed"),
     ("eval", "eval_harness_moved_to_dev_tool"),
     (
         "gateway.pairing_dashboard",

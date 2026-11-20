@@ -1,8 +1,8 @@
 //! Model-facing durable task-list tool (#567/#568): cross-session
 //! commitments with server-minted stable ids and revision-checked batched
-//! writes, each optionally carrying a reminder occurrence. This is NOT the
-//! current-step plan (that is `TodoWrite`) — items here are multi-day
-//! commitments that survive restarts and session changes.
+//! writes, each optionally carrying a reminder occurrence. Items here are
+//! multi-day commitments that survive restarts and session changes; the
+//! current turn keeps its execution steps in the conversation history.
 
 use std::sync::Arc;
 
@@ -225,9 +225,9 @@ impl Tool for TaskListTool {
     }
 
     fn description(&self) -> &str {
-        // Distinct from TodoWrite: durable commitments, not current steps.
+        // Durable commitments have a different lifetime from current execution steps.
         "Manage your durable commitment list across sessions and days \
-(multi-day promises; NOT the current-step plan — use TodoWrite for that). \
+(multi-day promises; keep current execution steps in the conversation history). \
 Batched per-item operations with stable server-issued task ids; every call \
 must echo the current `expected_revision` (from the task context or the \
 last result). On a revision conflict the current list is returned — \

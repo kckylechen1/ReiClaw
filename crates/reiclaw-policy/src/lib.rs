@@ -2213,9 +2213,8 @@ impl SecurityPolicy {
     /// inventory in the gateway API docs is reviewed together with any new
     /// tool. Reads are unaffected, which is why this is not part of
     /// [`Self::is_resolved_path_allowed`]. Residuals that cannot be guarded
-    /// by path: `shell` (behind the approval chain), `git_operations`
-    /// checkout/stash flows (they can change tracked workspace content), and
-    /// hardlink write-through into a protected file via a link created with
+    /// by path: `shell` (behind the approval chain), including repository
+    /// checkout/stash flows and hardlink write-through via a link created with
     /// `shell` — all of which reduce to the `shell` residual.
     ///
     /// `Err` carries the tool-facing violation message.
