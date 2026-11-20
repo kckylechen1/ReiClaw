@@ -27,6 +27,7 @@ const INPUT_SECRET: &str = "fixture-input-private-value";
 const OUTPUT_SECRET: &str = "fixture-output-private-value";
 const ERROR_SECRET: &str = "fixture-error-private-value";
 const BODY_MARKER: &str = "fixture-body-is-not-metadata";
+const DEBUG_FIXTURE_COMPLETE: &str = "tool-log-policy-debug-assertions-complete";
 const TOOL_NAMES: &[&str] = &["audit_success", "audit_failure", "audit_error"];
 const BODY_FIELDS: &[&str] = &[
     "input",
@@ -558,13 +559,17 @@ async fn canonical_loop_enforces_tool_log_policy_on_broadcast_and_disk() {
     );
     reiclaw_log::clear_broadcast_hook();
 
+    if debug_child {
+        println!("{DEBUG_FIXTURE_COMPLETE}");
+    }
     if !debug_child {
         // A fresh test process can install a DEBUG subscriber without changing
         // the INFO-floor assertion above or introducing a mutable global filter.
         let mut command = tokio::process::Command::new(std::env::current_exe().unwrap());
         command
             .arg("--exact")
-            .arg("canonical_loop_enforces_tool_log_policy_on_broadcast_and_disk")
+            .arg("tool_log_policy::canonical_loop_enforces_tool_log_policy_on_broadcast_and_disk")
+            .arg("--nocapture")
             .env("REI_AUDIT_LOG_DEBUG", "1")
             .kill_on_drop(true);
         let output = tokio::time::timeout(std::time::Duration::from_secs(60), command.output())
@@ -574,6 +579,12 @@ async fn canonical_loop_enforces_tool_log_policy_on_broadcast_and_disk() {
         assert!(
             output.status.success(),
             "DEBUG fixture failed:\n{}\n{}",
+            String::from_utf8_lossy(&output.stdout),
+            String::from_utf8_lossy(&output.stderr),
+        );
+        assert!(
+            String::from_utf8_lossy(&output.stdout).contains(DEBUG_FIXTURE_COMPLETE),
+            "DEBUG fixture exited without completing its assertions:\n{}\n{}",
             String::from_utf8_lossy(&output.stdout),
             String::from_utf8_lossy(&output.stderr),
         );
