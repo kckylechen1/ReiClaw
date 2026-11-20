@@ -117,7 +117,6 @@ pub(crate) const SUPPORTED_PROXY_SERVICE_KEYS: &[&str] = &[
     "tool.http_request",
     "tool.web_search",
     "memory.embeddings",
-    "tunnel.custom",
     "transcription.groq",
 ];
 
@@ -144,7 +143,6 @@ pub(crate) const SUPPORTED_PROXY_SERVICE_SELECTORS: &[&str] = &[
     "channel.*",
     "tool.*",
     "memory.*",
-    "tunnel.*",
     "transcription.*",
 ];
 
@@ -1089,37 +1087,6 @@ impl Config {
             validation_bail!(InvalidFormat, "allowed_tools", "{reason}");
         }
 
-        // Tunnel — OpenVPN
-        if self.tunnel.tunnel_provider.trim() == "openvpn" {
-            let openvpn = self.tunnel.openvpn.as_ref().ok_or_else(|| {
-                ::reiclaw_log::record!(
-                    WARN,
-                    ::reiclaw_log::Event::new(
-                        crate::schema::CONFIG_SCHEMA_LOG_TARGET,
-                        ::reiclaw_log::Action::Reject
-                    )
-                    .with_outcome(::reiclaw_log::EventOutcome::Failure),
-                    "tunnel.tunnel_provider='openvpn' rejected: [tunnel.openvpn] block missing"
-                );
-                anyhow::Error::msg("tunnel.tunnel_provider='openvpn' requires [tunnel.openvpn]")
-            })?;
-
-            if openvpn.config_file.trim().is_empty() {
-                validation_bail!(
-                    RequiredFieldEmpty,
-                    "tunnel.openvpn.config_file",
-                    "tunnel.openvpn.config_file must not be empty"
-                );
-            }
-            if openvpn.connect_timeout_secs == 0 {
-                validation_bail!(
-                    InvalidNumericRange,
-                    "tunnel.openvpn.connect_timeout_secs",
-                    "tunnel.openvpn.connect_timeout_secs must be greater than 0"
-                );
-            }
-        }
-
         // Reply-pacing bounds — both `reply_min_interval_secs` and
         // `reply_queue_depth_max` walk through one entry list so adding
         // a new paced channel only requires extending `reply_pacing_entries`.
@@ -1883,18 +1850,6 @@ impl Config {
                         reg.name
                     ),
                 }
-            }
-        }
-
-        // Pinggy tunnel region — validate allowed values (case-insensitive, auto-lowercased at runtime).
-        if let Some(ref pinggy) = self.tunnel.pinggy
-            && let Some(ref region) = pinggy.region
-        {
-            let r = region.trim().to_ascii_lowercase();
-            if !r.is_empty() && !matches!(r.as_str(), "us" | "eu" | "ap" | "br" | "au") {
-                anyhow::bail!(
-                    "tunnel.pinggy.region must be one of: us, eu, ap, br, au (or omitted for auto)"
-                );
             }
         }
 

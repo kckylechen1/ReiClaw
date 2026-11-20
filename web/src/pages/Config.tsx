@@ -60,11 +60,8 @@ import { t } from "@/lib/i18n";
 // into "Other"). Schema-attribute-driven grouping replaces this in v3 /
 // #5947.
 //
-// Foundation leads — Workspace / Providers / Channels / Memory /
-// Tunnel are the most-edited sections, surfaced first inside
-// the Config explorer instead of as duplicate top-level nav entries.
-// The Quickstart flow walks the same five (reachable via the
-// "Run setup again" link in the breadcrumb row).
+// Foundation leads with the frequently edited provider, channel and memory
+// sections. The Config explorer and Quickstart use the gateway section registry.
 const GROUP_ORDER = [
   "Foundation",
   "Agent",
@@ -492,9 +489,9 @@ export default function Config() {
                   activeSection.key,
                   typeKey,
                 );
-                // BackendPicker sections (Memory, Tunnel) collapse the
+                // BackendPicker sections (Memory) collapse the
                 // pick into a single field on the section root
-                // (memory.backend, tunnel.tunnel_provider). The form
+                // (memory.backend). The form
                 // renders against the section's own prefix, so the URL
                 // is `/config/<section>` with no trailing type segment.
                 // Two-tier paths (providers/channels) still navigate
@@ -945,7 +942,6 @@ function AliasListView({
 // BackendPicker sections have a discriminator field that the top picker
 // sets; the settings form below excludes it to avoid the duplicate input.
 const BACKEND_PICKER_FIELD: Record<string, string> = {
-  tunnel: "tunnel.tunnel_provider",
   memory: "memory.backend",
 };
 
@@ -1507,7 +1503,7 @@ function SectionOverview({
 }: SectionOverviewProps) {
   const [showPicker, setShowPicker] = useState(false);
 
-  // BackendPicker sections (Memory, Tunnel) pick ONE backend; +Add
+  // BackendPicker sections (Memory) pick ONE backend; +Add
   // and the "configured items" list don't fit single-choice semantics.
   // Render the picker plus the section's own fields (memory.auto_save,
   // hygiene, etc.) inline.

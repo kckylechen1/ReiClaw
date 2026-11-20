@@ -138,6 +138,9 @@ use serde::{Deserialize, Serialize};
 ///   JSONL, unknown and malformed selections refuse config admission.
 /// - `unused_channel_setting_removed`: a global channel setting has no
 ///   consumer. Per-Telegram-alias reaction and debounce controls remain live.
+/// - `in_process_tunnel_removed`: an empty or disabled-default `[tunnel]`
+///   section is ignored. Configured tunnels and credentials reject admission;
+///   operators must migrate them to a host-managed service explicitly.
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 #[cfg_attr(feature = "schema-export", derive(schemars::JsonSchema))]
 pub struct ValidationWarning {
@@ -182,6 +185,7 @@ pub const RETIRED_CONFIG_SURFACES: &[(&str, &str)] = &[
     ("security.nevis", "unenforced_security_config_removed"),
     ("security.webauthn", "unenforced_security_config_removed"),
     ("node_transport", "unenforced_security_config_removed"),
+    ("tunnel", "in_process_tunnel_removed"),
     ("acp", "unused_kernel_config_removed"),
     ("trust", "unused_kernel_config_removed"),
     ("media_pipeline", "unused_kernel_config_removed"),

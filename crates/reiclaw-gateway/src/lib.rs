@@ -523,9 +523,9 @@ fn gateway_session_queue() -> Arc<session_queue::SessionActorQueue> {
 /// How the gateway treats the address it is about to bind.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum PublicBindPosture {
-    /// Loopback, or network-facing with pairing and an explicit opt-in or tunnel.
+    /// Loopback, or network-facing with pairing and an explicit opt-in.
     Local,
-    /// Network-facing with pairing on but no tunnel or opt-in: warn.
+    /// Network-facing with pairing on but no opt-in: warn.
     ExposedWithoutOptIn,
     /// Network-facing, pairing off, explicit dangerous exemption set: allowed, warned loudly.
     UnauthenticatedOptedIn,
@@ -539,7 +539,6 @@ fn public_bind_posture(
     host: &str,
     require_pairing: bool,
     allow_public_bind: bool,
-    no_tunnel: bool,
     dangerously_allow_unauthenticated_public_bind: bool,
 ) -> PublicBindPosture {
     if !is_public_bind(host)
@@ -555,7 +554,7 @@ fn public_bind_posture(
             PublicBindPosture::RefuseUnauthenticated
         };
     }
-    if !allow_public_bind && no_tunnel {
+    if !allow_public_bind {
         PublicBindPosture::ExposedWithoutOptIn
     } else {
         PublicBindPosture::Local
@@ -583,7 +582,6 @@ pub async fn run_gateway(
         host,
         config.gateway.require_pairing,
         config.gateway.allow_public_bind,
-        config.tunnel.tunnel_provider == "none",
         config.gateway.dangerously_allow_unauthenticated_public_bind,
     ) {
         PublicBindPosture::Local => {}
@@ -593,7 +591,7 @@ pub async fn run_gateway(
                 ::reiclaw_log::Event::new(module_path!(), ::reiclaw_log::Action::Note)
                     .with_outcome(::reiclaw_log::EventOutcome::Unknown),
                 "⚠️  Binding to {host} — gateway will be exposed to all network interfaces.\n\
-                 Suggestion: use --host 127.0.0.1 (default), configure a tunnel, or set\n\
+                 Suggestion: use --host 127.0.0.1 (default) or set\n\
                  [gateway] allow_public_bind = true in config.toml to silence this warning.\n\n\
                  Docker/VM: if you are running inside a container or VM, this is expected."
             );
@@ -1084,40 +1082,6 @@ pub async fn run_gateway(
         .as_deref()
         .filter(|p| !p.is_empty());
 
-    // ── Tunnel ────────────────────────────────────────────────
-    let tunnel = match reiclaw_runtime::tunnel::create_tunnel(&config.tunnel) {
-        Ok(t) => t,
-        Err(e) => {
-            ::reiclaw_log::record!(
-                WARN,
-                ::reiclaw_log::Event::new(module_path!(), ::reiclaw_log::Action::Note)
-                    .with_outcome(::reiclaw_log::EventOutcome::Unknown)
-                    .with_attrs(::serde_json::json!({
-                        "tunnel_provider": config.tunnel.tunnel_provider,
-                        "error": format!("{e}"),
-                    })),
-                "Gateway: tunnel adapter failed to construct; booting without a \
-                 tunnel. Fix [tunnel] and POST /admin/reload."
-            );
-            None
-        }
-    };
-    let mut tunnel_url: Option<String> = None;
-
-    if let Some(ref tun) = tunnel {
-        println!("🔗 Starting {} tunnel...", tun.name());
-        match tun.start(host, actual_port).await {
-            Ok(url) => {
-                println!("🌐 Tunnel active: {url}");
-                tunnel_url = Some(url);
-            }
-            Err(e) => {
-                println!("⚠️  Tunnel failed to start: {e}");
-                println!("   Falling back to local-only mode.");
-            }
-        }
-    }
-
     let auto_detect_web_dist = || -> Option<std::path::PathBuf> {
         let mut candidates = vec![
             // Relative to CWD (development: running from repo root)
@@ -1190,9 +1154,6 @@ pub async fn run_gateway(
 
     let pfx = path_prefix.unwrap_or("");
     println!("🦀 ReiClaw Gateway listening on http://{display_addr}{pfx}");
-    if let Some(ref url) = tunnel_url {
-        println!("  🌐 Public URL: {url}");
-    }
     if web_dist_dir.is_some() {
         println!("  🌐 Web Dashboard: http://{display_addr}{pfx}/");
     } else {

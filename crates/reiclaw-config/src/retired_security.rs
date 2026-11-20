@@ -1,4 +1,4 @@
-//! Raw admission checks for retired, previously unenforced security settings.
+//! Raw admission checks for retired settings that carry credentials or policy.
 //!
 //! Only empty sections and known serialized defaults may be discarded with a
 //! warning. Configured credentials, policy changes, unknown fields and malformed
@@ -7,7 +7,12 @@
 use anyhow::Result;
 use toml::Value;
 
-const SURFACES: &[&str] = &["security.nevis", "security.webauthn", "node_transport"];
+const SURFACES: &[&str] = &[
+    "security.nevis",
+    "security.webauthn",
+    "node_transport",
+    "tunnel",
+];
 
 /// A pre-write refusal that never includes submitted values or field names.
 #[derive(Debug)]
@@ -15,6 +20,13 @@ pub struct RetiredSecurityConfigError(&'static str);
 
 impl std::fmt::Display for RetiredSecurityConfigError {
     fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        if self.0 == "tunnel" {
+            return formatter.write_str(
+                "[tunnel] is retired. Run tunnels and VPNs as host-managed services, then \
+                 explicitly remove [tunnel] and its REI_ overrides. Existing credentials, \
+                 commands and network policy are not migrated or silently discarded.",
+            );
+        }
         write!(
             formatter,
             "[{}] is retired and has no runtime enforcement. Review and remove its \
@@ -32,6 +44,7 @@ enum HarmlessDefault {
     Integer(i64),
     String(&'static str),
     EmptyArray,
+    EmptyTable,
 }
 
 impl HarmlessDefault {
@@ -43,6 +56,7 @@ impl HarmlessDefault {
                 .as_str()
                 .is_some_and(|actual| actual.is_empty() || actual == *expected),
             Self::EmptyArray => value.as_array().is_some_and(Vec::is_empty),
+            Self::EmptyTable => value.as_table().is_some_and(toml::Table::is_empty),
         }
     }
 
@@ -59,7 +73,7 @@ impl HarmlessDefault {
 }
 
 fn harmless_default(surface: &str, field: &str) -> Option<HarmlessDefault> {
-    use HarmlessDefault::{Bool, EmptyArray, Integer, String};
+    use HarmlessDefault::{Bool, EmptyArray, EmptyTable, Integer, String};
     match (surface, field) {
         ("security.nevis", "enabled" | "require_mfa")
         | ("security.webauthn", "enabled")
@@ -80,6 +94,13 @@ fn harmless_default(surface: &str, field: &str) -> Option<HarmlessDefault> {
         ("node_transport", "enabled" | "require_https") => Some(Bool(true)),
         ("node_transport", "max_request_age_secs") => Some(Integer(300)),
         ("node_transport", "connection_pool_size") => Some(Integer(4)),
+        ("tunnel", "tunnel_provider") => Some(String("none")),
+        // Disabled serialized defaults contain no provider blocks. Empty
+        // blocks carry no setting; any provider field requires migration,
+        // even with `tunnel_provider = "none"` (credentials can be dormant).
+        ("tunnel", "cloudflare" | "tailscale" | "ngrok" | "openvpn" | "pinggy" | "custom") => {
+            Some(EmptyTable)
+        }
         _ => None,
     }
 }
@@ -152,6 +173,62 @@ fn parse_env_literal(raw: &str) -> Option<Value> {
 mod tests {
     use super::*;
     use crate::current::{parse_current, parse_current_resilient};
+
+    #[test]
+    fn retired_tunnel_disabled_defaults_warn_without_exposing_a_live_surface() {
+        let config = crate::schema::Config::default();
+        assert!(
+            config
+                .prop_schema()
+                .iter()
+                .all(|field| !field.name.starts_with("tunnel."))
+        );
+        assert!(crate::sections::Section::from_key("tunnel").is_none());
+        assert!(
+            toml::Value::try_from(config)
+                .unwrap()
+                .get("tunnel")
+                .is_none()
+        );
+        for suffix in [
+            "[tunnel]\n",
+            "[tunnel]\ntunnel_provider = 'none'\n",
+            "[tunnel.cloudflare]\n",
+        ] {
+            let raw = format!("schema_version = 3\n{suffix}");
+            parse_current(&raw).unwrap();
+            parse_current_resilient(&raw).unwrap();
+            let warnings = crate::validation_warnings::retired_section_tombstones(&raw);
+            assert_eq!(warnings.len(), 1);
+            assert_eq!(warnings[0].path, "tunnel");
+            assert_eq!(warnings[0].code, "in_process_tunnel_removed");
+        }
+    }
+
+    #[test]
+    fn retired_tunnel_file_refuses_active_credentials_commands_and_malformed_settings() {
+        for settings in [
+            "tunnel_provider = 'cloudflare'",
+            "tunnel_provider = 'none'\nngrok = { auth_token = 'private-sentinel' }",
+            "cloudflare = { token = 'enc:private-sentinel' }",
+            "tailscale = { funnel = true }",
+            "openvpn = { config_file = 'private-sentinel', auth_file = 'private-sentinel' }",
+            "pinggy = { token = 'private-sentinel' }",
+            "custom = { start_command = 'private-sentinel' }",
+            "tunnel_provider = false",
+            "cloudflare = 'private-sentinel'",
+            "future_policy = 'private-sentinel'",
+        ] {
+            let raw = format!("schema_version = 3\n[tunnel]\n{settings}\n");
+            assert!(crate::validation_warnings::retired_section_tombstones(&raw).is_empty());
+            for result in [parse_current(&raw), parse_current_resilient(&raw)] {
+                let error = result.unwrap_err();
+                assert!(error.is::<RetiredSecurityConfigError>(), "{error:#}");
+                assert!(error.to_string().contains("host-managed services"));
+                assert!(!format!("{error:#}").contains("private-sentinel"));
+            }
+        }
+    }
 
     #[test]
     fn retired_security_absent_empty_and_serialized_defaults_are_accepted() {
@@ -292,35 +369,39 @@ connection_pool_size = 4
     async fn retired_security_save_and_comment_paths_preserve_operator_bytes() {
         let temp = tempfile::tempdir().unwrap();
         let path = temp.path().join("config.toml");
-        let raw = "schema_version = 3\n[node_transport]\nshared_secret = 'private-sentinel'\n";
-        tokio::fs::write(&path, raw).await.unwrap();
-        let mut config = crate::schema::Config {
-            config_path: path.clone(),
-            data_dir: temp.path().join("data"),
-            loaded_from: Some(path.clone()),
-            ..Default::default()
-        };
-        config.channels.show_tool_calls = true;
-        config.mark_dirty("channels.show_tool_calls");
-        for mode in ["save", "save_dirty", "force_save"] {
-            let result = match mode {
-                "save" => config.save().await,
-                "save_dirty" => config.save_dirty().await,
-                _ => config.force_save().await,
+        for raw in [
+            "schema_version = 3\n[node_transport]\nshared_secret = 'private-sentinel'\n",
+            "schema_version = 3\n[tunnel.ngrok]\nauth_token = 'private-sentinel'\n",
+        ] {
+            tokio::fs::write(&path, raw).await.unwrap();
+            let mut config = crate::schema::Config {
+                config_path: path.clone(),
+                data_dir: temp.path().join("data"),
+                loaded_from: Some(path.clone()),
+                ..Default::default()
             };
-            let error = result.unwrap_err();
-            assert!(error.is::<RetiredSecurityConfigError>(), "{error:#}");
-            assert!(!format!("{error:#}").contains("private-sentinel"));
+            config.channels.show_tool_calls = true;
+            config.mark_dirty("channels.show_tool_calls");
+            for mode in ["save", "save_dirty", "force_save"] {
+                let result = match mode {
+                    "save" => config.save().await,
+                    "save_dirty" => config.save_dirty().await,
+                    _ => config.force_save().await,
+                };
+                let error = result.unwrap_err();
+                assert!(error.is::<RetiredSecurityConfigError>(), "{error:#}");
+                assert!(!format!("{error:#}").contains("private-sentinel"));
+                assert_eq!(tokio::fs::read_to_string(&path).await.unwrap(), raw);
+            }
+            let error = crate::comment_writer::apply_comments(
+                &path,
+                &[("schema_version".into(), "updated".into())],
+            )
+            .await
+            .unwrap_err();
+            assert_eq!(error.kind(), std::io::ErrorKind::InvalidData);
+            assert!(!error.to_string().contains("private-sentinel"));
             assert_eq!(tokio::fs::read_to_string(&path).await.unwrap(), raw);
         }
-        let error = crate::comment_writer::apply_comments(
-            &path,
-            &[("schema_version".into(), "updated".into())],
-        )
-        .await
-        .unwrap_err();
-        assert_eq!(error.kind(), std::io::ErrorKind::InvalidData);
-        assert!(!error.to_string().contains("private-sentinel"));
-        assert_eq!(tokio::fs::read_to_string(&path).await.unwrap(), raw);
     }
 }

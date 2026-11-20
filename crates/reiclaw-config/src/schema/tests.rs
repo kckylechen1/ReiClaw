@@ -1806,7 +1806,6 @@ async fn config_toml_roundtrip() {
         },
         memory: MemoryConfig::default(),
         storage: StorageConfig::default(),
-        tunnel: TunnelConfig::default(),
         gateway: GatewayConfig::default(),
         secrets: SecretsConfig::default(),
         http_request: HttpRequestConfig::default(),
@@ -2535,7 +2534,6 @@ async fn config_save_and_load_tmpdir() {
         channels: ChannelsConfig::default(),
         memory: MemoryConfig::default(),
         storage: StorageConfig::default(),
-        tunnel: TunnelConfig::default(),
         gateway: GatewayConfig::default(),
         secrets: SecretsConfig::default(),
         http_request: HttpRequestConfig::default(),
@@ -5020,6 +5018,30 @@ async fn proxy_config_scope_services_requires_entries_when_enabled() {
 
     let error = proxy.validate().unwrap_err().to_string();
     assert!(error.contains("proxy.scope='services'"));
+}
+
+#[test]
+async fn retired_tunnel_proxy_selectors_fail_without_changing_live_proxy_scope() {
+    let mut proxy = ProxyConfig {
+        enabled: true,
+        http_proxy: Some("http://127.0.0.1:7890".into()),
+        scope: ProxyScope::Services,
+        services: vec!["model_provider.*".into(), "channel.telegram".into()],
+        ..Default::default()
+    };
+    proxy.validate().unwrap();
+    for selector in ["tunnel.custom", "tunnel.*"] {
+        proxy.services.push(selector.into());
+        let error = proxy.validate().unwrap_err();
+        assert!(
+            error
+                .to_string()
+                .contains("Unsupported proxy service selector")
+        );
+        assert_eq!(proxy.http_proxy.as_deref(), Some("http://127.0.0.1:7890"));
+        proxy.services.pop();
+    }
+    proxy.validate().unwrap();
 }
 
 #[test]
@@ -11466,7 +11488,7 @@ async fn every_prop_is_gettable_and_settable() {
 /// it, that field is unreachable on every surface.
 ///
 /// `init_defaults(None)` populates Option-shaped subsections (memory
-/// backend specifics, tunnel provider details, etc.) so the walk
+/// backend specifics, gateway TLS settings, etc.) so the walk
 /// also exercises fields that only materialize once a backend is
 /// chosen.
 #[test]
@@ -14199,11 +14221,6 @@ async fn empty_table_round_trips_to_section_defaults() {
     assert_eq!(web_search.enabled, WebSearchConfig::default().enabled);
     let memory: MemoryConfig = toml::from_str("").unwrap();
     assert_eq!(memory.backend, MemoryConfig::default().backend);
-    let tunnel: TunnelConfig = toml::from_str("").unwrap();
-    assert_eq!(
-        tunnel.tunnel_provider,
-        TunnelConfig::default().tunnel_provider
-    );
     let hooks: HooksConfig = toml::from_str("").unwrap();
     assert_eq!(hooks.enabled, HooksConfig::default().enabled);
     let builtin: BuiltinHooksConfig = toml::from_str("").unwrap();

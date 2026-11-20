@@ -20,14 +20,14 @@ pub use schema::{
     DockerRuntimeConfig, EmbeddingRouteConfig, EstopConfig, GatewayConfig, GoogleSttConfig,
     HeartbeatConfig, HooksConfig, HttpRequestConfig, IdentityConfig, LocalWhisperConfig, McpConfig,
     McpServerConfig, McpTransport, MemoryConfig, MemoryPolicyConfig, ModelRouteConfig,
-    MultimodalConfig, NodesConfig, ObservabilityConfig, OpenAiSttConfig, OpenVpnTunnelConfig,
-    OtpConfig, OtpMethod, PacingConfig, ProxyConfig, ProxyScope, QueryClassificationConfig,
-    ReliabilityConfig, RiskProfileConfig, RuntimeConfig, SandboxBackend, SandboxConfig,
-    SchedulerConfig, SearchMode, SecretsConfig, SecurityConfig, SecurityOpsConfig, ShellToolConfig,
-    SkillCreationConfig, SkillImprovementConfig, SkillsConfig, SkillsPromptInjectionMode,
-    StorageConfig, StreamMode, TelegramConfig, ToolFilterGroup, ToolFilterGroupMode,
-    TranscriptionConfig, TtsConfig, TtsProviderConfig, TunnelConfig, VerifiableIntentConfig,
-    WebFetchConfig, WebSearchConfig, WebhookConfig, read_persisted_proxy_for_boot,
+    MultimodalConfig, NodesConfig, ObservabilityConfig, OpenAiSttConfig, OtpConfig, OtpMethod,
+    PacingConfig, ProxyConfig, ProxyScope, QueryClassificationConfig, ReliabilityConfig,
+    RiskProfileConfig, RuntimeConfig, SandboxBackend, SandboxConfig, SchedulerConfig, SearchMode,
+    SecretsConfig, SecurityConfig, SecurityOpsConfig, ShellToolConfig, SkillCreationConfig,
+    SkillImprovementConfig, SkillsConfig, SkillsPromptInjectionMode, StorageConfig, StreamMode,
+    TelegramConfig, ToolFilterGroup, ToolFilterGroupMode, TranscriptionConfig, TtsConfig,
+    TtsProviderConfig, VerifiableIntentConfig, WebFetchConfig, WebSearchConfig, WebhookConfig,
+    read_persisted_proxy_for_boot,
 };
 
 pub use schema::ModelProviderConfig;
