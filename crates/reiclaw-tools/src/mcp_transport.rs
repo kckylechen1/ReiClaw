@@ -1029,6 +1029,8 @@ impl HttpTransport {
         enforce_url_estop(estop.as_ref(), &url)?;
 
         let client = reqwest::Client::builder()
+            // A redirect target has not passed the live estop host check.
+            .redirect(reqwest::redirect::Policy::none())
             .build()
             .context("failed to build HTTP client")?;
 
@@ -1276,6 +1278,8 @@ impl SseTransport {
         enforce_url_estop(estop.as_ref(), &sse_url)?;
 
         let client = reqwest::Client::builder()
+            // Apply the same host boundary to both the SSE GET and POST.
+            .redirect(reqwest::redirect::Policy::none())
             .build()
             .context("failed to build HTTP client")?;
 
