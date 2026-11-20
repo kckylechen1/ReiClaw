@@ -18,14 +18,15 @@ use reiclaw_infra::session_backend::SessionBackend;
 use crate::agent::history::floor_char_boundary;
 
 use super::{
-    ExtractedCoreFact, SharedOutcome, is_unsupported_sleep_error, persist_extracted_core_facts,
-    string_array_arg,
+    ExtractedCoreFact, SharedOutcome, SleepMemoryAdmission, complete_batch_episode_id,
+    is_unsupported_sleep_error, persist_extracted_core_facts, string_array_arg,
 };
 // ── Confined Sleep Primitives (7 `Tool` implementations) ─────────────────────
 
 pub(super) struct SessionSearchTool {
     pub(super) session_backend: Arc<dyn SessionBackend>,
     pub(super) allowed_session_keys: Vec<String>,
+    pub(super) admission: SleepMemoryAdmission,
 }
 
 reiclaw_api::tool_attribution!(SessionSearchTool, ToolKind::Search);
@@ -68,10 +69,19 @@ impl Tool for SessionSearchTool {
             .unwrap_or(10);
         let backend = Arc::clone(&self.session_backend);
         let keys = self.allowed_session_keys.clone();
+        let admission = self.admission.clone();
         let query_owned = query.to_string();
         let hits = tokio::task::spawn_blocking(move || {
-            let key_refs: Vec<&str> = keys.iter().map(String::as_str).collect();
-            backend.search_session_fts(&key_refs, &query_owned, limit)
+            let key_refs: Vec<&str> = keys
+                .iter()
+                .filter(|key| admission.permits_session(key))
+                .map(String::as_str)
+                .collect();
+            let mut hits = backend.search_session_fts(&key_refs, &query_owned, limit)?;
+            // Recheck after the search snapshot so concurrently appended
+            // unattributed input cannot enter through an earlier admission.
+            hits.retain(|hit| admission.permits_session(&hit.session_key));
+            Ok::<_, std::io::Error>(hits)
         })
         .await
         .context("session_search blocking task failed")??;
@@ -82,6 +92,7 @@ impl Tool for SessionSearchTool {
 pub(super) struct EpisodeReadTool {
     pub(super) memory: Arc<dyn Memory>,
     pub(super) agent_id: String,
+    pub(super) admission: SleepMemoryAdmission,
 }
 
 reiclaw_api::tool_attribution!(EpisodeReadTool, ToolKind::Memory);
@@ -119,8 +130,18 @@ impl Tool for EpisodeReadTool {
             .unwrap_or(20);
         let episodes = self
             .memory
-            .read_episodes_in_window(&self.agent_id, since, until, session_id, limit)
+            .read_episodes_in_window(&self.agent_id, since, until, session_id, 100)
             .await?;
+        let admission = self.admission.clone();
+        let episodes = tokio::task::spawn_blocking(move || {
+            episodes
+                .into_iter()
+                .filter(|episode| admission.permits_episode(episode))
+                .take(limit)
+                .collect::<Vec<_>>()
+        })
+        .await
+        .context("episode_read admission task failed")?;
         Ok(ToolResult::ok(serde_json::json!({ "episodes": episodes })))
     }
 }
@@ -168,7 +189,13 @@ impl Tool for CheckpointStageTool {
             .get("up_to_message_id")
             .and_then(|v| v.as_i64())
             .unwrap_or(self.max_message_id);
-        let watermark = requested_id.clamp(1, self.max_message_id.max(1));
+        if requested_id != self.max_message_id || self.max_message_id <= 0 {
+            return Ok(ToolResult::err(format!(
+                "up_to_message_id must equal the complete batch watermark {}",
+                self.max_message_id
+            )));
+        }
+        let watermark = self.max_message_id;
         let backend = Arc::clone(&self.session_backend);
         let key = self.session_key.clone();
         let digest_owned = digest.to_string();
@@ -248,13 +275,17 @@ impl Tool for EpisodeCommitTool {
         else {
             return Ok(ToolResult::err("'summary' must be a non-empty string"));
         };
-        let episode_id = args
-            .get("episode_id")
-            .and_then(|v| v.as_str())
-            .map(str::trim)
-            .filter(|s| !s.is_empty())
-            .map(str::to_string)
-            .unwrap_or_else(|| format!("ep_{}", uuid::Uuid::new_v4()));
+        let episode_id = self.default_up_to_message_id.map_or_else(
+            || {
+                args.get("episode_id")
+                    .and_then(|v| v.as_str())
+                    .map(str::trim)
+                    .filter(|s| !s.is_empty())
+                    .map(str::to_string)
+                    .unwrap_or_else(|| format!("ep_{}", uuid::Uuid::new_v4()))
+            },
+            |watermark| complete_batch_episode_id(&self.default_session_key, watermark),
+        );
         validate_non_soul_key(&episode_id, "episode_id")?;
 
         let session_key = args
@@ -265,19 +296,30 @@ impl Tool for EpisodeCommitTool {
             .unwrap_or(&self.default_session_key)
             .to_string();
         validate_non_soul_key(&session_key, "session_key")?;
+        if session_key != self.default_session_key {
+            return Ok(ToolResult::err(
+                "session_key must match the admitted source session",
+            ));
+        }
 
-        let started_at = args
-            .get("started_at")
-            .and_then(|v| v.as_str())
-            .filter(|s| reiclaw_api::time::parse_rfc3339(s).is_ok())
-            .map(str::to_string)
-            .unwrap_or_else(|| self.default_started_at.clone());
-        let mut ended_at = args
-            .get("ended_at")
-            .and_then(|v| v.as_str())
-            .filter(|s| reiclaw_api::time::parse_rfc3339(s).is_ok())
-            .map(str::to_string)
-            .unwrap_or_else(|| self.default_ended_at.clone());
+        let started_at = if self.default_up_to_message_id.is_some() {
+            self.default_started_at.clone()
+        } else {
+            args.get("started_at")
+                .and_then(|v| v.as_str())
+                .filter(|s| reiclaw_api::time::parse_rfc3339(s).is_ok())
+                .map(str::to_string)
+                .unwrap_or_else(|| self.default_started_at.clone())
+        };
+        let mut ended_at = if self.default_up_to_message_id.is_some() {
+            self.default_ended_at.clone()
+        } else {
+            args.get("ended_at")
+                .and_then(|v| v.as_str())
+                .filter(|s| reiclaw_api::time::parse_rfc3339(s).is_ok())
+                .map(str::to_string)
+                .unwrap_or_else(|| self.default_ended_at.clone())
+        };
         if let (Ok(s), Ok(e)) = (
             reiclaw_api::time::parse_rfc3339(&started_at),
             reiclaw_api::time::parse_rfc3339(&ended_at),

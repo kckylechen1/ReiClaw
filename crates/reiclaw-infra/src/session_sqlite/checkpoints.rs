@@ -12,6 +12,10 @@ use std::io;
 /// FTS5 `IN (...)` clause (safely below SQLite's 32,766 host-parameter limit).
 const MAX_ALLOWED_FTS_KEYS: usize = 30_000;
 
+/// Version 1 binds coverage to complete transcript batches and rolling context.
+/// Older derived checkpoints may claim unseen rows and cannot replace raw history.
+const CURRENT_CHECKPOINT_FORMAT_VERSION: i64 = 1;
+
 /// Initialize the `session_checkpoints` schema inside the caller's transaction.
 pub(super) fn initialize(conn: &Connection) -> rusqlite::Result<()> {
     conn.execute_batch(
@@ -22,9 +26,22 @@ pub(super) fn initialize(conn: &Connection) -> rusqlite::Result<()> {
             digest TEXT NOT NULL,
             created_at TEXT NOT NULL,
             updated_at TEXT NOT NULL,
+            format_version INTEGER NOT NULL DEFAULT 0,
             PRIMARY KEY (session_key, slot)
         );",
-    )
+    )?;
+    let has_version: bool = conn.query_row(
+        "SELECT COUNT(*) > 0 FROM pragma_table_info('session_checkpoints') WHERE name = 'format_version'",
+        [],
+        |row| row.get(0),
+    )?;
+    if !has_version {
+        conn.execute(
+            "ALTER TABLE session_checkpoints ADD COLUMN format_version INTEGER NOT NULL DEFAULT 0",
+            [],
+        )?;
+    }
+    Ok(())
 }
 
 /// Remove all checkpoints belonging to `session_key` inside the caller's transaction.
@@ -119,18 +136,37 @@ impl SqliteSessionBackend {
             ));
         }
 
+        // A slow compactor must not replace a newer active/staged candidate.
+        // Rejecting it here also avoids leaving a permanently stale staged
+        // slot that would fail every later cold-window promotion.
+        let newest_watermark: Option<i64> = tx
+            .query_row(
+                "SELECT MAX(up_to_message_id) FROM session_checkpoints
+                 WHERE session_key = ?1 AND format_version = ?2",
+                params![session_key, CURRENT_CHECKPOINT_FORMAT_VERSION],
+                |row| row.get(0),
+            )
+            .map_err(io::Error::other)?;
+        if newest_watermark.is_some_and(|newest| up_to_message_id < newest) {
+            return Err(io::Error::new(
+                io::ErrorKind::InvalidInput,
+                "checkpoint watermark precedes a newer active or staged checkpoint",
+            ));
+        }
+
         let now = jiff::Timestamp::now();
         let now_str = reiclaw_api::time::format_rfc3339(now);
         tx.execute(
             "INSERT INTO session_checkpoints
-                (session_key, slot, up_to_message_id, digest, created_at, updated_at)
-             VALUES (?1, 'staged', ?2, ?3, ?4, ?4)
+                (session_key, slot, up_to_message_id, digest, created_at, updated_at, format_version)
+             VALUES (?1, 'staged', ?2, ?3, ?4, ?4, ?5)
              ON CONFLICT(session_key, slot) DO UPDATE SET
                 up_to_message_id = excluded.up_to_message_id,
                 digest = excluded.digest,
                 created_at = excluded.created_at,
-                updated_at = excluded.updated_at",
-            params![session_key, up_to_message_id, digest, now_str],
+                updated_at = excluded.updated_at,
+                format_version = excluded.format_version",
+            params![session_key, up_to_message_id, digest, now_str, CURRENT_CHECKPOINT_FORMAT_VERSION],
         )
         .map_err(io::Error::other)?;
 
@@ -149,6 +185,14 @@ impl SqliteSessionBackend {
         &self,
         session_key: &str,
     ) -> io::Result<Option<SessionCheckpoint>> {
+        self.promote_staged_checkpoint_bounded_impl(session_key, None)
+    }
+
+    pub(super) fn promote_staged_checkpoint_bounded_impl(
+        &self,
+        session_key: &str,
+        covered_message_id: Option<i64>,
+    ) -> io::Result<Option<SessionCheckpoint>> {
         if session_key.is_empty() {
             return Err(io::Error::new(
                 io::ErrorKind::InvalidInput,
@@ -165,8 +209,8 @@ impl SqliteSessionBackend {
             .query_row(
                 "SELECT up_to_message_id, digest, created_at
                  FROM session_checkpoints
-                 WHERE session_key = ?1 AND slot = 'staged'",
-                params![session_key],
+                 WHERE session_key = ?1 AND slot = 'staged' AND format_version = ?2",
+                params![session_key, CURRENT_CHECKPOINT_FORMAT_VERSION],
                 |row| {
                     Ok((
                         row.get::<_, i64>(0)?,
@@ -181,6 +225,9 @@ impl SqliteSessionBackend {
         let Some((staged_watermark, digest, staged_created_str)) = staged else {
             return Ok(None);
         };
+        if covered_message_id.is_some_and(|covered| staged_watermark > covered) {
+            return Ok(None);
+        }
 
         if staged_watermark <= 0 || digest.trim().is_empty() {
             return Err(io::Error::new(
@@ -193,8 +240,8 @@ impl SqliteSessionBackend {
             .query_row(
                 "SELECT up_to_message_id, created_at
                  FROM session_checkpoints
-                 WHERE session_key = ?1 AND slot = 'active'",
-                params![session_key],
+                 WHERE session_key = ?1 AND slot = 'active' AND format_version = ?2",
+                params![session_key, CURRENT_CHECKPOINT_FORMAT_VERSION],
                 |row| Ok((row.get::<_, i64>(0)?, row.get::<_, String>(1)?)),
             )
             .optional()
@@ -218,18 +265,20 @@ impl SqliteSessionBackend {
 
         tx.execute(
             "INSERT INTO session_checkpoints
-                (session_key, slot, up_to_message_id, digest, created_at, updated_at)
-             VALUES (?1, 'active', ?2, ?3, ?4, ?5)
+                (session_key, slot, up_to_message_id, digest, created_at, updated_at, format_version)
+             VALUES (?1, 'active', ?2, ?3, ?4, ?5, ?6)
              ON CONFLICT(session_key, slot) DO UPDATE SET
                 up_to_message_id = excluded.up_to_message_id,
                 digest = excluded.digest,
-                updated_at = excluded.updated_at",
+                updated_at = excluded.updated_at,
+                format_version = excluded.format_version",
             params![
                 session_key,
                 staged_watermark,
                 digest,
                 active_created_str,
-                updated_str
+                updated_str,
+                CURRENT_CHECKPOINT_FORMAT_VERSION
             ],
         )
         .map_err(io::Error::other)?;
@@ -262,19 +311,22 @@ impl SqliteSessionBackend {
                 .prepare(
                     "SELECT slot, up_to_message_id, digest, created_at, updated_at
                      FROM session_checkpoints
-                     WHERE session_key = ?1",
+                     WHERE session_key = ?1 AND format_version = ?2",
                 )
                 .map_err(io::Error::other)?;
             let rows = stmt
-                .query_map(params![session_key], |row| {
-                    Ok((
-                        row.get::<_, String>(0)?,
-                        row.get::<_, i64>(1)?,
-                        row.get::<_, String>(2)?,
-                        row.get::<_, String>(3)?,
-                        row.get::<_, String>(4)?,
-                    ))
-                })
+                .query_map(
+                    params![session_key, CURRENT_CHECKPOINT_FORMAT_VERSION],
+                    |row| {
+                        Ok((
+                            row.get::<_, String>(0)?,
+                            row.get::<_, i64>(1)?,
+                            row.get::<_, String>(2)?,
+                            row.get::<_, String>(3)?,
+                            row.get::<_, String>(4)?,
+                        ))
+                    },
+                )
                 .map_err(io::Error::other)?;
 
             for row in rows {
@@ -457,6 +509,90 @@ mod tests {
     }
 
     #[test]
+    fn legacy_checkpoint_migration_restores_raw_history_until_complete_coverage_is_rebuilt() {
+        let tmp = TempDir::new().unwrap();
+        let backend = SqliteSessionBackend::new(tmp.path()).unwrap();
+        for message in [
+            ChatMessage::user("early decision"),
+            ChatMessage::assistant("early reply"),
+            ChatMessage::user("previously unseen later decision"),
+            ChatMessage::assistant("later reply"),
+        ] {
+            backend.append("legacy", &message).unwrap();
+        }
+        let ids = message_ids(&backend, "legacy");
+        // Reproduce the shipped schema, with no version evidence and both
+        // derived slots claiming more rows than their transcript contained.
+        {
+            let conn = backend.conn.lock();
+            conn.execute_batch(
+                "DROP TABLE session_checkpoints;
+                 CREATE TABLE session_checkpoints (
+                    session_key TEXT NOT NULL,
+                    slot TEXT NOT NULL CHECK (slot IN ('active', 'staged')),
+                    up_to_message_id INTEGER NOT NULL,
+                    digest TEXT NOT NULL,
+                    created_at TEXT NOT NULL,
+                    updated_at TEXT NOT NULL,
+                    PRIMARY KEY (session_key, slot)
+                 );",
+            )
+            .unwrap();
+            let now = reiclaw_api::time::format_rfc3339(jiff::Timestamp::now());
+            for slot in ["active", "staged"] {
+                conn.execute(
+                    "INSERT INTO session_checkpoints VALUES (?1, ?2, ?3, ?4, ?5, ?5)",
+                    params!["legacy", slot, ids[3], "truncated old digest", now],
+                )
+                .unwrap();
+            }
+        }
+        drop(backend);
+
+        let backend = SqliteSessionBackend::new(tmp.path()).unwrap();
+        let window = backend.load_session_window("legacy").unwrap();
+        assert!(window.active_checkpoint.is_none());
+        assert!(window.staged_checkpoint.is_none());
+        assert_eq!(window.delta_messages.len(), 4);
+        assert!(
+            backend
+                .promote_staged_checkpoint("legacy")
+                .unwrap()
+                .is_none()
+        );
+        assert!(
+            backend
+                .promote_staged_checkpoint_if_covered("legacy", ids[3])
+                .unwrap()
+                .is_none()
+        );
+        assert_eq!(
+            checkpoint_count(&backend, "legacy"),
+            2,
+            "old derived rows are not deleted"
+        );
+
+        backend
+            .stage_checkpoint("legacy", ids[1], "complete first turn")
+            .unwrap();
+        assert!(
+            backend
+                .promote_staged_checkpoint_if_covered("legacy", ids[0])
+                .unwrap()
+                .is_none()
+        );
+        let rebuilt = backend
+            .promote_staged_checkpoint_if_covered("legacy", ids[1])
+            .unwrap()
+            .unwrap();
+        assert_eq!(rebuilt.up_to_message_id, ids[1]);
+        let window = backend.load_session_window("legacy").unwrap();
+        assert_eq!(window.delta_messages.len(), 2);
+        assert_eq!(window.delta_messages[0].0, ids[2]);
+        assert_eq!(backend.load("legacy").len(), 4);
+    }
+
+    #[test]
     fn stage_checkpoint_rejects_invalid_and_cross_session_watermarks() {
         let tmp = TempDir::new().unwrap();
         let backend = SqliteSessionBackend::new(tmp.path()).unwrap();
@@ -541,11 +677,12 @@ mod tests {
         assert_eq!(active.digest, "digest up to msg 2");
         assert_eq!(checkpoint_count(&backend, "zeroclaw_user"), 1);
 
-        // Regressing watermark staged at message 1 must fail closed and leave active=2, staged=1 intact.
-        backend
-            .stage_checkpoint("zeroclaw_user", ids[0], "stale digest")
-            .unwrap();
-        assert!(backend.promote_staged_checkpoint("zeroclaw_user").is_err());
+        // A slow older compactor cannot replace the newer candidate or active slot.
+        assert!(
+            backend
+                .stage_checkpoint("zeroclaw_user", ids[0], "stale digest")
+                .is_err()
+        );
 
         let window = backend.load_session_window("zeroclaw_user").unwrap();
         assert_eq!(
@@ -560,7 +697,7 @@ mod tests {
                 .staged_checkpoint
                 .as_ref()
                 .map(|c| c.up_to_message_id),
-            Some(ids[0])
+            None
         );
 
         // Equal watermark succeeds, and advancing watermark to message 3 succeeds.
@@ -577,6 +714,11 @@ mod tests {
         backend
             .stage_checkpoint("zeroclaw_user", ids[2], "digest up to msg 3")
             .unwrap();
+        assert!(
+            backend
+                .stage_checkpoint("zeroclaw_user", ids[1], "late older candidate")
+                .is_err()
+        );
         let promoted_fwd = backend
             .promote_staged_checkpoint("zeroclaw_user")
             .unwrap()
