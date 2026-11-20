@@ -4,7 +4,7 @@
 //! unresolved external outcome could permit a duplicate worker submission.
 
 use super::SqliteSessionBackend;
-use anyhow::{Context, Result, bail};
+use anyhow::{Context, Result, bail, ensure};
 use reiclaw_api::delegation_request::{DelegationRequestBinding, DelegationRequestClaim};
 use rusqlite::{Connection, TransactionBehavior, params};
 
@@ -68,6 +68,30 @@ pub(super) fn migrate_route_provenance(conn: &mut Connection) -> Result<()> {
         )
         .context("adding delegation proxy revision schema")?;
     }
+    let has_proxy_state: bool = tx.query_row(
+        "SELECT COUNT(*) > 0 FROM pragma_table_info('session_delegations') WHERE name = 'proxy_continuation_state'",
+        [],
+        |row| row.get(0),
+    ).context("inspecting delegation proxy continuation state schema")?;
+    if !has_proxy_state {
+        tx.execute(
+            "ALTER TABLE session_delegations ADD COLUMN proxy_continuation_state TEXT NOT NULL DEFAULT 'idle'",
+            [],
+        ).context("adding delegation proxy continuation state schema")?;
+        // The old writer counted both accepted and unknown submissions. Its
+        // count/revision cannot prove a receipt, so upgrading must not turn
+        // that history into permission to submit again.
+        tx.execute(
+            "UPDATE session_delegations SET proxy_continuation_state = 'unknown:legacy'
+             WHERE proxy_continuations != 0 OR last_proxy_revision IS NOT NULL",
+            [],
+        )
+        .context("preserving unresolved legacy proxy continuations")?;
+    }
+    tx.execute(
+        "CREATE INDEX IF NOT EXISTS idx_session_delegations_dispatch ON session_delegations(dispatch_id)",
+        [],
+    ).context("indexing canonical delegation dispatch lookup")?;
     tx.commit()
         .context("committing delegation route provenance schema")
 }
@@ -85,6 +109,179 @@ pub struct DispatchBindingRow {
     pub notified_outcome: Option<String>,
     pub proxy_continuations: u8,
     pub last_proxy_revision: Option<u64>,
+    pub proxy_continuation_state: ProxyContinuationState,
+}
+
+/// Durable disposition of the latest automatic continuation attempt.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum ProxyContinuationState {
+    Idle,
+    Reserved,
+    Unknown,
+    Settled,
+    Unsent,
+}
+
+/// Only a freshly reserved attempt authorizes one external submission.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum ProxyContinuationAdmission {
+    Reserved(ProxyContinuationReservation),
+    Unresolved,
+    CapExceeded { prior: u64, max: u8 },
+    AlreadyRecorded { last_revision: u64 },
+    StaleRevision { last_revision: u64 },
+}
+
+/// Opaque local ownership of one reservation; never an external request ID.
+/// A new nonce on an unsent retry prevents an old completion from settling or
+/// refunding a later attempt at the same canonical revision.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ProxyContinuationReservation {
+    rowid: i64,
+    scope: String,
+    route_digest: Option<String>,
+    dispatch_id: String,
+    revision: u64,
+    nonce: String,
+    owner_count: i64,
+    round: u8,
+}
+
+impl ProxyContinuationReservation {
+    #[must_use]
+    pub const fn round(&self) -> u8 {
+        self.round
+    }
+
+    #[must_use]
+    pub const fn revision(&self) -> u64 {
+        self.revision
+    }
+}
+
+fn decode_proxy_state(
+    raw: &str,
+    count: u64,
+    revision: Option<u64>,
+) -> Result<ProxyContinuationState> {
+    if raw == "idle" {
+        ensure!(
+            count == 0 && revision.is_none(),
+            "idle proxy continuation has attempt history"
+        );
+        return Ok(ProxyContinuationState::Idle);
+    }
+    if raw == "unknown:legacy" {
+        ensure!(
+            count != 0 || revision.is_some(),
+            "legacy proxy continuation has no attempt history"
+        );
+        return Ok(ProxyContinuationState::Unknown);
+    }
+    let (state, nonce) = raw
+        .split_once(':')
+        .context("invalid proxy continuation state")?;
+    uuid::Uuid::parse_str(nonce).context("invalid proxy continuation attempt nonce")?;
+    ensure!(
+        revision.is_some(),
+        "proxy continuation attempt has no revision"
+    );
+    let state = match state {
+        "reserved" => ProxyContinuationState::Reserved,
+        "unknown" => ProxyContinuationState::Unknown,
+        "settled" => ProxyContinuationState::Settled,
+        "unsent" => ProxyContinuationState::Unsent,
+        _ => bail!("invalid proxy continuation disposition"),
+    };
+    ensure!(
+        count != 0 || state == ProxyContinuationState::Unsent,
+        "proxy continuation attempt has no reserved count"
+    );
+    Ok(state)
+}
+
+struct ContinuationBinding {
+    rowid: i64,
+    scope: String,
+    agent_alias: String,
+    request_id: String,
+    route_digest: Option<String>,
+    count: u64,
+    revision: Option<u64>,
+    state: ProxyContinuationState,
+}
+
+fn continuation_bindings(
+    conn: &Connection,
+    binding: &DispatchBindingRow,
+) -> Result<Vec<ContinuationBinding>> {
+    let expected_route = binding
+        .route_digest
+        .as_deref()
+        .filter(|route| !route.is_empty())
+        .context("proxy continuation requires immutable route provenance")?;
+    let mut query = conn.prepare(
+        "SELECT rowid, agent_alias, request_id, route_digest,
+                proxy_continuations, last_proxy_revision, proxy_continuation_state
+         FROM session_delegations WHERE dispatch_id = ?1 ORDER BY rowid",
+    )?;
+    let mut rows = query.query([&binding.dispatch_id])?;
+    let mut group = Vec::new();
+    while let Some(row) = rows.next()? {
+        let scope: String = row.get(1)?;
+        let stored_route: Option<String> = row.get(3)?;
+        let legacy = scope.rsplit_once(':').filter(|(_, route)| {
+            route.len() == 64
+                && route
+                    .bytes()
+                    .all(|byte| byte.is_ascii_digit() || (b'a'..=b'f').contains(&byte))
+        });
+        let (agent_alias, route) = if let Some((alias, legacy)) = legacy {
+            ensure!(
+                stored_route.as_deref().is_none_or(|route| route == legacy),
+                "legacy delegation route provenance conflicts"
+            );
+            (alias, legacy)
+        } else {
+            // No route fact means an old attempt cannot safely be excluded
+            // from this dispatch's budget, even by claiming a new alias.
+            (
+                scope.as_str(),
+                stored_route
+                    .as_deref()
+                    .filter(|route| !route.is_empty())
+                    .context("canonical dispatch has an unscoped legacy claim")?,
+            )
+        };
+        if route != expected_route {
+            continue;
+        }
+        let count =
+            u64::try_from(row.get::<_, i64>(4)?).context("negative proxy continuation count")?;
+        let revision = row
+            .get::<_, Option<i64>>(5)?
+            .map(u64::try_from)
+            .transpose()
+            .context("negative proxy continuation revision")?;
+        let state = decode_proxy_state(&row.get::<_, String>(6)?, count, revision)?;
+        group.push(ContinuationBinding {
+            rowid: row.get(0)?,
+            agent_alias: agent_alias.to_string(),
+            scope,
+            request_id: row.get(2)?,
+            route_digest: stored_route,
+            count,
+            revision,
+            state,
+        });
+    }
+    ensure!(
+        group.iter().any(|row| row.rowid == binding.rowid
+            && row.request_id == binding.request_id
+            && row.agent_alias == binding.agent_alias),
+        "proxy continuation binding no longer matches its canonical identity"
+    );
+    Ok(group)
 }
 
 /// Bounded recovery projection of the existing claims, including uncertain
@@ -310,7 +507,7 @@ impl SqliteSessionBackend {
         let conn = self.conn.lock();
         let mut query = conn.prepare(
             "SELECT rowid, agent_alias, request_id, dispatch_id, route_digest, notified_outcome,
-                    proxy_continuations, last_proxy_revision
+                    proxy_continuations, last_proxy_revision, proxy_continuation_state
              FROM session_delegations
              WHERE dispatch_id IS NOT NULL AND rowid > ?1
              ORDER BY rowid LIMIT ?2",
@@ -362,6 +559,21 @@ impl SqliteSessionBackend {
                         })
                     })
                     .transpose()?;
+                let proxy_continuation_state = decode_proxy_state(
+                    &row.get::<_, String>(8)?,
+                    u64::from(proxy_continuations),
+                    last_proxy_revision,
+                )
+                .map_err(|error| {
+                    rusqlite::Error::FromSqlConversionFailure(
+                        8,
+                        rusqlite::types::Type::Text,
+                        Box::new(std::io::Error::new(
+                            std::io::ErrorKind::InvalidData,
+                            error.to_string(),
+                        )),
+                    )
+                })?;
                 Ok(DispatchBindingRow {
                     rowid: row.get(0)?,
                     agent_alias: owner,
@@ -371,6 +583,7 @@ impl SqliteSessionBackend {
                     notified_outcome: row.get(5)?,
                     proxy_continuations,
                     last_proxy_revision,
+                    proxy_continuation_state,
                 })
             })
             .context("listing delegation dispatch bindings")?
@@ -422,46 +635,187 @@ impl SqliteSessionBackend {
         Ok(())
     }
 
-    /// Atomically record an automatic proxy continuation for `rowid` at
-    /// `expected_revision`, updating `proxy_continuations` monotonically to at
-    /// least `new_count`. Returns `Ok(false)` when `expected_revision` matches
-    /// the already-recorded `last_proxy_revision` so crashes/retries cannot
-    /// double-answer or double-count the same revision.
-    pub fn record_proxy_continuation(
+    /// Reserve one automatic continuation before sending. The canonical route
+    /// and dispatch own the budget: additional request IDs, aliases sharing a
+    /// Tachi identity, and preserved legacy scopes cannot reset it.
+    ///
+    /// `max_attempts` may narrow, never exceed, the three-attempt contract. Any
+    /// unresolved attempt blocks further reservations regardless of revision.
+    pub fn reserve_proxy_continuation(
         &self,
-        rowid: i64,
+        binding: &DispatchBindingRow,
         expected_revision: u64,
-        new_count: u8,
-    ) -> Result<bool> {
-        use rusqlite::OptionalExtension;
+        max_attempts: u8,
+    ) -> Result<ProxyContinuationAdmission> {
+        ensure!(
+            (1..=3).contains(&max_attempts),
+            "proxy continuation limit must be between one and three"
+        );
         let rev_i64 = i64::try_from(expected_revision)
             .context("proxy continuation revision exceeds SQLite INTEGER range")?;
         let mut conn = self.conn.lock();
         let tx = conn.transaction_with_behavior(TransactionBehavior::Immediate)?;
-        let current: Option<(i64, Option<i64>)> = tx
+        let group = continuation_bindings(&tx, binding)?;
+        if group.iter().any(|row| {
+            matches!(
+                row.state,
+                ProxyContinuationState::Reserved | ProxyContinuationState::Unknown
+            )
+        }) {
+            return Ok(ProxyContinuationAdmission::Unresolved);
+        }
+        let prior = group.iter().try_fold(0_u64, |total, row| {
+            total
+                .checked_add(row.count)
+                .context("proxy continuation aggregate count overflow")
+        })?;
+        if prior >= u64::from(max_attempts) {
+            return Ok(ProxyContinuationAdmission::CapExceeded {
+                prior,
+                max: max_attempts,
+            });
+        }
+        if let Some(last_revision) = group.iter().filter_map(|row| row.revision).max() {
+            if expected_revision < last_revision {
+                return Ok(ProxyContinuationAdmission::StaleRevision { last_revision });
+            }
+            if expected_revision == last_revision
+                && group.iter().any(|row| {
+                    row.revision == Some(last_revision)
+                        && row.state != ProxyContinuationState::Unsent
+                })
+            {
+                return Ok(ProxyContinuationAdmission::AlreadyRecorded { last_revision });
+            }
+        }
+        // Claims are permanent. The first row remains the local write owner;
+        // all rows still participate in the aggregate above, including later
+        // aliases/requests and old per-request counters.
+        let owner = group
+            .first()
+            .context("canonical dispatch has no continuation owner")?;
+        let nonce = uuid::Uuid::new_v4().to_string();
+        let owner_count = i64::try_from(owner.count + 1)
+            .context("proxy continuation count exceeds SQLite INTEGER range")?;
+        let reservation = ProxyContinuationReservation {
+            rowid: owner.rowid,
+            scope: owner.scope.clone(),
+            route_digest: owner.route_digest.clone(),
+            dispatch_id: binding.dispatch_id.clone(),
+            revision: expected_revision,
+            nonce,
+            owner_count,
+            round: u8::try_from(prior + 1).context("proxy continuation round exceeds its limit")?,
+        };
+        let updated = tx
+            .execute(
+                "UPDATE session_delegations
+             SET proxy_continuations = ?2, last_proxy_revision = ?3,
+                 proxy_continuation_state = ?4
+             WHERE rowid = ?1",
+                params![
+                    owner.rowid,
+                    owner_count,
+                    rev_i64,
+                    format!("reserved:{}", reservation.nonce)
+                ],
+            )
+            .context("reserving proxy continuation before transmission")?;
+        ensure!(
+            updated == 1,
+            "proxy continuation reservation was not persisted"
+        );
+        tx.commit()
+            .context("committing proxy continuation reservation")?;
+        if let Some(path) = conn.path() {
+            crate::sqlite_perms::harden_sqlite_owner_only(std::path::Path::new(path));
+        }
+        Ok(ProxyContinuationAdmission::Reserved(reservation))
+    }
+
+    /// Record the trusted receipt for this exact attempt, keeping its budget.
+    /// A newer status revision alone is never evidence to settle an attempt.
+    pub fn settle_proxy_continuation(
+        &self,
+        reservation: &ProxyContinuationReservation,
+    ) -> Result<bool> {
+        self.finish_proxy_continuation(reservation, ProxyContinuationState::Settled)
+    }
+
+    /// Preserve a possibly transmitted attempt for explicit reconciliation.
+    pub fn mark_proxy_continuation_unknown(
+        &self,
+        reservation: &ProxyContinuationReservation,
+    ) -> Result<bool> {
+        self.finish_proxy_continuation(reservation, ProxyContinuationState::Unknown)
+    }
+
+    /// Refund only a still-reserved attempt with proof that no continuation
+    /// was sent. Its revision remains a high-water mark; a same-revision retry
+    /// receives a new nonce. Unknown attempts cannot be refunded here.
+    pub fn release_unsent_proxy_continuation(
+        &self,
+        reservation: &ProxyContinuationReservation,
+    ) -> Result<bool> {
+        self.finish_proxy_continuation(reservation, ProxyContinuationState::Unsent)
+    }
+
+    fn finish_proxy_continuation(
+        &self,
+        reservation: &ProxyContinuationReservation,
+        next: ProxyContinuationState,
+    ) -> Result<bool> {
+        use rusqlite::OptionalExtension;
+        let (prefix, refund) = match next {
+            ProxyContinuationState::Settled => ("settled", false),
+            ProxyContinuationState::Unknown => ("unknown", false),
+            ProxyContinuationState::Unsent => ("unsent", true),
+            _ => bail!("invalid proxy continuation completion"),
+        };
+        let mut conn = self.conn.lock();
+        let tx = conn.transaction_with_behavior(TransactionBehavior::Immediate)?;
+        let current: Option<(String, i64)> = tx
             .query_row(
-                "SELECT proxy_continuations, last_proxy_revision
-                 FROM session_delegations WHERE rowid = ?1",
-                params![rowid],
+                "SELECT proxy_continuation_state, proxy_continuations FROM session_delegations
+             WHERE rowid = ?1 AND agent_alias = ?2 AND route_digest IS ?3
+               AND dispatch_id = ?4 AND last_proxy_revision = ?5",
+                params![
+                    reservation.rowid,
+                    reservation.scope,
+                    reservation.route_digest,
+                    reservation.dispatch_id,
+                    i64::try_from(reservation.revision)?
+                ],
                 |row| Ok((row.get(0)?, row.get(1)?)),
             )
             .optional()
-            .context("reading proxy continuation state")?;
-        let Some((_, last_rev)) = current else {
-            bail!("delegation binding row {rowid} not found");
+            .context("reading owned proxy continuation reservation")?;
+        let Some((state, count)) = current else {
+            return Ok(false);
         };
-        if last_rev == Some(rev_i64) {
+        let target = format!("{prefix}:{}", reservation.nonce);
+        let target_count = reservation.owner_count - if refund { 1 } else { 0 };
+        if state == target && count == target_count {
+            return Ok(true);
+        }
+        let reserved = format!("reserved:{}", reservation.nonce);
+        let unknown = format!("unknown:{}", reservation.nonce);
+        if count != reservation.owner_count
+            || !(state == reserved || (next == ProxyContinuationState::Settled && state == unknown))
+        {
             return Ok(false);
         }
-        tx.execute(
-            "UPDATE session_delegations
-             SET proxy_continuations = MAX(proxy_continuations, ?2),
-                 last_proxy_revision = ?3
+        let updated = tx.execute(
+            "UPDATE session_delegations SET proxy_continuation_state = ?2, proxy_continuations = ?3
              WHERE rowid = ?1",
-            params![rowid, i64::from(new_count), rev_i64],
-        )
-        .context("recording proxy continuation state")?;
-        tx.commit().context("committing proxy continuation state")?;
+            params![reservation.rowid, target, target_count],
+        ).context("persisting proxy continuation disposition")?;
+        ensure!(
+            updated == 1,
+            "proxy continuation disposition was not persisted"
+        );
+        tx.commit()
+            .context("committing proxy continuation disposition")?;
         if let Some(path) = conn.path() {
             crate::sqlite_perms::harden_sqlite_owner_only(std::path::Path::new(path));
         }
@@ -1190,6 +1544,10 @@ mod tests {
         assert_eq!(rows.len(), 1);
         assert_eq!(rows[0].proxy_continuations, 0);
         assert_eq!(rows[0].last_proxy_revision, None);
+        assert_eq!(
+            rows[0].proxy_continuation_state,
+            ProxyContinuationState::Idle
+        );
 
         drop(reopened);
         let reopened_again = SqliteSessionBackend::new(tmp.path()).unwrap();
@@ -1197,77 +1555,176 @@ mod tests {
         assert_eq!(rows.len(), 1);
         assert_eq!(rows[0].proxy_continuations, 0);
         assert_eq!(rows[0].last_proxy_revision, None);
+        assert_eq!(
+            rows[0].proxy_continuation_state,
+            ProxyContinuationState::Idle
+        );
+    }
+
+    fn proxy_binding(
+        store: &SqliteSessionBackend,
+        alias: &str,
+        request: &str,
+        route: &str,
+        dispatch: &str,
+    ) -> DispatchBindingRow {
+        store
+            .claim_delegation_request(alias, request, "digest", route)
+            .unwrap();
+        store
+            .bind_delegation_request(alias, request, "digest", route, dispatch)
+            .unwrap();
+        store
+            .list_dispatch_bindings_page(0, 100)
+            .unwrap()
+            .into_iter()
+            .find(|row| row.agent_alias == alias && row.request_id == request)
+            .unwrap()
+    }
+
+    fn reserve_proxy(
+        store: &SqliteSessionBackend,
+        binding: &DispatchBindingRow,
+        revision: u64,
+    ) -> ProxyContinuationReservation {
+        match store
+            .reserve_proxy_continuation(binding, revision, 3)
+            .unwrap()
+        {
+            ProxyContinuationAdmission::Reserved(reservation) => reservation,
+            other => panic!("expected a proxy continuation reservation, got {other:?}"),
+        }
     }
 
     #[test]
-    fn record_proxy_continuation_persists_across_reopen_and_deduplicates_revision() {
+    fn proxy_continuation_migration_preserves_ambiguous_history_as_unknown() {
         let tmp = TempDir::new().unwrap();
         let store = SqliteSessionBackend::new(tmp.path()).unwrap();
         store
-            .claim_delegation_request("butler", "req-1", "digest", "route")
+            .conn
+            .lock()
+            .execute_batch(
+                "DROP TABLE session_delegations;
+             CREATE TABLE session_delegations (
+                agent_alias TEXT NOT NULL, request_id TEXT NOT NULL,
+                request_digest TEXT NOT NULL, dispatch_id TEXT, route_digest TEXT,
+                notified_outcome TEXT, proxy_continuations INTEGER NOT NULL DEFAULT 0,
+                last_proxy_revision INTEGER, PRIMARY KEY(agent_alias, request_id)
+             );
+             INSERT INTO session_delegations VALUES
+                ('old', 'r', 'd', 'dispatch', 'route', NULL, 2, 17);",
+            )
             .unwrap();
-        store
-            .bind_delegation_request("butler", "req-1", "digest", "route", "disp-1")
-            .unwrap();
-        let rowid = store.list_dispatch_bindings_page(0, 10).unwrap()[0].rowid;
-
-        assert!(store.record_proxy_continuation(rowid, 5, 1).unwrap());
-        // Same revision must not double-count or overwrite.
-        assert!(!store.record_proxy_continuation(rowid, 5, 2).unwrap());
-
-        let row = store.list_dispatch_bindings_page(0, 10).unwrap().remove(0);
-        assert_eq!(row.proxy_continuations, 1);
-        assert_eq!(row.last_proxy_revision, Some(5));
-
         drop(store);
-        let reopened = SqliteSessionBackend::new(tmp.path()).unwrap();
-        let row = reopened
-            .list_dispatch_bindings_page(0, 10)
-            .unwrap()
-            .remove(0);
-        assert_eq!(row.proxy_continuations, 1);
-        assert_eq!(row.last_proxy_revision, Some(5));
-        assert!(!reopened.record_proxy_continuation(rowid, 5, 2).unwrap());
-        assert!(reopened.record_proxy_continuation(rowid, 7, 2).unwrap());
-
-        let updated = reopened
-            .list_dispatch_bindings_page(0, 10)
-            .unwrap()
-            .remove(0);
-        assert_eq!(updated.proxy_continuations, 2);
-        assert_eq!(updated.last_proxy_revision, Some(7));
-        assert!(reopened.record_proxy_continuation(999_999, 1, 1).is_err());
+        for _ in 0..2 {
+            let reopened = SqliteSessionBackend::new(tmp.path()).unwrap();
+            let row = reopened
+                .list_dispatch_bindings_page(0, 10)
+                .unwrap()
+                .remove(0);
+            assert_eq!(row.proxy_continuations, 2);
+            assert_eq!(row.last_proxy_revision, Some(17));
+            assert_eq!(
+                row.proxy_continuation_state,
+                ProxyContinuationState::Unknown
+            );
+            assert_eq!(
+                reopened.reserve_proxy_continuation(&row, 99, 3).unwrap(),
+                ProxyContinuationAdmission::Unresolved
+            );
+            let alias = proxy_binding(&reopened, "new", "another-request", "route", "dispatch");
+            assert_eq!(
+                reopened.reserve_proxy_continuation(&alias, 100, 3).unwrap(),
+                ProxyContinuationAdmission::Unresolved
+            );
+        }
     }
 
     #[test]
-    fn concurrent_record_proxy_continuation_allows_only_one_winner_per_revision() {
+    fn proxy_continuation_pending_and_unknown_survive_reopen_and_new_request() {
+        let tmp = TempDir::new().unwrap();
+        for unknown in [false, true] {
+            let store = SqliteSessionBackend::new(tmp.path()).unwrap();
+            let dispatch = format!("dispatch-{unknown}");
+            let request = format!("request-{unknown}");
+            let row = proxy_binding(&store, "a", &request, "route", &dispatch);
+            let reservation = reserve_proxy(&store, &row, 5);
+            assert_eq!(reservation.round(), 1);
+            if unknown {
+                assert!(store.mark_proxy_continuation_unknown(&reservation).unwrap());
+                assert!(
+                    !store
+                        .release_unsent_proxy_continuation(&reservation)
+                        .unwrap()
+                );
+            }
+            drop(store);
+            let reopened = SqliteSessionBackend::new(tmp.path()).unwrap();
+            let alias = proxy_binding(&reopened, "b", &request, "route", &dispatch);
+            for binding in [&row, &alias] {
+                for revision in [5, 99] {
+                    assert_eq!(
+                        reopened
+                            .reserve_proxy_continuation(binding, revision, 3)
+                            .unwrap(),
+                        ProxyContinuationAdmission::Unresolved
+                    );
+                }
+            }
+            let updated = reopened
+                .list_dispatch_bindings_page(0, 100)
+                .unwrap()
+                .into_iter()
+                .find(|item| item.rowid == row.rowid)
+                .unwrap();
+            assert_eq!(updated.proxy_continuations, 1);
+            assert_eq!(
+                updated.proxy_continuation_state,
+                if unknown {
+                    ProxyContinuationState::Unknown
+                } else {
+                    ProxyContinuationState::Reserved
+                }
+            );
+        }
+    }
+
+    #[test]
+    fn proxy_continuation_same_revision_is_serialized_across_handles() {
         let tmp = TempDir::new().unwrap();
         let first = SqliteSessionBackend::new(tmp.path()).unwrap();
         let second = SqliteSessionBackend::new(tmp.path()).unwrap();
-        first
-            .claim_delegation_request("butler", "req-race", "digest", "route")
-            .unwrap();
-        first
-            .bind_delegation_request("butler", "req-race", "digest", "route", "disp-race")
-            .unwrap();
-        let rowid = first.list_dispatch_bindings_page(0, 10).unwrap()[0].rowid;
+        let row = proxy_binding(&first, "a", "r", "route", "dispatch");
         let barrier = Arc::new(Barrier::new(2));
-
-        let outcomes: Vec<bool> = [first, second]
+        let handles: Vec<_> = [first, second]
             .into_iter()
             .map(|store| {
                 let barrier = Arc::clone(&barrier);
+                let row = row.clone();
                 std::thread::spawn(move || {
                     barrier.wait();
-                    store.record_proxy_continuation(rowid, 42, 1).unwrap()
+                    store.reserve_proxy_continuation(&row, 42, 3).unwrap()
                 })
             })
-            .collect::<Vec<_>>()
-            .into_iter()
-            .map(|h| h.join().unwrap())
             .collect();
-
-        assert_eq!(outcomes.iter().filter(|recorded| **recorded).count(), 1);
+        let outcomes: Vec<_> = handles
+            .into_iter()
+            .map(|handle| handle.join().unwrap())
+            .collect();
+        assert_eq!(
+            outcomes
+                .iter()
+                .filter(|result| matches!(result, ProxyContinuationAdmission::Reserved(_)))
+                .count(),
+            1
+        );
+        assert_eq!(
+            outcomes
+                .iter()
+                .filter(|result| **result == ProxyContinuationAdmission::Unresolved)
+                .count(),
+            1
+        );
         let reopened = SqliteSessionBackend::new(tmp.path()).unwrap();
         let row = reopened
             .list_dispatch_bindings_page(0, 10)
@@ -1275,5 +1732,242 @@ mod tests {
             .remove(0);
         assert_eq!(row.proxy_continuations, 1);
         assert_eq!(row.last_proxy_revision, Some(42));
+    }
+
+    #[test]
+    fn proxy_continuation_cap_uses_durable_aggregate_for_stale_concurrent_aliases() {
+        let tmp = TempDir::new().unwrap();
+        let first = SqliteSessionBackend::new(tmp.path()).unwrap();
+        let second = SqliteSessionBackend::new(tmp.path()).unwrap();
+        let a = proxy_binding(&first, "a", "r1", "route", "dispatch");
+        let b = proxy_binding(&first, "b", "r2", "route", "dispatch");
+        for revision in [1, 2] {
+            let reservation = reserve_proxy(&first, &a, revision);
+            assert!(first.settle_proxy_continuation(&reservation).unwrap());
+        }
+        // Both caller snapshots still claim a zero count. A successful receipt
+        // can settle before the competing transaction runs; the durable cap
+        // must still prevent a fourth attempt, not merely rely on pending.
+        let barrier = Arc::new(Barrier::new(2));
+        let handles: Vec<_> = [(first, a.clone(), 3), (second, b.clone(), 4)]
+            .into_iter()
+            .map(|(store, row, revision)| {
+                let barrier = Arc::clone(&barrier);
+                std::thread::spawn(move || {
+                    barrier.wait();
+                    let admission = store.reserve_proxy_continuation(&row, revision, 3).unwrap();
+                    if let ProxyContinuationAdmission::Reserved(reservation) = &admission {
+                        assert!(store.settle_proxy_continuation(reservation).unwrap());
+                    }
+                    admission
+                })
+            })
+            .collect();
+        let outcomes: Vec<_> = handles
+            .into_iter()
+            .map(|handle| handle.join().unwrap())
+            .collect();
+        assert_eq!(
+            outcomes
+                .iter()
+                .filter(|result| matches!(result, ProxyContinuationAdmission::Reserved(_)))
+                .count(),
+            1
+        );
+        let reopened = SqliteSessionBackend::new(tmp.path()).unwrap();
+        for row in [&a, &b] {
+            assert_eq!(
+                reopened.reserve_proxy_continuation(row, 100, 3).unwrap(),
+                ProxyContinuationAdmission::CapExceeded { prior: 3, max: 3 }
+            );
+        }
+        assert_eq!(
+            reopened
+                .list_dispatch_bindings_page(0, 10)
+                .unwrap()
+                .iter()
+                .map(|row| u64::from(row.proxy_continuations))
+                .sum::<u64>(),
+            3
+        );
+    }
+
+    #[test]
+    fn proxy_continuation_legacy_scope_and_new_alias_share_owner_but_routes_do_not() {
+        let tmp = TempDir::new().unwrap();
+        let store = SqliteSessionBackend::new(tmp.path()).unwrap();
+        let route = "a".repeat(64);
+        store.conn.lock().execute(
+            "INSERT INTO session_delegations (agent_alias, request_id, request_digest, dispatch_id)
+             VALUES (?1, 'legacy', 'd', 'dispatch')", [format!("old:{route}")],
+        ).unwrap();
+        let a = proxy_binding(&store, "agent_%", "r1", &route, "dispatch");
+        let b = proxy_binding(&store, "agent_AX", "r2", &route, "dispatch");
+        let other_route = proxy_binding(&store, "agent_%", "other", "different-route", "dispatch");
+        let reservation = reserve_proxy(&store, &a, 8);
+        assert_eq!(
+            store.reserve_proxy_continuation(&b, 9, 3).unwrap(),
+            ProxyContinuationAdmission::Unresolved
+        );
+        let independent = reserve_proxy(&store, &other_route, 1);
+        assert_eq!(independent.round(), 1);
+        assert!(store.settle_proxy_continuation(&reservation).unwrap());
+        assert_eq!(
+            store.reserve_proxy_continuation(&b, 8, 3).unwrap(),
+            ProxyContinuationAdmission::AlreadyRecorded { last_revision: 8 }
+        );
+        assert_eq!(
+            store.reserve_proxy_continuation(&b, 7, 3).unwrap(),
+            ProxyContinuationAdmission::StaleRevision { last_revision: 8 }
+        );
+        let next = reserve_proxy(&store, &b, 9);
+        assert_eq!(next.round(), 2);
+        let rows = store.list_dispatch_bindings_page(0, 10).unwrap();
+        let legacy = rows.iter().find(|row| row.request_id == "legacy").unwrap();
+        assert_eq!(legacy.proxy_continuations, 2);
+        assert_eq!(
+            legacy.proxy_continuation_state,
+            ProxyContinuationState::Reserved
+        );
+        assert_eq!(
+            rows.iter()
+                .find(|row| row.rowid == b.rowid)
+                .unwrap()
+                .proxy_continuations,
+            0
+        );
+    }
+
+    #[test]
+    fn proxy_continuation_proven_unsent_retry_has_new_nonce_and_keeps_high_water() {
+        let tmp = TempDir::new().unwrap();
+        let store = SqliteSessionBackend::new(tmp.path()).unwrap();
+        let row = proxy_binding(&store, "a", "r", "route", "dispatch");
+        let first = reserve_proxy(&store, &row, 10);
+        assert!(store.release_unsent_proxy_continuation(&first).unwrap());
+        assert!(store.release_unsent_proxy_continuation(&first).unwrap());
+        drop(store);
+        let reopened = SqliteSessionBackend::new(tmp.path()).unwrap();
+        let stored = reopened
+            .list_dispatch_bindings_page(0, 10)
+            .unwrap()
+            .remove(0);
+        assert_eq!(stored.proxy_continuations, 0);
+        assert_eq!(stored.last_proxy_revision, Some(10));
+        assert_eq!(
+            stored.proxy_continuation_state,
+            ProxyContinuationState::Unsent
+        );
+        assert_eq!(
+            reopened.reserve_proxy_continuation(&row, 9, 3).unwrap(),
+            ProxyContinuationAdmission::StaleRevision { last_revision: 10 }
+        );
+        let retry = reserve_proxy(&reopened, &row, 10);
+        assert_ne!(first.nonce, retry.nonce);
+        assert_eq!(retry.round(), 1);
+        assert!(!reopened.release_unsent_proxy_continuation(&first).unwrap());
+        assert!(!reopened.settle_proxy_continuation(&first).unwrap());
+        assert!(!reopened.mark_proxy_continuation_unknown(&first).unwrap());
+        assert!(reopened.settle_proxy_continuation(&retry).unwrap());
+        assert!(reopened.settle_proxy_continuation(&retry).unwrap());
+        assert!(!reopened.release_unsent_proxy_continuation(&retry).unwrap());
+        assert_eq!(
+            reopened.reserve_proxy_continuation(&row, 10, 3).unwrap(),
+            ProxyContinuationAdmission::AlreadyRecorded { last_revision: 10 }
+        );
+    }
+
+    #[test]
+    fn proxy_continuation_reservation_write_failure_does_not_consume_budget() {
+        let tmp = TempDir::new().unwrap();
+        let store = SqliteSessionBackend::new(tmp.path()).unwrap();
+        let row = proxy_binding(&store, "a", "r", "route", "dispatch");
+        store.conn.lock().execute_batch(
+            "CREATE TRIGGER refuse_proxy BEFORE UPDATE OF proxy_continuation_state ON session_delegations
+             BEGIN SELECT RAISE(ABORT, 'reservation persistence failed'); END;",
+        ).unwrap();
+        assert!(store.reserve_proxy_continuation(&row, 1, 3).is_err());
+        let stored = store.list_dispatch_bindings_page(0, 10).unwrap().remove(0);
+        assert_eq!(stored.proxy_continuations, 0);
+        assert_eq!(stored.last_proxy_revision, None);
+        assert_eq!(
+            stored.proxy_continuation_state,
+            ProxyContinuationState::Idle
+        );
+    }
+
+    #[test]
+    fn proxy_continuation_settlement_failure_retains_reservation_after_restart() {
+        let tmp = TempDir::new().unwrap();
+        let store = SqliteSessionBackend::new(tmp.path()).unwrap();
+        let row = proxy_binding(&store, "a", "r", "route", "dispatch");
+        let reservation = reserve_proxy(&store, &row, 1);
+        store.conn.lock().execute_batch(
+            "CREATE TRIGGER refuse_settlement BEFORE UPDATE OF proxy_continuation_state ON session_delegations
+             WHEN NEW.proxy_continuation_state LIKE 'settled:%'
+             BEGIN SELECT RAISE(ABORT, 'settlement persistence failed'); END;",
+        ).unwrap();
+        assert!(store.settle_proxy_continuation(&reservation).is_err());
+        drop(store);
+        let reopened = SqliteSessionBackend::new(tmp.path()).unwrap();
+        assert_eq!(
+            reopened.reserve_proxy_continuation(&row, 2, 3).unwrap(),
+            ProxyContinuationAdmission::Unresolved
+        );
+        let stored = reopened
+            .list_dispatch_bindings_page(0, 10)
+            .unwrap()
+            .remove(0);
+        assert_eq!(stored.proxy_continuations, 1);
+        assert_eq!(
+            stored.proxy_continuation_state,
+            ProxyContinuationState::Reserved
+        );
+    }
+
+    #[test]
+    fn proxy_continuation_rejects_changed_binding_and_invalid_stored_state() {
+        let tmp = TempDir::new().unwrap();
+        let store = SqliteSessionBackend::new(tmp.path()).unwrap();
+        let row = proxy_binding(&store, "a", "r", "route", "dispatch");
+        let mut wrong = row.clone();
+        wrong.agent_alias = "b".to_string();
+        assert!(store.reserve_proxy_continuation(&wrong, 1, 3).is_err());
+        wrong = row.clone();
+        wrong.request_id = "other".to_string();
+        assert!(store.reserve_proxy_continuation(&wrong, 1, 3).is_err());
+        wrong = row.clone();
+        wrong.route_digest = Some("other-route".to_string());
+        assert!(store.reserve_proxy_continuation(&wrong, 1, 3).is_err());
+        assert!(store.reserve_proxy_continuation(&row, 1, 4).is_err());
+        assert!(store.reserve_proxy_continuation(&row, u64::MAX, 3).is_err());
+        for invalid in ["invalid", "reserved:not-a-uuid", "unknown:legacy"] {
+            store
+                .conn
+                .lock()
+                .execute(
+                    "UPDATE session_delegations SET proxy_continuation_state = ?1",
+                    [invalid],
+                )
+                .unwrap();
+            assert!(store.reserve_proxy_continuation(&row, 1, 3).is_err());
+            assert!(store.list_dispatch_bindings_page(0, 10).is_err());
+        }
+    }
+
+    #[test]
+    fn proxy_continuation_unscoped_legacy_dispatch_requires_reconciliation() {
+        let tmp = TempDir::new().unwrap();
+        let store = SqliteSessionBackend::new(tmp.path()).unwrap();
+        let row = proxy_binding(&store, "new", "r", "route", "dispatch");
+        store.conn.lock().execute(
+            "INSERT INTO session_delegations (agent_alias, request_id, request_digest, dispatch_id)
+             VALUES ('old', 'legacy', 'd', 'dispatch')", [],
+        ).unwrap();
+        assert!(store.reserve_proxy_continuation(&row, 1, 3).is_err());
+        assert_eq!(
+            store.list_dispatch_bindings_page(0, 10).unwrap()[0].proxy_continuations,
+            0
+        );
     }
 }
