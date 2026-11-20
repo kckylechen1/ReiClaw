@@ -786,12 +786,7 @@ mod tests {
         // runtime, never user-edited, so intentionally ungrouped.
         const HIDDEN: &[&str] = &["schema_version"];
 
-        const UNGROUPED: &[&str] = &[
-            "escalation",
-            "file_upload",
-            "file_upload_bundle",
-            "file_download",
-        ];
+        const UNGROUPED: &[&str] = &["escalation"];
 
         let violations: Vec<&String> = roots
             .iter()

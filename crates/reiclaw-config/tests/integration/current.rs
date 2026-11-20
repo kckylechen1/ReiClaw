@@ -265,6 +265,30 @@ Authorization = "Bearer x"
 }
 
 #[test]
+fn v3_retired_overlapping_tool_settings_warn_and_leave_no_tool_config() {
+    for section in [
+        "pipeline",
+        "image_gen",
+        "file_upload",
+        "file_upload_bundle",
+        "file_download",
+    ] {
+        let raw = format!("schema_version = 3\n[{section}]\nenabled = true\n");
+        let cfg = parse_current(&raw).expect("removed tool capability has a config tombstone");
+        let warnings = reiclaw_config::validation_warnings::retired_section_tombstones(&raw);
+        assert_eq!(warnings.len(), 1, "{section}");
+        assert_eq!(warnings[0].code, "overlapping_builtin_tool_removed");
+        assert_eq!(warnings[0].path, section);
+        assert!(
+            cfg.prop_paths()
+                .iter()
+                .all(|path| !path.starts_with(&format!("{section}.")))
+        );
+        assert!(toml::Value::try_from(cfg).unwrap().get(section).is_none());
+    }
+}
+
+#[test]
 fn v3_retired_prometheus_backend_warns_and_preserves_log_persistence() {
     for backend in ["prometheus", "PROMETHEUS"] {
         let raw = format!(

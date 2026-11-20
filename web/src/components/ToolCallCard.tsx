@@ -1,8 +1,8 @@
 import type { LucideIcon } from 'lucide-react';
 import {
   Terminal, FileText, FilePlus, FileEdit, Search, FolderSearch,
-  Download, Wifi, Database, GitBranch,
-  Image, Camera, Wrench, CheckCircle2, Loader2,
+  Download, Wifi, Database,
+  Camera, Wrench, CheckCircle2, Loader2,
 } from 'lucide-react';
 import { Card, Badge } from '@/components/ui';
 import { t } from '@/lib/i18n';
@@ -30,8 +30,6 @@ const TOOL_ICON_MAP: Record<string, LucideIcon> = {
   http_request: Wifi,
   memory_store: Database,
   memory_recall: Database,
-  git_operations: GitBranch,
-  image_gen: Image,
   screenshot: Camera,
 };
 

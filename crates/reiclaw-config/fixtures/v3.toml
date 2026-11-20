@@ -146,9 +146,6 @@ enabled = true
 max_response_size = 1000000
 timeout_secs = 30
 
-[image_gen]
-enabled = false
-
 [link_enricher]
 enabled = false
 max_links = 3
@@ -243,11 +240,6 @@ external_peers = [
     "@v1_admin",
     "12345678",
 ]
-
-[pipeline]
-allowed_tools = []
-enabled = false
-max_steps = 20
 
 [providers.models.anthropic.agent_complex_agent]
 api_key = "sk-ant-complex"

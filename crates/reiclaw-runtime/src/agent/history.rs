@@ -478,7 +478,7 @@ mod tests {
 
     #[test]
     fn canonicalize_for_wraps_image_producing_and_fetching_tools() {
-        // Default-allow: image_gen (produces) and file_download (fetches) keep
+        // Default-allow: screenshot and admitted MCP tools keep
         // canonicalization so a genuinely produced/fetched image still routes.
         let dir = tempfile::tempdir().unwrap();
         let image = dir.path().join("generated.png");
@@ -486,7 +486,7 @@ mod tests {
         let input = format!("Saved to {}", image.display());
         let expected = format!("[IMAGE:{}]", image.display());
 
-        for tool in ["image_gen", "file_download", "some_future_tool"] {
+        for tool in ["screenshot", "mcp_images_generate", "some_future_tool"] {
             let output = canonicalize_tool_result_media_markers_for(tool, &input);
             assert!(
                 output.contains(&expected),

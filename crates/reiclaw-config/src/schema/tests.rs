@@ -1768,7 +1768,6 @@ async fn config_toml_roundtrip() {
         reliability: ReliabilityConfig::default(),
         scheduler: SchedulerConfig::default(),
         skills: SkillsConfig::default(),
-        pipeline: PipelineConfig::default(),
         query_classification: QueryClassificationConfig::default(),
         heartbeat: HeartbeatConfig {
             enabled: true,
@@ -1834,10 +1833,6 @@ async fn config_toml_roundtrip() {
         tachi: crate::tachi::TachiConfig::default(),
         nodes: NodesConfig::default(),
         onboard_state: OnboardStateConfig::default(),
-        image_gen: ImageGenConfig::default(),
-        file_upload: FileUploadConfig::default(),
-        file_upload_bundle: FileUploadBundleConfig::default(),
-        file_download: FileDownloadConfig::default(),
         verifiable_intent: VerifiableIntentConfig::default(),
         sop: HashMap::new(),
         shell_tool: ShellToolConfig::default(),
@@ -2538,7 +2533,6 @@ async fn config_save_and_load_tmpdir() {
         reliability: ReliabilityConfig::default(),
         scheduler: SchedulerConfig::default(),
         skills: SkillsConfig::default(),
-        pipeline: PipelineConfig::default(),
         query_classification: QueryClassificationConfig::default(),
         heartbeat: HeartbeatConfig::default(),
         cron: HashMap::new(),
@@ -2571,10 +2565,6 @@ async fn config_save_and_load_tmpdir() {
         tachi: crate::tachi::TachiConfig::default(),
         nodes: NodesConfig::default(),
         onboard_state: OnboardStateConfig::default(),
-        image_gen: ImageGenConfig::default(),
-        file_upload: FileUploadConfig::default(),
-        file_upload_bundle: FileUploadBundleConfig::default(),
-        file_download: FileDownloadConfig::default(),
         verifiable_intent: VerifiableIntentConfig::default(),
         sop: HashMap::new(),
         shell_tool: ShellToolConfig::default(),
@@ -2652,10 +2642,6 @@ async fn config_save_encrypts_nested_credentials() {
         "rotation-credential-b".into(),
     ];
     config.nodes.auth_token = Some("nodes-auth-credential".into());
-    config.file_upload.headers = HashMap::from([(
-        "Authorization".to_string(),
-        "Bearer upload-credential".to_string(),
-    )]);
     config.http_request.secrets = HashMap::from([(
         "api_token".to_string(),
         "Bearer http-request-credential".to_string(),
@@ -2799,13 +2785,6 @@ async fn config_save_encrypts_nested_credentials() {
     let nodes_auth = stored.nodes.auth_token.as_deref().unwrap();
     assert!(crate::secrets::SecretStore::is_encrypted(nodes_auth));
     assert_eq!(store.decrypt(nodes_auth).unwrap(), "nodes-auth-credential");
-
-    let upload_auth = stored.file_upload.headers.get("Authorization").unwrap();
-    assert!(crate::secrets::SecretStore::is_encrypted(upload_auth));
-    assert_eq!(
-        store.decrypt(upload_auth).unwrap(),
-        "Bearer upload-credential"
-    );
 
     let http_request_auth = stored.http_request.secrets.get("api_token").unwrap();
     assert!(crate::secrets::SecretStore::is_encrypted(http_request_auth));
@@ -7774,19 +7753,13 @@ async fn prop_is_secret_routes_through_hashmap_keyed_paths() {
 }
 
 #[test]
-async fn file_transfer_header_maps_are_secret() {
-    assert!(Config::prop_is_secret(
-        "file_download.headers.Authorization"
-    ));
-    assert!(Config::prop_is_secret("file_upload.headers.Authorization"));
-    assert!(Config::prop_is_secret(
-        "file_upload_bundle.headers.Authorization"
-    ));
+async fn mcp_header_maps_are_secret() {
     assert!(Config::prop_is_secret(
         "mcp.servers.acme.headers.Authorization"
     ));
-    assert!(!Config::prop_is_secret("file_download.timeout_secs"));
-    assert!(!Config::prop_is_secret("file_download.headers"));
+    assert!(Config::prop_is_secret("mcp.servers.acme.headers.X-Api-Key"));
+    assert!(!Config::prop_is_secret("mcp.servers.acme.command"));
+    assert!(!Config::prop_is_secret("mcp.servers.acme.headers"));
 }
 
 #[test]
