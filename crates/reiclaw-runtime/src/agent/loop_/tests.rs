@@ -10,6 +10,7 @@ use super::{
 
 use crate::agent::history::DEFAULT_MAX_HISTORY_MESSAGES;
 use crate::agent::tool_execution::{ToolDispatchContext, execute_one_tool};
+use crate::agent::turn::stream_consume::StreamOutput;
 use reiclaw_api::channel::{
     Channel, ChannelApprovalRequest, ChannelApprovalResponse, ChannelMessage, SendMessage,
 };
@@ -6568,8 +6569,11 @@ async fn consume_provider_streaming_response_buffers_split_tool_protocol_markers
         "mock-model",
         Some(0.0),
         None,
-        Some(&tx),
-        None, // event_tx
+        StreamOutput {
+            on_delta: Some(&tx),
+            event_tx: None,
+            delivered_event_text: &mut String::new(),
+        },
         false,
     )
     .await
@@ -6655,8 +6659,11 @@ async fn consume_provider_streaming_response_buffers_top_level_tool_call_array()
         "mock-model",
         Some(0.0),
         None,
-        Some(&tx),
-        None, // event_tx
+        StreamOutput {
+            on_delta: Some(&tx),
+            event_tx: None,
+            delivered_event_text: &mut String::new(),
+        },
         false,
     )
     .await
@@ -6693,8 +6700,11 @@ async fn consume_provider_streaming_response_preserves_schema_array_without_tool
         "mock-model",
         Some(0.0),
         None,
-        Some(&tx),
-        None, // event_tx
+        StreamOutput {
+            on_delta: Some(&tx),
+            event_tx: None,
+            delivered_event_text: &mut String::new(),
+        },
         false,
     )
     .await
@@ -6734,8 +6744,11 @@ async fn consume_provider_streaming_response_preserves_unknown_function_call_jso
         "mock-model",
         Some(0.0),
         None,
-        Some(&tx),
-        None, // event_tx
+        StreamOutput {
+            on_delta: Some(&tx),
+            event_tx: None,
+            delivered_event_text: &mut String::new(),
+        },
         false,
     )
     .await
@@ -6775,8 +6788,11 @@ async fn consume_provider_streaming_response_preserves_malformed_unknown_tool_ca
         "mock-model",
         Some(0.0),
         None,
-        Some(&tx),
-        None, // event_tx
+        StreamOutput {
+            on_delta: Some(&tx),
+            event_tx: None,
+            delivered_event_text: &mut String::new(),
+        },
         false,
     )
     .await
@@ -6860,8 +6876,11 @@ async fn consume_provider_streaming_response_buffers_malformed_tool_protocol_jso
         "mock-model",
         Some(0.0),
         None,
-        Some(&tx),
-        None, // event_tx
+        StreamOutput {
+            on_delta: Some(&tx),
+            event_tx: None,
+            delivered_event_text: &mut String::new(),
+        },
         false,
     )
     .await
@@ -6943,8 +6962,11 @@ async fn consume_provider_streaming_response_drops_truncated_protocol_at_finish(
         "mock-model",
         Some(0.0),
         None,
-        Some(&tx),
-        None, // event_tx
+        StreamOutput {
+            on_delta: Some(&tx),
+            event_tx: None,
+            delivered_event_text: &mut String::new(),
+        },
         false,
     )
     .await
@@ -7028,8 +7050,11 @@ async fn consume_provider_streaming_response_preserves_json_fenced_tool_protocol
         "mock-model",
         Some(0.0),
         None,
-        Some(&tx),
-        None, // event_tx
+        StreamOutput {
+            on_delta: Some(&tx),
+            event_tx: None,
+            delivered_event_text: &mut String::new(),
+        },
         false,
     )
     .await
@@ -7117,8 +7142,11 @@ async fn consume_provider_streaming_response_buffers_tool_call_fence_with_tools(
         "mock-model",
         Some(0.0),
         None,
-        Some(&tx),
-        None, // event_tx
+        StreamOutput {
+            on_delta: Some(&tx),
+            event_tx: None,
+            delivered_event_text: &mut String::new(),
+        },
         false,
     )
     .await
@@ -7201,8 +7229,11 @@ async fn consume_provider_streaming_response_preserves_plain_prefix_before_proto
         "mock-model",
         Some(0.0),
         None,
-        Some(&tx),
-        None, // event_tx
+        StreamOutput {
+            on_delta: Some(&tx),
+            event_tx: None,
+            delivered_event_text: &mut String::new(),
+        },
         false,
     )
     .await
@@ -7288,8 +7319,11 @@ async fn consume_provider_streaming_response_preserves_split_protocol_after_plai
         "mock-model",
         Some(0.0),
         None,
-        Some(&tx),
-        None, // event_tx
+        StreamOutput {
+            on_delta: Some(&tx),
+            event_tx: None,
+            delivered_event_text: &mut String::new(),
+        },
         false,
     )
     .await
@@ -7748,8 +7782,11 @@ async fn consume_provider_streaming_response_strips_split_think_tags_before_forw
         "mock-model",
         Some(0.0),
         None,
-        Some(&tx),
-        None, // event_tx
+        StreamOutput {
+            on_delta: Some(&tx),
+            event_tx: None,
+            delivered_event_text: &mut String::new(),
+        },
         true,
     )
     .await
@@ -9236,8 +9273,11 @@ async fn consume_provider_streaming_response_captures_reasoning_content() {
         "deepseek-v4-pro",
         Some(0.2),
         None,
-        None,
-        None, // event_tx
+        StreamOutput {
+            on_delta: None,
+            event_tx: None,
+            delivered_event_text: &mut String::new(),
+        },
         false,
     )
     .await
@@ -9331,8 +9371,11 @@ async fn consume_provider_streaming_response_accumulates_split_reasoning_chunks(
         "deepseek-v4-flash",
         Some(0.2),
         None,
-        None,
-        None, // event_tx
+        StreamOutput {
+            on_delta: None,
+            event_tx: None,
+            delivered_event_text: &mut String::new(),
+        },
         false,
     )
     .await
