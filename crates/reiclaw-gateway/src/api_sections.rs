@@ -12,6 +12,7 @@ use serde::{Deserialize, Serialize};
 
 use super::AppState;
 use super::api::require_auth;
+use crate::auth::PairedAuth;
 
 // ── Response wire types ─────────────────────────────────────────────
 
@@ -108,12 +109,7 @@ pub struct SelectItemResponse {
 /// `GET /api/config/catalog` — list every model provider the CLI wizard knows
 /// about. The dashboard shows these in the "+ Add model provider" picker so
 /// CLI / web stay in sync.
-pub async fn handle_catalog(State(state): State<AppState>, headers: HeaderMap) -> Response {
-    if let Err(e) = require_auth(&state, &headers) {
-        return e.into_response();
-    }
-    let _ = state;
-
+pub async fn handle_catalog(_auth: PairedAuth) -> Response {
     let model_providers: Vec<CatalogModelProvider> = reiclaw_providers::list_model_providers()
         .into_iter()
         .map(|p| CatalogModelProvider {
@@ -137,12 +133,9 @@ pub struct ModelsQuery {
 
 pub async fn handle_catalog_models(
     State(state): State<AppState>,
-    headers: HeaderMap,
+    _auth: PairedAuth,
     Query(q): Query<ModelsQuery>,
 ) -> Response {
-    if let Err(e) = require_auth(&state, &headers) {
-        return e.into_response();
-    }
     let local = reiclaw_runtime::quickstart::model_provider_is_local(&q.model_provider);
     // Snapshot config so the catalog resolves the alias credential and can reach
     // the native /models endpoint (surfacing new native-only models that the
@@ -275,10 +268,7 @@ fn quickstart_agent_missing_requirements(
     missing
 }
 
-pub async fn handle_section_status(State(state): State<AppState>, headers: HeaderMap) -> Response {
-    if let Err(e) = require_auth(&state, &headers) {
-        return e.into_response();
-    }
+pub async fn handle_section_status(State(state): State<AppState>, _auth: PairedAuth) -> Response {
     let cfg = state.config.read().clone();
     axum::Json(derive_section_status(&cfg)).into_response()
 }
@@ -328,18 +318,12 @@ pub fn build_agent_options(cfg: &reiclaw_config::schema::Config) -> AgentOptions
 /// `GET /api/config/agent-options` — every alias-reference list the
 /// agent form needs, derived from the live config. Mirrors the lists the
 /// TUI computes locally for its alias pickers.
-pub async fn handle_agent_options(State(state): State<AppState>, headers: HeaderMap) -> Response {
-    if let Err(e) = require_auth(&state, &headers) {
-        return e.into_response();
-    }
+pub async fn handle_agent_options(State(state): State<AppState>, _auth: PairedAuth) -> Response {
     let cfg = state.config.read().clone();
     axum::Json(build_agent_options(&cfg)).into_response()
 }
 
-pub async fn handle_sections(State(state): State<AppState>, headers: HeaderMap) -> Response {
-    if let Err(e) = require_auth(&state, &headers) {
-        return e.into_response();
-    }
+pub async fn handle_sections(State(state): State<AppState>, _auth: PairedAuth) -> Response {
     let cfg = state.config.read().clone();
     let completed: std::collections::HashSet<String> = cfg
         .onboard_state
@@ -500,12 +484,9 @@ pub struct SectionPath {
 
 pub async fn handle_section_picker(
     State(state): State<AppState>,
-    headers: HeaderMap,
+    _auth: PairedAuth,
     axum::extract::Path(SectionPath { section }): axum::extract::Path<SectionPath>,
 ) -> Response {
-    if let Err(e) = require_auth(&state, &headers) {
-        return e.into_response();
-    }
     let cfg = state.config.read().clone();
 
     use reiclaw_config::sections::Section;

@@ -20,7 +20,7 @@ the live surface.
 | Memory and review | `GET/POST /api/memory`, `DELETE /api/memory/{key}`, `/api/user-model/*`, `/api/soul*`, `/api/review/inbox` |
 | Personality and skills | `/api/personality*`, `/api/skills/*`, `GET /api/agents/{alias}/skills` |
 | Diagnostics | `GET /api/logs`, `GET /api/cost`, `GET /api/tools` |
-| Channels | `GET /api/channels`, `POST /api/channels/{channel}/relink` (until #378) |
+| Channels | `GET /api/channels` |
 | Config (dashboard editor, until #379) | `/api/config*`, `POST /api/channels/bind` |
 | Edge devices (`nodes` feature) | `GET /ws/nodes` (WebSocket), `POST /api/node-identities/pairing`, `POST /api/node-identities`, `DELETE /api/node-identities/{id}` |
 | Dashboard assets | `GET /_app/{*path}`, SPA fallback |
@@ -897,13 +897,13 @@ people only through a bridge (or an in-core channel). The SSE stream at
 Two endpoints answer the question "what can I do here?":
 
 - `OPTIONS /api/config` returns the JSON Schema for the whole-config type.
-  Static per build; clients should cache against the `ETag` header. Its current
-  `Allow` header still lists legacy `PUT`, which the router does not register.
+  Static per build; clients should cache against the `ETag` header.
+  Its `Allow` header is `PATCH, OPTIONS`.
 - `OPTIONS /api/config/prop?path=<dotted>` returns the schema fragment for a
   specific path with `Allow: GET, PUT, DELETE, OPTIONS`. Returns 404 if the
   path doesn't exist in the schema.
 
-`OPTIONS` returns capabilities. `GET /api/config/prop` and `GET /api/config/list` return the user's current values. Forms in the dashboard issue `OPTIONS` once at load time to learn types and constraints, then `GET` to populate fields, then `PUT`/`PATCH` to write. A compatibility `GET /api/config` also returns a whole-config snapshot with secrets masked so older bundled dashboard pages do not fail against newer gateways. New clients should prefer the per-property surface because it carries field metadata and explicit secret handling.
+`OPTIONS` returns capabilities. `GET /api/config/prop` and `GET /api/config/list` return the user's current values. Forms in the dashboard issue `OPTIONS` once at load time to learn types and constraints, then `GET` to populate fields, then `PUT`/`PATCH` to write. The whole-config `GET /api/config` was retired by ADR-026 S8; clients read current values through the per-property surface, which carries field metadata and explicit secret handling.
 
 CORS preflight requests (those carrying `Access-Control-Request-Method`) get
 the standard preflight response and short-circuit before the schema body is
@@ -913,7 +913,6 @@ returned.
 
 | Method | Path | Purpose |
 |---|---|---|
-| `GET` | `/api/config` | Compatibility whole-config snapshot with secrets masked; new clients should prefer the per-property surface. |
 | `PATCH` | `/api/config` | Apply a JSON Patch (RFC 6902) document atomically. |
 | `OPTIONS` | `/api/config` | Whole-config JSON Schema (capabilities, not values). |
 | `GET` | `/api/config/prop?path=...` | Read one field. Secrets return `{path, populated}` only. |
@@ -951,10 +950,8 @@ response shape (`--json` for scripts).
 
 Per-property reads never expose secret fields (those marked `#[secret]` or
 `#[derived_from_secret]` in the schema). Their responses carry
-`{populated: bool}` only, with no value, length, masked stand-in, or hash. The
-compatibility `GET /api/config` instead serializes the whole config after
-applying `MaskSecrets`, so secret fields can appear there only as masked
-placeholders. Neither config read surface returns the underlying secret value.
+`{populated: bool}` only, with no value, length, masked stand-in, or hash.
+`GET /api/config/list` applies the same secret-field boundary.
 
 `PUT` and `PATCH` write the new secret value and respond with
 `{populated: true}`; `DELETE` clears it and responds with

@@ -4,8 +4,8 @@ use std::collections::{BTreeMap, HashMap};
 
 use axum::{
     Json,
-    extract::{Query, State},
-    http::{HeaderMap, StatusCode},
+    extract::Query,
+    http::StatusCode,
     response::{IntoResponse, Response},
 };
 use reiclaw_log::{
@@ -13,8 +13,7 @@ use reiclaw_log::{
 };
 use serde::Serialize;
 
-use super::AppState;
-use super::api::require_auth;
+use crate::auth::PairedAuth;
 
 const TOP_LEVEL_PARAMS: &[&str] = &[
     "since_ts",
@@ -72,14 +71,9 @@ fn attribution_keys_for_response() -> Vec<String> {
 
 #[allow(deprecated)] // we still forward the legacy cursor for backwards compat
 pub async fn handle_api_logs(
-    State(state): State<AppState>,
-    headers: HeaderMap,
+    _auth: PairedAuth,
     Query(params): Query<HashMap<String, String>>,
 ) -> Response {
-    if let Err(e) = require_auth(&state, &headers) {
-        return e.into_response();
-    }
-
     let Some(path) = reiclaw_log::current_log_path() else {
         return Json(LogsResponse {
             events: Vec::new(),

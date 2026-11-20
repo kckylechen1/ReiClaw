@@ -21,6 +21,7 @@ pub mod api_skills;
 pub mod api_soul;
 pub mod api_user_model;
 mod attention;
+pub mod auth;
 pub mod auth_rate_limit;
 mod delegation_notifications;
 #[cfg(feature = "nodes")]
@@ -46,7 +47,7 @@ use anyhow::{Context, Result};
 use axum::{
     Router,
     extract::{ConnectInfo, Query, State},
-    http::{HeaderMap, StatusCode, header},
+    http::{HeaderMap, StatusCode},
     response::{IntoResponse, Json},
     routing::{delete, get, post, put},
 };
@@ -1419,19 +1420,7 @@ pub async fn run_gateway(
         // ── Web Dashboard API routes ──
         .route("/api/status", get(api::handle_api_status))
         .route("/api/logs", get(api_logs::handle_api_logs))
-        .route(
-            "/api/config",
-            get(api_config::handle_config_get)
-                .patch(api_config::handle_patch)
-                .options(api_config::handle_options_config),
-        )
-        .route(
-            "/api/config/prop",
-            get(api_config::handle_prop_get)
-                .put(api_config::handle_prop_put)
-                .delete(api_config::handle_prop_delete)
-                .options(api_config::handle_options_prop),
-        )
+        .merge(api_config::routes())
         .route("/api/config/list", get(api_config::handle_list))
         .route("/api/config/drift", get(api_config::handle_drift))
         .route(
@@ -1526,10 +1515,6 @@ pub async fn run_gateway(
         .route("/api/memory/{key}", delete(api::handle_api_memory_delete))
         .route("/api/cost", get(api::handle_api_cost))
         .route("/api/channels", get(api::handle_api_channels))
-        .route(
-            "/api/channels/{channel}/relink",
-            post(api::handle_api_channel_relink),
-        )
         .route("/api/health", get(api::handle_api_health))
         .route("/api/sessions", get(api::handle_api_sessions_list))
         .route("/api/sessions/running", get(api::handle_api_sessions_running))
@@ -2269,12 +2254,7 @@ async fn handle_webhook(
             });
             return (StatusCode::TOO_MANY_REQUESTS, Json(err));
         }
-        let auth = headers
-            .get(header::AUTHORIZATION)
-            .and_then(|v| v.to_str().ok())
-            .unwrap_or("");
-        let token = auth.strip_prefix("Bearer ").unwrap_or("");
-        if !state.pairing.is_authenticated(token) {
+        if !auth::paired_authenticates(&state, &headers) {
             state.auth_limiter.record_attempt(&rate_key);
             ::reiclaw_log::record!(
                 WARN,

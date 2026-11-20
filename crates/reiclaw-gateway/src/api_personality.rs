@@ -5,7 +5,7 @@
 use axum::{
     Json,
     extract::{Query, State},
-    http::{HeaderMap, StatusCode},
+    http::StatusCode,
     response::IntoResponse,
 };
 use reiclaw_runtime::agent::personality::{EDITABLE_PERSONALITY_FILES, MAX_FILE_CHARS};
@@ -15,7 +15,7 @@ use std::path::{Path, PathBuf};
 use std::time::SystemTime;
 
 use super::AppState;
-use super::api::require_auth;
+use crate::auth::PairedAuth;
 
 // ── Response wire types ─────────────────────────────────────────────
 
@@ -185,13 +185,9 @@ fn truncate_to_chars(content: &str, max: usize) -> (String, bool) {
 /// named agent's workspace.
 pub async fn handle_index(
     State(state): State<AppState>,
-    headers: HeaderMap,
+    _auth: PairedAuth,
     Query(q): Query<AgentQuery>,
 ) -> impl IntoResponse {
-    if let Err(e) = require_auth(&state, &headers) {
-        return e.into_response();
-    }
-
     let workspace_dir = match resolve_agent_workspace(&state, q.agent.as_deref()) {
         Ok(p) => p,
         Err(resp) => return resp.into_response(),
@@ -229,14 +225,10 @@ pub async fn handle_index(
 /// GET /api/personality/{filename} — read one file's full content.
 pub async fn handle_get(
     State(state): State<AppState>,
-    headers: HeaderMap,
+    _auth: PairedAuth,
     axum::extract::Path(filename): axum::extract::Path<String>,
     Query(q): Query<AgentQuery>,
 ) -> impl IntoResponse {
-    if let Err(e) = require_auth(&state, &headers) {
-        return e.into_response();
-    }
-
     let allowed = match validate_filename(&filename) {
         Ok(f) => f,
         Err(e) => return e.into_response(),
@@ -284,15 +276,11 @@ pub async fn handle_get(
 /// PUT /api/personality/{filename} — overwrite the file.
 pub async fn handle_put(
     State(state): State<AppState>,
-    headers: HeaderMap,
+    _auth: PairedAuth,
     axum::extract::Path(filename): axum::extract::Path<String>,
     Query(q): Query<AgentQuery>,
     Json(body): Json<PersonalityPutBody>,
 ) -> impl IntoResponse {
-    if let Err(e) = require_auth(&state, &headers) {
-        return e.into_response();
-    }
-
     let allowed = match validate_filename(&filename) {
         Ok(f) => f,
         Err(e) => return e.into_response(),
@@ -372,13 +360,9 @@ pub async fn handle_put(
 
 pub async fn handle_templates(
     State(state): State<AppState>,
-    headers: HeaderMap,
+    _auth: PairedAuth,
     Query(q): Query<TemplateQuery>,
 ) -> impl IntoResponse {
-    if let Err(e) = require_auth(&state, &headers) {
-        return e.into_response();
-    }
-
     let (memory_default_enabled, agent_display_default) = {
         let cfg = state.config.read();
         let mem = cfg.memory.backend.as_str() != "none";

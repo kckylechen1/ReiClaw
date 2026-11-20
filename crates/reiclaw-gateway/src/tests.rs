@@ -1,7 +1,7 @@
 #[cfg(test)]
 use super::*;
 use async_trait::async_trait;
-use axum::http::{HeaderValue, Uri};
+use axum::http::{HeaderValue, Uri, header};
 use axum::response::IntoResponse;
 use http_body_util::BodyExt;
 use parking_lot::{Mutex, RwLock};

@@ -3,7 +3,7 @@
 use axum::{
     Json,
     extract::{Path, State},
-    http::{HeaderMap, StatusCode},
+    http::StatusCode,
     response::{IntoResponse, Response},
 };
 use reiclaw_runtime::skills::{
@@ -13,7 +13,7 @@ use reiclaw_runtime::skills::{
 use serde::{Deserialize, Serialize};
 
 use super::AppState;
-use super::api::require_auth;
+use crate::auth::PairedAuth;
 
 // ── Response wire types ─────────────────────────────────────────────
 
@@ -150,13 +150,7 @@ pub struct DeleteQuery {
 /// `GET /api/skills/slash-option-kinds` — the canonical typed-slash-option kind
 /// registry (kind list + per-kind constraint capabilities), built by walking
 /// `SlashOptionKind::ALL`. Surfaces read this instead of restating the kind set.
-pub async fn handle_slash_option_kinds(
-    State(state): State<AppState>,
-    headers: HeaderMap,
-) -> Response {
-    if let Err(e) = require_auth(&state, &headers) {
-        return e.into_response();
-    }
+pub async fn handle_slash_option_kinds(_auth: PairedAuth) -> Response {
     Json(SlashOptionKindsResult {
         kinds: reiclaw_runtime::skills::slash_option_kinds(),
     })
@@ -164,10 +158,7 @@ pub async fn handle_slash_option_kinds(
 }
 
 /// `GET /api/skills/bundles`
-pub async fn handle_list_bundles(State(state): State<AppState>, headers: HeaderMap) -> Response {
-    if let Err(e) = require_auth(&state, &headers) {
-        return e.into_response();
-    }
+pub async fn handle_list_bundles(State(state): State<AppState>, _auth: PairedAuth) -> Response {
     let config = state.config.read().clone();
     let install_root = config.install_root_dir();
     let service = SkillsService::new(&config, install_root);
@@ -192,12 +183,9 @@ pub async fn handle_list_bundles(State(state): State<AppState>, headers: HeaderM
 /// `GET /api/skills/bundles/:alias/skills`
 pub async fn handle_list_skills(
     State(state): State<AppState>,
-    headers: HeaderMap,
+    _auth: PairedAuth,
     Path(alias): Path<String>,
 ) -> Response {
-    if let Err(e) = require_auth(&state, &headers) {
-        return e.into_response();
-    }
     let config = state.config.read().clone();
     let install_root = config.install_root_dir();
     let service = SkillsService::new(&config, install_root);
@@ -221,12 +209,9 @@ pub async fn handle_list_skills(
 
 pub async fn handle_agent_skills(
     State(state): State<AppState>,
-    headers: HeaderMap,
+    _auth: PairedAuth,
     Path(alias): Path<String>,
 ) -> Response {
-    if let Err(e) = require_auth(&state, &headers) {
-        return e.into_response();
-    }
     let config = state.config.read().clone();
     let install_root = config.install_root_dir();
     let service = SkillsService::new(&config, install_root);
@@ -293,13 +278,10 @@ fn dropped_skill_entry(d: DroppedSkill) -> DroppedSkillEntry {
 /// `POST /api/skills/bundles/:alias/skills`
 pub async fn handle_create_skill(
     State(state): State<AppState>,
-    headers: HeaderMap,
+    _auth: PairedAuth,
     Path(alias): Path<String>,
     Json(body): Json<SkillCreateBody>,
 ) -> Response {
-    if let Err(e) = require_auth(&state, &headers) {
-        return e.into_response();
-    }
     let config = state.config.read().clone();
     let install_root = config.install_root_dir();
     let service = SkillsService::new(&config, install_root);
@@ -332,12 +314,9 @@ pub async fn handle_create_skill(
 /// `GET /api/skills/bundles/:alias/skills/:name`
 pub async fn handle_read_skill(
     State(state): State<AppState>,
-    headers: HeaderMap,
+    _auth: PairedAuth,
     Path((alias, name)): Path<(String, String)>,
 ) -> Response {
-    if let Err(e) = require_auth(&state, &headers) {
-        return e.into_response();
-    }
     let config = state.config.read().clone();
     let install_root = config.install_root_dir();
     let service = SkillsService::new(&config, install_root);
@@ -361,13 +340,10 @@ pub async fn handle_read_skill(
 /// `PUT /api/skills/bundles/:alias/skills/:name`
 pub async fn handle_write_skill(
     State(state): State<AppState>,
-    headers: HeaderMap,
+    _auth: PairedAuth,
     Path((alias, name)): Path<(String, String)>,
     Json(body): Json<SkillWriteBody>,
 ) -> Response {
-    if let Err(e) = require_auth(&state, &headers) {
-        return e.into_response();
-    }
     let config = state.config.read().clone();
     let install_root = config.install_root_dir();
     let service = SkillsService::new(&config, install_root);
@@ -389,13 +365,10 @@ pub async fn handle_write_skill(
 /// `DELETE /api/skills/bundles/:alias/skills/:name?purge=true`
 pub async fn handle_delete_skill(
     State(state): State<AppState>,
-    headers: HeaderMap,
+    _auth: PairedAuth,
     Path((alias, name)): Path<(String, String)>,
     axum::extract::Query(q): axum::extract::Query<DeleteQuery>,
 ) -> Response {
-    if let Err(e) = require_auth(&state, &headers) {
-        return e.into_response();
-    }
     let config = state.config.read().clone();
     let install_root = config.install_root_dir();
     let service = SkillsService::new(&config, install_root);

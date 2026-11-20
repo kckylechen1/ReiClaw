@@ -4,6 +4,7 @@ use reiclaw_api::memory_traits::DailyDigest;
 use reiclaw_api::model_provider::ModelProvider;
 use reiclaw_memory::companion::reflection::{OwnerMessages, reflect};
 use reiclaw_memory::companion::{SoulStory, StoryKind, UserModelKind};
+use std::net::SocketAddr;
 use std::sync::Arc;
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
 
