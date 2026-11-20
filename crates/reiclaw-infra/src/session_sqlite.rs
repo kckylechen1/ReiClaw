@@ -929,6 +929,14 @@ impl SessionBackend for SqliteSessionBackend {
         self.load_session_window_impl(session_key)
     }
 
+    fn load_session_window_if_advanced(
+        &self,
+        session_key: &str,
+        applied_watermark: i64,
+    ) -> std::io::Result<Option<SessionWindow>> {
+        self.load_session_window_if_advanced_impl(session_key, applied_watermark)
+    }
+
     fn search_session_fts(
         &self,
         allowed_session_keys: &[&str],

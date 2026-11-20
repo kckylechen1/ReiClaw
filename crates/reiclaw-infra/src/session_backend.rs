@@ -447,6 +447,17 @@ pub trait SessionBackend: Send + Sync {
         })
     }
 
+    /// Refresh an already hydrated session only when its active checkpoint has
+    /// advanced. Checkpoint-capable backends override this to avoid reading the
+    /// full transcript on every foreground turn.
+    fn load_session_window_if_advanced(
+        &self,
+        _session_key: &str,
+        _applied_watermark: i64,
+    ) -> std::io::Result<Option<SessionWindow>> {
+        Ok(None)
+    }
+
     /// Scoped FTS5 search restricted to `allowed_session_keys` before `LIMIT`.
     fn search_session_fts(
         &self,
