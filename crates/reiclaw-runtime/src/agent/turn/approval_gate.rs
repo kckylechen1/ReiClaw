@@ -26,13 +26,14 @@ pub(crate) async fn gate_tool_approval(
     iteration: usize,
 ) -> ApprovalGateOutcome {
     let mut approval_requirement = ctx
+        .exec
         .approval
         .map(|mgr| mgr.approval_requirement(tool_name))
         .unwrap_or(ApprovalRequirement::NotRequired);
 
     // Outcomes that never reach a human still belong on the durable trail:
     // "nobody was asked, at 03:00" is the row an investigation needs most.
-    if let Some(mgr) = ctx.approval
+    if let Some(mgr) = ctx.exec.approval
         && approval_requirement != ApprovalRequirement::Prompt
     {
         let decision = match approval_requirement {
@@ -50,7 +51,7 @@ pub(crate) async fn gate_tool_approval(
         );
     }
 
-    if let Some(mgr) = ctx.approval
+    if let Some(mgr) = ctx.exec.approval
         && approval_requirement == ApprovalRequirement::Prompt
     {
         let request = ApprovalRequest {
@@ -186,7 +187,7 @@ pub(crate) async fn gate_tool_approval(
                     .with_category(::reiclaw_log::EventCategory::Tool)
                     .with_outcome(::reiclaw_log::EventOutcome::Failure)
                     .with_attrs(tool_log_attributes(tool_name, ::serde_json::json!({
-                        "model": ctx.model,
+                        "model": ctx.exec.model_access.model,
                         "iteration": iteration + 1,
                         "tool": tool_name,
                         "arguments": tool_args.to_string(),
@@ -243,7 +244,7 @@ pub(crate) async fn gate_tool_approval(
                     .with_attrs(tool_log_attributes(
                         tool_name,
                         ::serde_json::json!({
-                            "model": ctx.model,
+                            "model": ctx.exec.model_access.model,
                             "iteration": iteration + 1,
                             "tool": tool_name,
                             "arguments": tool_args.to_string(),
@@ -288,7 +289,7 @@ pub(crate) async fn gate_tool_approval(
                         .with_category(::reiclaw_log::EventCategory::Tool)
                         .with_outcome(::reiclaw_log::EventOutcome::Failure)
                         .with_attrs(::serde_json::json!({
-                            "model": ctx.model,
+                            "model": ctx.exec.model_access.model,
                             "iteration": iteration + 1,
                             "tool": tool_name,
                             "failure": format!("{failure:?}"),

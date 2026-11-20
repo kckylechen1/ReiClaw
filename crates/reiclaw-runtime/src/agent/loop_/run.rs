@@ -487,111 +487,61 @@ pub async fn run(
                 ChatMessage::user(&enriched),
             ];
 
-            // Compute per-turn excluded MCP tools from tool_filter_groups.
-            let excluded_tools = compute_excluded_mcp_tools(
-                &tools_registry,
-                &agent.resolved.tool_filter_groups,
-                &effective_msg,
-                &mcp_tool_names,
+            // The registry, activation set, model/thinking selection and persona
+            // did not change while autosaving and appending this message. Reuse
+            // the same prompt and exclusions for this one round.
+            let loop_knobs = LoopKnobs::default();
+            let exec = ResolvedAgentExecution::resolve(
+                ResolvedModelAccess {
+                    model_provider: model_provider.as_ref(),
+                    provider_name: &provider_name,
+                    model: &model_name,
+                    temperature: effective_temperature,
+                },
+                ResolvedIo {
+                    tools_registry: &tools_registry,
+                    observer: observer.as_ref(),
+                    silent: false,
+                    approval: approval_manager.as_ref(),
+                    multimodal_config: &config.multimodal,
+                    config: Some(&config),
+                    hooks: None,
+                    activated_tools: activated_handle.as_ref(),
+                    receipt_generator: None,
+                },
+                ResolvedRuntimeKnobs {
+                    excluded_tools: &excluded_tools,
+                    ..ResolvedRuntimeKnobs::for_agent(&agent.resolved, &config.pacing, &loop_knobs)
+                },
+            )
+            .with_task_owner(task_owner.as_ref());
+            let mut turn = ToolLoop::for_turn(
+                exec,
+                &mut history,
+                crate::agent::TurnMeta {
+                    channel_name,
+                    agent_alias: Some(agent_alias),
+                    parent_agent_alias: None,
+                    turn_id: &turn_id,
+                },
+                IngressContext::from_origin(origin),
             );
-
-            if let Some(sys_msg) = history.first_mut()
-                && sys_msg.role == "system"
-            {
-                sys_msg.content = build_system_prompt_for_turn(
-                    &agent_workspace,
-                    &model_name,
-                    &tool_descs,
-                    &deferred_section,
-                    &skills,
-                    Some(&agent.identity),
-                    bootstrap_max_chars,
-                    &risk_profile,
-                    model_provider.as_ref(),
-                    &tools_registry,
-                    &excluded_tools,
-                    activated_handle.as_ref(),
-                    agent.resolved.strict_tool_parsing,
-                    eff_prompt_injection_mode,
-                    eff_compact_context,
-                    eff_max_system_prompt_chars,
-                    true,
-                    config.channels.show_tool_calls,
-                    persona_section.as_deref(),
-                    persona.legacy_files,
-                    thinking_params.system_prompt_prefix.as_deref(),
-                )?;
-            }
+            turn.memory = Some(crate::agent::memory_inject::TurnMemory {
+                handle: mem.as_ref(),
+                query: effective_msg.clone(),
+                sessions: vec![memory_session_id.clone()],
+                suppress: suppress_memory_inject,
+                cfg: crate::agent::memory_inject::MemoryInjectConfig::from_memory_config(
+                    &config.memory,
+                    crate::agent::memory_inject::DEFAULT_RECALL_LIMIT,
+                ),
+            });
             let response = reiclaw_api::NATIVE_THINKING_OVERRIDE
                 .scope(
                     thinking_params.native_thinking,
                     TOOL_LOOP_COST_TRACKING_CONTEXT.scope(
                         cost_tracking_context.clone(),
-                        crate::agent::turn::run_tool_call_loop_with_security(
-                            ToolLoop {
-                            exec: ResolvedAgentExecution::resolve(
-                                ResolvedModelAccess {
-                                    model_provider: model_provider.as_ref(),
-                                    provider_name: &provider_name,
-                                    model: &model_name,
-                                    temperature: effective_temperature,
-                                },
-                                ResolvedIo {
-                                    tools_registry: &tools_registry,
-                                    observer: observer.as_ref(),
-                                    silent: false,
-                                    approval: approval_manager.as_ref(),
-                                    multimodal_config: &config.multimodal,
-                                    config: Some(&config),
-                                    hooks: None,
-                                    activated_tools: activated_handle.as_ref(),
-                                    receipt_generator: None,
-                                },
-                                ResolvedRuntimeKnobs {
-                                    max_tool_iterations: agent.resolved.max_tool_iterations,
-                                    excluded_tools: &excluded_tools,
-                                    dedup_exempt_tools: &agent.resolved.tool_call_dedup_exempt,
-                                    pacing: &config.pacing,
-                                    strict_tool_parsing: agent.resolved.strict_tool_parsing,
-                                    parallel_tools: agent.resolved.parallel_tools,
-                                    max_tool_result_chars: agent.resolved.max_tool_result_chars,
-                                    keep_tool_context_turns: agent.resolved.keep_tool_context_turns,
-                                    context_token_budget: agent
-                                        .resolved
-                                        .effective_context_budget(),
-                                    knobs: &LoopKnobs::default(),
-                                },
-                            ).with_task_owner(task_owner.as_ref()),
-                            history: &mut history,
-                            channel_name,
-                            channel_reply_target: None,
-                            cancellation_token: None,
-                            on_delta: None,
-                            shared_budget: None,
-                            channel: None,
-                            collected_receipts: None,
-                            event_tx: None,
-                            steering: None,
-                            new_messages_out: None,
-                            image_cache: None,
-                            // Origin is threaded from the entry point;
-                            // source/transport/trust stay phase-1
-                            // placeholders until per-transport stamping.
-                            memory: Some(crate::agent::memory_inject::TurnMemory {
-                                handle: mem.as_ref(),
-                                query: effective_msg.clone(),
-                                sessions: vec![memory_session_id.clone()],
-                                suppress: suppress_memory_inject,
-                                cfg: crate::agent::memory_inject::MemoryInjectConfig::from_memory_config(
-                                    &config.memory,
-                                    crate::agent::memory_inject::DEFAULT_RECALL_LIMIT,
-                                ),
-                            }),
-                            ingress: IngressContext::from_origin(origin),
-                            agent_alias: Some(agent_alias),
-                            parent_agent_alias: None,
-                            turn_id: &turn_id,
-                        }, Some(&security)),
+                        crate::agent::turn::run_tool_call_loop_with_security(turn, Some(&security)),
                     ),
                 )
                 .await?;

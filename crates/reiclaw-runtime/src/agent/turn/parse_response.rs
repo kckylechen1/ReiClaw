@@ -132,9 +132,9 @@ pub(crate) async fn interpret_chat_response(
         .map(|u| (u.input_tokens, u.output_tokens))
         .unwrap_or((None, None));
 
-    ctx.observer.record_event(&ObserverEvent::LlmResponse {
-        model_provider: ctx.provider_name.to_string(),
-        model: ctx.model.to_string(),
+    ctx.exec.observer.record_event(&ObserverEvent::LlmResponse {
+        model_provider: ctx.exec.model_access.provider_name.to_string(),
+        model: ctx.exec.model_access.model.to_string(),
         duration: llm_started_at.elapsed(),
         success: true,
         error_message: None,
@@ -152,7 +152,13 @@ pub(crate) async fn interpret_chat_response(
     let call_cost_usd = resp
         .usage
         .as_ref()
-        .and_then(|usage| record_tool_loop_cost_usage(ctx.provider_name, ctx.model, usage))
+        .and_then(|usage| {
+            record_tool_loop_cost_usage(
+                ctx.exec.model_access.provider_name,
+                ctx.exec.model_access.model,
+                usage,
+            )
+        })
         .map(|(_total_tokens, cost_usd)| cost_usd);
 
     // Per-LLM-call usage event, right after the observer success event
@@ -195,7 +201,7 @@ pub(crate) async fn interpret_chat_response(
 
     if calls.is_empty()
         && has_resolvable_tools
-        && !ctx.strict_tool_parsing
+        && !ctx.exec.strict_tool_parsing
         && !looks_like_tool_protocol_example(&response_text)
     {
         let (fallback_text, fallback_calls) = parse_tool_calls(&response_text);
@@ -213,7 +219,7 @@ pub(crate) async fn interpret_chat_response(
         calls = filtered_calls;
     }
 
-    let parse_issue = if ctx.strict_tool_parsing {
+    let parse_issue = if ctx.exec.strict_tool_parsing {
         None
     } else if !has_resolvable_tools {
         // Knob-gated (embedders return model text verbatim); a live stream
@@ -246,7 +252,7 @@ pub(crate) async fn interpret_chat_response(
                 .with_category(::reiclaw_log::EventCategory::Tool)
                 .with_outcome(::reiclaw_log::EventOutcome::Failure)
                 .with_attrs(::serde_json::json!({
-                    "model": ctx.model,
+                    "model": ctx.exec.model_access.model,
                     "iteration": iteration + 1,
                     "issue": issue.as_str(),
                     "trace_id": ctx.turn_id,
@@ -256,7 +262,7 @@ pub(crate) async fn interpret_chat_response(
     }
 
     let mut response_attrs = ::serde_json::json!({
-        "model": ctx.model,
+        "model": ctx.exec.model_access.model,
         "iteration": iteration + 1,
         "input_tokens": resp_input_tokens,
         "output_tokens": resp_output_tokens,
@@ -464,23 +470,24 @@ mod cost_usd_regression_tests {
         // TurnCtx with event_tx wired; everything else empty/None.
         let (tx, mut rx) = tokio::sync::mpsc::channel::<TurnEvent>(4);
         let pacing = reiclaw_config::schema::PacingConfig::default();
-        let dedup_exempt_tools: Vec<String> = Vec::new();
+        let exec = crate::agent::turn::execution::test_support::execution(
+            crate::agent::turn::ResolvedModelAccess {
+                model_provider: &crate::agent::turn::execution::test_support::UncalledModelProvider,
+                provider_name: provider,
+                model,
+                temperature: None,
+            },
+            &crate::observability::NoopObserver,
+            &pacing,
+        );
         let ctx = TurnCtx {
+            exec: &exec,
             parent_agent_alias: None,
-            observer: &crate::observability::NoopObserver,
-            provider_name: provider,
-            model,
-            temperature: None,
-            approval: None,
             channel_name: "",
             channel_reply_target: None,
             cancellation_token: None,
             on_delta: None,
             event_tx: Some(&tx),
-            hooks: None,
-            dedup_exempt_tools: &dedup_exempt_tools,
-            pacing: &pacing,
-            strict_tool_parsing: false,
             channel: None,
             agent_alias: None,
             turn_id: "turn-cost-regression",

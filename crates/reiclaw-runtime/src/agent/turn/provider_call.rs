@@ -155,7 +155,7 @@ pub(crate) async fn announce_llm_request(
         let _ = tx.send(StreamDelta::Status(phase)).await;
     }
 
-    ctx.observer.record_event(&ObserverEvent::LlmRequest {
+    ctx.exec.observer.record_event(&ObserverEvent::LlmRequest {
         model_provider: active_model_provider_name.to_string(),
         model: active_model.to_string(),
         messages_count: history.len(),
@@ -215,8 +215,10 @@ pub(crate) async fn announce_llm_request(
     let llm_started_at = Instant::now();
 
     // Fire void hook before LLM call
-    if let Some(hooks) = ctx.hooks {
-        hooks.fire_llm_input(history, ctx.model).await;
+    if let Some(hooks) = ctx.exec.hooks {
+        hooks
+            .fire_llm_input(history, ctx.exec.model_access.model)
+            .await;
     }
 
     llm_started_at
@@ -322,14 +324,14 @@ pub(crate) async fn call_provider(
                     request_tools,
                     known_tool_names,
                     active_model,
-                    ctx.temperature,
+                    ctx.exec.model_access.temperature,
                     ctx.cancellation_token,
                     StreamOutput {
                         on_delta: ctx.on_delta,
                         event_tx: ctx.event_tx,
                         delivered_event_text: &mut delivered_event_text,
                     },
-                    ctx.strict_tool_parsing,
+                    ctx.exec.strict_tool_parsing,
                 );
                 // Let `consume_provider_streaming_response` handle `ctx.cancellation_token`
                 // directly so cancel after streamed deltas returns `StreamCancelledAfterOutput`
@@ -418,7 +420,7 @@ pub(crate) async fn call_provider(
                                     .flatten(),
                             },
                             active_model,
-                            ctx.temperature,
+                            ctx.exec.model_access.temperature,
                         );
                         match run_provider_future_with_estop(
                             ctx,
@@ -449,11 +451,10 @@ pub(crate) async fn call_provider(
                             .flatten(),
                     },
                     active_model,
-                    ctx.temperature,
+                    ctx.exec.model_access.temperature,
                 );
 
-                let step_timeout = ctx
-                    .pacing
+                let step_timeout = ctx.exec.pacing
                     .step_timeout_secs
                     .filter(|&secs| secs > 0)
                     .map(Duration::from_secs);
@@ -489,6 +490,7 @@ pub(crate) async fn call_provider(
 #[cfg(test)]
 mod payload_capture_tests {
     use super::super::context::TurnCtx;
+    use super::super::execution::{ResolvedAgentExecution, ResolvedModelAccess, test_support};
     use super::announce_llm_request;
     use crate::observability::NoopObserver;
     use async_trait::async_trait;
@@ -524,23 +526,15 @@ mod payload_capture_tests {
         }
     }
 
-    fn test_ctx<'a>(observer: &'a NoopObserver, pacing: &'a PacingConfig) -> TurnCtx<'a> {
+    fn test_ctx<'a>(exec: &'a ResolvedAgentExecution<'a>) -> TurnCtx<'a> {
         TurnCtx {
+            exec,
             parent_agent_alias: None,
-            observer,
-            provider_name: "stub",
-            model: "stub-model",
-            temperature: None,
-            approval: None,
             channel_name: "test",
             channel_reply_target: None,
             cancellation_token: None,
             on_delta: None,
             event_tx: None,
-            hooks: None,
-            dedup_exempt_tools: &[],
-            pacing,
-            strict_tool_parsing: false,
             channel: None,
             agent_alias: None,
             turn_id: "trace-req-test",
@@ -606,6 +600,16 @@ mod payload_capture_tests {
         let observer = NoopObserver;
         let pacing = PacingConfig::default();
         let provider = StubProvider;
+        let exec = test_support::execution(
+            ResolvedModelAccess {
+                model_provider: &provider,
+                provider_name: "stub",
+                model: "stub-model",
+                temperature: None,
+            },
+            &observer,
+            &pacing,
+        );
         let history = vec![
             ChatMessage::system("You are a helpful assistant."),
             ChatMessage::user(format!("deploy with api_key: sk-{SECRET_TAIL} please")),
@@ -615,7 +619,7 @@ mod payload_capture_tests {
         install_writer("redacted");
         while rx.try_recv().is_ok() {}
 
-        let ctx = test_ctx(&observer, &pacing);
+        let ctx = test_ctx(&exec);
         let _ = announce_llm_request(&ctx, &history, &provider, "stub", "stub-model", 0).await;
         let on_record = next_llm_request(&mut rx).await;
 
@@ -654,7 +658,7 @@ mod payload_capture_tests {
         install_writer("off");
         while rx.try_recv().is_ok() {}
 
-        let ctx = test_ctx(&observer, &pacing);
+        let ctx = test_ctx(&exec);
         let _ = announce_llm_request(&ctx, &history, &provider, "stub", "stub-model", 0).await;
         let off_record = next_llm_request(&mut rx).await;
 
@@ -680,6 +684,7 @@ mod payload_capture_tests {
 
 #[cfg(test)]
 mod fallback_tests {
+    use super::super::execution::{ResolvedAgentExecution, ResolvedModelAccess, test_support};
     use super::*;
     use crate::observability::NoopObserver;
     use reiclaw_config::schema::PacingConfig;
@@ -687,23 +692,15 @@ mod fallback_tests {
     use wiremock::matchers::method;
     use wiremock::{Mock, MockServer, ResponseTemplate};
 
-    fn test_ctx<'a>(observer: &'a NoopObserver, pacing: &'a PacingConfig) -> TurnCtx<'a> {
+    fn test_ctx<'a>(exec: &'a ResolvedAgentExecution<'a>) -> TurnCtx<'a> {
         TurnCtx {
+            exec,
             parent_agent_alias: None,
-            observer,
-            provider_name: "stub",
-            model: "stub-model",
-            temperature: None,
-            approval: None,
             channel_name: "test",
             channel_reply_target: None,
             cancellation_token: None,
             on_delta: None,
             event_tx: None,
-            hooks: None,
-            dedup_exempt_tools: &[],
-            pacing,
-            strict_tool_parsing: false,
             channel: None,
             agent_alias: None,
             turn_id: "trace-req-test",
@@ -727,8 +724,18 @@ mod fallback_tests {
                 .build();
             let observer = NoopObserver;
             let pacing = PacingConfig::default();
+            let exec = test_support::execution(
+                ResolvedModelAccess {
+                    model_provider: &provider,
+                    provider_name: "stub",
+                    model: "stub-model",
+                    temperature: None,
+                },
+                &observer,
+                &pacing,
+            );
             let outcome = call_provider(
-                &test_ctx(&observer, &pacing),
+                &test_ctx(&exec),
                 &provider,
                 "test-model",
                 &[ChatMessage::user("hello")],
@@ -830,8 +837,18 @@ mod fallback_tests {
         };
         let observer = NoopObserver;
         let pacing = PacingConfig::default();
+        let exec = test_support::execution(
+            ResolvedModelAccess {
+                model_provider: &provider,
+                provider_name: "stub",
+                model: "stub-model",
+                temperature: None,
+            },
+            &observer,
+            &pacing,
+        );
         let outcome = call_provider(
-            &test_ctx(&observer, &pacing),
+            &test_ctx(&exec),
             &provider,
             "test-model",
             &[ChatMessage::user("hello")],

@@ -49,7 +49,7 @@ async fn record_duplicate_tool_call(
             .with_attrs(tool_log_attributes(
                 tool_name,
                 ::serde_json::json!({
-                    "model": ctx.model,
+                    "model": ctx.exec.model_access.model,
                     "iteration": iteration + 1,
                     "tool": tool_name,
                     "arguments": tool_args.to_string(),
@@ -99,7 +99,7 @@ pub(crate) async fn prepare_tool_calls(
         // ── Hook: before_tool_call (modifying) ──────────
         let mut tool_name = call.name.clone();
         let mut tool_args = call.arguments.clone();
-        if let Some(hooks) = ctx.hooks {
+        if let Some(hooks) = ctx.exec.hooks {
             let hook_call_id = format!(
                 "{}:iter{}:idx{}:{}",
                 ctx.turn_id,
@@ -139,7 +139,7 @@ pub(crate) async fn prepare_tool_calls(
                             .with_attrs(tool_log_attributes(
                                 &log_tool_name,
                                 ::serde_json::json!({
-                                    "model": ctx.model,
+                                    "model": ctx.exec.model_access.model,
                                     "iteration": iteration + 1,
                                     "tool": call.name,
                                     "arguments": tool_args.to_string(),
@@ -202,8 +202,8 @@ pub(crate) async fn prepare_tool_calls(
                 let full_args = super::redact::scrub_credentials_json(&tool_args);
                 let tool_call_id_owned = call.tool_call_id.clone();
                 let meta = ctx.meta();
-                ctx.observer
-                    .record_event(&crate::observability::ObserverEvent::ToolCallStart {
+                ctx.exec.observer.record_event(
+                    &crate::observability::ObserverEvent::ToolCallStart {
                         tool: tool_name.clone(),
                         tool_call_id: tool_call_id_owned.clone(),
                         arguments: Some(full_args.clone()),
@@ -211,8 +211,10 @@ pub(crate) async fn prepare_tool_calls(
                         agent_alias: meta.agent_alias.map(str::to_string),
                         parent_agent_alias: meta.parent_agent_alias.map(str::to_string),
                         turn_id: Some(meta.turn_id.to_string()),
-                    });
-                ctx.observer
+                    },
+                );
+                ctx.exec
+                    .observer
                     .record_event(&crate::observability::ObserverEvent::ToolCall {
                         tool: tool_name.clone(),
                         tool_call_id: tool_call_id_owned.clone(),
@@ -265,6 +267,7 @@ pub(crate) async fn prepare_tool_calls(
         crate::agent::set_runtime_approved_arg(&tool_name, &mut tool_args, false);
 
         let requires_prompt = ctx
+            .exec
             .approval
             .map(|mgr| mgr.needs_approval(&tool_name))
             .unwrap_or(false);
@@ -280,7 +283,7 @@ pub(crate) async fn prepare_tool_calls(
                 dispatch,
                 may_activate_in_batch,
                 &ctx.meta(),
-                ctx.observer,
+                ctx.exec.observer,
             ) {
                 ::reiclaw_log::record!(
                     INFO,
@@ -290,7 +293,7 @@ pub(crate) async fn prepare_tool_calls(
                         .with_attrs(tool_log_attributes(
                             &tool_name,
                             ::serde_json::json!({
-                                "model": ctx.model,
+                                "model": ctx.exec.model_access.model,
                                 "iteration": iteration + 1,
                                 "tool": tool_name,
                                 "result": outcome.output,
@@ -343,7 +346,7 @@ pub(crate) async fn prepare_tool_calls(
                         .with_attrs(tool_log_attributes(
                             &tool_name,
                             ::serde_json::json!({
-                                "model": ctx.model,
+                                "model": ctx.exec.model_access.model,
                                 "iteration": iteration + 1,
                                 "tool": tool_name.clone(),
                                 "arguments": tool_args.to_string(),
@@ -384,7 +387,7 @@ pub(crate) async fn prepare_tool_calls(
 
         let signature = tool_call_signature(&tool_name, &tool_args);
         let dedup_exempt =
-            ctx.dedup_exempt_tools.iter().any(|e| e == &tool_name) || reentrant_agent_tool;
+            ctx.exec.dedup_exempt_tools.iter().any(|e| e == &tool_name) || reentrant_agent_tool;
         if dedup_enabled && !dedup_exempt && !seen_tool_signatures.insert(signature) {
             let duplicate =
                 record_duplicate_tool_call(ctx, &tool_name, &tool_args, iteration).await;
@@ -399,7 +402,7 @@ pub(crate) async fn prepare_tool_calls(
                 .with_attrs(tool_log_attributes(
                     &tool_name,
                     ::serde_json::json!({
-                        "model": ctx.model,
+                        "model": ctx.exec.model_access.model,
                         "iteration": iteration + 1,
                         "tool": tool_name.clone(),
                         "arguments": tool_args.to_string(),
