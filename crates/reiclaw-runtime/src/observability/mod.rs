@@ -1,7 +1,5 @@
 pub mod log;
 pub mod noop;
-#[cfg(feature = "observability-prometheus")]
-pub mod prometheus;
 pub mod runtime_trace;
 pub mod traits;
 pub mod verbose;
@@ -9,8 +7,6 @@ pub mod verbose;
 #[allow(unused_imports)]
 pub use self::log::LogObserver;
 pub use noop::NoopObserver;
-#[cfg(feature = "observability-prometheus")]
-pub use prometheus::PrometheusObserver;
 pub use traits::{Observer, ObserverEvent};
 #[allow(unused_imports)]
 pub use verbose::VerboseObserver;
@@ -210,8 +206,7 @@ fn current_broadcast_hook() -> Option<Arc<dyn Observer>> {
 /// per turn would add a synchronous export to every invocation.
 ///
 /// Backend-agnostic: calls `Observer::flush()`, which is a no-op for
-/// synchronous backends (`Log`/`Verbose`/`Noop`) and meaningless-but-
-/// harmless for pull backends (`Prometheus` — see startup warning).
+/// synchronous backends (`Log`/`Verbose`/`Noop`).
 #[must_use = "hold the guard for the lifetime of the agent invocation; dropping it flushes"]
 pub struct FlushGuard {
     observer: Arc<dyn Observer>,
@@ -272,8 +267,8 @@ impl Observer for TeeObserver {
     }
 
     fn as_any(&self) -> &dyn Any {
-        // Expose the primary so downcasts (e.g. to PrometheusObserver in the
-        // gateway's /metrics handler) keep working transparently.
+        // Expose the primary so backend-specific diagnostics can downcast
+        // through the broadcast wrapper.
         self.primary.as_any()
     }
 }
@@ -289,22 +284,6 @@ fn create_primary_observer(config: &ObservabilityConfig) -> Box<dyn Observer> {
     match config.backend {
         ObservabilityBackend::Log => Box::new(LogObserver::new()),
         ObservabilityBackend::Verbose => Box::new(VerboseObserver::new()),
-        ObservabilityBackend::Prometheus => {
-            #[cfg(feature = "observability-prometheus")]
-            {
-                Box::new(PrometheusObserver::shared())
-            }
-            #[cfg(not(feature = "observability-prometheus"))]
-            {
-                ::reiclaw_log::record!(
-                    WARN,
-                    ::reiclaw_log::Event::new(module_path!(), ::reiclaw_log::Action::Note)
-                        .with_outcome(::reiclaw_log::EventOutcome::Unknown),
-                    "Prometheus backend requested but this build was compiled without `observability-prometheus`; falling back to noop."
-                );
-                Box::new(NoopObserver)
-            }
-        }
         ObservabilityBackend::None => Box::new(NoopObserver),
     }
 }
@@ -348,20 +327,6 @@ mod tests {
             ..ObservabilityConfig::default()
         };
         assert_eq!(create_observer(&cfg).name(), "verbose");
-    }
-
-    #[test]
-    fn factory_prometheus_returns_prometheus() {
-        let cfg = ObservabilityConfig {
-            backend: ObservabilityBackend::Prometheus,
-            ..ObservabilityConfig::default()
-        };
-        let expected = if cfg!(feature = "observability-prometheus") {
-            "prometheus"
-        } else {
-            "noop"
-        };
-        assert_eq!(create_observer(&cfg).name(), expected);
     }
 
     #[test]
@@ -564,7 +529,7 @@ mod tests {
         let observer = create_observer(&cfg);
 
         // `as_any` must surface the primary observer so existing downcasts
-        // (e.g. PrometheusObserver in /metrics) keep working through the tee.
+        // keep working through the tee.
         assert!(observer.as_any().downcast_ref::<LogObserver>().is_some());
     }
 

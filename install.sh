@@ -108,8 +108,8 @@ validate_feature() {
   landlock)
     die "Feature 'landlock' was retired; use 'sandbox-landlock'."
     ;;
-  metrics)
-    die "Feature 'metrics' was retired; use 'observability-prometheus'."
+  metrics | observability-prometheus)
+    die "Feature '$1' was retired; use the structured log and event surfaces."
     ;;
   channel-* | default-channels | channels-full | slim-control)
     die "Feature '$1' was retired. Use agent-runtime,gateway for the controller; install Telegram and ACP as separate bridge binaries."
@@ -708,21 +708,6 @@ fi
     fi
     info "Rust $RUST_VERSION (>= $MSRV)"
   fi
-
-  # ── Preflight: 32-bit ARM ────────────────────────────────────────
-
-  case "$(uname -m)" in
-  armv7l | armv6l | armhf)
-    die "32-bit ARM detected — the default feature 'observability-prometheus'
-requires 64-bit atomics and will not compile on this architecture.
-
-Example (full agent without prometheus):
-  $0 --minimal --features agent-runtime,schema-export
-
-See all available features:
-  $0 --list-features"
-    ;;
-  esac
 
   # ── Build feature flags ──────────────────────────────────────────
   #

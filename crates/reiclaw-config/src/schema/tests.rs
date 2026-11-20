@@ -1342,12 +1342,12 @@ async fn observability_enums_deserialize_legacy_string_values() {
     // Backward compat: TOML configs written before the enum conversion
     // stored these as bare strings. They must still parse.
     let toml = r#"
-backend = "prometheus"
+backend = "log"
 log_persistence = "full"
 log_tool_io = "off"
 "#;
     let o: ObservabilityConfig = toml::from_str(toml).unwrap();
-    assert_eq!(o.backend, ObservabilityBackend::Prometheus);
+    assert_eq!(o.backend, ObservabilityBackend::Log);
     assert_eq!(o.log_persistence, LogPersistence::Full);
     assert_eq!(o.log_tool_io, LogToolIo::Off);
 
@@ -1357,7 +1357,7 @@ log_tool_io = "off"
 
     // Round-trip: serialize back to the same wire strings the runtime
     // boundary (`to_log_config`) and downstream `from_raw` expect.
-    assert_eq!(ObservabilityBackend::Prometheus.as_wire(), "prometheus");
+    assert_eq!(ObservabilityBackend::Log.as_wire(), "log");
     assert_eq!(LogPersistence::Full.as_wire(), "full");
     assert_eq!(LogPersistence::Rotating.as_wire(), "rotating");
     assert_eq!(LogToolIo::Off.as_wire(), "off");
@@ -1396,7 +1396,7 @@ async fn observability_backend_unknown_falls_back_to_default() {
     assert_eq!(noop.backend, ObservabilityBackend::None);
     // The retired OTel backend values load as the default sink; the
     // retired-value tombstone reports them.
-    for retired in ["otel", "otlp", "opentelemetry"] {
+    for retired in ["otel", "otlp", "opentelemetry", "prometheus"] {
         let parsed: ObservabilityConfig =
             toml::from_str(&format!("backend = \"{retired}\"")).unwrap();
         assert_eq!(parsed.backend, ObservabilityBackend::None);
@@ -5277,7 +5277,7 @@ async fn save_dirty_retains_current_schema_version_and_explicit_values() {
         config_path: config_path.clone(),
         ..Default::default()
     };
-    config.observability.backend = ObservabilityBackend::Prometheus;
+    config.observability.backend = ObservabilityBackend::Log;
     config.mark_dirty("observability.backend");
     config.save_dirty().await.unwrap();
     let written = std::fs::read_to_string(&config_path).unwrap();
@@ -5286,10 +5286,7 @@ async fn save_dirty_retains_current_schema_version_and_explicit_values() {
         reloaded.schema_version,
         crate::current::CURRENT_SCHEMA_VERSION
     );
-    assert_eq!(
-        reloaded.observability.backend,
-        ObservabilityBackend::Prometheus
-    );
+    assert_eq!(reloaded.observability.backend, ObservabilityBackend::Log);
     assert!(written.trim_start().starts_with("schema_version ="));
 }
 

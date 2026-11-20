@@ -483,6 +483,11 @@ pub const RETIRED_CONFIG_FIELDS: &[(&str, &str)] = &[
 pub const RETIRED_CONFIG_VALUES: &[(&str, &[&str], &str)] = &[
     (
         "observability.backend",
+        &["prometheus"],
+        "prometheus_observability_removed",
+    ),
+    (
+        "observability.backend",
         &["otel", "otlp", "opentelemetry"],
         "otel_observability_removed",
     ),
@@ -538,9 +543,13 @@ fn retired_field_reason(code: &str) -> &'static str {
             "the rust_native (WebDriver) browser backend was removed; selecting it \
              fails the browser tool. Use agent_browser, computer_use or auto"
         }
+        "prometheus_observability_removed" => {
+            "the Prometheus observer and /metrics endpoint were removed; use structured logs \
+             and /api/events. The retired backend value loads as `none`"
+        }
         "otel_observability_removed" => {
-            "the OpenTelemetry exporter was removed; the `log`, `verbose` and \
-             `prometheus` sinks remain, and a retired backend value loads as `none`"
+            "the OpenTelemetry exporter was removed; the `log` and `verbose` \
+             sinks remain, and a retired backend value loads as `none`"
         }
         "whatsapp_audio_option_removed" => {
             "the WhatsApp-only forwarded audio selector has no runtime consumer after the transport retired"
@@ -840,7 +849,7 @@ delegation_policy = { mode = "allow" }
             assert_eq!(warnings[0].path, "observability.backend");
             assert!(warnings[0].message.contains(value), "{warnings:?}");
         }
-        assert!(retired_field_tombstones("[observability]\nbackend = \"prometheus\"\n").is_empty());
+        assert!(retired_field_tombstones("[observability]\nbackend = \"log\"\n").is_empty());
         assert!(retired_field_tombstones("[observability]\nbackend = 3\n").is_empty());
     }
 

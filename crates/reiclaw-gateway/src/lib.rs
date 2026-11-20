@@ -1250,7 +1250,6 @@ pub async fn run_gateway(
         println!("  GET  {pfx}/ws/nodes  — WebSocket node discovery");
     }
     println!("  GET  {pfx}/health    — health check");
-    println!("  GET  {pfx}/metrics   — Prometheus metrics");
     println!("  Press Ctrl+C to stop.\n");
 
     reiclaw_runtime::health::mark_component_ok("gateway");
@@ -1270,7 +1269,7 @@ pub async fn run_gateway(
 
     // Bound into AppState. Not a broadcaster — the broadcaster is the
     // `broadcast_layer` installed above as the global hook. This is the
-    // configured backend (Log/Prometheus/...) wrapped by `TeeObserver`,
+    // configured backend (Log/Verbose/Noop) wrapped by `TeeObserver`,
     // which tees events into the hook on every record.
     let state_observer: Arc<dyn reiclaw_runtime::observability::Observer> = Arc::from(
         reiclaw_runtime::observability::create_observer(&config.observability),
@@ -1456,7 +1455,6 @@ pub async fn run_gateway(
         .route("/admin/paircode/new", post(handle_admin_paircode_new))
         // ── Existing routes ──
         .route("/health", get(handle_health))
-        .route("/metrics", get(handle_metrics))
         .route("/pair", post(handle_pair))
         .route("/pair/code", get(handle_pair_code))
         .route("/webhook", post(handle_webhook))
@@ -1920,52 +1918,6 @@ async fn handle_health(State(state): State<AppState>) -> impl IntoResponse {
         "runtime": reiclaw_runtime::health::snapshot_json(),
     });
     Json(body)
-}
-
-/// Prometheus content type for text exposition format.
-const PROMETHEUS_CONTENT_TYPE: &str = "text/plain; version=0.0.4; charset=utf-8";
-
-fn prometheus_disabled_hint() -> String {
-    String::from(
-        "# Prometheus backend not enabled. Set [observability] backend = \"prometheus\" in config.\n",
-    )
-}
-
-#[cfg(feature = "observability-prometheus")]
-fn prometheus_observer_from_state(
-    observer: &dyn reiclaw_runtime::observability::Observer,
-) -> Option<&reiclaw_runtime::observability::PrometheusObserver> {
-    // `TeeObserver::as_any` returns the primary observer, so a single direct
-    // downcast finds the PrometheusObserver whether the state observer is the
-    // raw backend or wrapped by the factory tee.
-    observer
-        .as_any()
-        .downcast_ref::<reiclaw_runtime::observability::PrometheusObserver>()
-}
-
-/// GET /metrics — Prometheus text exposition format
-async fn handle_metrics(State(state): State<AppState>) -> impl IntoResponse {
-    let body = {
-        #[cfg(feature = "observability-prometheus")]
-        {
-            if let Some(prom) = prometheus_observer_from_state(state.observer.as_ref()) {
-                prom.encode()
-            } else {
-                prometheus_disabled_hint()
-            }
-        }
-        #[cfg(not(feature = "observability-prometheus"))]
-        {
-            let _ = &state;
-            prometheus_disabled_hint()
-        }
-    };
-
-    (
-        StatusCode::OK,
-        [(header::CONTENT_TYPE, PROMETHEUS_CONTENT_TYPE)],
-        body,
-    )
 }
 
 /// POST /pair — exchange one-time code for bearer token

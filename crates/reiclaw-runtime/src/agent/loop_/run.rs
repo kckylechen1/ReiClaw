@@ -114,21 +114,6 @@ pub async fn run(
         let turn_id = uuid::Uuid::new_v4().to_string();
         let channel_name = if interactive { "cli" } else { "daemon" };
         let _flush_guard = interactive.then(|| observability::FlushGuard::new(observer.clone()));
-        if interactive
-            && matches!(
-                config.observability.backend,
-                reiclaw_config::schema::ObservabilityBackend::Prometheus
-            )
-        {
-            ::reiclaw_log::record!(
-                WARN,
-                ::reiclaw_log::Event::new(module_path!(), ::reiclaw_log::Action::Note)
-                    .with_outcome(::reiclaw_log::EventOutcome::Unknown),
-                "Observability backend is Prometheus (pull/scrape model): a one-shot CLI process \
-                 exits before any scraper can pull, so its telemetry will not be collected. \
-                 Prometheus is intended for long-running (daemon) deployments."
-            );
-        }
         let runtime: Arc<dyn platform::RuntimeAdapter> =
             Arc::from(platform::create_runtime(&config.runtime)?);
         let task_identity = overrides.task_identity.or_else(|| {

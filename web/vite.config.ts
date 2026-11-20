@@ -56,7 +56,6 @@ export default defineConfig(({ command }) => ({
       "/ws":             { target: gatewayTarget, changeOrigin: true, ws: true },
       "/admin":          { target: gatewayTarget, changeOrigin: true },
       "/health":         { target: gatewayTarget, changeOrigin: true },
-      "/metrics":        { target: gatewayTarget, changeOrigin: true },
       // Exact-match the gateway pairing endpoints (/pair, /pair/code) so the
       // prefix doesn't swallow the client route /pairing — a bare "/pair" key
       // proxies /pairing to the gateway, which serves its own built UI and

@@ -160,18 +160,11 @@ non_row_features = [
     "embedded-web",
     "voice-surface",
 ]
-# Compatibility exclusions for standard distribution artifacts. Release
-# workflows pass only their target triple; feature policy stays here.
-[package.metadata.reiclaw.dist_target_exclusions]
-arm-unknown-linux-gnueabihf = ["observability-prometheus"]
-armv7-unknown-linux-gnueabihf = ["observability-prometheus"]
-
 [features]
 default = [
     "agent-runtime",
     "gateway",
     "memory-core",
-    "observability-prometheus",
     "schema-export",
 ]
 
@@ -200,10 +193,6 @@ nodes = ["reiclaw-gateway?/nodes"]
 memory-core = ["reiclaw-memory/memorycore", "reiclaw-runtime?/memory-core", "reiclaw-gateway?/memory-core"]
 
 # Backends and platform flags — each forwards to ONE crate
-observability-prometheus = [
-    "reiclaw-runtime/observability-prometheus",
-    "reiclaw-gateway/observability-prometheus",
-]
 sandbox-landlock = ["reiclaw-runtime/sandbox-landlock"]
 sandbox-bubblewrap = ["reiclaw-runtime/sandbox-bubblewrap"]
 embedded-web = ["reiclaw-gateway/embedded-web"]
@@ -216,7 +205,6 @@ ci-all = [
     "voice-surface",
     "agent-runtime",
     "memory-core",
-    "observability-prometheus",
     "sandbox-landlock", "sandbox-bubblewrap",
     "reiclaw-runtime/heavy-tests",
 ]
