@@ -763,9 +763,7 @@ async fn config_default_has_sane_values() {
     // No model_provider configured by default — set during Quickstart.
     assert!(c.providers.models.is_empty());
     assert!(c.providers.models.iter_entries().next().is_none());
-    assert!(!c.skills.open_skills_enabled);
     assert!(!c.skills.allow_scripts);
-    assert!(!c.skills.install_suggestions.enabled);
     assert_eq!(
         c.skills.prompt_injection_mode,
         SkillsPromptInjectionMode::Full
@@ -914,30 +912,6 @@ runtime_profile = "fast"
     );
 }
 
-#[test]
-async fn skills_install_suggestions_config_deserializes_enabled() {
-    let c = parse_test_config(
-        r#"
-[skills.install_suggestions]
-enabled = true
-"#,
-    );
-
-    assert!(c.skills.install_suggestions.enabled);
-}
-
-#[test]
-async fn skills_install_suggestions_config_accepts_hyphen_alias() {
-    let c = parse_test_config(
-        r#"
-[skills.install-suggestions]
-enabled = true
-"#,
-    );
-
-    assert!(c.skills.install_suggestions.enabled);
-}
-
 fn capture_log_events() -> tokio::sync::broadcast::Receiver<serde_json::Value> {
     ::reiclaw_log::try_install_capture_subscriber();
     ::reiclaw_log::subscribe_or_install()
@@ -1039,95 +1013,6 @@ async fn validate_rejects_reply_min_interval_above_upper_bound() {
         msg.contains("channels.telegram.default.reply_min_interval_secs"),
         "error must name the offending path; got: {msg}"
     );
-}
-
-fn ext_reg(name: &str, url: &str, kind: &str) -> ExternalRegistry {
-    ExternalRegistry {
-        name: name.to_string(),
-        url: url.to_string(),
-        kind: kind.to_string().into(),
-        enabled: true,
-    }
-}
-
-#[test]
-async fn validate_accepts_git_extra_registry() {
-    let mut config = Config::default();
-    config.skills.extra_registries = vec![ext_reg("team", "https://github.com/acme/skills", "git")];
-    assert!(config.validate().is_ok(), "valid git registry must pass");
-}
-
-#[test]
-async fn validate_rejects_extra_registry_non_git_kind() {
-    let mut config = Config::default();
-    config.skills.extra_registries =
-        vec![ext_reg("team", "https://github.com/acme/skills", "zip-api")];
-    let err = config
-        .validate()
-        .expect_err("non-git kind must be rejected");
-    assert!(err.to_string().contains("kind must be 'git'"), "got: {err}");
-}
-
-#[test]
-async fn validate_rejects_extra_registry_duplicate_names() {
-    let mut config = Config::default();
-    config.skills.extra_registries = vec![
-        ext_reg("team", "https://github.com/acme/a", "git"),
-        ext_reg("team", "https://github.com/acme/b", "git"),
-    ];
-    let err = config
-        .validate()
-        .expect_err("duplicate names must be rejected");
-    assert!(
-        err.to_string().contains("duplicate name 'team'"),
-        "got: {err}"
-    );
-}
-
-#[test]
-async fn validate_rejects_extra_registry_unaddressable_names() {
-    for name in [
-        "team.prod",
-        "team prod",
-        "team/prod",
-        "..",
-        " team",
-        "team ",
-        "Team",
-        "teamProd",
-    ] {
-        let mut config = Config::default();
-        config.skills.extra_registries =
-            vec![ext_reg(name, "https://github.com/acme/skills", "git")];
-        let err = config
-            .validate()
-            .expect_err("unaddressable extra-registry name must be rejected");
-        assert!(
-            err.to_string().contains("registry:<name>/<skill>"),
-            "name {name:?} produced unexpected error: {err}"
-        );
-    }
-}
-
-#[test]
-async fn validate_rejects_extra_registry_empty_name_or_url() {
-    let mut config = Config::default();
-    config.skills.extra_registries = vec![ext_reg("", "https://github.com/acme/a", "git")];
-    assert!(config.validate().is_err(), "empty name must be rejected");
-
-    let mut config = Config::default();
-    config.skills.extra_registries = vec![ext_reg("team", "   ", "git")];
-    assert!(config.validate().is_err(), "empty url must be rejected");
-}
-
-#[test]
-async fn validate_rejects_extra_registry_bad_url_scheme() {
-    let mut config = Config::default();
-    config.skills.extra_registries = vec![ext_reg("team", "ftp://example.com/x", "git")];
-    let err = config
-        .validate()
-        .expect_err("non-http(s)/file scheme must be rejected");
-    assert!(err.to_string().contains("scheme"), "got: {err}");
 }
 
 #[test]

@@ -110,6 +110,17 @@ pub(crate) fn apply_env_overrides_matching(
 ) -> Result<AppliedOverrides> {
     let mut entries: Vec<(String, String, String)> = std::env::vars()
         .filter_map(|(k, v)| {
+            // Legacy open-skills controls predate the lowercase override
+            // convention. Surface their retirement through the same exact
+            // field tombstones; never read values into a live loader.
+            let retired_alias = match k.as_str() {
+                "REI_OPEN_SKILLS_ENABLED" => Some("skills__open_skills_enabled"),
+                "REI_OPEN_SKILLS_DIR" => Some("skills__open_skills_dir"),
+                _ => None,
+            };
+            if let Some(tail) = retired_alias {
+                return include_tail(tail).then(|| (k, v, tail.to_string()));
+            }
             let tail = k.strip_prefix(PREFIX)?;
             (!tail.is_empty()
                 && tail
@@ -367,6 +378,54 @@ pub(crate) async fn env_test_lock() -> tokio::sync::MutexGuard<'static, ()> {
 mod tests {
     use super::*;
     use crate::schema::Config;
+
+    #[tokio::test]
+    async fn local_override_selection_excludes_legacy_skill_aliases() {
+        let _lock = env_test_lock().await;
+        let _legacy = EnvVarGuard::set("REI_OPEN_SKILLS_DIR", "private-sentinel");
+        let _retired = EnvVarGuard::set("REI_skills__open_skills_enabled", "true");
+        let mut config = Config::default();
+        let selected =
+            apply_env_overrides_matching(&mut config, |tail| tail.starts_with("security__estop__"))
+                .unwrap();
+        assert!(selected.tombstone_warnings.is_empty());
+        assert!(selected.paths.is_empty());
+    }
+
+    #[tokio::test]
+    async fn retired_skill_authoring_env_warns_without_erasing_script_policy() {
+        let _lock = env_test_lock().await;
+        let _policy = EnvVarGuard::set("REI_skills__allow_scripts", "true");
+        for (name, value) in [
+            ("REI_skills__skill_creation__enabled", "true"),
+            ("REI_skills__skill_improvement", "{ enabled = true }"),
+            ("REI_skills__install_suggestions__enabled", "true"),
+            ("REI_skills__open_skills_enabled", "true"),
+            ("REI_skills__open_skills_dir", "private-sentinel"),
+            ("REI_skills__registry_url", "https://private-sentinel"),
+            (
+                "REI_skills__extra_registries",
+                "[{ name = 'team', url = 'private-sentinel' }]",
+            ),
+            ("REI_OPEN_SKILLS_ENABLED", "true"),
+            ("REI_OPEN_SKILLS_DIR", "private-sentinel"),
+        ] {
+            let _retired = EnvVarGuard::set(name, value);
+            let mut config = Config::default();
+            let applied = apply_env_overrides(&mut config).unwrap();
+            assert!(config.skills.allow_scripts);
+            assert_eq!(
+                applied.paths,
+                HashSet::from(["skills.allow_scripts".to_string()])
+            );
+            assert_eq!(applied.tombstone_warnings.len(), 1);
+            let warning = &applied.tombstone_warnings[0];
+            assert_eq!(warning.code, "skill_authoring_and_registry_removed");
+            assert!(!warning.message.contains("private-sentinel"));
+        }
+        let _unknown = EnvVarGuard::set("REI_skills__future_ide", "true");
+        assert!(apply_env_overrides(&mut Config::default()).is_err());
+    }
 
     #[tokio::test]
     async fn walker_refuses_retired_tunnel_settings_and_only_warns_for_disabled_defaults() {

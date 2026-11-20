@@ -141,6 +141,9 @@ use serde::{Deserialize, Serialize};
 /// - `in_process_tunnel_removed`: an empty or disabled-default `[tunnel]`
 ///   section is ignored. Configured tunnels and credentials reject admission;
 ///   operators must migrate them to a host-managed service explicitly.
+/// - `skill_authoring_and_registry_removed`: automatic skill creation,
+///   improvement, suggestions and registry sync are retired. Local bundle
+///   loading, prompt injection and `skills.allow_scripts` remain active.
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 #[cfg_attr(feature = "schema-export", derive(schemars::JsonSchema))]
 pub struct ValidationWarning {
@@ -186,6 +189,22 @@ pub const RETIRED_CONFIG_SURFACES: &[(&str, &str)] = &[
     ("security.webauthn", "unenforced_security_config_removed"),
     ("node_transport", "unenforced_security_config_removed"),
     ("tunnel", "in_process_tunnel_removed"),
+    (
+        "skills.skill_creation",
+        "skill_authoring_and_registry_removed",
+    ),
+    (
+        "skills.skill_improvement",
+        "skill_authoring_and_registry_removed",
+    ),
+    (
+        "skills.install_suggestions",
+        "skill_authoring_and_registry_removed",
+    ),
+    (
+        "skills.install-suggestions",
+        "skill_authoring_and_registry_removed",
+    ),
     ("acp", "unused_kernel_config_removed"),
     ("trust", "unused_kernel_config_removed"),
     ("media_pipeline", "unused_kernel_config_removed"),
@@ -377,6 +396,22 @@ pub const RETIRED_CONFIG_FIELDS: &[(&str, &str)] = &[
         "channels.session_backend",
         "session_backend_selector_removed",
     ),
+    (
+        "skills.open_skills_enabled",
+        "skill_authoring_and_registry_removed",
+    ),
+    (
+        "skills.open_skills_dir",
+        "skill_authoring_and_registry_removed",
+    ),
+    (
+        "skills.registry_url",
+        "skill_authoring_and_registry_removed",
+    ),
+    (
+        "skills.extra_registries",
+        "skill_authoring_and_registry_removed",
+    ),
     ("channels.cli", "unused_channel_setting_removed"),
     (
         "channels.message_timeout_secs",
@@ -525,6 +560,10 @@ fn retired_field_reason(code: &str) -> &'static str {
     match code {
         "session_backend_selector_removed" => {
             "SQLite is the only session backend; legacy JSONL startup import remains available"
+        }
+        "skill_authoring_and_registry_removed" => {
+            "automatic skill authoring and registry sync were retired; use reviewed local \
+             bundles or an explicit audited install. Script policy remains in skills.allow_scripts"
         }
         "unused_channel_setting_removed" => {
             "the global channel setting has no runtime consumer; Telegram alias settings are unchanged"
@@ -811,6 +850,52 @@ fn table_path_exists(root: Option<&toml::value::Table>, path: &str) -> bool {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn retired_skill_authoring_file_warns_and_preserves_live_script_policy() {
+        let contents = r#"
+schema_version = 3
+[skills]
+allow_scripts = false
+prompt_injection_mode = "compact"
+open_skills_enabled = true
+open_skills_dir = "private-sentinel"
+registry_url = "https://private-sentinel"
+extra_registries = [{ name = "team", url = "private-sentinel" }]
+[skills.skill_creation]
+enabled = true
+[skills.skill_improvement]
+enabled = true
+[skills.install_suggestions]
+enabled = true
+[skills.install-suggestions]
+enabled = true
+"#;
+        let config = crate::current::parse_current(contents).unwrap();
+        assert!(!config.skills.allow_scripts);
+        assert_eq!(
+            config.skills.prompt_injection_mode,
+            crate::schema::SkillsPromptInjectionMode::Compact
+        );
+        let mut warnings = retired_section_tombstones(contents);
+        warnings.extend(retired_field_tombstones(contents));
+        assert_eq!(warnings.len(), 8);
+        assert!(warnings.iter().all(|warning| {
+            warning.code == "skill_authoring_and_registry_removed"
+                && !warning.message.contains("private-sentinel")
+        }));
+        let serialized = toml::Value::try_from(config).unwrap();
+        let keys: std::collections::BTreeSet<&str> = serialized["skills"]
+            .as_table()
+            .unwrap()
+            .keys()
+            .map(String::as_str)
+            .collect();
+        assert_eq!(
+            keys,
+            std::collections::BTreeSet::from(["allow_scripts", "prompt_injection_mode"])
+        );
+    }
 
     #[test]
     fn retired_field_tombstones_flags_field_under_wildcard_alias() {

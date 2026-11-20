@@ -16,7 +16,6 @@ use crate::tools::schedule::ScheduleTool;
 use crate::tools::send_message_to_peer::SendMessageToPeerTool;
 use crate::tools::shell::ShellTool;
 use crate::tools::skill_http::SkillHttpTool;
-use crate::tools::skill_manage::{SkillManageTool, SkillViewTool, SkillsListTool};
 use crate::tools::skill_tool::{SkillBuiltinTool, SkillShellTool};
 
 tool_attribution!(CronAddTool, ToolKind::Plugin);
@@ -32,9 +31,6 @@ tool_attribution!(ScheduleTool, ToolKind::Plugin);
 tool_attribution!(SendMessageToPeerTool, ToolKind::Plugin);
 tool_attribution!(ShellTool, ToolKind::Shell);
 tool_attribution!(SkillHttpTool, ToolKind::Plugin);
-tool_attribution!(SkillsListTool, ToolKind::Plugin);
-tool_attribution!(SkillViewTool, ToolKind::Plugin);
-tool_attribution!(SkillManageTool, ToolKind::Plugin);
 tool_attribution!(SkillBuiltinTool, ToolKind::Plugin);
 tool_attribution!(SkillShellTool, ToolKind::Plugin);
 tool_attribution!(ReasoningSubagentTool, ToolKind::SpawnSubagent);

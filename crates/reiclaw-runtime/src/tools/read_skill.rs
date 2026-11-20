@@ -129,7 +129,6 @@ mod tests {
             config_path: tmp.path().join("config.toml"),
             data_dir: tmp.path().join("data"),
             skills: SkillsConfig {
-                open_skills_enabled: false,
                 allow_scripts: false,
                 ..Default::default()
             },
