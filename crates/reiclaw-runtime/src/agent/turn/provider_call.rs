@@ -5,7 +5,7 @@ use super::context::TurnCtx;
 use super::events::StreamDelta;
 use super::outcome::{StreamInterruptedAfterOutput, ToolLoopCancelled, is_tool_loop_cancelled};
 use super::redact::scrub_credentials;
-use super::stream_consume::consume_provider_streaming_response;
+use super::stream_consume::{StreamOutput, consume_provider_streaming_response};
 use crate::agent::cost::check_tool_loop_budget;
 use crate::cost::types::BudgetCheck;
 use crate::observability::ObserverEvent;
@@ -315,6 +315,7 @@ pub(crate) async fn call_provider(
                 // Attribution is opened by ProviderDispatch::from_ref(...).stream_chat
                 // inside `consume_provider_streaming_response`; the caller does not
                 // wrap a second attribution_span! here.
+                let mut delivered_event_text = String::new();
                 let stream_future = consume_provider_streaming_response(
                     active_model_provider,
                     prepared_messages,
@@ -323,8 +324,11 @@ pub(crate) async fn call_provider(
                     active_model,
                     ctx.temperature,
                     ctx.cancellation_token,
-                    ctx.on_delta,
-                    ctx.event_tx,
+                    StreamOutput {
+                        on_delta: ctx.on_delta,
+                        event_tx: ctx.event_tx,
+                        delivered_event_text: &mut delivered_event_text,
+                    },
                     ctx.strict_tool_parsing,
                 );
                 // Let `consume_provider_streaming_response` handle `ctx.cancellation_token`
@@ -356,7 +360,29 @@ pub(crate) async fn call_provider(
                             reasoning_content,
                         })
                     }
-                    Err(stream_err) if is_estop_aborted(&stream_err) => return Err(stream_err),
+                    Err(stream_err) if is_estop_aborted(&stream_err) => {
+                        // The outer estop poll may drop the consumer while it
+                        // waits on either the provider or a backpressured sink.
+                        // Preserve only successfully delivered text via the
+                        // existing interrupted-stream history path, with no
+                        // fallback, retry, or successful completion.
+                        if stream_err
+                            .downcast_ref::<StreamInterruptedAfterOutput>()
+                            .is_some()
+                        {
+                            Err(stream_err)
+                        } else if !delivered_event_text.is_empty() {
+                            // Retain the typed stop as the source: domain-stop
+                            // text does not contain the generic estop marker.
+                            let message = stream_err.to_string();
+                            Err(stream_err.context(StreamInterruptedAfterOutput {
+                                partial_text: delivered_event_text,
+                                message,
+                            }))
+                        } else {
+                            return Err(stream_err);
+                        }
+                    }
                     Err(stream_err)
                         if is_tool_loop_cancelled(&stream_err)
                             || is_stream_auth_error(&stream_err)

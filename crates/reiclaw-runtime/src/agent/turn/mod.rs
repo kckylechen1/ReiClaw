@@ -839,15 +839,16 @@ async fn run_tool_call_loop_turn(
             }
             Err(e) => {
                 record_llm_failure(&ctx, llm_started_at, iteration, &e);
-                let recovered = try_recover_context_overflow(
-                    turn_state.history,
-                    &e,
-                    iteration,
-                    event_tx.as_ref(),
-                    observer,
-                    context_token_budget,
-                )
-                .await;
+                let recovered = !provider_call::is_estop_aborted(&e)
+                    && try_recover_context_overflow(
+                        turn_state.history,
+                        &e,
+                        iteration,
+                        event_tx.as_ref(),
+                        observer,
+                        context_token_budget,
+                    )
+                    .await;
                 if recovered {
                     continue;
                 }

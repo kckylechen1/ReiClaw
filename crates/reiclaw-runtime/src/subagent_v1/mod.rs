@@ -252,23 +252,19 @@ impl OpaqueModelBinding {
             tools: None,
             thinking: None,
         };
-        // Provider-dispatch contract: model calls go through
-        // `ProviderDispatch` so attribution spans attach (never direct
-        // `ModelProvider` method calls).
-        let dispatcher = reiclaw_providers::ProviderDispatch::from_ref(provider.as_ref());
-        let response = dispatcher
-            .chat(chat_request, &model, request.temperature)
-            .await?;
-        // Attribute the child's spend to the resolved `type.alias` in the
-        // turn's cost scope (gateway WS, `loop_::run`, `turn_entry`). No
-        // scope (direct/test calls) = nothing is recorded.
-        if let Some(usage) = response.usage.as_ref() {
-            let _ = crate::agent::cost::record_tool_loop_cost_usage(
-                &policy.provider_ref,
-                &model,
-                usage,
-            );
+        // Use the turn's guarded one-shot seam for the child's actual resolved
+        // endpoint. The parent and advisor may use different domains; checking
+        // only the parent provider would bypass domain stops and live estop.
+        // This seam also dispatches with attribution and records usage exactly
+        // once under the child's resolved `type.alias` in the turn's cost scope.
+        let response = crate::agent::loop_::ResolvedModelAccess {
+            model_provider: provider.as_ref(),
+            provider_name: &policy.provider_ref,
+            model: &model,
+            temperature: request.temperature,
         }
+        .run_model_query(chat_request)
+        .await?;
         let (tokens_in, tokens_out) = response
             .usage
             .map(|usage| {
