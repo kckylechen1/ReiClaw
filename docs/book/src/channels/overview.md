@@ -36,7 +36,7 @@ Per-family retirement pages: [Other chat platforms](./chat-others.md) (Notion) Â
 > **Also retired earlier:** the MQTT and filesystem SOP-trigger channels were retired when the SOP run side was removed; their sections are **rejected at config parse** with the migration message ([MQTT](./mqtt.md), [Filesystem](./filesystem.md)). The retired transport sections above load with a retirement warning and are discarded.
 
 The retired transport Cargo features and installer selections have also been
-removed. `channels-full`/`--preset full` therefore no longer add
+removed. `--preset full` therefore does not add
 channels; the live surface set is the table above.
 
 ## Configuration

@@ -62,7 +62,7 @@ make_checkout() {
     { print }
     /^\[features\]$/ {
       print "installer-smoke-indirect = [\"installer-smoke-runtime\", \"installer-smoke-runtime\"]"
-      print "installer-smoke-runtime = [\"slim-control\"]"
+      print "installer-smoke-runtime = [\"agent-runtime\"]"
     }
   ' "$repo_root/Cargo.toml" > "$path/Cargo.toml"
   printf 'preserve this local file\n' > "$path/local-marker"
@@ -124,7 +124,7 @@ run_installer success "$scratch/fork" "$scratch/missing" --source --minimal --dr
 contains 'cargo install --path . --locked --force --no-default-features'
 excludes 'cargo install --path bridges/acp'
 no_mutations
-for feature in agent-runtime slim-control default installer-smoke-indirect; do
+for feature in agent-runtime default installer-smoke-indirect; do
   run_installer success "$scratch/fork" "$scratch/missing" --minimal --features "$feature" --dry-run
   contains "cargo install --path . --locked --force --no-default-features --features $feature"
   contains 'cargo install --path bridges/acp --locked --force --bin rei-acp-bridge'

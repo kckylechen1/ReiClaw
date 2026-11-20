@@ -162,7 +162,7 @@ pub async fn handle(config: &Config, format: Option<String>) -> Result<()> {
     println!();
     println!("Channels:");
     println!("  CLI:      ✅ always");
-    for entry in crate::channels::listing::compiled_channels(&config.channels) {
+    for entry in crate::channels::listing::supported_channels(&config.channels) {
         let channel_status = if entry.configured {
             "configured".to_string()
         } else {
@@ -178,14 +178,14 @@ pub async fn handle(config: &Config, format: Option<String>) -> Result<()> {
             }
         );
     }
-    let uncompiled = crate::channels::listing::configured_uncompiled_channels(&config.channels);
-    if !uncompiled.is_empty() {
-        println!("  Configured but not compiled in this binary:");
-        for entry in &uncompiled {
-            println!("  {:9} 🚫 configured, not compiled", entry.name);
+    let unsupported = crate::channels::listing::configured_unsupported_channels(&config.channels);
+    if !unsupported.is_empty() {
+        println!("  Configured but unsupported by this build:");
+        for entry in &unsupported {
+            println!("  {:9} 🚫 configured, owner unavailable", entry.name);
         }
         println!(
-            "  Build from source with `./install.sh --source --preset full`, `--features channels-full`, or the specific `channel-*` feature."
+            "  Enable the gateway build feature for webhook ingress. Telegram and ACP run as separate bridge binaries."
         );
     }
     let retired = crate::channels::listing::configured_retired_channels(&config.channels);
