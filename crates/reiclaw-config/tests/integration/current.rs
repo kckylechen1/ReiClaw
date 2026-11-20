@@ -9,7 +9,7 @@ use reiclaw_config::schema::Config;
 use reiclaw_config::secrets::SecretStore;
 use reiclaw_config::validation_warnings::ValidationWarning;
 
-const CURRENT_FIXTURE: &str = include_str!("../fixtures/v3.toml");
+const CURRENT_FIXTURE: &str = include_str!("../../fixtures/v3.toml");
 
 #[test]
 fn v3_retired_inbound_webhook_channel_loads_with_tombstone_warning() {
@@ -1262,8 +1262,8 @@ fn legacy_root_fields_are_diagnosed_as_unknown_in_current_input() {
 #[test]
 fn development_templates_are_native_current_config_with_explicit_policy() {
     for raw in [
-        include_str!("../../../dev/config.template.toml"),
-        include_str!("../../../dev/config.harness-test.toml"),
+        include_str!("../../../../dev/config.template.toml"),
+        include_str!("../../../../dev/config.harness-test.toml"),
     ] {
         let config = parse_current(raw).unwrap();
         assert!(Config::unknown_keys(raw).is_empty());
@@ -1286,7 +1286,7 @@ fn development_templates_are_native_current_config_with_explicit_policy() {
             reiclaw_config::autonomy::AutonomyLevel::Supervised
         );
     }
-    let harness = parse_current(include_str!("../../../dev/config.harness-test.toml")).unwrap();
+    let harness = parse_current(include_str!("../../../../dev/config.harness-test.toml")).unwrap();
     assert_eq!(harness.runtime_profiles["default"].max_tool_iterations, 50);
     assert_eq!(
         harness.runtime_profiles["default"].max_tool_result_chars,

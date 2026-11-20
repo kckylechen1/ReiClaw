@@ -10,8 +10,6 @@
 //!   3. Child denied path (reads /etc/passwd — must fail)
 //!   4. Post-parent access (reads /etc/passwd after spawning children)
 
-#![cfg(all(feature = "sandbox-landlock", target_os = "linux"))]
-
 use reiclaw_runtime::security::landlock::LandlockSandbox;
 use reiclaw_runtime::security::traits::Sandbox;
 use std::path::Path;

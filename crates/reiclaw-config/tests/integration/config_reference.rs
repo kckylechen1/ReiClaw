@@ -1,5 +1,3 @@
-#![cfg(feature = "schema-export")]
-
 //! The real config schema rendered through the public presentation boundary.
 
 use reiclaw_config::schema_markdown::{field_table_for_path, generate};

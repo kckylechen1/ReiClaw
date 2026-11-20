@@ -5,8 +5,6 @@
 //! nextest runs each test in a separate process, so this test can
 //! fork a Landlock-restricted child without affecting other tests.
 
-#![cfg(all(feature = "sandbox-landlock", target_os = "linux"))]
-
 use reiclaw_runtime::security::landlock::LandlockSandbox;
 use reiclaw_runtime::security::traits::Sandbox;
 use std::path::{Path, PathBuf};
