@@ -29,6 +29,8 @@ Amended on 2026-09-26 for #381: §8 records how ZeroClaw maps onto Tachi's `tach
 
 Amended on 2026-11-10, after the owner confirmed the positioning in review: the product is a framework for agents whose actions have real consequences, and the personal body is its first deployment, not its whole scope (Context, §2). The decisions in §1 to §8 are unchanged. #388 still words the direction as "not a general agent framework"; until the owner reconciles that issue, this record states the confirmed positioning and #388 keeps governing reuse, module boundaries and replace-before-delete. The contract work that follows from it is tracked in #630.
 
+Amended on 2026-11-20 by [ADR-027](./ADR-027-owner-workflow-closure-and-scoped-services.md). In-body L1 (§3) expands from a zero-tool single-shot reasoning call to a bounded, turn-scoped parallel subagent pool restricted to `ToolOperation::Read` (covering multi-source research, private session/memory sweeps, and option comparison with zero side effects, approvals, recursion, or durable task rows), while L2 Tachi delegation focuses on long-horizon software engineering, sandboxed code/test loops, and cross-session durable runs.
+
 ## Context
 
 This fork cuts upstream ZeroClaw down to a small kernel. The owner chose ZeroClaw over heavier agents such as OpenClaw because it is Rust and small: one static binary can run always-on and its device-side hosts can run on constrained hardware.

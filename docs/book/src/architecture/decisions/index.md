@@ -1,7 +1,7 @@
 ---
 type: architecture
 status: accepted
-last-reviewed: 2026-11-19
+last-reviewed: 2026-11-20
 relates-to:
   - docs/book/src/foundations/fnd-002-documentation-standards.md
 ---
@@ -20,11 +20,12 @@ Accepted ADRs are immutable. If the architecture changes, write a new ADR and ma
 | [ADR-004](./ADR-004-tool-shared-state-ownership.md) | accepted | Tool-held shared state follows daemon-owned identity, handle ownership, isolation, and reload rules. |
 | [ADR-011](./ADR-011-multi-agent-runtime-boundaries.md) | accepted (peer messaging retired by [ADR-017](./ADR-017-personal-agent-body-edges-and-delegation.md) and [ADR-026](./ADR-026-headless-rust-kernel-external-workbenches-and-complexity-budget.md)) | Configured agent aliases have explicit runtime boundaries under one daemon; work delegation goes through Tachi rather than in-process peer messaging. |
 | [ADR-013](./ADR-013-channels-as-gateway-clients.md) | accepted (Node deferral amended by [ADR-017](./ADR-017-personal-agent-body-edges-and-delegation.md); extended to UIs by [ADR-026](./ADR-026-headless-rust-kernel-external-workbenches-and-complexity-budget.md)) | Channels and user-facing UIs are out-of-process gateway clients; the gateway is the only external door and the runtime owns the turn lifecycle. |
-| [ADR-017](./ADR-017-personal-agent-body-edges-and-delegation.md) | accepted (voice carrier amended by [ADR-023](./ADR-023-realtime-voice-carrier-with-body-delegation.md)) | One always-on body on the owner's computer; speakers, phones, and other devices are gateway Clients and Nodes; the body answers directly or reasons itself, and hands work to CLI agents only through Tachi. |
+| [ADR-017](./ADR-017-personal-agent-body-edges-and-delegation.md) | accepted (voice carrier amended by [ADR-023](./ADR-023-realtime-voice-carrier-with-body-delegation.md); L1/L2 boundary amended by [ADR-027](./ADR-027-owner-workflow-closure-and-scoped-services.md)) | One always-on body on the owner's computer; speakers, phones, and other devices are gateway Clients and Nodes; the body answers directly, fans out bounded read-only L1 subagents in-process, and delegates long-horizon engineering to CLI harnesses through Tachi. |
 | [ADR-019](./ADR-019-one-body-many-hands.md) | accepted | One body retains Soul, approval, and safety authority; processes, crates, and traits split only for named cost-justified reasons (`>=2` real consumers/impls or hard dependency boundaries). Clients use scoped `/ws/chat`, Nodes use v2, and body-initiated MCP stays distinct. |
 | [ADR-024](./ADR-024-bounded-tachi-provider-broker.md) | proposed | Tachi brokers inference through its provider/vault control plane and a narrow local data plane. Amendment 1 fixes the end state: zero model-provider families or upstream credentials remain in the body. |
 | [ADR-025](./ADR-025-long-context-sleep-memory-and-delegation-continuity.md) | accepted | Foreground turns use a cache-pinned four-layer context stack with `sessions.db` checkpoints and drill-down tools; a confined sleep-time subagent compiles episodes into `memorycore.db` (`portable-kernel`) and a quiet Daily Digest; `rmcp` SSE wake-ups drive bounded `tachi_staff(continue)` proxy answers. |
 | [ADR-026](./ADR-026-headless-rust-kernel-external-workbenches-and-complexity-budget.md) | accepted | The ReiClaw repository is a headless pure-Rust kernel; desktop workbenches (with pluggable scenario sidebars such as Hyperion and Documents) and mobile apps live in external client repositories over `/ws/chat` and REST; configuration is file-first, retiring embedded `web/` and dynamic web-form reflection after cutover; misplaced platform features and zero-caller seams are pruned in bounded `#374` waves. |
+| [ADR-027](./ADR-027-owner-workflow-closure-and-scoped-services.md) | accepted | Amends [ADR-017](./ADR-017-personal-agent-body-edges-and-delegation.md) §3 so the main agent fans out turn-scoped read-only L1 subagents for everyday research and private memory sweeps while reserving L2 Tachi for long-horizon engineering; wires live gateway `GroundedContinuationResolver` and SSE wake-ups, adds operator-gated `DailyDigest` candidate dispatch, distills owner attention and candidate feedback into review-gated triage rules during `04:00` Auto Dream, and standardizes quiet sentinels and `explicit_only` deferred MCP services. |
 
 ## Soul and Character Governance
 
