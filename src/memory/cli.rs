@@ -344,6 +344,46 @@ mod tests {
     use super::*;
     use tempfile::TempDir;
 
+    #[cfg(feature = "memory-core")]
+    #[tokio::test]
+    async fn reindex_preserves_rows_in_the_configured_dotted_memorycore_backend() {
+        let directory = TempDir::new().unwrap();
+        let config = Config {
+            data_dir: directory.path().to_path_buf(),
+            config_path: directory.path().join("config.toml"),
+            memory: crate::config::MemoryConfig {
+                backend: "memorycore.default".into(),
+                ..crate::config::MemoryConfig::default()
+            },
+            ..Config::default()
+        };
+        // Seed through the retained operator handle, then reopen through the
+        // CLI reindex route. Both must select the same configured store.
+        let memory = create_cli_memory(&config).unwrap();
+        memory
+            .store(
+                "reindex_key",
+                "reindex searchable content",
+                MemoryCategory::Core,
+                None,
+            )
+            .await
+            .unwrap();
+        drop(memory);
+
+        handle_command(crate::MemoryCommands::Reindex, &config)
+            .await
+            .unwrap();
+
+        let memory = create_cli_memory(&config).unwrap();
+        let results = memory
+            .recall("searchable", 10, None, None, None)
+            .await
+            .unwrap();
+        assert_eq!(results.len(), 1);
+        assert_eq!(results[0].key, "reindex_key");
+    }
+
     #[test]
     fn parse_category_known_variants() {
         assert_eq!(parse_category("core"), MemoryCategory::Core);

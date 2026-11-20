@@ -489,9 +489,8 @@ pub trait Memory: Send + Sync + crate::attribution::Attributable {
 
     /// Rebuild backend indexes: FTS tables and any missing embedding vectors.
     ///
-    /// Intended as a manual fixup after bulk writes that didn't go through
-    /// the normal `store()` path (e.g. `zeroclaw migrate openclaw`, which
-    /// uses `NoopEmbedding` for speed and leaves `embedding = NULL` behind).
+    /// Intended as a manual fixup after writes made without an embedding
+    /// provider or bulk writes that left entries without embedding vectors.
     /// Returns the number of entries that were re-embedded; backends
     /// without a vector index or with nothing to fill in return 0.
     ///

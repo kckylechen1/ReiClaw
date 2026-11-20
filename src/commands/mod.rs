@@ -10,5 +10,3 @@ pub mod quickstart;
 pub mod soul;
 #[cfg(feature = "agent-runtime")]
 pub mod status;
-#[cfg(all(feature = "agent-runtime", feature = "channel-telegram"))]
-pub mod telegram;

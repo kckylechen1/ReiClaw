@@ -35,3 +35,10 @@ converts a leftover `brain.db`. A refused legacy or foreign kernel store is not
 upgraded in place. Restore a store written by a supported release or start a
 fresh one; do not change schema versions, role stamps or sidecars to bypass
 admission.
+
+## Retired OpenClaw importer
+
+The `rei migrate openclaw` command is retired. ReiClaw no longer imports an
+OpenClaw workspace through this CLI. Source workspaces and existing memory
+stores remain on disk. The `rei memory` commands continue to manage supported
+current stores, including listing, inspection, deletion and reindexing.

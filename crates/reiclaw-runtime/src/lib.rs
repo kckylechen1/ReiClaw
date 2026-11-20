@@ -7,7 +7,6 @@
 
 pub mod cli_input;
 pub mod identity;
-pub mod migration;
 pub mod spoken;
 pub mod util;
 
