@@ -5,14 +5,11 @@ pub mod helpers;
 pub mod util_helpers;
 
 pub mod ask_user;
-pub mod backup_tool;
 pub mod content_search;
-pub mod data_management;
 pub mod episode_read;
 pub mod escalate;
 pub mod file_edit;
 pub mod file_write;
-mod fs_guard;
 pub mod glob_search;
 pub mod http_request;
 pub mod mcp_client;

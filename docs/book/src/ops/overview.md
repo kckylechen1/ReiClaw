@@ -132,6 +132,15 @@ For multi-tenant hosting, see the proposal in #2765 (closed, historical, the arc
 
 ## Backups
 
+ReiClaw no longer runs an in-process backup or data-retention engine. The
+`[backup]` and `[data_retention]` sections emit retirement warnings and schedule
+no work; the corresponding gateway routes are removed. Configure backup,
+retention, encryption and scheduling with your host tools for the active
+configuration and data directories, including any agent workspace paths outside
+them. The retired engine's existing archives remain on disk. Previously injected
+declarative backup jobs disappear during the normal cron reconciliation;
+explicit `[cron.<id>]` jobs and their shared scheduler remain supported.
+
 What to back up:
 
 - `~/.zeroclaw/data/memory/*.db`: conversation memory (`memorycore.db`, plus `audit.db`)

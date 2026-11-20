@@ -265,6 +265,40 @@ Authorization = "Bearer x"
 }
 
 #[test]
+fn v3_retired_backup_retention_settings_warn_without_scheduling_work() {
+    for (section, body) in [
+        (
+            "backup",
+            "enabled = true\nschedule_cron = '0 3 * * *'\nencrypt = true\n",
+        ),
+        (
+            "data_retention",
+            "enabled = true\nretention_days = 7\ndry_run = false\n",
+        ),
+    ] {
+        let raw = format!("schema_version = 3\n[{section}]\n{body}");
+        let cfg = parse_current(&raw).expect("retired operator engine has a tombstone");
+        let warnings = reiclaw_config::validation_warnings::retired_section_tombstones(&raw);
+        assert_eq!(warnings.len(), 1, "{section}");
+        assert_eq!(warnings[0].code, "backup_retention_engine_removed");
+        assert_eq!(warnings[0].path, section);
+        assert!(warnings[0].message.contains("host-managed"));
+        assert!(
+            warnings[0]
+                .message
+                .contains("no backup or purge is scheduled")
+        );
+        assert!(cfg.cron.is_empty());
+        assert!(
+            cfg.prop_paths()
+                .iter()
+                .all(|path| !path.starts_with(&format!("{section}.")))
+        );
+        assert!(toml::Value::try_from(cfg).unwrap().get(section).is_none());
+    }
+}
+
+#[test]
 fn v3_retired_overlapping_tool_settings_warn_and_leave_no_tool_config() {
     for section in [
         "pipeline",
@@ -648,7 +682,6 @@ fn generate_v3_covers_every_v3_top_level_section() {
     // section the fixture covers. Drop one and the regression suite
     // surfaces it.
     assert!(cfg.gateway.require_pairing, "gateway block carried through");
-    assert!(cfg.backup.enabled, "backup block carried through");
     assert!(cfg.heartbeat.enabled, "heartbeat block carried through");
     assert!(cfg.web_search.enabled, "web_search block carried through");
 }

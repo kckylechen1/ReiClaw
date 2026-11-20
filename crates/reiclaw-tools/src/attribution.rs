@@ -7,9 +7,7 @@ use reiclaw_api::attribution::ToolKind;
 use reiclaw_api::tool_attribution;
 
 use crate::ask_user::AskUserTool;
-use crate::backup_tool::BackupTool;
 use crate::content_search::ContentSearchTool;
-use crate::data_management::DataManagementTool;
 use crate::escalate::EscalateToHumanTool;
 use crate::file_edit::FileEditTool;
 use crate::file_write::FileWriteTool;
@@ -31,9 +29,7 @@ use crate::web_fetch::WebFetchTool;
 use crate::web_search_tool::WebSearchTool;
 
 tool_attribution!(AskUserTool, ToolKind::Wait);
-tool_attribution!(BackupTool, ToolKind::Plugin);
 tool_attribution!(ContentSearchTool, ToolKind::Search);
-tool_attribution!(DataManagementTool, ToolKind::Plugin);
 tool_attribution!(EscalateToHumanTool, ToolKind::Wait);
 tool_attribution!(FileEditTool, ToolKind::Plugin);
 tool_attribution!(FileWriteTool, ToolKind::Plugin);

@@ -92,56 +92,75 @@ mod tests {
         }
     }
 
-    #[tokio::test]
-    async fn spawn_returns_future_output() {
-        let handle = crate::spawn!(async { 42_u32 });
-        assert_eq!(handle.await.unwrap(), 42);
+    fn run_with_writer_lock(test: impl std::future::Future<Output = ()>) {
+        // Lifecycle records can reach the process-wide capture layer. Keep
+        // every spawned task joined before another test owns the writer.
+        let _writer_guard = crate::writer::WRITER_TEST_LOCK.lock();
+        tokio::runtime::Builder::new_current_thread()
+            .enable_all()
+            .build()
+            .unwrap()
+            .block_on(test);
     }
 
-    #[tokio::test]
-    async fn spawn_preserves_error_type() {
-        let handle = crate::spawn!(async { Err::<(), &'static str>("nope") });
-        assert_eq!(handle.await.unwrap(), Err("nope"));
-    }
-
-    #[tokio::test]
-    async fn spawn_runs_to_completion_with_await_point() {
-        let handle = crate::spawn!(async {
-            tokio::time::sleep(std::time::Duration::from_millis(1)).await;
-            "done"
+    #[test]
+    fn spawn_returns_future_output() {
+        run_with_writer_lock(async {
+            let handle = crate::spawn!(async { 42_u32 });
+            assert_eq!(handle.await.unwrap(), 42);
         });
-        assert_eq!(handle.await.unwrap(), "done");
     }
 
-    #[tokio::test]
-    async fn spawn_propagates_callers_span_into_task() {
-        let capture = SpanCapture::default();
-        let subscriber = Registry::default().with(capture.clone());
-        let _guard = tracing::subscriber::set_default(subscriber);
-
-        let outer = span!(tracing::Level::INFO, "attribution_span");
-        let _entered = outer.enter();
-
-        let handle = crate::spawn!(async {
-            // Yield once so the task actually re-enters its instrumented
-            // span on a different poll than the spawn site.
-            tokio::task::yield_now().await;
-            tracing::event!(tracing::Level::INFO, "inside_spawned_task");
+    #[test]
+    fn spawn_preserves_error_type() {
+        run_with_writer_lock(async {
+            let handle = crate::spawn!(async { Err::<(), &'static str>("nope") });
+            assert_eq!(handle.await.unwrap(), Err("nope"));
         });
-        handle.await.unwrap();
+    }
 
-        drop(_entered);
+    #[test]
+    fn spawn_runs_to_completion_with_await_point() {
+        run_with_writer_lock(async {
+            let handle = crate::spawn!(async {
+                tokio::time::sleep(std::time::Duration::from_millis(1)).await;
+                "done"
+            });
+            assert_eq!(handle.await.unwrap(), "done");
+        });
+    }
 
-        let events = capture.events.lock().unwrap();
-        // Find the event we emitted from inside the task and assert it
-        // saw `attribution_span` on its stack.
-        let saw_outer = events
-            .iter()
-            .any(|stack| stack.iter().any(|name| name == "attribution_span"));
-        assert!(
-            saw_outer,
-            "spawned task lost caller's span; captured stacks: {:?}",
-            *events
-        );
+    #[test]
+    fn spawn_propagates_callers_span_into_task() {
+        run_with_writer_lock(async {
+            let capture = SpanCapture::default();
+            let subscriber = Registry::default().with(capture.clone());
+            let _guard = tracing::subscriber::set_default(subscriber);
+
+            let outer = span!(tracing::Level::INFO, "attribution_span");
+            let _entered = outer.enter();
+
+            let handle = crate::spawn!(async {
+                // Yield once so the task actually re-enters its instrumented
+                // span on a different poll than the spawn site.
+                tokio::task::yield_now().await;
+                tracing::event!(tracing::Level::INFO, "inside_spawned_task");
+            });
+            handle.await.unwrap();
+
+            drop(_entered);
+
+            let events = capture.events.lock().unwrap();
+            // Find the event we emitted from inside the task and assert it
+            // saw `attribution_span` on its stack.
+            let saw_outer = events
+                .iter()
+                .any(|stack| stack.iter().any(|name| name == "attribution_span"));
+            assert!(
+                saw_outer,
+                "spawned task lost caller's span; captured stacks: {:?}",
+                *events
+            );
+        });
     }
 }

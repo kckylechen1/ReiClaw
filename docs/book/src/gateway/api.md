@@ -68,7 +68,7 @@ and authorization still apply.
 
 ### Operator credentials and migration
 
-The existing Soul, User Model, review inbox, attention, backup/data-retention,
+The existing Soul, User Model, review inbox, attention,
 and Node identity management gates can use a separate operator credential class:
 
 ```toml

@@ -3022,7 +3022,6 @@ dependencies = [
  "reiclaw-providers",
  "reqwest",
  "rusqlite",
- "rustix",
  "scopeguard",
  "serde",
  "serde_json",

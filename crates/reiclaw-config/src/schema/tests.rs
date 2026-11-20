@@ -676,7 +676,7 @@ async fn validate_does_not_warn_when_a_bundle_exists() {
 
 fn parse_test_config(raw: &str) -> Config {
     let mut merged = raw.trim().to_string();
-    for table in ["data_retention", "security", "security_ops"] {
+    for table in ["security", "security_ops"] {
         if has_test_table(&merged, table) {
             continue;
         }
@@ -1757,8 +1757,6 @@ async fn config_toml_roundtrip() {
             );
             m
         },
-        backup: BackupConfig::default(),
-        data_retention: DataRetentionConfig::default(),
         security: SecurityConfig::default(),
         security_ops: SecurityOpsConfig::default(),
         runtime: RuntimeConfig {
@@ -2525,8 +2523,6 @@ async fn config_save_and_load_tmpdir() {
         data_dir: dir.join("workspace"),
         config_path: config_path.clone(),
         observability: ObservabilityConfig::default(),
-        backup: BackupConfig::default(),
-        data_retention: DataRetentionConfig::default(),
         security: SecurityConfig::default(),
         security_ops: SecurityOpsConfig::default(),
         runtime: RuntimeConfig::default(),

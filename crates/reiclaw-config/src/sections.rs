@@ -761,13 +761,10 @@ mod tests {
         assert_eq!(section_group_for_key("secrets"), SectionGroup::Storage);
         // Kebab spelling of a SCHEMA-grouped (non-curated) root resolves
         // through the kebab→snake fallback to the snake-keyed
-        // `nested_section_group` arm. (`web_search`/`data_retention` are
+        // `nested_section_group` arm. (`web_search`/`http_request` are
         // schema `#[group]` fields, not curated `sections!` rows.)
         assert_eq!(section_group_for_key("web-search"), SectionGroup::Tools);
-        assert_eq!(
-            section_group_for_key("data-retention"),
-            SectionGroup::Operations
-        );
+        assert_eq!(section_group_for_key("http-request"), SectionGroup::Tools);
         // Unknown keys land in the catch-all, never disappear.
         assert_eq!(section_group_for_key("not_a_section"), SectionGroup::Other);
     }

@@ -906,7 +906,7 @@ schema_version = 3
 [heartbeat]
 enabled = "not-a-bool"
 
-[backup]
+[scheduler]
 enabled = "also-not-a-bool"
 "#;
         let load = parse_current_salvaged(raw).unwrap();
@@ -916,7 +916,7 @@ enabled = "also-not-a-bool"
             load.dropped
         );
         assert!(
-            load.dropped.iter().any(|p| p == "backup"),
+            load.dropped.iter().any(|p| p == "scheduler"),
             "second offender must be dropped, got {:?}",
             load.dropped
         );

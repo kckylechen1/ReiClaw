@@ -2334,22 +2334,6 @@ fn warn_verifiable_intent_withheld(config: &Config) {
 /// gateway request and per nested rebuild).
 #[cfg(feature = "agent-runtime")]
 fn warn_withheld_operator_tools(config: &Config) {
-    if config.backup.enabled {
-        ::reiclaw_log::record!(
-            WARN,
-            ::reiclaw_log::Event::new(module_path!(), ::reiclaw_log::Action::Note)
-                .with_outcome(::reiclaw_log::EventOutcome::Unknown),
-            "backup: the backup model tool is retired; backup create/list/verify/restore are operator-only via the gateway operator API (POST/GET /api/agents/<alias>/backup). The [backup] section still configures that surface"
-        );
-    }
-    if config.data_retention.enabled {
-        ::reiclaw_log::record!(
-            WARN,
-            ::reiclaw_log::Event::new(module_path!(), ::reiclaw_log::Action::Note)
-                .with_outcome(::reiclaw_log::EventOutcome::Unknown),
-            "data_retention: the data_management model tool is retired; retention status/stats/purge are operator-only via the gateway operator API (/api/agents/<alias>/data-retention). The [data_retention] section still configures that surface"
-        );
-    }
     if config.security_ops.enabled {
         ::reiclaw_log::record!(
             WARN,

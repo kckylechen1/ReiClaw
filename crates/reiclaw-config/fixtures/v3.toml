@@ -20,19 +20,6 @@ runtime_profile = "default"
 [agents.simple_agent.identity]
 format = "openclaw"
 
-[backup]
-compress = true
-destination_dir = "state/backups"
-enabled = true
-encrypt = false
-include_dirs = [
-    "config",
-    "memory",
-    "audit",
-    "knowledge",
-]
-max_keep = 10
-
 [channels]
 ack_reactions = true
 cli = true
@@ -91,12 +78,6 @@ session_target = "isolated"
 expr = "0 7 * * *"
 kind = "cron"
 tz = "UTC"
-
-[data_retention]
-categories = []
-dry_run = false
-enabled = false
-retention_days = 90
 
 [[embedding_routes]]
 dimensions = 1536
