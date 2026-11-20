@@ -11561,6 +11561,299 @@ fn isolated_run_test_config() -> (tempfile::TempDir, Config) {
     (tmp, config)
 }
 
+mod process_message_pacing {
+    use super::*;
+    use axum::{Json, Router, extract::State, routing::post};
+    use reiclaw_config::multi_agent::{AgentMemoryConfig, MemoryBackendKind};
+    use reiclaw_config::schema::{
+        AliasedAgentConfig, ModelProviderConfig, OllamaModelProviderConfig, RiskProfileConfig,
+        RuntimeProfileConfig,
+    };
+    use serde_json::{Value, json};
+    use tokio::sync::Notify;
+
+    struct ScriptedProvider {
+        file_read_rounds: usize,
+        requests: parking_lot::Mutex<Vec<Value>>,
+    }
+
+    async fn scripted_response(
+        State(script): State<Arc<ScriptedProvider>>,
+        Json(request): Json<Value>,
+    ) -> Json<Value> {
+        let round = {
+            let mut requests = script.requests.lock();
+            requests.push(request);
+            requests.len()
+        };
+        let message = if round <= script.file_read_rounds {
+            json!({
+                "role": "assistant",
+                "content": null,
+                "tool_calls": [{
+                    "id": format!("pacing-read-{round}"),
+                    "type": "function",
+                    "function": {
+                        "name": "file_read",
+                        "arguments": json!({"path": "pacing-fixture.txt"}).to_string(),
+                    },
+                }],
+            })
+        } else {
+            json!({"role": "assistant", "content": "pacing-finished"})
+        };
+        Json(json!({"choices": [{"message": message}]}))
+    }
+
+    async fn start_provider(app: Router) -> (String, tokio::task::JoinHandle<()>) {
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0")
+            .await
+            .expect("pacing provider should bind");
+        let uri = format!("http://{}", listener.local_addr().unwrap());
+        let server = reiclaw_log::spawn!(async move {
+            axum::serve(listener, app)
+                .await
+                .expect("pacing provider should run");
+        });
+        (uri, server)
+    }
+
+    fn config_for_provider(uri: String, alias: &str) -> (TempDir, Config) {
+        let (tmp, mut config) = isolated_run_test_config();
+        config.memory.backend = "none".into();
+        config.reliability.provider_retries = 0;
+        config.providers.models.ollama.insert(
+            "pacing".into(),
+            OllamaModelProviderConfig {
+                base: ModelProviderConfig {
+                    model: Some("process-message-pacing-model".into()),
+                    uri: Some(uri),
+                    // Longer than the step budget exercised by the timeout test.
+                    timeout_secs: Some(300),
+                    ..Default::default()
+                },
+            },
+        );
+        config.agents.insert(
+            alias.into(),
+            AliasedAgentConfig {
+                model_provider: "ollama.pacing".into(),
+                risk_profile: "pacing".into(),
+                runtime_profile: "pacing".into(),
+                memory: AgentMemoryConfig {
+                    backend: MemoryBackendKind::None,
+                },
+                ..Default::default()
+            },
+        );
+        config.risk_profiles.insert(
+            "pacing".into(),
+            RiskProfileConfig {
+                allowed_tools: Some(vec!["file_read".into()]),
+                auto_approve: vec!["file_read".into()],
+                ..Default::default()
+            },
+        );
+        config.runtime_profiles.insert(
+            "pacing".into(),
+            RuntimeProfileConfig {
+                agentic: true,
+                max_tool_iterations: 16,
+                // Exercise completed repetitions through the public profile
+                // knob; a deduplicated call must not count as executed evidence.
+                tool_call_dedup_exempt: vec!["file_read".into()],
+                ..Default::default()
+            },
+        );
+        std::fs::create_dir_all(config.agent_workspace_dir(alias)).unwrap();
+        (tmp, config)
+    }
+
+    #[tokio::test]
+    async fn process_message_honors_disabled_and_custom_repetition_thresholds() {
+        let _hook_lock = observability::HOOK_TEST_LOCK.lock().await;
+        let capturing = Arc::new(CapturingObserver::default());
+        let _hook = observability::set_scoped_broadcast_hook(capturing.clone());
+
+        for (enabled, threshold, expected_calls) in [(false, 1, 6), (true, 1, 2), (true, 4, 5)] {
+            let script = Arc::new(ScriptedProvider {
+                file_read_rounds: 6,
+                requests: parking_lot::Mutex::new(Vec::new()),
+            });
+            let app = Router::new()
+                .route("/v1/chat/completions", post(scripted_response))
+                .with_state(script.clone());
+            let (uri, server) = start_provider(app).await;
+            let _server = scopeguard::guard(server, |server| server.abort());
+            let alias = format!("pacing-failure-{enabled}-{threshold}");
+            let (_tmp, mut config) = config_for_provider(uri, &alias);
+            config.pacing.loop_detection_enabled = enabled;
+            config.pacing.loop_detection_max_repeats = threshold;
+
+            let output = super::super::process_message(
+                config,
+                &alias,
+                "Read the requested fixture.",
+                None,
+                TurnOrigin::Channel,
+            )
+            .await
+            .expect("the scripted turn should finish or close with a recovery explanation");
+
+            if enabled {
+                assert!(output.contains("The recovery retry failed with the same result"));
+            } else {
+                assert_eq!(output, "pacing-finished");
+            }
+            assert_eq!(
+                script.requests.lock().len(),
+                expected_calls + usize::from(!enabled),
+                "unexpected provider rounds for enabled={enabled}, threshold={threshold}"
+            );
+            let events = capturing.events.lock();
+            let completed: Vec<_> = events
+                .iter()
+                .filter_map(|event| match event {
+                    ObserverEvent::ToolCall {
+                        tool,
+                        agent_alias,
+                        success,
+                        result,
+                        ..
+                    } if tool == "file_read" && agent_alias.as_deref() == Some(alias.as_str()) => {
+                        Some((*success, result.as_deref().unwrap_or_default()))
+                    }
+                    _ => None,
+                })
+                .collect();
+            assert_eq!(completed.len(), expected_calls);
+            assert!(
+                completed.iter().all(|(success, result)| {
+                    !success && result.contains("Failed to resolve file path")
+                }),
+                "each repetition must be a real missing-file dispatch, got {completed:?}"
+            );
+            assert_eq!(lifecycle_events_for_alias(&events, &alias), (1, 1));
+        }
+    }
+
+    #[tokio::test]
+    async fn process_message_honors_configured_observation_grace() {
+        for (minimum_elapsed, expected_advisory) in
+            [(Some(0), true), (Some(3600), false), (None, false)]
+        {
+            let script = Arc::new(ScriptedProvider {
+                file_read_rounds: 4,
+                requests: parking_lot::Mutex::new(Vec::new()),
+            });
+            let app = Router::new()
+                .route("/v1/chat/completions", post(scripted_response))
+                .with_state(script.clone());
+            let (uri, server) = start_provider(app).await;
+            let _server = scopeguard::guard(server, |server| server.abort());
+            let alias = "pacing-success";
+            let (_tmp, mut config) = config_for_provider(uri, alias);
+            std::fs::write(
+                config.agent_workspace_dir(alias).join("pacing-fixture.txt"),
+                "pacing fixture output\n",
+            )
+            .unwrap();
+            config.pacing.loop_detection_max_repeats = 100;
+            config.pacing.loop_detection_min_elapsed_secs = minimum_elapsed;
+
+            let output = super::super::process_message(
+                config,
+                alias,
+                "Read the requested fixture.",
+                None,
+                TurnOrigin::Channel,
+            )
+            .await
+            .expect("successful repeated reads should remain advisory");
+
+            let advisory = "configured observation grace period";
+            if expected_advisory {
+                assert!(output.ends_with("pacing-finished"));
+                assert_eq!(output.matches(advisory).count(), 1);
+            } else {
+                assert_eq!(output, "pacing-finished");
+            }
+            let requests = script.requests.lock();
+            assert_eq!(requests.len(), 5);
+            assert!(
+                requests[..4]
+                    .iter()
+                    .all(|request| !request["messages"].to_string().contains(advisory)),
+                "the timed advisory requires four completed successful rounds"
+            );
+            assert!(
+                requests[4]["messages"]
+                    .to_string()
+                    .contains("pacing fixture output")
+            );
+            assert_eq!(
+                requests[4]["messages"].to_string().contains(advisory),
+                expected_advisory,
+                "wrong timed advisory for min_elapsed={minimum_elapsed:?}"
+            );
+        }
+    }
+
+    async fn hold_response(State(received): State<Arc<Notify>>) -> Json<Value> {
+        received.notify_one();
+        std::future::pending().await
+    }
+
+    #[tokio::test]
+    async fn process_message_waits_for_the_configured_step_timeout() {
+        let received = Arc::new(Notify::new());
+        let app = Router::new()
+            .route("/v1/chat/completions", post(hold_response))
+            .with_state(received.clone());
+        let (uri, server) = start_provider(app).await;
+        let _server = scopeguard::guard(server, |server| server.abort());
+        let alias = "pacing-step-timeout";
+        let (_tmp, mut config) = config_for_provider(uri, alias);
+        config.pacing.step_timeout_secs = Some(60);
+        let process = reiclaw_log::spawn!(async move {
+            super::super::process_message(
+                config,
+                alias,
+                "Wait for the provider response.",
+                None,
+                TurnOrigin::Channel,
+            )
+            .await
+        });
+        let mut process = scopeguard::guard(process, |process| process.abort());
+
+        // Complete local socket setup before pausing. Pausing at test start
+        // lets the virtual clock race ahead while real I/O is still pending.
+        tokio::time::timeout(Duration::from_secs(5), received.notified())
+            .await
+            .expect("process_message must reach the real provider request");
+        tokio::time::pause();
+        let _clock = scopeguard::guard((), |()| tokio::time::resume());
+        tokio::time::advance(Duration::from_secs(1)).await;
+        assert!(
+            !process.is_finished(),
+            "the step budget must permit waiting"
+        );
+        tokio::time::advance(Duration::from_secs(60)).await;
+        let error = tokio::time::timeout(Duration::from_secs(1), &mut *process)
+            .await
+            .expect("the configured step budget must stop the blocked response")
+            .expect("the message task should not panic")
+            .expect_err("the provider is still waiting when the step budget expires");
+        assert!(
+            error
+                .to_string()
+                .contains("timed out after 60s (step_timeout_secs)"),
+            "expected the pacing timeout, got {error:#}"
+        );
+    }
+}
+
 #[tokio::test]
 async fn run_brackets_successful_turn_with_agent_start_and_agent_end() {
     use axum::{Router, routing::post};
