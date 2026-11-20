@@ -388,6 +388,7 @@ pub trait SessionBackend: Send + Sync {
     }
 
     /// Stage a rolling L1 checkpoint for `session_key` up to `up_to_message_id`.
+    /// A delayed writer must not replace a newer active or staged watermark.
     /// Backends without checkpoint support fail closed with `Unsupported`.
     fn stage_checkpoint(
         &self,
@@ -410,6 +411,20 @@ pub trait SessionBackend: Send + Sync {
         Err(std::io::Error::new(
             std::io::ErrorKind::Unsupported,
             "session checkpoints are unsupported",
+        ))
+    }
+
+    /// Atomically promote only when the staged watermark is no greater than
+    /// `covered_message_id`. The comparison and promotion must share a storage
+    /// transaction: a caller's earlier read cannot authorize a replacement slot.
+    fn promote_staged_checkpoint_if_covered(
+        &self,
+        _session_key: &str,
+        _covered_message_id: i64,
+    ) -> std::io::Result<Option<SessionCheckpoint>> {
+        Err(std::io::Error::new(
+            std::io::ErrorKind::Unsupported,
+            "bounded session checkpoint promotion is unsupported",
         ))
     }
 

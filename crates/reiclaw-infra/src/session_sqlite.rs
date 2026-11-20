@@ -917,6 +917,14 @@ impl SessionBackend for SqliteSessionBackend {
         self.promote_staged_checkpoint_impl(session_key)
     }
 
+    fn promote_staged_checkpoint_if_covered(
+        &self,
+        session_key: &str,
+        covered_message_id: i64,
+    ) -> std::io::Result<Option<SessionCheckpoint>> {
+        self.promote_staged_checkpoint_bounded_impl(session_key, Some(covered_message_id))
+    }
+
     fn load_session_window(&self, session_key: &str) -> std::io::Result<SessionWindow> {
         self.load_session_window_impl(session_key)
     }

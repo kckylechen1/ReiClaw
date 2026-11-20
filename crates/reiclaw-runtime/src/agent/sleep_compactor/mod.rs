@@ -26,7 +26,9 @@ use reiclaw_api::memory_traits::{
 };
 use reiclaw_api::tool::Tool;
 use reiclaw_config::schema::{Config, MemoryConfig, MultimodalConfig, PacingConfig};
-use reiclaw_infra::session_backend::{SessionBackend, SessionCheckpoint};
+use reiclaw_infra::session_backend::{
+    SessionBackend, SessionCheckpoint, SessionWindow, TimestampedMessage,
+};
 use reiclaw_memory::conflict;
 use reiclaw_memory::dedup::{self, DedupAction};
 use reiclaw_memory::importance;
@@ -44,6 +46,9 @@ use crate::agent::loop_::{
 use crate::agent::session_model_provider::build_session_model_provider;
 use crate::observability::NoopObserver;
 use crate::security::SecurityPolicy;
+
+mod admission;
+pub use admission::SleepMemoryAdmission;
 
 /// Context-budget utilization percentage that triggers staging an L1 checkpoint.
 pub const WATERMARK_STAGE_PERCENT: usize = 65;
@@ -63,6 +68,13 @@ pub const DREAM_CUT_HOUR: i8 = 4;
 
 /// Maximum atomic Core facts persisted per compaction pass.
 const MAX_TYPED_FACTS_PER_PASS: usize = 5;
+
+/// Batch toward this size without cutting a message or an unfinished turn.
+const TRANSCRIPT_BATCH_TARGET_BYTES: usize = 16_000;
+
+/// A single complete turn may exceed the target, but cannot consume an
+/// unbounded model context. Oversized turns remain in raw session storage.
+const TRANSCRIPT_MAX_TURN_BYTES: usize = 128_000;
 
 /// Lightweight JSON state marker file inside `config.data_dir` tracking
 /// the last completed Auto Dream `day_key` per agent (no second SQLite DB).
@@ -86,7 +98,7 @@ Your ONLY job is to distill conversation turns into a crisp rolling checkpoint a
 
 Rules:
 1. Preserve user and assistant Thoughts (`why_and_tradeoffs`), `settled_decisions`, and `rejected_options` — never flatten decisions into bare outcomes without why they were chosen or what alternatives were rejected.
-2. Call `checkpoint_stage` with a concise, lossless rolling digest of the conversation window up to the provided message watermark.
+2. Call `checkpoint_stage` with a concise, lossless rolling digest that combines the full previous active checkpoint with the new transcript. Preserve earlier decisions, reasoning, and unresolved work unless the new transcript explicitly changes them. Use exactly the provided message watermark.
 3. Call `episode_commit` with structured `summary`, `why_and_tradeoffs`, `settled_decisions`, `rejected_options`, `entities`, and optional `core_facts` (only durable facts/preferences/decisions; never reusable how-to procedures).
 4. If an earlier Core fact was explicitly contradicted or replaced, call `memory_supersede`.
 5. Never execute actions, never modify identity/soul rules, and never invent facts absent from the transcript.
@@ -703,10 +715,6 @@ pub async fn consolidate_turn_via_sleep(
     let outcome = SharedOutcome::new();
 
     let tools: Vec<Box<dyn Tool>> = vec![
-        Box::new(EpisodeReadTool {
-            memory: Arc::clone(&memory),
-            agent_id: agent_id.to_string(),
-        }),
         Box::new(EpisodeCommitTool {
             memory: Arc::clone(&memory),
             memory_config: memory_config.clone(),
@@ -830,6 +838,13 @@ pub async fn maybe_compact_ws_turn(
         return Ok(());
     };
 
+    let admission = SleepMemoryAdmission::new(config, Arc::clone(backend), agent_alias);
+    let check = admission.clone();
+    let key = session_key.to_string();
+    if !tokio::task::spawn_blocking(move || check.permits_session(&key)).await? {
+        return Ok(());
+    }
+
     let backend_clone = Arc::clone(backend);
     let key_owned = session_key.to_string();
     let mut window =
@@ -848,8 +863,13 @@ pub async fn maybe_compact_ws_turn(
         if age_secs >= COLD_WINDOW_GAP_SECS {
             let b = Arc::clone(backend);
             let k = session_key.to_string();
-            if let Ok(Ok(Some(_))) =
-                tokio::task::spawn_blocking(move || b.promote_staged_checkpoint(&k)).await
+            let covered = staged.up_to_message_id;
+            if tokio::task::spawn_blocking(move || {
+                b.promote_staged_checkpoint_if_covered(&k, covered)
+            })
+            .await
+            .context("cold checkpoint promotion task failed")??
+            .is_some()
             {
                 let b_reload = Arc::clone(backend);
                 let k_reload = session_key.to_string();
@@ -862,6 +882,9 @@ pub async fn maybe_compact_ws_turn(
     }
 
     if context_token_budget == 0 || window.delta_messages.is_empty() {
+        return Ok(());
+    }
+    if !admission.permits_messages(window.delta_messages.iter().map(|(_, row)| row)) {
         return Ok(());
     }
 
@@ -883,20 +906,15 @@ pub async fn maybe_compact_ws_turn(
         return Ok(());
     }
 
-    let max_delta_id = window
-        .delta_messages
-        .iter()
-        .map(|(id, _)| *id)
-        .max()
-        .unwrap_or(0);
-    if max_delta_id <= 0 {
+    let Some(batch) = select_transcript_batch(&window.delta_messages)? else {
         return Ok(());
-    }
+    };
+    let covered_message_id = batch.up_to_message_id();
 
     let already_staged_current = window
         .staged_checkpoint
         .as_ref()
-        .is_some_and(|c| c.up_to_message_id >= max_delta_id);
+        .is_some_and(|c| c.up_to_message_id == covered_message_id);
 
     if !already_staged_current {
         let Some(sleep_model) = resolve_fast_sleep_model(config, live_provider_ref, live_model)
@@ -914,121 +932,269 @@ pub async fn maybe_compact_ws_turn(
             return Ok(());
         };
 
-        let transcript = format_delta_transcript(&window.delta_messages);
-        let started_at = window
-            .delta_messages
-            .first()
-            .and_then(|(_, tm)| tm.created_at)
-            .unwrap_or(now_ts);
-        let ended_at = window
-            .delta_messages
-            .last()
-            .and_then(|(_, tm)| tm.created_at)
-            .unwrap_or(now_ts)
-            .max(started_at);
-
-        let started_rfc = reiclaw_api::time::format_rfc3339(started_at);
-        let ended_rfc = reiclaw_api::time::format_rfc3339(ended_at);
-        let outcome = SharedOutcome::new();
-
-        let mut tools: Vec<Box<dyn Tool>> = vec![
-            Box::new(SessionSearchTool {
-                session_backend: Arc::clone(backend),
-                allowed_session_keys: vec![session_key.to_string()],
-            }),
-            Box::new(CheckpointStageTool {
-                session_backend: Arc::clone(backend),
-                session_key: session_key.to_string(),
-                max_message_id: max_delta_id,
-                outcome: outcome.clone(),
-            }),
-        ];
-        if let Some(mem) = memory {
-            tools.push(Box::new(EpisodeReadTool {
-                memory: Arc::clone(mem),
-                agent_id: agent_alias.to_string(),
-            }));
-            tools.push(Box::new(EpisodeCommitTool {
-                memory: Arc::clone(mem),
-                memory_config: config.memory.clone(),
-                agent_id: agent_alias.to_string(),
-                default_session_key: session_key.to_string(),
-                source_kind: EpisodeSourceKind::Dialogue,
-                default_started_at: started_rfc.clone(),
-                default_ended_at: ended_rfc.clone(),
-                default_up_to_message_id: Some(max_delta_id),
-                tolerate_unsupported_sleep: true,
-                outcome: outcome.clone(),
-            }));
-            tools.push(Box::new(MemorySupersedeTool {
-                memory: Arc::clone(mem),
-                agent_id: agent_alias.to_string(),
-                outcome: outcome.clone(),
-            }));
-        }
-
-        let user_prompt = format!(
-            "Session `{session_key}` reached {used_tokens}/{budget} tokens (watermark up_to_message_id={max_delta_id}).\n\nTranscript:\n{transcript}"
-        );
-        let security = sleep_security_for_agent(config, agent_alias);
-        let final_text = run_confined_loop(
-            sleep_model.provider.as_ref(),
-            &sleep_model.provider_name,
-            &sleep_model.model,
-            sleep_model.temperature,
+        stage_session_batch(
+            config,
+            backend,
+            memory,
             agent_alias,
-            tools,
-            WATERMARK_COMPACTOR_SYSTEM_PROMPT,
-            &user_prompt,
-            6,
-            Some(&security),
+            session_key,
+            &window,
+            &batch,
+            &sleep_model,
         )
         .await?;
-
-        // Fallback if the model answered with plain text / JSON without calling `checkpoint_stage`.
-        if outcome.0.lock().staged_checkpoint.is_none() {
-            let fallback_digest = build_fallback_digest(&final_text, &transcript);
-            let b = Arc::clone(backend);
-            let k = session_key.to_string();
-            let _ = tokio::task::spawn_blocking(move || {
-                b.stage_checkpoint(&k, max_delta_id, &fallback_digest)
-            })
-            .await;
-        }
     }
 
     if promote_due {
         let b = Arc::clone(backend);
         let k = session_key.to_string();
-        let _ = tokio::task::spawn_blocking(move || b.promote_staged_checkpoint(&k)).await;
+        tokio::task::spawn_blocking(move || {
+            b.promote_staged_checkpoint_if_covered(&k, covered_message_id)
+        })
+        .await
+        .context("checkpoint promotion task failed")??;
     }
 
     Ok(())
 }
 
-pub(super) fn format_delta_transcript(
-    delta_messages: &[(i64, reiclaw_infra::session_backend::TimestampedMessage)],
-) -> String {
-    let mut out = String::new();
-    for (id, tm) in delta_messages {
-        let cleaned = strip_media_markers(&tm.message.content);
-        let line = format!("[msg:{id}] {}: {}\n", tm.message.role, cleaned);
-        if out.len() + line.len() > 16_000 {
-            out.push_str("[... earlier/later messages truncated for sleep budget ...]\n");
-            break;
-        }
-        out.push_str(&line);
-    }
-    out
+/// A contiguous prefix ending at a complete assistant response. Its watermark
+/// describes exactly the rows in `transcript`, never the unseen remainder.
+pub(super) struct TranscriptBatch<'a> {
+    messages: &'a [(i64, TimestampedMessage)],
+    transcript: String,
 }
 
-pub(super) fn build_fallback_digest(final_text: &str, transcript: &str) -> String {
-    let trimmed = final_text.trim();
-    if !trimmed.is_empty() {
-        truncate_utf8(trimmed, 4_000)
-    } else {
-        truncate_utf8(transcript, 1_500)
+/// Only runtime-produced complete batches may advance automatic Episode
+/// coverage. Old records remain readable but their unversioned watermarks may
+/// describe a truncated transcript, so they must not hide the raw suffix.
+fn complete_batch_episode_id(session_key: &str, watermark: i64) -> String {
+    format!("ep_complete_v1_{session_key}_{watermark}")
+}
+
+fn complete_batch_episode_watermark(episode: &EpisodeRecord) -> Option<i64> {
+    episode.up_to_message_id.filter(|watermark| {
+        *watermark > 0
+            && episode.episode_id == complete_batch_episode_id(&episode.session_key, *watermark)
+    })
+}
+
+impl TranscriptBatch<'_> {
+    fn up_to_message_id(&self) -> i64 {
+        self.messages.last().map_or(0, |(id, _)| *id)
     }
+
+    fn timestamps(&self) -> (String, String) {
+        let now = jiff::Timestamp::now();
+        let started = self
+            .messages
+            .first()
+            .and_then(|(_, row)| row.created_at)
+            .unwrap_or(now);
+        let ended = self
+            .messages
+            .last()
+            .and_then(|(_, row)| row.created_at)
+            .unwrap_or(now)
+            .max(started);
+        (
+            reiclaw_api::time::format_rfc3339(started),
+            reiclaw_api::time::format_rfc3339(ended),
+        )
+    }
+
+    fn fallback_episode(
+        &self,
+        agent_alias: &str,
+        session_key: &str,
+        source_kind: EpisodeSourceKind,
+    ) -> EpisodeRecord {
+        let (started_at, ended_at) = self.timestamps();
+        let watermark = self.up_to_message_id();
+        EpisodeRecord {
+            episode_id: complete_batch_episode_id(session_key, watermark),
+            agent_id: agent_alias.to_string(),
+            session_key: session_key.to_string(),
+            started_at,
+            ended_at,
+            up_to_message_id: Some(watermark),
+            // A deterministic archive must retain the complete selected batch.
+            // Arbitrary final model text is not evidence of covered content.
+            summary: self.transcript.clone(),
+            why_and_tradeoffs: Vec::new(),
+            settled_decisions: Vec::new(),
+            rejected_options: Vec::new(),
+            entities: Vec::new(),
+            source_kind,
+        }
+    }
+}
+
+pub(super) fn select_transcript_batch(
+    messages: &[(i64, TimestampedMessage)],
+) -> Result<Option<TranscriptBatch<'_>>> {
+    if messages.is_empty() {
+        return Ok(None);
+    }
+    anyhow::ensure!(
+        messages[0].1.message.role == "user",
+        "sleep transcript does not start at an owner turn boundary; raw history retained"
+    );
+
+    let mut transcript = String::new();
+    let mut turn = String::new();
+    let mut covered_end = 0;
+    for (index, (id, row)) in messages.iter().enumerate() {
+        let cleaned = strip_media_markers(&row.message.content);
+        turn.push_str(&format!("[msg:{id}] {}: {cleaned}\n", row.message.role));
+        if turn.len() > TRANSCRIPT_MAX_TURN_BYTES {
+            if covered_end > 0 {
+                break;
+            }
+            anyhow::bail!(
+                "sleep transcript turn exceeds the {TRANSCRIPT_MAX_TURN_BYTES}-byte limit; raw history retained without advancing its watermark"
+            );
+        }
+        let next_starts_turn = messages
+            .get(index + 1)
+            .is_none_or(|(_, next)| next.message.role == "user");
+        if row.message.role != "assistant" || !next_starts_turn {
+            continue;
+        }
+        if !transcript.is_empty() && transcript.len() + turn.len() > TRANSCRIPT_BATCH_TARGET_BYTES {
+            break;
+        }
+        transcript.push_str(&turn);
+        turn.clear();
+        covered_end = index + 1;
+        if transcript.len() >= TRANSCRIPT_BATCH_TARGET_BYTES {
+            break;
+        }
+    }
+    Ok((covered_end > 0).then(|| TranscriptBatch {
+        messages: &messages[..covered_end],
+        transcript,
+    }))
+}
+
+/// Shared production staging path. The active digest is part of every rolling
+/// request; only this batch's complete terminal row can become its watermark.
+#[allow(clippy::too_many_arguments)]
+async fn stage_session_batch(
+    config: &Config,
+    backend: &Arc<dyn SessionBackend>,
+    memory: Option<&Arc<dyn Memory>>,
+    agent_alias: &str,
+    session_key: &str,
+    window: &SessionWindow,
+    batch: &TranscriptBatch<'_>,
+    model: &ResolvedSleepModel,
+) -> Result<()> {
+    let covered_message_id = batch.up_to_message_id();
+    let (started_at, ended_at) = batch.timestamps();
+    let outcome = SharedOutcome::new();
+    let admission = SleepMemoryAdmission::new(config, Arc::clone(backend), agent_alias);
+    let mut tools: Vec<Box<dyn Tool>> = vec![
+        Box::new(SessionSearchTool {
+            session_backend: Arc::clone(backend),
+            allowed_session_keys: vec![session_key.to_string()],
+            admission: admission.clone(),
+        }),
+        Box::new(CheckpointStageTool {
+            session_backend: Arc::clone(backend),
+            session_key: session_key.to_string(),
+            max_message_id: covered_message_id,
+            outcome: outcome.clone(),
+        }),
+    ];
+    if let Some(mem) = memory {
+        tools.push(Box::new(EpisodeReadTool {
+            memory: Arc::clone(mem),
+            agent_id: agent_alias.to_string(),
+            admission,
+        }));
+        tools.push(Box::new(EpisodeCommitTool {
+            memory: Arc::clone(mem),
+            memory_config: config.memory.clone(),
+            agent_id: agent_alias.to_string(),
+            default_session_key: session_key.to_string(),
+            source_kind: EpisodeSourceKind::Dialogue,
+            default_started_at: started_at,
+            default_ended_at: ended_at,
+            default_up_to_message_id: Some(covered_message_id),
+            tolerate_unsupported_sleep: true,
+            outcome: outcome.clone(),
+        }));
+        tools.push(Box::new(MemorySupersedeTool {
+            memory: Arc::clone(mem),
+            agent_id: agent_alias.to_string(),
+            outcome: outcome.clone(),
+        }));
+    }
+    let prior = window.active_checkpoint.as_ref().map_or_else(
+        || "No previous active checkpoint.".to_string(),
+        |checkpoint| {
+            format!(
+                "Previous active checkpoint through message_id={} (retain its still-valid context):\n{}",
+                checkpoint.up_to_message_id, checkpoint.digest
+            )
+        },
+    );
+    let prompt = format!(
+        "Build the next rolling checkpoint for session `{session_key}` at exactly up_to_message_id={covered_message_id}. Combine the previous checkpoint with every complete new turn below. Later raw rows, if any, are outside this batch.\n\n{prior}\n\nNew transcript:\n{}",
+        batch.transcript
+    );
+    let security = sleep_security_for_agent(config, agent_alias);
+    if let Some(mem) = memory {
+        // The archive must commit before a checkpoint can hide its raw prefix.
+        // A later provider error or crash can then leave a staged candidate,
+        // but never a candidate whose source batch has no recoverable Episode.
+        security
+            .enforce_estop_tool("episode_commit")
+            .map_err(anyhow::Error::msg)?;
+        let episode = batch.fallback_episode(agent_alias, session_key, EpisodeSourceKind::Dialogue);
+        episode.validate()?;
+        match mem.commit_episode(&episode).await {
+            Ok(_) => {}
+            Err(err) if is_unsupported_sleep_error(&err) => {
+                // Legacy backends have no typed Episode API. Preserve their
+                // existing Daily fallback; only MemoryCore supports recovery
+                // via the exact versioned Episode identity.
+                mem.store(
+                    &episode.episode_id,
+                    &episode.summary,
+                    MemoryCategory::Daily,
+                    None,
+                )
+                .await?;
+            }
+            Err(err) => return Err(err),
+        }
+    }
+    run_confined_loop(
+        model.provider.as_ref(),
+        &model.provider_name,
+        &model.model,
+        model.temperature,
+        agent_alias,
+        tools,
+        WATERMARK_COMPACTOR_SYSTEM_PROMPT,
+        &prompt,
+        6,
+        Some(&security),
+    )
+    .await?;
+
+    anyhow::ensure!(
+        outcome
+            .0
+            .lock()
+            .staged_checkpoint
+            .as_ref()
+            .is_some_and(|checkpoint| checkpoint.up_to_message_id == covered_message_id),
+        "sleep compactor did not stage the complete batch at message_id={covered_message_id}; raw history retained without promotion"
+    );
+    Ok(())
 }
 
 #[cfg(test)]

@@ -5,7 +5,7 @@ use std::path::{Path, PathBuf};
 use std::sync::Arc;
 
 use anyhow::{Context, Result};
-use reiclaw_api::memory_traits::{EpisodeRecord, EpisodeSourceKind, Memory};
+use reiclaw_api::memory_traits::{EpisodeRecord, EpisodeSourceKind, Memory, MemoryCategory};
 use reiclaw_api::tool::Tool;
 use reiclaw_config::attention::AttentionConfig;
 use reiclaw_config::multi_agent::MemoryBackendKind;
@@ -21,8 +21,9 @@ use super::tools::{
 use super::{
     COLD_WINDOW_GAP_SECS, DEEP_DREAM_SYSTEM_PROMPT, DREAM_CUT_HOUR, DREAM_STATE_FILENAME,
     EPISODE_FLUSH_SYSTEM_PROMPT, ResolvedSleepModel, SLEEP_CHECK_INTERVAL, SharedOutcome,
-    build_fallback_digest, format_delta_transcript, resolve_daemon_fast_sleep_model,
-    resolve_primary_sleep_model, run_confined_loop, truncate_utf8,
+    SleepMemoryAdmission, complete_batch_episode_id, complete_batch_episode_watermark,
+    resolve_daemon_fast_sleep_model, resolve_primary_sleep_model, run_confined_loop,
+    select_transcript_batch, truncate_utf8,
 };
 // ── Quiet Hours & 04:00 Day Cut Scheduling ──────────────────────────────────
 
@@ -90,7 +91,7 @@ fn resolve_dream_timezone(config: &Config) -> jiff::tz::TimeZone {
 }
 
 #[derive(Debug, Default, Serialize, Deserialize)]
-struct DreamStateFile {
+pub(super) struct DreamStateFile {
     #[serde(default)]
     last_day_key_by_agent: BTreeMap<String, String>,
 }
@@ -147,9 +148,9 @@ fn session_belongs_to_agent(meta: &SessionMetadata, agent_alias: &str, single_ag
     }
 }
 
-/// Flush any unflushed turns in one session into an `EpisodeRecord` (and promote
-/// any staged checkpoint). Used on daemon startup (`StartupRecovery`) and idle
-/// session detection (`IdleFlush`).
+/// Flush one complete, bounded batch into an `EpisodeRecord`. Later passes
+/// resume after its exact watermark. Only promote a staged checkpoint when
+/// Episode coverage has reached it. Used on startup and idle detection.
 pub async fn flush_session_to_episode(
     config: &Config,
     backend: &Arc<dyn SessionBackend>,
@@ -159,6 +160,12 @@ pub async fn flush_session_to_episode(
     source_kind: EpisodeSourceKind,
     sleep_model: Option<&ResolvedSleepModel>,
 ) -> Result<bool> {
+    let admission = SleepMemoryAdmission::new(config, Arc::clone(backend), agent_alias);
+    let check = admission.clone();
+    let key = session_key.to_string();
+    if !tokio::task::spawn_blocking(move || check.permits_session(&key)).await? {
+        return Ok(false);
+    }
     let b = Arc::clone(backend);
     let k = session_key.to_string();
     let window = tokio::task::spawn_blocking(move || b.load_session_window(&k))
@@ -166,60 +173,90 @@ pub async fn flush_session_to_episode(
         .context("load_session_window failed")??;
 
     if window.delta_messages.is_empty() {
-        if window.staged_checkpoint.is_some() {
-            let b = Arc::clone(backend);
-            let k = session_key.to_string();
-            let _ = tokio::task::spawn_blocking(move || b.promote_staged_checkpoint(&k)).await;
-        }
         return Ok(false);
     }
-
-    let max_delta_id = window
-        .delta_messages
-        .iter()
-        .map(|(id, _)| *id)
-        .max()
-        .unwrap_or(0);
-    if max_delta_id <= 0 {
+    if !admission.permits_messages(window.delta_messages.iter().map(|(_, row)| row)) {
         return Ok(false);
     }
 
     let existing = memory
-        .read_episodes_in_window(agent_alias, None, None, Some(session_key), 1)
+        .read_episodes_in_window(agent_alias, None, None, Some(session_key), 100)
         .await?;
-    if let Some(latest) = existing.first()
-        && latest.up_to_message_id.is_some_and(|id| id >= max_delta_id)
-    {
+    let mut flushed_through = existing
+        .iter()
+        .filter_map(complete_batch_episode_watermark)
+        .max()
+        .unwrap_or(0);
+    let mut first_unflushed = window
+        .delta_messages
+        .partition_point(|(id, _)| *id <= flushed_through);
+    let batch = loop {
+        let Some(batch) = select_transcript_batch(&window.delta_messages[first_unflushed..])?
+        else {
+            break None;
+        };
+        // Early recovery batches can sort behind hundreds of later legacy
+        // records. An exact key+agent lookup proves coverage independently of
+        // recency pagination, while namespace and record checks fail closed.
+        let expected_id = complete_batch_episode_id(session_key, batch.up_to_message_id());
+        let existing = memory.get_for_agent(&expected_id, agent_alias).await?;
+        let covered = if let Some(entry) = existing.filter(|entry| {
+            entry.key == expected_id
+                && entry.namespace == "sleep_episode"
+                && entry.category == MemoryCategory::Custom("sleep_episode".into())
+                && entry.superseded_by.is_none()
+                && entry.agent_id.as_deref() == Some(agent_alias)
+                && entry.session_id.as_deref() == Some(session_key)
+        }) {
+            let episode: EpisodeRecord = serde_json::from_str(&entry.content)
+                .context("invalid complete-batch Episode record")?;
+            episode.validate()?;
+            episode.agent_id == agent_alias
+                && episode.session_key == session_key
+                && episode.episode_id == expected_id
+                && complete_batch_episode_watermark(&episode) == Some(batch.up_to_message_id())
+        } else {
+            false
+        };
+        if covered {
+            flushed_through = batch.up_to_message_id();
+            first_unflushed += batch.messages.len();
+            continue;
+        }
+        break Some(batch);
+    };
+    let Some(batch) = batch else {
+        if window
+            .staged_checkpoint
+            .as_ref()
+            .is_some_and(|checkpoint| checkpoint.up_to_message_id <= flushed_through)
+        {
+            let b = Arc::clone(backend);
+            let k = session_key.to_string();
+            tokio::task::spawn_blocking(move || {
+                b.promote_staged_checkpoint_if_covered(&k, flushed_through)
+            })
+            .await
+            .context("episode-covered checkpoint promotion task failed")??;
+        }
         return Ok(false);
-    }
-
-    let now_ts = jiff::Timestamp::now();
-    let started_at = window
-        .delta_messages
-        .first()
-        .and_then(|(_, tm)| tm.created_at)
-        .unwrap_or(now_ts);
-    let ended_at = window
-        .delta_messages
-        .last()
-        .and_then(|(_, tm)| tm.created_at)
-        .unwrap_or(now_ts)
-        .max(started_at);
-    let started_rfc = reiclaw_api::time::format_rfc3339(started_at);
-    let ended_rfc = reiclaw_api::time::format_rfc3339(ended_at);
-
-    let transcript = format_delta_transcript(&window.delta_messages);
+    };
+    let covered_message_id = batch.up_to_message_id();
+    let (started_rfc, ended_rfc) = batch.timestamps();
     let outcome = SharedOutcome::new();
+    let security = super::sleep_security_for_agent(config, agent_alias);
 
     if let Some(model) = sleep_model {
         let tools: Vec<Box<dyn Tool>> = vec![
             Box::new(SessionSearchTool {
                 session_backend: Arc::clone(backend),
                 allowed_session_keys: vec![session_key.to_string()],
+                admission: admission.clone(),
             }),
             Box::new(EpisodeReadTool {
                 memory: Arc::clone(memory),
                 agent_id: agent_alias.to_string(),
+                admission: admission.clone(),
             }),
             Box::new(EpisodeCommitTool {
                 memory: Arc::clone(memory),
@@ -229,7 +266,7 @@ pub async fn flush_session_to_episode(
                 source_kind,
                 default_started_at: started_rfc.clone(),
                 default_ended_at: ended_rfc.clone(),
-                default_up_to_message_id: Some(max_delta_id),
+                default_up_to_message_id: Some(covered_message_id),
                 tolerate_unsupported_sleep: false,
                 outcome: outcome.clone(),
             }),
@@ -240,10 +277,10 @@ pub async fn flush_session_to_episode(
             }),
         ];
         let prompt = format!(
-            "Flush unflushed session `{session_key}` ({source_kind}) up to message_id={max_delta_id}.\n\nTranscript:\n{transcript}"
+            "Flush this complete batch from session `{session_key}` ({source_kind}) through message_id={covered_message_id}. Later raw rows, if any, are outside this batch.\n\nTranscript:\n{}",
+            batch.transcript
         );
-        let security = super::sleep_security_for_agent(config, agent_alias);
-        let final_text = run_confined_loop(
+        run_confined_loop(
             model.provider.as_ref(),
             &model.provider_name,
             &model.model,
@@ -256,49 +293,30 @@ pub async fn flush_session_to_episode(
             Some(&security),
         )
         .await?;
-
-        if outcome.0.lock().committed_episodes.is_empty() {
-            let episode = EpisodeRecord {
-                episode_id: format!("ep_{session_key}_{max_delta_id}"),
-                agent_id: agent_alias.to_string(),
-                session_key: session_key.to_string(),
-                started_at: started_rfc,
-                ended_at: ended_rfc,
-                up_to_message_id: Some(max_delta_id),
-                summary: build_fallback_digest(&final_text, &transcript),
-                why_and_tradeoffs: Vec::new(),
-                settled_decisions: Vec::new(),
-                rejected_options: Vec::new(),
-                entities: Vec::new(),
-                source_kind,
-            };
-            episode.validate()?;
-            memory.commit_episode(&episode).await?;
-        }
-    } else {
-        // Deterministic recovery fallback when no provider resolves cleanly.
-        let episode = EpisodeRecord {
-            episode_id: format!("ep_{session_key}_{max_delta_id}"),
-            agent_id: agent_alias.to_string(),
-            session_key: session_key.to_string(),
-            started_at: started_rfc,
-            ended_at: ended_rfc,
-            up_to_message_id: Some(max_delta_id),
-            summary: truncate_utf8(&transcript, 1_500),
-            why_and_tradeoffs: Vec::new(),
-            settled_decisions: Vec::new(),
-            rejected_options: Vec::new(),
-            entities: Vec::new(),
-            source_kind,
-        };
+    }
+    if outcome.0.lock().committed_episodes.is_empty() {
+        // Retain every selected row even if there is no provider or the model
+        // finishes without committing an Episode. Never truncate and advance.
+        security
+            .enforce_estop_tool("episode_commit")
+            .map_err(anyhow::Error::msg)?;
+        let episode = batch.fallback_episode(agent_alias, session_key, source_kind);
         episode.validate()?;
         memory.commit_episode(&episode).await?;
     }
 
-    if window.staged_checkpoint.is_some() {
+    if window
+        .staged_checkpoint
+        .as_ref()
+        .is_some_and(|checkpoint| checkpoint.up_to_message_id <= covered_message_id)
+    {
         let b = Arc::clone(backend);
         let k = session_key.to_string();
-        let _ = tokio::task::spawn_blocking(move || b.promote_staged_checkpoint(&k)).await;
+        tokio::task::spawn_blocking(move || {
+            b.promote_staged_checkpoint_if_covered(&k, covered_message_id)
+        })
+        .await
+        .context("episode-covered checkpoint promotion task failed")??;
     }
 
     Ok(true)
@@ -318,6 +336,7 @@ pub async fn run_deep_dream_for_agent(
     primary_model: &ResolvedSleepModel,
     now: jiff::Timestamp,
 ) -> Result<bool> {
+    let admission = SleepMemoryAdmission::new(config, Arc::clone(backend), agent_alias);
     let episodes = memory
         .read_episodes_in_window(
             agent_alias,
@@ -327,6 +346,15 @@ pub async fn run_deep_dream_for_agent(
             100,
         )
         .await?;
+    let check = admission.clone();
+    let episodes = tokio::task::spawn_blocking(move || {
+        episodes
+            .into_iter()
+            .filter(|episode| check.permits_episode(episode))
+            .collect::<Vec<_>>()
+    })
+    .await
+    .context("dream episode admission task failed")?;
 
     if episodes.is_empty() {
         return Ok(false);
@@ -334,12 +362,11 @@ pub async fn run_deep_dream_for_agent(
 
     let allowed_session_keys: Vec<String> = {
         let b = Arc::clone(backend);
-        let alias_owned = agent_alias.to_string();
-        let single_agent = config.agents.len() == 1;
+        let check = admission.clone();
         tokio::task::spawn_blocking(move || {
             b.list_sessions_with_metadata()
                 .into_iter()
-                .filter(|m| session_belongs_to_agent(m, &alias_owned, single_agent))
+                .filter(|m| check.permits_session(&m.key))
                 .map(|m| m.key)
                 .collect()
         })
@@ -354,10 +381,12 @@ pub async fn run_deep_dream_for_agent(
         Box::new(SessionSearchTool {
             session_backend: Arc::clone(backend),
             allowed_session_keys,
+            admission: admission.clone(),
         }),
         Box::new(EpisodeReadTool {
             memory: Arc::clone(memory),
             agent_id: agent_alias.to_string(),
+            admission,
         }),
         Box::new(MemorySupersedeTool {
             memory: Arc::clone(memory),
@@ -542,7 +571,7 @@ async fn publish_dream_fallback(
     Ok(())
 }
 
-async fn tick_agent(
+pub(super) async fn tick_agent(
     config: &Config,
     backend: &Arc<dyn SessionBackend>,
     dream_state: &mut DreamStateFile,
@@ -550,7 +579,7 @@ async fn tick_agent(
     startup_pass: bool,
     now: jiff::Timestamp,
 ) -> Result<bool> {
-    if !agent_uses_memorycore(config, agent_alias) {
+    if !config.memory.auto_save || !agent_uses_memorycore(config, agent_alias) {
         return Ok(false);
     }
 
