@@ -28,12 +28,12 @@ use std::sync::Arc;
 
 use futures_util::future::BoxFuture;
 use parking_lot::RwLock;
+use reiclaw_api::delegation_request::{DelegationOrigin, DelegationOriginScope};
 use reiclaw_api::model_provider::ModelProvider;
 use reiclaw_api::sleep_records::{EpisodeRecord, EpisodeSourceKind};
 use reiclaw_api::tachi_staff::{ContinueReceipt, RunResult, RunState, RunStatus, TachiStaffError};
 use reiclaw_config::schema::Config;
 use reiclaw_infra::bridge_outbox::BridgeOutbox;
-use reiclaw_infra::session_backend::SessionBackend;
 use reiclaw_infra::session_sqlite::{
     DispatchBindingRow, ProxyContinuationAdmission, ProxyContinuationState, SqliteSessionBackend,
 };
@@ -280,6 +280,8 @@ pub(crate) struct ContinuationContext<'a> {
     pub revision: u64,
     pub prompt: Option<&'a str>,
     pub read_projection: Option<&'a serde_json::Value>,
+    pub binding: &'a DispatchBindingRow,
+    pub source_is_current: &'a (dyn Fn() -> bool + Send + Sync),
 }
 
 /// Grounded proxy-continuation responder for live `INPUT_REQUIRED` pauses.
@@ -336,109 +338,129 @@ impl GroundedContinuationResolver {
             || find_protected_identity_marker(content).is_some()
     }
 
-    fn collect_session_facts(&self, agent_alias: &str, prompt: &str) -> Vec<String> {
+    fn collect_session_facts(&self, ctx: &ContinuationContext<'_>, prompt: &str) -> Vec<String> {
+        if !(ctx.source_is_current)() {
+            return Vec::new();
+        }
         let Ok(sessions) = SqliteSessionBackend::new(&self.data_dir) else {
             return Vec::new();
         };
-        let mut metas: Vec<_> = sessions
-            .list_sessions_with_metadata()
-            .into_iter()
-            .filter(|meta| meta.agent_alias.as_deref() == Some(agent_alias))
-            .collect();
-        metas.sort_by_key(|b| std::cmp::Reverse(b.last_activity));
-
+        let Ok(Some(snapshot)) = sessions.delegation_session_facts(ctx.binding, prompt) else {
+            return Vec::new();
+        };
         let mut facts = Vec::new();
-        let allowed_keys: Vec<String> = metas.iter().take(16).map(|m| m.key.clone()).collect();
-        for key in allowed_keys.iter().take(3) {
-            if let Ok(window) = sessions.load_session_window(key) {
-                for cp in [window.active_checkpoint, window.staged_checkpoint]
-                    .into_iter()
-                    .flatten()
-                {
-                    let scrubbed = reiclaw_providers::scrub_secret_patterns(&cp.digest);
-                    let trimmed = scrubbed.trim();
-                    if !trimmed.is_empty() && find_protected_identity_marker(trimmed).is_none() {
-                        facts.push(format!(
-                            "Session checkpoint ({}): {}",
-                            key,
-                            truncate_utf8(trimmed, 800)
-                        ));
-                    }
-                }
+        for digest in snapshot.checkpoint_digests {
+            let scrubbed = reiclaw_providers::scrub_secret_patterns(&digest);
+            let trimmed = scrubbed.trim();
+            if !trimmed.is_empty() && find_protected_identity_marker(trimmed).is_none() {
+                facts.push(format!(
+                    "Source session checkpoint: {}",
+                    truncate_utf8(trimmed, 800)
+                ));
             }
         }
-        if !allowed_keys.is_empty() {
-            let key_refs: Vec<&str> = allowed_keys.iter().map(String::as_str).collect();
-            if let Ok(hits) = sessions.search_session_fts(&key_refs, prompt, 5) {
-                for hit in hits {
-                    let scrubbed = reiclaw_providers::scrub_secret_patterns(&hit.content);
-                    let trimmed = scrubbed.trim();
-                    if !trimmed.is_empty() && find_protected_identity_marker(trimmed).is_none() {
-                        facts.push(format!(
-                            "Session transcript ({}): {}",
-                            hit.session_key,
-                            truncate_utf8(trimmed, 500)
-                        ));
-                    }
-                }
+        for hit in snapshot.transcript_hits {
+            let scrubbed = reiclaw_providers::scrub_secret_patterns(&hit.content);
+            let trimmed = scrubbed.trim();
+            if !trimmed.is_empty() && find_protected_identity_marker(trimmed).is_none() {
+                facts.push(format!(
+                    "Source session transcript: {}",
+                    truncate_utf8(trimmed, 500)
+                ));
             }
         }
         facts
     }
 
-    async fn collect_grounded_facts(&self, agent_alias: &str, prompt: &str) -> Vec<String> {
-        let mut facts = self.collect_session_facts(agent_alias, prompt);
-        let Some(mem) = self.memory.as_deref() else {
+    async fn collect_grounded_facts(
+        &self,
+        ctx: &ContinuationContext<'_>,
+        prompt: &str,
+    ) -> Vec<String> {
+        let Some(origin) = ctx.binding.origin.as_ref() else {
+            return Vec::new();
+        };
+        let DelegationOriginScope::SessionFacts {
+            memory_session_id, ..
+        } = &origin.scope
+        else {
+            return Vec::new();
+        };
+        if !(ctx.source_is_current)() {
+            return Vec::new();
+        }
+        let mut facts = self.collect_session_facts(ctx, prompt);
+        let Some(mem) = self.memory.as_deref().filter(|mem| mem.name() != "none") else {
             return facts;
         };
-        if mem.name() == "none" {
-            return facts;
+        if !(ctx.source_is_current)() {
+            return Vec::new();
         }
-        if let Ok(episodes) = mem
-            .read_episodes_in_window(agent_alias, None, None, None, 5)
-            .await
-        {
-            for ep in episodes {
+        let episodes = mem
+            .read_episodes_in_window(ctx.agent_alias, None, None, Some(&origin.session_key), 5)
+            .await;
+        if !(ctx.source_is_current)() {
+            return Vec::new();
+        }
+        if let Ok(episodes) = episodes {
+            // A backend/filter bug must not widen the persisted source grant.
+            for ep in episodes
+                .into_iter()
+                .filter(|ep| ep.agent_id == ctx.agent_alias && ep.session_key == origin.session_key)
+            {
                 let scrubbed = reiclaw_providers::scrub_secret_patterns(&ep.summary);
                 let trimmed = scrubbed.trim();
                 if !trimmed.is_empty() && find_protected_identity_marker(trimmed).is_none() {
-                    let mut line = format!(
-                        "Episode ({}): {}",
-                        ep.episode_id,
-                        truncate_utf8(trimmed, 600)
-                    );
-                    if !ep.settled_decisions.is_empty() {
-                        let decisions = ep
-                            .settled_decisions
-                            .iter()
-                            .map(|d| reiclaw_providers::scrub_secret_patterns(d))
-                            .filter(|d| find_protected_identity_marker(d).is_none())
-                            .collect::<Vec<_>>()
-                            .join("; ");
-                        if !decisions.is_empty() {
-                            line.push_str(&format!(" | Settled decisions: {decisions}"));
-                        }
+                    let mut line = format!("Source episode: {}", truncate_utf8(trimmed, 600));
+                    let decisions = ep
+                        .settled_decisions
+                        .iter()
+                        .map(|d| reiclaw_providers::scrub_secret_patterns(d))
+                        .filter(|d| find_protected_identity_marker(d).is_none())
+                        .collect::<Vec<_>>()
+                        .join("; ");
+                    if !decisions.is_empty() {
+                        line.push_str(&format!(
+                            " | Settled decisions: {}",
+                            truncate_utf8(&decisions, 600)
+                        ));
                     }
                     facts.push(line);
                 }
             }
         }
-        if let Ok(entries) = mem
-            .recall_for_agents(&[agent_alias], prompt, 5, None, None, None)
-            .await
-        {
+        // Transcript-only grants do not authorize canonical memory lookups.
+        let Some(memory_session_id) = memory_session_id.as_deref() else {
+            return facts;
+        };
+        if !(ctx.source_is_current)() {
+            return Vec::new();
+        }
+        let entries = mem
+            .recall_for_agents(
+                &[ctx.agent_alias],
+                prompt,
+                5,
+                Some(memory_session_id),
+                None,
+                None,
+            )
+            .await;
+        if !(ctx.source_is_current)() {
+            return Vec::new();
+        }
+        if let Ok(entries) = entries {
             for entry in entries {
-                if Self::is_excluded_memory_scope(&entry.namespace, &entry.key, &entry.content) {
+                if entry.session_id.as_deref() != Some(memory_session_id)
+                    || entry.agent_alias.as_deref() != Some(ctx.agent_alias)
+                    || Self::is_excluded_memory_scope(&entry.namespace, &entry.key, &entry.content)
+                {
                     continue;
                 }
                 let scrubbed = reiclaw_providers::scrub_secret_patterns(&entry.content);
                 let trimmed = scrubbed.trim();
                 if !trimmed.is_empty() && find_protected_identity_marker(trimmed).is_none() {
-                    facts.push(format!(
-                        "Memory ({}): {}",
-                        entry.key,
-                        truncate_utf8(trimmed, 500)
-                    ));
+                    facts.push(format!("Source memory: {}", truncate_utf8(trimmed, 500)));
                 }
             }
         }
@@ -452,8 +474,11 @@ impl ContinuationResolver for GroundedContinuationResolver {
         let Some(prompt) = ctx.prompt.map(str::trim).filter(|p| !p.is_empty()) else {
             return Ok(None);
         };
-        let facts = self.collect_grounded_facts(ctx.agent_alias, prompt).await;
-        if facts.is_empty() {
+        if !(ctx.source_is_current)() {
+            return Ok(None);
+        }
+        let facts = self.collect_grounded_facts(ctx, prompt).await;
+        if facts.is_empty() || !(ctx.source_is_current)() {
             return Ok(None);
         }
         let user_prompt = format!(
@@ -462,6 +487,9 @@ impl ContinuationResolver for GroundedContinuationResolver {
             prompt,
             facts.join("\n- ")
         );
+        if !(ctx.source_is_current)() {
+            return Ok(None);
+        }
         let raw_reply = ProviderDispatch::from_ref(&*self.provider)
             .chat_with_system(
                 Some(PROXY_SYSTEM_PROMPT),
@@ -470,6 +498,9 @@ impl ContinuationResolver for GroundedContinuationResolver {
                 self.temperature,
             )
             .await?;
+        if !(ctx.source_is_current)() {
+            return Ok(None);
+        }
         let trimmed = raw_reply.trim();
         if trimmed.is_empty()
             || trimmed.eq_ignore_ascii_case(INSUFFICIENT_FACTS_SENTINEL)
@@ -491,12 +522,70 @@ impl ContinuationResolver for GroundedContinuationResolver {
     }
 }
 
+/// Live host authorization, independent from the durable source and shared budget.
+type SourceAuthorizer = dyn Fn(&str, &DelegationOrigin) -> bool + Send + Sync;
+
+/// The persisted grant pins the source credential and stable agent identity.
+/// Every use consults current host policy; a historical grant is not approval.
+fn paired_source_authorizer(
+    config: Arc<RwLock<Config>>,
+    pairing: Arc<reiclaw_runtime::security::pairing::PairingGuard>,
+) -> Arc<SourceAuthorizer> {
+    let selected_data_dir = config.read().data_dir.clone();
+    Arc::new(move |agent, origin| {
+        let DelegationOriginScope::SessionFacts {
+            operator_subject,
+            agent_id,
+            ..
+        } = &origin.scope
+        else {
+            return false;
+        };
+        if !pairing.tokens().contains(operator_subject) {
+            return false;
+        }
+        let current = config.read();
+        if current.data_dir != selected_data_dir
+            || !current.tachi.enabled
+            || !current.agents.get(agent).is_some_and(|entry| entry.enabled)
+            || !crate::ws::operator_source_namespace_allowed(&current, &origin.session_key)
+            || current.gateway.bridges.values().any(|bridge| {
+                reiclaw_config::tokens::constant_time_eq(
+                    &bridge.token_hash.to_ascii_lowercase(),
+                    operator_subject,
+                )
+            })
+        {
+            return false;
+        }
+        let store_dir = current
+            .companion_memory
+            .resolved_store_dir(&current.data_dir);
+        if reiclaw_memory::companion::peek_agent_identity(&store_dir, agent)
+            .is_none_or(|identity| identity.as_str() != agent_id)
+        {
+            return false;
+        }
+        let Ok(policy) = reiclaw_policy::SecurityPolicy::for_agent(&current, agent) else {
+            return false;
+        };
+        let Some(profile) = current.risk_profile_for_agent(agent) else {
+            return false;
+        };
+        policy.can_act()
+            && policy.is_tool_allowed("tachi_start")
+            && !reiclaw_runtime::approval::ApprovalManager::from_risk_profile(profile)
+                .needs_approval("tachi_start")
+    })
+}
+
 /// Dependencies injected into [`reconcile_with_deps`].
 pub(crate) struct SweepDeps<'a> {
     pub fetch_status: StatusFetch<'a>,
     pub fetch_result: Option<ResultFetch<'a>>,
     pub send_continue: Option<ContinueSender<'a>>,
     pub continuation_resolver: Option<&'a dyn ContinuationResolver>,
+    pub authorize_source: Option<&'a SourceAuthorizer>,
     pub memory: Option<&'a dyn Memory>,
 }
 
@@ -598,8 +687,8 @@ enum ProxySubmission {
 /// Recheck local eligibility after awaited resolution and immediately before
 /// handing the mutation to the sender. The validated route snapshot is still
 /// the one used for the status read; a route change cannot redirect this send.
-/// This does not supply the originating task grant or the transport's live
-/// estop handle: both remain prerequisites for production resolver activation.
+/// The source grant is separately rechecked by the caller. A transport-time
+/// live estop guard remains a prerequisite for production resolver activation.
 fn continuation_is_current(
     config: &RwLock<Config>,
     data_dir: &Path,
@@ -656,8 +745,9 @@ async fn reserve_and_send_continuation(
     revision: u64,
     answer: &str,
     send: ContinueSender<'_>,
+    source_is_current: &(dyn Fn() -> bool + Send + Sync),
 ) -> anyhow::Result<ProxySubmission> {
-    if !continuation_is_current(config, data_dir, stop, row) {
+    if !continuation_is_current(config, data_dir, stop, row) || !source_is_current() {
         return Ok(ProxySubmission::Skipped);
     }
     let reservation = match SqliteSessionBackend::new(data_dir)?.reserve_proxy_continuation(
@@ -666,6 +756,11 @@ async fn reserve_and_send_continuation(
         MAX_PROXY_CONTINUATIONS_PER_DISPATCH,
     )? {
         ProxyContinuationAdmission::Reserved(reservation) => reservation,
+        ProxyContinuationAdmission::SourceUnavailable => {
+            return Ok(ProxySubmission::Escalate(
+                "originating session is missing or no longer authorized".into(),
+            ));
+        }
         ProxyContinuationAdmission::Unresolved => {
             return Ok(ProxySubmission::Escalate(
                 "prior continuation outcome unresolved; canonical reconciliation required".into(),
@@ -685,7 +780,7 @@ async fn reserve_and_send_continuation(
     };
     // Opening/acquiring the database can block. A concurrent cancellation or
     // config/estop change before sender invocation is still provably unsent.
-    if !continuation_is_current(config, data_dir, stop, row) {
+    if !continuation_is_current(config, data_dir, stop, row) || !source_is_current() {
         anyhow::ensure!(
             SqliteSessionBackend::new(data_dir)?.release_unsent_proxy_continuation(&reservation)?,
             "continuation reservation changed before unsent release"
@@ -1070,6 +1165,18 @@ pub(crate) async fn reconcile_with_deps(
                     if let (Some(resolver), Some(send_continue)) =
                         (deps.continuation_resolver, deps.send_continue)
                     {
+                        let source_sessions = SqliteSessionBackend::new(data_dir)?;
+                        let source_is_current = || {
+                            continuation_is_current(config, data_dir, stop, row)
+                                && row.origin.as_ref().is_some_and(|origin| {
+                                    deps.authorize_source.is_some_and(|authorize| {
+                                        authorize(&row.agent_alias, origin)
+                                    })
+                                })
+                                && source_sessions
+                                    .delegation_origin_is_current(row)
+                                    .unwrap_or(false)
+                        };
                         let ctx = ContinuationContext {
                             agent_alias: &row.agent_alias,
                             request_id: &row.request_id,
@@ -1077,8 +1184,16 @@ pub(crate) async fn reconcile_with_deps(
                             revision,
                             prompt: prompt.as_deref(),
                             read_projection: status.read_projection.as_ref(),
+                            binding: row,
+                            source_is_current: &source_is_current,
                         };
-                        match resolver.resolve(&ctx).await {
+                        // Recheck after the status await before even invoking a resolver.
+                        let answer = if source_is_current() {
+                            resolver.resolve(&ctx).await
+                        } else {
+                            Ok(None)
+                        };
+                        match answer {
                             Ok(Some(answer)) => match gate.admit(&status, &answer) {
                                 Ok(expected_rev) => {
                                     match reserve_and_send_continuation(
@@ -1090,6 +1205,7 @@ pub(crate) async fn reconcile_with_deps(
                                         expected_rev,
                                         answer.trim(),
                                         send_continue,
+                                        &source_is_current,
                                     )
                                     .await?
                                     {
@@ -1357,6 +1473,7 @@ pub(crate) async fn reconcile(
         fetch_result: None,
         send_continue: None,
         continuation_resolver: None,
+        authorize_source: None,
         memory: None,
     };
     reconcile_with_deps(config, data_dir, stop, rotation, &deps).await
@@ -1423,11 +1540,13 @@ impl Drop for DelegationNotificationTask {
 /// canonical (agent, request, outcome); delivery retries are the outbox's.
 pub(crate) fn start(
     config: Arc<RwLock<Config>>,
+    pairing: Arc<reiclaw_runtime::security::pairing::PairingGuard>,
     memory: Option<Arc<dyn Memory>>,
     wake: Option<Arc<tokio::sync::Notify>>,
     shutdown: tokio::sync::watch::Receiver<bool>,
 ) -> DelegationNotificationTask {
-    start_with_resolver(config, memory, wake, None, shutdown)
+    let authorize_source = paired_source_authorizer(Arc::clone(&config), pairing);
+    start_with_resolver(config, memory, wake, None, Some(authorize_source), shutdown)
 }
 
 pub(crate) fn start_with_resolver(
@@ -1435,6 +1554,7 @@ pub(crate) fn start_with_resolver(
     memory: Option<Arc<dyn Memory>>,
     wake: Option<Arc<tokio::sync::Notify>>,
     resolver: Option<Arc<dyn ContinuationResolver>>,
+    authorize_source: Option<Arc<SourceAuthorizer>>,
     mut shutdown: tokio::sync::watch::Receiver<bool>,
 ) -> DelegationNotificationTask {
     let data_dir: PathBuf = config.read().data_dir.clone();
@@ -1500,6 +1620,7 @@ pub(crate) fn start_with_resolver(
                 fetch_result: Some(&fetch_result),
                 send_continue: Some(&send_continue),
                 continuation_resolver: resolver.as_deref(),
+                authorize_source: authorize_source.as_deref(),
                 memory: memory.as_deref(),
             };
             if let Err(error) =

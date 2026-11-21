@@ -308,6 +308,184 @@ fn start_args(id: &str) -> Value {
     json!({"request_id":id,"harness":"codex","task":"Review the Codex adapter on GitHub; compare these together", "staffing_reason":"explicit_user_request"})
 }
 
+#[tokio::test]
+async fn production_owner_source_is_durable_before_send_and_never_serialized_to_staff() {
+    use reiclaw_api::delegation_request::{
+        DELEGATION_ORIGIN_CONTEXT, DelegationOrigin, DelegationOriginResolver,
+        DelegationOriginScope,
+    };
+    use reiclaw_infra::session_backend::SessionBackend;
+    use reiclaw_infra::session_sqlite::SqliteSessionBackend;
+
+    let temp = tempfile::tempdir().unwrap();
+    let data_dir = temp.path().join("data");
+    let db = Arc::new(SqliteSessionBackend::new(&data_dir).unwrap());
+    db.set_session_agent_alias("gw_owner-source", "home")
+        .unwrap();
+    let identity = reiclaw_memory::companion::resolve_or_mint_agent_identity(
+        &data_dir.join("companion"),
+        "home",
+    )
+    .unwrap();
+    let subject = reiclaw_config::tokens::hash_token("synthetic-origin-operator");
+    let origin = DelegationOrigin {
+        session_key: "gw_owner-source".into(),
+        scope: DelegationOriginScope::SessionFacts {
+            operator_subject: subject.clone(),
+            agent_id: identity.as_str().into(),
+            memory_session_id: None,
+        },
+    };
+    let expected = origin.clone();
+    let inspect = Arc::clone(&db);
+    let (fake, endpoint) = serve(move |tool, args| {
+        assert_eq!(tool, TACHI_STAFF_TOOL);
+        assert_eq!(args["action"], "start");
+        let claim = inspect
+            .read_delegation_request("home", "owner-source")
+            .unwrap()
+            .unwrap();
+        assert_eq!(claim.origin.as_ref(), Some(&expected));
+        assert!(
+            claim.dispatch_id.is_none(),
+            "source is durable before the receipt"
+        );
+        assert!(
+            inspect.load("gw_owner-source").is_empty(),
+            "no current owner message has been persisted"
+        );
+        assert_eq!(
+            inspect
+                .get_session_metadata("gw_owner-source")
+                .unwrap()
+                .message_count,
+            0
+        );
+        let wire = args.to_string();
+        for private in [
+            "gw_owner-source",
+            subject.as_str(),
+            identity.as_str(),
+            "operator_subject",
+            "origin_context",
+        ] {
+            assert!(
+                !wire.contains(private),
+                "origin authority must remain local"
+            );
+        }
+        Reply::Ok(working_receipt("dispatch-source"))
+    })
+    .await;
+    let cfg = production_config(&temp, &endpoint);
+    let tools = production_tools(&cfg, Arc::new(parking_lot::RwLock::new(cfg.clone())));
+    let admitted = origin.clone();
+    let resolver: DelegationOriginResolver =
+        Arc::new(move |alias| (alias == "home").then(|| admitted.clone()));
+    let result = DELEGATION_ORIGIN_CONTEXT
+        .scope(
+            resolver,
+            invoke(&tools, "tachi_start", start_args("owner-source")),
+        )
+        .await;
+    assert!(result.success, "{:?}", result.error);
+    let reopened = SqliteSessionBackend::new(&data_dir).unwrap();
+    let bound = reopened
+        .read_delegation_request("home", "owner-source")
+        .unwrap()
+        .unwrap();
+    assert_eq!(bound.origin, Some(origin.clone()));
+    assert_eq!(bound.dispatch_id.as_deref(), Some("dispatch-source"));
+
+    let mut changed = origin.clone();
+    changed.session_key = "gw_other-owner-source".into();
+    let resolver: DelegationOriginResolver = Arc::new(move |_| Some(changed.clone()));
+    let conflict = DELEGATION_ORIGIN_CONTEXT
+        .scope(
+            resolver,
+            invoke(&tools, "tachi_start", start_args("owner-source")),
+        )
+        .await;
+    assert!(!conflict.success);
+    assert_eq!(conflict.output.data().unwrap()["code"], "request_conflict");
+    let mut forged = start_args("owner-source");
+    forged["origin"] = serde_json::to_value(&origin).unwrap();
+    let refused = invoke(&tools, "tachi_start", forged).await;
+    assert!(!refused.success);
+    assert_eq!(refused.output.data().unwrap()["code"], "invalid_arguments");
+    assert_eq!(
+        reopened
+            .read_delegation_request("home", "owner-source")
+            .unwrap()
+            .unwrap(),
+        bound
+    );
+    assert_eq!(fake.staff_calls().len(), 1);
+}
+
+#[tokio::test]
+async fn production_source_revoked_after_claim_is_released_without_transport() {
+    use reiclaw_api::delegation_request::{
+        DELEGATION_ORIGIN_CONTEXT, DelegationOrigin, DelegationOriginResolver,
+        DelegationOriginScope,
+    };
+    use reiclaw_infra::session_backend::SessionBackend;
+    use reiclaw_infra::session_sqlite::SqliteSessionBackend;
+
+    let temp = tempfile::tempdir().unwrap();
+    let (fake, endpoint) = serve(|_, _| panic!("a revoked source must not reach Staff")).await;
+    let cfg = production_config(&temp, &endpoint);
+    let tools = production_tools(&cfg, Arc::new(parking_lot::RwLock::new(cfg.clone())));
+    let db = Arc::new(SqliteSessionBackend::new(&cfg.data_dir).unwrap());
+    db.set_session_agent_alias("gw_revoked-source", "home")
+        .unwrap();
+    let identity = reiclaw_memory::companion::peek_agent_identity(
+        &cfg.companion_memory.resolved_store_dir(&cfg.data_dir),
+        "home",
+    )
+    .unwrap();
+    let origin = DelegationOrigin {
+        session_key: "gw_revoked-source".into(),
+        scope: DelegationOriginScope::SessionFacts {
+            operator_subject: reiclaw_config::tokens::hash_token("synthetic-revoked-origin"),
+            agent_id: identity.as_str().into(),
+            memory_session_id: None,
+        },
+    };
+    let reads = Arc::new(AtomicUsize::new(0));
+    let calls = Arc::clone(&reads);
+    let inspect = Arc::clone(&db);
+    let resolver: DelegationOriginResolver = Arc::new(move |_| {
+        if calls.fetch_add(1, Ordering::SeqCst) == 0 {
+            Some(origin.clone())
+        } else {
+            let claim = inspect
+                .read_delegation_request("home", "revoked-source")
+                .unwrap()
+                .unwrap();
+            assert_eq!(claim.origin.as_ref(), Some(&origin));
+            assert!(claim.dispatch_id.is_none());
+            None
+        }
+    });
+    let result = DELEGATION_ORIGIN_CONTEXT
+        .scope(
+            resolver,
+            invoke(&tools, "tachi_start", start_args("revoked-source")),
+        )
+        .await;
+    assert!(!result.success);
+    assert_eq!(result.output.data().unwrap()["code"], "source_unavailable");
+    assert_eq!(reads.load(Ordering::SeqCst), 2);
+    assert!(
+        db.read_delegation_request("home", "revoked-source")
+            .unwrap()
+            .is_none()
+    );
+    assert!(fake.calls().is_empty());
+    assert_eq!(fake.sessions_opened.load(Ordering::SeqCst), 0);
+}
+
 #[test]
 fn production_registry_omits_disabled_tachi_tools() {
     for enabled in [None, Some(false), Some(true)] {

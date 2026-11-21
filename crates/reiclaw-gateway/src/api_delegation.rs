@@ -293,6 +293,29 @@ async fn control(
             action,
         )
     });
+    let origin_live = Arc::clone(&state.config);
+    let origin_pairing = Arc::clone(&state.pairing);
+    let origin_binding = binding.clone();
+    let origin_root = context.selected_data_dir.clone();
+    let origin: reiclaw_api::delegation_request::DelegationOriginResolver =
+        Arc::new(move |alias| {
+            let current = origin_live.read();
+            (alias == origin_binding.agent
+                && current.data_dir == origin_root
+                && origin_binding.allows(&current, op)
+                && !origin_pairing.tokens().iter().any(|stored| {
+                    reiclaw_config::tokens::constant_time_eq(
+                        stored,
+                        &origin_binding.initial.token_hash.to_ascii_lowercase(),
+                    )
+                }))
+            .then(|| reiclaw_api::delegation_request::DelegationOrigin {
+                // The body-owned WS history key for this admitted bridge session.
+                // A device task records provenance, never personal-memory authority.
+                session_key: format!("gw_{}", origin_binding.session),
+                scope: reiclaw_api::delegation_request::DelegationOriginScope::SourceOnly,
+            })
+        });
     // A lost HTTP caller does not cancel an already admitted start. Only this
     // bounded admission/receipt operation is detached, never an agent turn or
     // harness runner. On deadline/shutdown its durable claim stays unresolved;
@@ -301,16 +324,20 @@ async fn control(
     let control_timeout = context.timeout;
     let submitted = reiclaw_log::spawn!(async move {
         let _permit = permit;
-        reiclaw_api::TOOL_LOOP_THREAD_ID.scope(Some(format!("delegation:{agent}")), async {
-            tokio::select! {
-                result = tokio::time::timeout(control_timeout, service.control(op, args)) => result.ok(),
-                _ = async {
-                    while !*shutdown.borrow() {
-                        if shutdown.changed().await.is_err() { break; }
-                    }
-                } => None,
-            }
-        }).await
+        reiclaw_api::TOOL_LOOP_THREAD_ID
+            .scope(Some(format!("delegation:{agent}")), async {
+                tokio::select! {
+                    result = tokio::time::timeout(control_timeout,
+                        reiclaw_api::delegation_request::DELEGATION_ORIGIN_CONTEXT.scope(
+                            origin, service.control(op, args))) => result.ok(),
+                    _ = async {
+                        while !*shutdown.borrow() {
+                            if shutdown.changed().await.is_err() { break; }
+                        }
+                    } => None,
+                }
+            })
+            .await
     });
     let result = submitted.await;
     if !binding.allows(&state.config.read(), op)

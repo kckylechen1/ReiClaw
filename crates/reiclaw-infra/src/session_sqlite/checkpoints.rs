@@ -14,7 +14,7 @@ const MAX_ALLOWED_FTS_KEYS: usize = 30_000;
 
 /// Version 1 binds coverage to complete transcript batches and rolling context.
 /// Older derived checkpoints may claim unseen rows and cannot replace raw history.
-const CURRENT_CHECKPOINT_FORMAT_VERSION: i64 = 1;
+pub(super) const CURRENT_CHECKPOINT_FORMAT_VERSION: i64 = 1;
 
 /// Initialize the `session_checkpoints` schema inside the caller's transaction.
 pub(super) fn initialize(conn: &Connection) -> rusqlite::Result<()> {
@@ -432,81 +432,90 @@ impl SqliteSessionBackend {
         query: &str,
         limit: usize,
     ) -> io::Result<Vec<SessionFtsHit>> {
-        if allowed_session_keys.is_empty() || query.trim().is_empty() || limit == 0 {
-            return Ok(Vec::new());
-        }
-
-        let mut keys: Vec<&str> = Vec::with_capacity(allowed_session_keys.len());
-        for &key in allowed_session_keys {
-            if !key.is_empty() && !keys.contains(&key) {
-                keys.push(key);
-            }
-        }
-        if keys.is_empty() {
-            return Ok(Vec::new());
-        }
-        if keys.len() > MAX_ALLOWED_FTS_KEYS {
-            return Err(io::Error::new(
-                io::ErrorKind::InvalidInput,
-                "allowed_session_keys exceeds SQLite parameter limit",
-            ));
-        }
-
-        let Some(fts_query) = build_fts5_content_query(query) else {
-            return Ok(Vec::new());
-        };
-
-        let placeholders: String = (0..keys.len())
-            .map(|idx| format!("?{}", idx + 2))
-            .collect::<Vec<_>>()
-            .join(", ");
-        let limit_param = keys.len() + 2;
-        let sql = format!(
-            "SELECT s.session_key, s.id, s.role, s.content, s.created_at,
-                    snippet(sessions_fts, 1, '', '', '...', 24)
-             FROM sessions_fts
-             JOIN sessions s ON s.id = sessions_fts.rowid
-             WHERE sessions_fts MATCH ?1
-               AND s.session_key IN ({placeholders})
-             ORDER BY bm25(sessions_fts) ASC, s.id DESC
-             LIMIT ?{limit_param}"
-        );
-
-        let limit_i64 = i64::try_from(limit).unwrap_or(i64::MAX);
-        let mut param_values: Vec<&dyn rusqlite::ToSql> = Vec::with_capacity(keys.len() + 2);
-        param_values.push(&fts_query);
-        for key in &keys {
-            param_values.push(key);
-        }
-        param_values.push(&limit_i64);
-
-        let conn = self.conn.lock();
-        let mut stmt = conn.prepare(&sql).map_err(io::Error::other)?;
-        let rows = stmt
-            .query_map(rusqlite::params_from_iter(param_values), |row| {
-                let session_key: String = row.get(0)?;
-                let message_id: i64 = row.get(1)?;
-                let role: String = row.get(2)?;
-                let content: String = row.get(3)?;
-                let created_at_raw: Option<String> = row.get(4).ok();
-                let created_at = created_at_raw
-                    .as_deref()
-                    .and_then(|raw| reiclaw_api::time::parse_rfc3339(raw).ok());
-                let snippet: Option<String> = row.get(5).ok();
-                Ok(SessionFtsHit {
-                    session_key,
-                    message_id,
-                    role,
-                    content,
-                    created_at,
-                    snippet,
-                })
-            })
-            .map_err(io::Error::other)?;
-
-        rows.collect::<rusqlite::Result<Vec<_>>>()
-            .map_err(io::Error::other)
+        search_session_fts_on(&self.conn.lock(), allowed_session_keys, query, limit)
     }
+}
+
+/// Shared SQL implementation; a caller can keep authority and facts in one snapshot.
+pub(super) fn search_session_fts_on(
+    conn: &Connection,
+    allowed_session_keys: &[&str],
+    query: &str,
+    limit: usize,
+) -> io::Result<Vec<SessionFtsHit>> {
+    if allowed_session_keys.is_empty() || query.trim().is_empty() || limit == 0 {
+        return Ok(Vec::new());
+    }
+
+    let mut keys: Vec<&str> = Vec::with_capacity(allowed_session_keys.len());
+    for &key in allowed_session_keys {
+        if !key.is_empty() && !keys.contains(&key) {
+            keys.push(key);
+        }
+    }
+    if keys.is_empty() {
+        return Ok(Vec::new());
+    }
+    if keys.len() > MAX_ALLOWED_FTS_KEYS {
+        return Err(io::Error::new(
+            io::ErrorKind::InvalidInput,
+            "allowed_session_keys exceeds SQLite parameter limit",
+        ));
+    }
+
+    let Some(fts_query) = build_fts5_content_query(query) else {
+        return Ok(Vec::new());
+    };
+
+    let placeholders: String = (0..keys.len())
+        .map(|idx| format!("?{}", idx + 2))
+        .collect::<Vec<_>>()
+        .join(", ");
+    let limit_param = keys.len() + 2;
+    let sql = format!(
+        "SELECT s.session_key, s.id, s.role, s.content, s.created_at,
+                snippet(sessions_fts, 1, '', '', '...', 24)
+         FROM sessions_fts
+         JOIN sessions s ON s.id = sessions_fts.rowid
+         WHERE sessions_fts MATCH ?1
+           AND s.session_key IN ({placeholders})
+         ORDER BY bm25(sessions_fts) ASC, s.id DESC
+         LIMIT ?{limit_param}"
+    );
+
+    let limit_i64 = i64::try_from(limit).unwrap_or(i64::MAX);
+    let mut param_values: Vec<&dyn rusqlite::ToSql> = Vec::with_capacity(keys.len() + 2);
+    param_values.push(&fts_query);
+    for key in &keys {
+        param_values.push(key);
+    }
+    param_values.push(&limit_i64);
+
+    let mut stmt = conn.prepare(&sql).map_err(io::Error::other)?;
+    let rows = stmt
+        .query_map(rusqlite::params_from_iter(param_values), |row| {
+            let session_key: String = row.get(0)?;
+            let message_id: i64 = row.get(1)?;
+            let role: String = row.get(2)?;
+            let content: String = row.get(3)?;
+            let created_at_raw: Option<String> = row.get(4).ok();
+            let created_at = created_at_raw
+                .as_deref()
+                .and_then(|raw| reiclaw_api::time::parse_rfc3339(raw).ok());
+            let snippet: Option<String> = row.get(5).ok();
+            Ok(SessionFtsHit {
+                session_key,
+                message_id,
+                role,
+                content,
+                created_at,
+                snippet,
+            })
+        })
+        .map_err(io::Error::other)?;
+
+    rows.collect::<rusqlite::Result<Vec<_>>>()
+        .map_err(io::Error::other)
 }
 
 #[cfg(test)]

@@ -1,8 +1,9 @@
 use super::*;
 use futures_util::FutureExt;
+use reiclaw_infra::session_backend::SessionBackend;
 use reiclaw_infra::session_sqlite::{ProxyContinuationAdmission, SqliteSessionBackend};
 use reiclaw_tools::tachi_delegation::route_fingerprint;
-use std::sync::atomic::{AtomicUsize, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
 
 fn fixture_config() -> (tempfile::TempDir, Config) {
     let tmp = tempfile::tempdir().unwrap();
@@ -40,8 +41,26 @@ fn seed_binding(
     let digest = route
         .unwrap_or(&route_fingerprint(&config.tachi, agent))
         .to_string();
+    let session_key = format!("source:{agent}:{request}");
     backend
-        .claim_delegation_request(agent, request, "request-digest", &digest)
+        .set_session_agent_alias(&session_key, agent)
+        .unwrap();
+    let origin = DelegationOrigin {
+        session_key,
+        scope: DelegationOriginScope::SessionFacts {
+            operator_subject: "cd".repeat(32),
+            agent_id: agent.into(),
+            memory_session_id: Some(format!("memory:{agent}:{request}")),
+        },
+    };
+    backend
+        .claim_delegation_request_with_origin(
+            agent,
+            request,
+            "request-digest",
+            &digest,
+            Some(&origin),
+        )
         .expect("claim");
     backend
         .bind_delegation_request(agent, request, "request-digest", &digest, dispatch)
@@ -1051,9 +1070,13 @@ fn partial_input_required_is_attention_worthy() {
     assert_eq!(terminal_outcome(&status(RunState::Submitted)), None);
 }
 
+type MemoryReadHook = dyn Fn(&str) + Send + Sync;
+
 struct RecordingMemory {
     episodes: parking_lot::Mutex<Vec<EpisodeRecord>>,
     recall_entries: parking_lot::Mutex<Vec<reiclaw_api::memory_traits::MemoryEntry>>,
+    reads: parking_lot::Mutex<Vec<(&'static str, Option<String>)>>,
+    read_hook: Option<Arc<MemoryReadHook>>,
     fail_commit: bool,
 }
 
@@ -1062,6 +1085,8 @@ impl RecordingMemory {
         Self {
             episodes: parking_lot::Mutex::new(Vec::new()),
             recall_entries: parking_lot::Mutex::new(Vec::new()),
+            reads: parking_lot::Mutex::new(Vec::new()),
+            read_hook: None,
             fail_commit,
         }
     }
@@ -1142,10 +1167,18 @@ impl Memory for RecordingMemory {
         _allowed_agent_ids: &[&str],
         _query: &str,
         _limit: usize,
-        _session_id: Option<&str>,
+        session_id: Option<&str>,
         _since: Option<&str>,
         _until: Option<&str>,
     ) -> anyhow::Result<Vec<reiclaw_api::memory_traits::MemoryEntry>> {
+        self.reads
+            .lock()
+            .push(("recall", session_id.map(str::to_owned)));
+        if let Some(hook) = &self.read_hook {
+            tokio::task::yield_now().await;
+            hook("recall");
+        }
+        // Intentionally ignore the filter so resolver defense-in-depth is exercised.
         Ok(self.recall_entries.lock().clone())
     }
     async fn commit_episode(&self, episode: &EpisodeRecord) -> anyhow::Result<String> {
@@ -1158,26 +1191,27 @@ impl Memory for RecordingMemory {
     }
     async fn read_episodes_in_window(
         &self,
-        agent_id: &str,
+        _agent_id: &str,
         _since: Option<&str>,
         _until: Option<&str>,
-        _session_id: Option<&str>,
+        session_id: Option<&str>,
         limit: usize,
     ) -> anyhow::Result<Vec<EpisodeRecord>> {
-        Ok(self
-            .episodes
+        self.reads
             .lock()
-            .iter()
-            .filter(|ep| ep.agent_id == agent_id)
-            .take(limit)
-            .cloned()
-            .collect())
+            .push(("episode", session_id.map(str::to_owned)));
+        if let Some(hook) = &self.read_hook {
+            tokio::task::yield_now().await;
+            hook("episode");
+        }
+        Ok(self.episodes.lock().iter().take(limit).cloned().collect())
     }
 }
 
 struct ScriptedModelProvider {
     reply: String,
     seen_prompts: parking_lot::Mutex<Vec<(Option<String>, String)>>,
+    reply_hook: Option<Arc<dyn Fn() + Send + Sync>>,
 }
 
 impl ScriptedModelProvider {
@@ -1185,6 +1219,7 @@ impl ScriptedModelProvider {
         Self {
             reply: reply.into(),
             seen_prompts: parking_lot::Mutex::new(Vec::new()),
+            reply_hook: None,
         }
     }
 }
@@ -1212,6 +1247,10 @@ impl ModelProvider for ScriptedModelProvider {
         self.seen_prompts
             .lock()
             .push((system_prompt.map(str::to_string), message.to_string()));
+        if let Some(hook) = &self.reply_hook {
+            tokio::task::yield_now().await;
+            hook();
+        }
         Ok(self.reply.clone())
     }
     async fn chat_with_history(
@@ -1277,6 +1316,7 @@ async fn continuation_pass(
         fetch_result: None,
         send_continue: Some(send_continue),
         continuation_resolver: Some(resolver),
+        authorize_source: Some(&|_, _| true),
         memory: None,
     };
     reconcile_with_deps(
@@ -1335,6 +1375,7 @@ async fn input_required_auth_required_hard_escalates_once_without_calling_resolv
         fetch_result: None,
         send_continue: Some(&send_continue),
         continuation_resolver: Some(&resolver),
+        authorize_source: Some(&|_, _| true),
         memory: None,
     };
 
@@ -1428,6 +1469,7 @@ async fn grounded_proxy_continuation_tracks_three_rounds_prevents_same_revision_
         fetch_result: None,
         send_continue: Some(&send_continue),
         continuation_resolver: Some(&resolver),
+        authorize_source: Some(&|_, _| true),
         memory: None,
     };
 
@@ -1531,6 +1573,7 @@ async fn grounded_proxy_continuation_tracks_three_rounds_prevents_same_revision_
         fetch_result: None,
         send_continue: Some(&send_continue),
         continuation_resolver: Some(&resolver),
+        authorize_source: Some(&|_, _| true),
         memory: None,
     };
     assert_eq!(
@@ -2173,6 +2216,7 @@ async fn unknown_continuation_still_allows_canonical_terminal_notice_and_digesti
         fetch_result: Some(&fetch_result),
         send_continue: Some(&send_continue),
         continuation_resolver: Some(&resolver),
+        authorize_source: Some(&|_, _| true),
         memory: Some(&memory),
     };
     let notified = reconcile_with_deps(
@@ -2203,10 +2247,103 @@ async fn unknown_continuation_still_allows_canonical_terminal_notice_and_digesti
     assert_eq!(persisted_continuation(tmp.path(), "req-terminal"), pending);
 }
 
+fn grounded_origin(memory_session_id: Option<&str>) -> DelegationOrigin {
+    DelegationOrigin {
+        session_key: "source-session".into(),
+        scope: DelegationOriginScope::SessionFacts {
+            operator_subject: "cd".repeat(32),
+            agent_id: "butler".into(),
+            memory_session_id: memory_session_id.map(str::to_owned),
+        },
+    }
+}
+
+fn grounded_binding(
+    backend: &SqliteSessionBackend,
+    config: &Config,
+    origin: Option<&DelegationOrigin>,
+) -> DispatchBindingRow {
+    if let Some(origin) = origin {
+        backend
+            .set_session_agent_alias(&origin.session_key, "butler")
+            .unwrap();
+    }
+    let route = route_fingerprint(&config.tachi, "butler");
+    backend
+        .claim_delegation_request_with_origin("butler", "req-1", "digest", &route, origin)
+        .unwrap();
+    backend
+        .bind_delegation_request("butler", "req-1", "digest", &route, "disp-1")
+        .unwrap();
+    backend.list_dispatch_bindings_page(0, 1).unwrap().remove(0)
+}
+
+fn grounded_context<'a>(
+    binding: &'a DispatchBindingRow,
+    source_is_current: &'a (dyn Fn() -> bool + Send + Sync),
+) -> ContinuationContext<'a> {
+    ContinuationContext {
+        agent_alias: &binding.agent_alias,
+        request_id: &binding.request_id,
+        dispatch_id: &binding.dispatch_id,
+        revision: 1,
+        prompt: Some("Which SQLite journal mode?"),
+        read_projection: None,
+        binding,
+        source_is_current,
+    }
+}
+
+fn source_episode(session_key: &str, summary: &str) -> EpisodeRecord {
+    EpisodeRecord {
+        episode_id: format!("episode:{session_key}"),
+        agent_id: "butler".into(),
+        session_key: session_key.into(),
+        started_at: "2026-11-18T00:00:00Z".into(),
+        ended_at: "2026-11-18T01:00:00Z".into(),
+        up_to_message_id: None,
+        summary: summary.into(),
+        why_and_tradeoffs: vec![],
+        settled_decisions: vec![],
+        rejected_options: vec![],
+        entities: vec![],
+        source_kind: EpisodeSourceKind::Dialogue,
+    }
+}
+
+fn source_memory(
+    session_id: Option<&str>,
+    content: &str,
+) -> reiclaw_api::memory_traits::MemoryEntry {
+    reiclaw_api::memory_traits::MemoryEntry {
+        id: content.into(),
+        key: "technical-fact".into(),
+        content: content.into(),
+        category: reiclaw_api::memory_traits::MemoryCategory::Conversation,
+        timestamp: "2026-11-18T00:00:00Z".into(),
+        session_id: session_id.map(str::to_owned),
+        score: None,
+        namespace: "conversation".into(),
+        importance: None,
+        superseded_by: None,
+        agent_alias: Some("butler".into()),
+        agent_id: Some("butler".into()),
+        kind: None,
+        pinned: false,
+        tenant_id: None,
+    }
+}
+
 #[tokio::test]
-async fn grounded_continuation_resolver_uses_session_and_non_soul_memory_and_returns_none_when_insufficient()
- {
+async fn grounded_resolver_uses_only_source_facts_and_excludes_protected_or_unscoped_records() {
     let (tmp, config) = fixture_config();
+    let backend = SqliteSessionBackend::new(tmp.path()).unwrap();
+    let row = grounded_binding(
+        &backend,
+        &config,
+        Some(&grounded_origin(Some("memory-source"))),
+    );
+    let current = || backend.delegation_origin_is_current(&row).unwrap();
     // Seed Soul and UserModel databases in data_dir with marker strings to
     // prove GroundedContinuationResolver never reads or emits them.
     reiclaw_memory::companion::SoulProfileStore::shared(tmp.path())
@@ -2235,64 +2372,62 @@ async fn grounded_continuation_resolver_uses_session_and_non_soul_memory_and_ret
     );
 
     // Absent prompt -> None without calling provider.
-    let no_prompt = ContinuationContext {
-        agent_alias: "butler",
-        request_id: "req-1",
-        dispatch_id: "disp-1",
-        revision: 1,
-        prompt: None,
-        read_projection: None,
-    };
+    let mut no_prompt = grounded_context(&row, &current);
+    no_prompt.prompt = None;
     assert_eq!(resolver.resolve(&no_prompt).await.unwrap(), None);
     assert!(provider.seen_prompts.lock().is_empty());
 
     // Insufficient facts (empty sessions + empty memory) -> None without calling provider.
-    let with_prompt = ContinuationContext {
-        agent_alias: "butler",
-        request_id: "req-1",
-        dispatch_id: "disp-1",
-        revision: 1,
-        prompt: Some("Which journal mode should SQLite use?"),
-        read_projection: None,
-    };
+    let with_prompt = grounded_context(&row, &current);
     assert_eq!(resolver.resolve(&with_prompt).await.unwrap(), None);
     assert!(provider.seen_prompts.lock().is_empty());
 
     // Add a Soul-namespaced memory entry (must be excluded) and a valid
     // technical EpisodeRecord + session checkpoint.
-    mem.recall_entries
-        .lock()
-        .push(reiclaw_api::memory_traits::MemoryEntry {
-            id: "soul-1".into(),
-            key: "soul::tone".into(),
-            content: "SECRET_SOUL_ENTRY".into(),
-            category: reiclaw_api::memory_traits::MemoryCategory::Core,
-            timestamp: "2026-11-18T00:00:00Z".into(),
-            session_id: None,
-            score: None,
-            namespace: "soul".into(),
-            importance: None,
-            superseded_by: None,
-            agent_alias: Some("butler".into()),
-            agent_id: Some("butler".into()),
-            kind: None,
-            pinned: false,
-            tenant_id: None,
-        });
-    mem.episodes.lock().push(EpisodeRecord {
-        episode_id: "ep-1".into(),
-        agent_id: "butler".into(),
-        session_key: "sess-1".into(),
-        started_at: "2026-11-18T00:00:00Z".into(),
-        ended_at: "2026-11-18T01:00:00Z".into(),
-        up_to_message_id: None,
-        summary: "SQLite uses WAL mode for concurrent gateway reads.".into(),
-        why_and_tradeoffs: vec![],
-        settled_decisions: vec!["Enable PRAGMA journal_mode=WAL".into()],
-        rejected_options: vec![],
-        entities: vec![],
-        source_kind: EpisodeSourceKind::Dialogue,
-    });
+    let mut protected = source_memory(Some("memory-source"), "SECRET_SOUL_ENTRY");
+    protected.namespace = "soul".into();
+    let mut foreign = source_memory(Some("memory-source"), "FOREIGN_AGENT_MEMORY");
+    foreign.agent_alias = Some("other-agent".into());
+    mem.recall_entries.lock().extend([
+        protected,
+        foreign,
+        source_memory(Some("memory-source"), "PERMITTED_SOURCE_MEMORY"),
+        source_memory(Some("other-session"), "OTHER_SESSION_MEMORY"),
+        source_memory(None, "UNSCOPED_MEMORY"),
+    ]);
+    let mut episode = source_episode(
+        "source-session",
+        "SQLite uses WAL mode for concurrent reads.",
+    );
+    episode
+        .settled_decisions
+        .push("Enable PRAGMA journal_mode=WAL".into());
+    let mut foreign_episode = source_episode("source-session", "FOREIGN_AGENT_EPISODE");
+    foreign_episode.agent_id = "other-agent".into();
+    mem.episodes.lock().extend([
+        episode,
+        foreign_episode,
+        source_episode("other-session", "OTHER_SESSION_EPISODE"),
+    ]);
+    for (key, text) in [
+        ("source-session", "SQLite PERMITTED_TRANSCRIPT"),
+        ("other-session", "SQLite OTHER_SESSION_TRANSCRIPT"),
+    ] {
+        backend.set_session_agent_alias(key, "butler").unwrap();
+        backend
+            .append(key, &reiclaw_api::model_provider::ChatMessage::user(text))
+            .unwrap();
+        let id = backend
+            .load_session_window(key)
+            .unwrap()
+            .delta_messages
+            .last()
+            .unwrap()
+            .0;
+        backend
+            .stage_checkpoint(key, id, &format!("checkpoint:{text}"))
+            .unwrap();
+    }
 
     let answer = resolver.resolve(&with_prompt).await.unwrap();
     assert_eq!(answer.as_deref(), Some("Use WAL mode."));
@@ -2300,10 +2435,29 @@ async fn grounded_continuation_resolver_uses_session_and_non_soul_memory_and_ret
         let prompts = provider.seen_prompts.lock();
         assert_eq!(prompts.len(), 1);
         assert!(prompts[0].1.contains("Enable PRAGMA journal_mode=WAL"));
-        assert!(!prompts[0].1.contains("SECRET_SOUL_BYTES"));
-        assert!(!prompts[0].1.contains("SECRET_USER_MODEL_BYTES"));
-        assert!(!prompts[0].1.contains("SECRET_SOUL_ENTRY"));
+        assert!(prompts[0].1.contains("PERMITTED_SOURCE_MEMORY"));
+        assert!(
+            prompts[0]
+                .1
+                .contains("checkpoint:SQLite PERMITTED_TRANSCRIPT")
+        );
+        for forbidden in [
+            "SECRET_SOUL_BYTES",
+            "SECRET_USER_MODEL_BYTES",
+            "SECRET_SOUL_ENTRY",
+            "OTHER_SESSION",
+            "FOREIGN_AGENT",
+            "UNSCOPED_MEMORY",
+        ] {
+            assert!(!prompts[0].1.contains(forbidden), "{forbidden}");
+        }
     }
+    assert!(mem.reads.lock().iter().all(|(kind, scope)| scope.as_deref()
+        == Some(if *kind == "episode" {
+            "source-session"
+        } else {
+            "memory-source"
+        })));
 
     // When provider says INSUFFICIENT_FACTS -> returns None.
     let insufficient_provider = Arc::new(ScriptedModelProvider::new("INSUFFICIENT_FACTS"));
@@ -2318,7 +2472,366 @@ async fn grounded_continuation_resolver_uses_session_and_non_soul_memory_and_ret
         insufficient_resolver.resolve(&with_prompt).await.unwrap(),
         None
     );
-    let _ = config;
+}
+
+#[tokio::test]
+async fn ungranted_deleted_and_recreated_sources_never_reach_memory_or_provider() {
+    for case in ["legacy", "source-only", "deleted", "recreated"] {
+        let (tmp, config) = fixture_config();
+        let backend = SqliteSessionBackend::new(tmp.path()).unwrap();
+        let mut origin = grounded_origin(Some("memory-source"));
+        if case == "source-only" {
+            origin.scope = DelegationOriginScope::SourceOnly;
+        }
+        let row = grounded_binding(&backend, &config, (case != "legacy").then_some(&origin));
+        if matches!(case, "deleted" | "recreated") {
+            backend.delete_session(&origin.session_key).unwrap();
+            if case == "recreated" {
+                backend
+                    .set_session_agent_alias(&origin.session_key, "butler")
+                    .unwrap();
+            }
+        }
+        let memory = Arc::new(RecordingMemory::new(false));
+        memory
+            .episodes
+            .lock()
+            .push(source_episode("source-session", "SQLite private fact"));
+        memory
+            .recall_entries
+            .lock()
+            .push(source_memory(Some("memory-source"), "private fact"));
+        let provider = Arc::new(ScriptedModelProvider::new("Use WAL mode."));
+        let resolver = GroundedContinuationResolver::new(
+            provider.clone(),
+            "test-model",
+            None,
+            tmp.path().to_path_buf(),
+            Some(memory.clone()),
+        );
+        let current = || backend.delegation_origin_is_current(&row).unwrap();
+        assert_eq!(
+            resolver
+                .resolve(&grounded_context(&row, &current))
+                .await
+                .unwrap(),
+            None,
+            "{case}"
+        );
+        assert!(
+            memory.reads.lock().is_empty(),
+            "{case} must stop before any memory read"
+        );
+        assert!(provider.seen_prompts.lock().is_empty(), "{case}");
+    }
+}
+
+#[tokio::test]
+async fn source_without_proven_memory_namespace_skips_ordinary_recall() {
+    let (tmp, config) = fixture_config();
+    let backend = SqliteSessionBackend::new(tmp.path()).unwrap();
+    let row = grounded_binding(&backend, &config, Some(&grounded_origin(None)));
+    let memory = Arc::new(RecordingMemory::new(false));
+    memory
+        .episodes
+        .lock()
+        .push(source_episode("source-session", "Source episode says WAL."));
+    memory
+        .recall_entries
+        .lock()
+        .push(source_memory(Some("source-session"), "COLLIDING_MEMORY_ID"));
+    let provider = Arc::new(ScriptedModelProvider::new("Use WAL mode."));
+    let resolver = GroundedContinuationResolver::new(
+        provider.clone(),
+        "test-model",
+        None,
+        tmp.path().to_path_buf(),
+        Some(memory.clone()),
+    );
+    let current = || backend.delegation_origin_is_current(&row).unwrap();
+    assert_eq!(
+        resolver
+            .resolve(&grounded_context(&row, &current))
+            .await
+            .unwrap()
+            .as_deref(),
+        Some("Use WAL mode.")
+    );
+    assert_eq!(
+        *memory.reads.lock(),
+        [("episode", Some("source-session".into()))]
+    );
+    assert!(
+        !provider.seen_prompts.lock()[0]
+            .1
+            .contains("COLLIDING_MEMORY_ID")
+    );
+}
+
+fn source_question(dispatch_id: &str) -> RunStatus {
+    let mut question = status(RunState::InputRequired);
+    question.dispatch_id = dispatch_id.into();
+    question.revision = Some(1);
+    question.read_projection = Some(serde_json::json!({"question":"Which SQLite journal mode?"}));
+    question
+}
+
+#[tokio::test]
+async fn source_revoked_during_status_await_stops_before_resolver() {
+    struct UnexpectedResolver;
+    #[async_trait::async_trait]
+    impl ContinuationResolver for UnexpectedResolver {
+        async fn resolve(&self, _: &ContinuationContext<'_>) -> anyhow::Result<Option<String>> {
+            panic!("revoked source reached the resolver");
+        }
+    }
+    let (tmp, config) = fixture_config();
+    let backend = Arc::new(SqliteSessionBackend::new(tmp.path()).unwrap());
+    grounded_binding(
+        &backend,
+        &config,
+        Some(&grounded_origin(Some("memory-source"))),
+    );
+    let fetch = |_a: &str, dispatch: &str, _r: &reiclaw_config::tachi::TachiConfig| {
+        let backend = backend.clone();
+        let dispatch = dispatch.to_owned();
+        async move {
+            tokio::task::yield_now().await;
+            backend.delete_session("source-session").unwrap();
+            Ok(source_question(&dispatch))
+        }
+        .boxed()
+    };
+    let send = |_a: &str,
+                _d: &str,
+                _r: &reiclaw_config::tachi::TachiConfig,
+                _v: u64,
+                _answer: &str|
+     -> BoxFuture<'static, Result<ContinueReceipt, TachiStaffError>> {
+        async { panic!("revoked source reached the sender") }.boxed()
+    };
+    let deps = SweepDeps {
+        fetch_status: &fetch,
+        fetch_result: None,
+        send_continue: Some(&send),
+        continuation_resolver: Some(&UnexpectedResolver),
+        authorize_source: Some(&|_, _| true),
+        memory: None,
+    };
+    reconcile_with_deps(
+        &RwLock::new(config),
+        tmp.path(),
+        &tokio_util::sync::CancellationToken::new(),
+        &mut Rotation::default(),
+        &deps,
+    )
+    .await
+    .unwrap();
+    assert_eq!(
+        persisted_continuation(tmp.path(), "req-1"),
+        (0, None, "idle".into())
+    );
+}
+
+#[tokio::test]
+async fn live_revocation_at_each_await_stops_further_grounding_and_never_sends() {
+    for stage in ["episode", "recall", "provider"] {
+        let (tmp, config) = fixture_config();
+        let backend = SqliteSessionBackend::new(tmp.path()).unwrap();
+        grounded_binding(
+            &backend,
+            &config,
+            Some(&grounded_origin(Some("memory-source"))),
+        );
+        let live = Arc::new(AtomicBool::new(true));
+        let mut memory = RecordingMemory::new(false);
+        memory
+            .episodes
+            .lock()
+            .push(source_episode("source-session", "SQLite uses WAL."));
+        let revoke = live.clone();
+        memory.read_hook = Some(Arc::new(move |read| {
+            if read == stage {
+                revoke.store(false, Ordering::SeqCst);
+            }
+        }));
+        let memory = Arc::new(memory);
+        let mut provider = ScriptedModelProvider::new("Use WAL mode.");
+        if stage == "provider" {
+            let revoke = live.clone();
+            provider.reply_hook = Some(Arc::new(move || revoke.store(false, Ordering::SeqCst)));
+        }
+        let provider = Arc::new(provider);
+        let resolver = GroundedContinuationResolver::new(
+            provider.clone(),
+            "test-model",
+            None,
+            tmp.path().to_path_buf(),
+            Some(memory.clone()),
+        );
+        let fetch = |_a: &str, dispatch: &str, _r: &reiclaw_config::tachi::TachiConfig| {
+            let question = source_question(dispatch);
+            async move { Ok(question) }.boxed()
+        };
+        let sends = AtomicUsize::new(0);
+        let send = |_a: &str,
+                    _d: &str,
+                    _r: &reiclaw_config::tachi::TachiConfig,
+                    _v: u64,
+                    _answer: &str| {
+            sends.fetch_add(1, Ordering::SeqCst);
+            async { Err(TachiStaffError::Unavailable("unexpected submission".into())) }.boxed()
+        };
+        let authorize = move |_agent: &str, _origin: &DelegationOrigin| live.load(Ordering::SeqCst);
+        let deps = SweepDeps {
+            fetch_status: &fetch,
+            fetch_result: None,
+            send_continue: Some(&send),
+            continuation_resolver: Some(&resolver),
+            authorize_source: Some(&authorize),
+            memory: None,
+        };
+        reconcile_with_deps(
+            &RwLock::new(config),
+            tmp.path(),
+            &tokio_util::sync::CancellationToken::new(),
+            &mut Rotation::default(),
+            &deps,
+        )
+        .await
+        .unwrap();
+        assert_eq!(
+            memory.reads.lock().len(),
+            if stage == "episode" { 1 } else { 2 },
+            "{stage}"
+        );
+        assert_eq!(
+            provider.seen_prompts.lock().len(),
+            usize::from(stage == "provider"),
+            "{stage}"
+        );
+        assert_eq!(sends.load(Ordering::SeqCst), 0, "{stage}");
+        assert_eq!(
+            persisted_continuation(tmp.path(), "req-1"),
+            (0, None, "idle".into()),
+            "{stage}"
+        );
+    }
+}
+
+#[test]
+fn paired_source_authorizer_rechecks_credential_policy_and_stable_identity() {
+    use reiclaw_config::autonomy::AutonomyLevel;
+    use reiclaw_memory::companion::{invalidate_alias_identity, resolve_or_mint_agent_identity};
+    use reiclaw_runtime::security::pairing::PairingGuard;
+    for change in [
+        "token",
+        "tool",
+        "supervised",
+        "always-ask",
+        "identity",
+        "agent",
+        "bridge",
+        "bridge-uppercase",
+        "device-raw",
+        "device-sanitized",
+        "unknown-source-prefix",
+    ] {
+        let (tmp, mut config) = fixture_config();
+        config.config_path = tmp.path().join("config.toml");
+        let profile = "source-full".to_string();
+        config.agents.get_mut("butler").unwrap().risk_profile = profile.clone().into();
+        config.risk_profiles.insert(
+            profile.clone(),
+            reiclaw_config::schema::RiskProfileConfig {
+                level: AutonomyLevel::Full,
+                ..Default::default()
+            },
+        );
+        let store_dir = config.companion_memory.resolved_store_dir(&config.data_dir);
+        let identity = resolve_or_mint_agent_identity(&store_dir, "butler").unwrap();
+        let subject = "cd".repeat(32);
+        let mut origin = DelegationOrigin {
+            session_key: "gw_source.a".into(),
+            scope: DelegationOriginScope::SessionFacts {
+                operator_subject: subject.clone(),
+                agent_id: identity.as_str().into(),
+                memory_session_id: None,
+            },
+        };
+        let pairing = Arc::new(PairingGuard::new(true, std::slice::from_ref(&subject)));
+        let shared = Arc::new(RwLock::new(config));
+        let authorize = paired_source_authorizer(shared.clone(), pairing.clone());
+        assert!(authorize("butler", &origin), "baseline {change}");
+        match change {
+            "token" => {
+                assert!(pairing.revoke_token_hash(&subject));
+            }
+            "tool" => {
+                shared
+                    .write()
+                    .risk_profiles
+                    .get_mut(&profile)
+                    .unwrap()
+                    .allowed_tools = Some(vec![]);
+            }
+            "supervised" => {
+                shared
+                    .write()
+                    .risk_profiles
+                    .get_mut(&profile)
+                    .unwrap()
+                    .level = AutonomyLevel::Supervised;
+            }
+            "always-ask" => {
+                shared
+                    .write()
+                    .risk_profiles
+                    .get_mut(&profile)
+                    .unwrap()
+                    .always_ask = vec!["tachi_start".into()];
+            }
+            "identity" => {
+                invalidate_alias_identity(&store_dir, "butler").unwrap();
+                resolve_or_mint_agent_identity(&store_dir, "butler").unwrap();
+            }
+            "agent" => {
+                shared.write().agents.get_mut("butler").unwrap().enabled = false;
+            }
+            "bridge" | "bridge-uppercase" => {
+                shared
+                    .write()
+                    .gateway
+                    .bridges
+                    .get_mut("tg")
+                    .unwrap()
+                    .token_hash = if change == "bridge-uppercase" {
+                    subject.to_ascii_uppercase()
+                } else {
+                    subject
+                };
+            }
+            "device-raw" | "device-sanitized" => {
+                let mut config = shared.write();
+                let bridge = config.gateway.bridges.get_mut("tg").unwrap();
+                bridge.sessions = vec![if change == "device-raw" {
+                    "source.a".into()
+                } else {
+                    "source_a".into()
+                }];
+                bridge.device = Some(reiclaw_config::schema::GatewayDeviceBridgeConfig {
+                    agent: "butler".into(),
+                    risk_profile: None,
+                    operations: vec!["tachi_start".into()],
+                });
+            }
+            "unknown-source-prefix" => {
+                origin.session_key = "cli_source.a".into();
+            }
+            _ => unreachable!(),
+        }
+        assert!(!authorize("butler", &origin), "live change: {change}");
+    }
 }
 
 #[tokio::test]
@@ -2392,6 +2905,7 @@ async fn terminal_result_digests_episode_and_remains_fail_soft_on_result_or_comm
         fetch_result: Some(&fetch_result),
         send_continue: None,
         continuation_resolver: None,
+        authorize_source: Some(&|_, _| true),
         memory: Some(mem.as_ref()),
     };
 
@@ -2430,6 +2944,7 @@ async fn terminal_result_digests_episode_and_remains_fail_soft_on_result_or_comm
         fetch_result: Some(&fetch_result),
         send_continue: None,
         continuation_resolver: None,
+        authorize_source: Some(&|_, _| true),
         memory: Some(&failing_mem),
     };
     assert_eq!(
@@ -2468,6 +2983,10 @@ async fn wake_notify_triggers_immediate_sweep_pass() {
     let wake = Arc::new(tokio::sync::Notify::new());
     let task = start(
         Arc::clone(&shared),
+        Arc::new(reiclaw_runtime::security::pairing::PairingGuard::new(
+            true,
+            &[],
+        )),
         None,
         Some(Arc::clone(&wake)),
         shutdown_rx,
@@ -2599,6 +3118,7 @@ async fn managed_native_wait_notifies_only_when_controllable_and_never_sends() {
             fetch_result: None,
             send_continue: Some(&send),
             continuation_resolver: Some(&resolver),
+            authorize_source: Some(&|_, _| true),
             memory: None,
         };
         let actual =
@@ -2630,6 +3150,7 @@ async fn managed_native_wait_notifies_only_when_controllable_and_never_sends() {
             fetch_result: None,
             send_continue: Some(&send),
             continuation_resolver: Some(&resolver),
+            authorize_source: Some(&|_, _| true),
             memory: None,
         };
         assert_eq!(

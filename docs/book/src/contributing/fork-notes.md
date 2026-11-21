@@ -346,6 +346,41 @@ ConversationHub. The fork already owns shared conversations and replay receipts;
 the gap is deletion of their retained live history. This is a bounded local fix,
 with no upstream code port, new durable store, protocol or configuration key.
 
+## Delegation source authority
+
+The #725 continuation slice binds each new request's authenticated source to the
+existing `sessions.db` delegation claim before sending a Staff start. The host
+supplies this provenance; task arguments and worker projections cannot choose it.
+Replays never replace the original source or grant legacy tasks new read access.
+
+Paired owner WS turns can admit facts from their exact persisted transcript,
+checkpoints and session Episodes. Device/bridge requests retain source provenance
+without personal fact access. Nested, scheduled and daemon turns cannot inherit
+a foreground source grant. The grant pins the operator credential hash and stable
+agent identity; live pairing, agent policy and approval requirements are rechecked
+before facts are resolved and after asynchronous work. No bearer token is stored
+in the grant or sent to Staff.
+
+Ordinary Memory recall is not granted by current WS ingress. Its normalized
+session IDs may collide across raw history IDs; a matching normalized ID alone
+cannot prove that a fact belongs to this source. An explicit canonical memory
+scope is supported by the resolver contract but requires provenance-safe host
+admission before it can be used.
+
+Source deletion, transcript clearing, retention cleanup or agent reassignment
+permanently revoke the old grant, including when the same session key is reused.
+The existing task claim, route, dispatch and continuation history remain intact.
+Attempt budgets are shared per canonical route/dispatch; fact grants are checked
+per request and never shared through that budget. SQLite checks the source in the
+same transaction as fact snapshots and continuation reservation.
+
+The production observer still starts with `resolver=None` and no SSE producer.
+Transport-time live estop wiring, canonical reconciliation and named paired
+ReiClaw/Tachi acceptance remain prerequisites for automatic activation. Rollback
+keeps the origin columns, revocation triggers, claims and attempt history, and
+keeps automatic continuation disabled; reverting code does not restore a revoked
+source or authorize a legacy writer to discard that history.
+
 ## Deferred MCP exact-name recovery
 
 The #382/#376 leaf compares upstream `zeroclaw-labs/zeroclaw` at

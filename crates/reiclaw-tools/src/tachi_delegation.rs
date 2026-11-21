@@ -9,7 +9,7 @@ use crate::tachi_staff::{
 };
 use async_trait::async_trait;
 use reiclaw_api::delegation_control::DelegationOperation;
-use reiclaw_api::delegation_request::DelegationRequestClaim;
+use reiclaw_api::delegation_request::{DELEGATION_ORIGIN_CONTEXT, DelegationRequestClaim};
 use reiclaw_api::tool::{Tool, ToolResult};
 use reiclaw_config::tachi::TachiConfig;
 use reiclaw_infra::session_sqlite::SqliteSessionBackend;
@@ -432,6 +432,22 @@ impl Tool for TachiDelegationTool {
             Err(error) => return Ok(failure("storage_error", &error.to_string())),
         };
         if let Some(start) = start {
+            // Only authenticated host entry points install this context. The
+            // model's JSON, task text and external receipts cannot grant it.
+            // Missing context preserves legacy starts with no fact authority;
+            // an installed but revoked source must stop this admission.
+            let origin = match DELEGATION_ORIGIN_CONTEXT
+                .try_with(|resolve| resolve(&self.service.agent_alias))
+            {
+                Ok(Some(origin)) => Some(origin),
+                Err(_) => None,
+                Ok(None) => {
+                    return Ok(failure(
+                        "source_unavailable",
+                        "The originating session is no longer authorized.",
+                    ));
+                }
+            };
             let outbound_task = outbound_task.unwrap_or_else(|| start.task.clone());
             let digest =
                 hash(&json!({"profile":client.profile_for(&start.harness)?, "arguments":args}));
@@ -443,8 +459,15 @@ impl Tool for TachiDelegationTool {
                     digest.clone(),
                     route_digest.clone(),
                 );
+                let origin = origin.clone();
                 tokio::task::spawn_blocking(move || {
-                    db.claim_delegation_request(&scope, &request_id, &digest, &route_digest)
+                    db.claim_delegation_request_with_origin(
+                        &scope,
+                        &request_id,
+                        &digest,
+                        &route_digest,
+                        origin.as_ref(),
+                    )
                 })
                 .await?
             };
@@ -473,10 +496,36 @@ impl Tool for TachiDelegationTool {
                 Ok(DelegationRequestClaim::Conflict) => {
                     return Ok(failure(
                         "request_conflict",
-                        "This request ID already names different task arguments or routing preferences.",
+                        "This request ID already names different task arguments, source, or routing preferences.",
                     ));
                 }
                 Err(error) => return Ok(failure("storage_error", &error.to_string())),
+            }
+            // Claim acquisition awaited a blocking transaction. Revocation in
+            // that interval is still provably unsent and may release this claim.
+            if origin.is_some()
+                && DELEGATION_ORIGIN_CONTEXT
+                    .try_with(|resolve| resolve(&self.service.agent_alias))
+                    .ok()
+                    .flatten()
+                    != origin
+            {
+                let released = tokio::task::spawn_blocking(move || {
+                    db.release_unsent_delegation_request(
+                        &scope,
+                        &request_id,
+                        &digest,
+                        &route_digest,
+                    )
+                })
+                .await?;
+                if let Err(error) = released {
+                    return Ok(failure("storage_error", &error.to_string()));
+                }
+                return Ok(failure(
+                    "source_unavailable",
+                    "The originating session is no longer authorized.",
+                ));
             }
             let refs = StaffRefs {
                 issue_ref: start.issue_ref,
