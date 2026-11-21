@@ -12,13 +12,13 @@ const LARGE_STREAM_SETTLE: Duration = Duration::from_secs(2 * LARGE_STREAM_PROVI
 /// Marker-only behavior in the real HTTP provider. No Conversation injection,
 /// no fake gateway output: all frames pass through the runtime streaming path.
 pub(super) async fn provider_response(request: &Value) -> Option<axum::response::Response> {
-    let text = request["messages"].as_array()?.last()?["content"].to_string();
+    let text = request["input"].as_array()?.last()?["content"].to_string();
     if text.contains("s2-delete-marker") {
-        let message = json!({"role":"assistant","content":"s2-deleted-output-marker "});
+        let response = json!({"output_text":"s2-deleted-output-marker "});
         return Some(if request["stream"] == true {
-            ([("content-type", "text/event-stream")], format!("data: {}\n\ndata: [DONE]\n\n", json!({"id":"deletion-response","choices":[{"index":0,"delta":message,"finish_reason":"stop"}]}))).into_response()
+            ([("content-type", "text/event-stream")], format!("data: {}\n\ndata: [DONE]\n\n", json!({"type":"response.completed","response":response}))).into_response()
         } else {
-            axum::Json(json!({"id":"deletion-response","choices":[{"index":0,"message":message,"finish_reason":"stop"}]})).into_response()
+            axum::Json(response).into_response()
         });
     }
     if text.contains("s2-held-provider") {
@@ -43,7 +43,7 @@ pub(super) async fn provider_response(request: &Value) -> Option<axum::response:
         } else {
             format!(
                 "data: {}\n\n",
-                json!({"id":"s2-local-stream","choices":[{"index":0,"delta":{"content":format!("{} ", "x".repeat(LARGE_STREAM_CHUNK_BYTES - 1))},"finish_reason":null}]})
+                json!({"type":"response.output_text.delta","delta":format!("{} ", "x".repeat(LARGE_STREAM_CHUNK_BYTES - 1))})
             )
         };
         Some((Ok::<_, std::io::Error>(bytes), index + 1))
@@ -195,6 +195,19 @@ async fn s2_explicit_steering_preserves_bridge_attachment_gate() {
     assert!(fixture.seen.lock().is_empty());
 }
 
+fn responses_item_text(item: &Value) -> &str {
+    item["content"]
+        .as_str()
+        .or_else(|| {
+            item["content"]
+                .as_array()?
+                .iter()
+                .rev()
+                .find_map(|part| part["text"].as_str())
+        })
+        .unwrap_or_else(|| panic!("expected text content in Responses item: {item}"))
+}
+
 fn assert_failed_parent_fallback(attempts: &[Value]) {
     // call_provider retries a failed, output-free stream as ordinary chat.
     // Both attempts belong to the SAME parent input; neither is a new turn.
@@ -206,17 +219,14 @@ fn assert_failed_parent_fallback(attempts: &[Value]) {
     assert_eq!(attempts[0]["stream"], true);
     assert_ne!(attempts[1]["stream"], true);
     assert_eq!(
-        attempts[0]["messages"], attempts[1]["messages"],
+        attempts[0]["input"], attempts[1]["input"],
         "fallback must retain the exact parent transcript"
     );
-    let messages = attempts[1]["messages"].as_array().unwrap();
+    let messages = attempts[1]["input"].as_array().unwrap();
     let last = messages.last().unwrap();
     assert_eq!(last["role"], "user");
     assert!(
-        last["content"]
-            .as_str()
-            .unwrap()
-            .ends_with("s2-held-provider-error"),
+        responses_item_text(last).ends_with("s2-held-provider-error"),
         "both attempts must still address the failed parent: {last}"
     );
 }
@@ -273,13 +283,8 @@ async fn s2_explicit_steering_is_not_promoted_after_provider_error() {
     terminal(&mut client, &next, admitted["turn_id"].as_str().unwrap()).await;
     let seen = fixture.seen.lock();
     assert_eq!(seen.len(), failed_attempts.len() + 1);
-    let next_messages = seen.last().unwrap()["messages"].as_array().unwrap();
-    assert!(
-        next_messages.last().unwrap()["content"]
-            .as_str()
-            .unwrap()
-            .ends_with("new explicit task")
-    );
+    let next_messages = seen.last().unwrap()["input"].as_array().unwrap();
+    assert!(responses_item_text(next_messages.last().unwrap()).ends_with("new explicit task"));
     assert!(
         !next_messages.iter().any(|message| message["content"]
             .to_string()
@@ -308,13 +313,10 @@ async fn legacy_late_steering_still_follows_up_after_provider_error() {
         "two parent transport attempts and one legacy follow-up"
     );
     assert_failed_parent_fallback(&seen[..2]);
-    let follow_up = seen[2]["messages"].as_array().unwrap().last().unwrap();
+    let follow_up = seen[2]["input"].as_array().unwrap().last().unwrap();
     assert_eq!(follow_up["role"], "user");
     assert!(
-        follow_up["content"]
-            .as_str()
-            .unwrap()
-            .ends_with("legacy correction"),
+        responses_item_text(follow_up).ends_with("legacy correction"),
         "the third request must be the legacy follow-up, not another attempt of the parent: {follow_up}"
     );
 }
@@ -684,7 +686,7 @@ async fn s2_wire_slow_reader_has_explicit_recovery_gap_without_blocking_other_se
         .write()
         .providers
         .models
-        .custom
+        .openai
         .get_mut("test")
         .unwrap()
         .base
@@ -966,7 +968,7 @@ async fn s2_wire_session_delete_resets_shared_history_and_preserves_other_sessio
     {
         let seen = fixture.seen.lock();
         assert_eq!(seen.len(), 3);
-        let input = seen[2]["messages"].to_string();
+        let input = seen[2]["input"].to_string();
         assert!(input.contains("fresh-after-delete"));
         assert!(!input.contains("s2-delete-marker"));
         assert!(!input.contains("s2-deleted-output-marker"));
@@ -981,7 +983,7 @@ async fn s2_wire_session_delete_resets_shared_history_and_preserves_other_sessio
     {
         let seen = fixture.seen.lock();
         assert_eq!(seen.len(), 4);
-        let input = seen[3]["messages"].to_string();
+        let input = seen[3]["input"].to_string();
         assert!(
             input.contains("fresh-after-delete"),
             "both sockets still share one Agent"
@@ -1000,7 +1002,7 @@ async fn s2_wire_session_delete_resets_shared_history_and_preserves_other_sessio
     let seen = fixture.seen.lock();
     assert_eq!(seen.len(), 5);
     assert!(
-        seen[4]["messages"]
+        seen[4]["input"]
             .to_string()
             .contains("unaffected-context-marker")
     );
@@ -1057,7 +1059,7 @@ async fn s2_wire_session_delete_during_connect_cannot_restore_old_snapshot() {
     terminal(&mut connecting, &fresh_id, ack["turn_id"].as_str().unwrap()).await;
     let seen = fixture.seen.lock();
     assert_eq!(seen.len(), 2);
-    let input = seen[1]["messages"].to_string();
+    let input = seen[1]["input"].to_string();
     assert!(!input.contains("s2-delete-marker"));
     assert!(!input.contains("s2-deleted-output-marker"));
 }
@@ -1097,7 +1099,7 @@ async fn s2_wire_session_delete_without_persistence_keeps_404_and_live_history()
     terminal(&mut client, &followup, ack["turn_id"].as_str().unwrap()).await;
     let seen = fixture.seen.lock();
     assert_eq!(seen.len(), 2);
-    assert!(seen[1]["messages"].to_string().contains("s2-delete-marker"));
+    assert!(seen[1]["input"].to_string().contains("s2-delete-marker"));
 }
 
 #[tokio::test]
@@ -1321,7 +1323,7 @@ async fn s2_wire_delete_active_turn_suppresses_late_events_and_allows_fresh_requ
         "only the new explicit ID may run after deletion"
     );
     assert!(
-        !fixture.seen.lock()[1]["messages"]
+        !fixture.seen.lock()[1]["input"]
             .to_string()
             .contains("s2-active-private-marker"),
         "cancellation settlement must not retain the deleted turn in the shared Agent"

@@ -106,10 +106,6 @@ use serde::{Deserialize, Serialize};
 ///   tool text is English only and the Fluent catalogues were removed, so the
 ///   key is ignored (see `RETIRED_CONFIG_FIELDS`). Voice and transcription
 ///   `language` settings are unaffected.
-/// - `ollama_native_options_removed`: an Ollama alias still sets `num_ctx`,
-///   `num_predict` or `temperature_override`. These native `/api/chat` options
-///   were not consumed by the current OpenAI-compatible `/v1` provider and
-///   were removed from the schema (see `RETIRED_CONFIG_FIELDS`).
 /// - `cost_optimized_routing_removed`: a runtime profile still sets
 ///   `auto_classify.cost_optimized_hint`. The unused cost selector was
 ///   removed; the three complexity hints and ordinary named routes remain.
@@ -446,18 +442,6 @@ pub const RETIRED_CONFIG_FIELDS: &[(&str, &str)] = &[
     ),
     ("agents.*.knowledge_bundles", "knowledge_bundles_removed"),
     (
-        "providers.models.ollama.*.num_ctx",
-        "ollama_native_options_removed",
-    ),
-    (
-        "providers.models.ollama.*.num_predict",
-        "ollama_native_options_removed",
-    ),
-    (
-        "providers.models.ollama.*.temperature_override",
-        "ollama_native_options_removed",
-    ),
-    (
         "transcription.transcribe_non_ptt_audio",
         "whatsapp_audio_option_removed",
     ),
@@ -572,12 +556,6 @@ fn retired_field_reason(code: &str) -> &'static str {
             "the unused cost-optimized selector was removed; this field never \
              selected a route. The simple, standard and complex hints and \
              ordinary named routes remain; prices do not select routes"
-        }
-        "ollama_native_options_removed" => {
-            "native Ollama /api/chat options were removed; the current \
-             OpenAI-compatible /v1 provider did not consume them. No automatic \
-             mapping is applied; configure supported client or Ollama server \
-             options explicitly"
         }
         "memory_backend_removed" => {
             "the postgres, qdrant, sqlite, and lucid memory backends were removed; selecting one \

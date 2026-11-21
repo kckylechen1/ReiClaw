@@ -101,15 +101,15 @@ async fn list_prefix_excludes_neighboring_agent_aliases() {
 #[tokio::test]
 async fn list_requires_paired_bearer_and_omits_configured_secret_value() {
     const SYNTHETIC_SECRET: &str = "list-visibility-synthetic-provider-secret";
-    const PROVIDER_PREFIX: &str = "providers.models.anthropic.visibility_fixture";
-    const SECRET_PATH: &str = "providers.models.anthropic.visibility_fixture.api_key";
+    const PROVIDER_PREFIX: &str = "providers.models.openai.visibility_fixture";
+    const SECRET_PATH: &str = "providers.models.openai.visibility_fixture.api_key";
 
     let tmp = tempfile::tempdir().expect("temporary config directory");
     let mut config = temp_config(&tmp);
     config
         .providers
         .models
-        .ensure("anthropic", "visibility_fixture")
+        .ensure("openai", "visibility_fixture")
         .expect("known provider family")
         .api_key = Some(SYNTHETIC_SECRET.into());
     let mut state = test_state(config);

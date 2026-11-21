@@ -1,152 +1,6 @@
 #[cfg(test)]
 use super::*;
 
-/// Canonical 1x1 PNG payload: 68 characters, a multiple of four, standard
-/// alphabet, no padding. Every accept case below uses it.
-const CANONICAL_PNG_B64: &str =
-    "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAAAAAA6fptVAAAACklEQVR4nGMAAQAABQAB";
-
-const TEN_MB: usize = 10 * 1024 * 1024;
-
-// Every test in this block fails to compile before the change: the
-// splitter and its rejection enum did not exist.
-
-#[test]
-fn split_data_uri_accepts_canonical_payload() {
-    let uri = format!("data:image/png;base64,{CANONICAL_PNG_B64}");
-    let (media_type, payload) =
-        split_base64_image_data_uri(&uri, TEN_MB).expect("canonical PNG data URI accepted");
-    assert_eq!(media_type, "image/png");
-    assert_eq!(payload, CANONICAL_PNG_B64);
-}
-
-#[test]
-fn split_data_uri_accepts_uppercase_media_type_and_extra_parameters() {
-    // The allowlist comparison is case-insensitive, and the header may
-    // carry parameters before `;base64`.
-    let uri = format!("data:IMAGE/PNG;charset=binary;base64,{CANONICAL_PNG_B64}");
-    let (media_type, payload) =
-        split_base64_image_data_uri(&uri, TEN_MB).expect("upper-case media type accepted");
-    // Returned verbatim — the caller lowercases it once when it builds a
-    // wire block.
-    assert_eq!(media_type, "IMAGE/PNG");
-    assert_eq!(payload, CANONICAL_PNG_B64);
-}
-
-#[test]
-fn split_data_uri_accepts_every_allowlisted_media_type() {
-    for mime in ALLOWED_IMAGE_MIME_TYPES {
-        let uri = format!("data:{mime};base64,{CANONICAL_PNG_B64}");
-        let (media_type, _) = split_base64_image_data_uri(&uri, TEN_MB)
-            .unwrap_or_else(|reason| panic!("{mime} rejected: {reason}"));
-        assert_eq!(media_type, *mime);
-    }
-}
-
-#[test]
-fn split_data_uri_accepts_well_formed_padding() {
-    // `AA==` has its final-quartet padding bits clear; so does `AAA=`.
-    let two_pad = split_base64_image_data_uri("data:image/png;base64,AA==", TEN_MB);
-    assert_eq!(two_pad.map(|(_, payload)| payload), Ok("AA=="));
-    let one_pad = split_base64_image_data_uri("data:image/png;base64,AAA=", TEN_MB);
-    assert_eq!(one_pad.map(|(_, payload)| payload), Ok("AAA="));
-}
-
-#[test]
-fn split_data_uri_rejects_non_data_uris() {
-    for candidate in [
-        "/tmp/screenshot.png",
-        r"C:\Users\leo\shot.png",
-        "http://example.com/a.png",
-        "https://example.com/a.png",
-        // A `data:` prefix with no comma has no payload to split.
-        "data:image/png;base64",
-    ] {
-        assert_eq!(
-            split_base64_image_data_uri(candidate, TEN_MB),
-            Err(ImageDataUriRejection::NotADataUri),
-            "expected {candidate} to be rejected as a non-data URI"
-        );
-    }
-}
-
-#[test]
-fn split_data_uri_rejects_missing_base64_declaration() {
-    // Matched case-sensitively, as `normalize_data_uri` already does.
-    assert_eq!(
-        split_base64_image_data_uri("data:image/png,AAAA", TEN_MB),
-        Err(ImageDataUriRejection::NotBase64Encoded)
-    );
-    assert_eq!(
-        split_base64_image_data_uri("data:image/png;BASE64,AAAA", TEN_MB),
-        Err(ImageDataUriRejection::NotBase64Encoded)
-    );
-}
-
-#[test]
-fn split_data_uri_rejects_media_types_outside_the_allowlist() {
-    for mime in ["image/svg+xml", "image/bmp", "application/pdf", ""] {
-        let uri = format!("data:{mime};base64,{CANONICAL_PNG_B64}");
-        assert_eq!(
-            split_base64_image_data_uri(&uri, TEN_MB),
-            Err(ImageDataUriRejection::UnsupportedMediaType),
-            "expected {mime} to be rejected"
-        );
-    }
-}
-
-#[test]
-fn split_data_uri_rejects_malformed_base64() {
-    for payload in [
-        // Empty payload.
-        "",
-        // Not a multiple of four. Preparation always emits canonical
-        // padded base64, so a payload this shape cannot be a real image
-        // and Anthropic's decoder would reject it.
-        "iVBORw0KGgo",
-        "/9j/4AAQSkZJRgABAQEAYABgAAD",
-        // Characters outside the standard alphabet.
-        "AAA-",
-        "AA=A",
-        // More than two padding characters.
-        "AB==CD==",
-        // Final-quartet padding bits set: both fail a strict decoder even
-        // though the length and alphabet are fine.
-        "AB==",
-        "AAB=",
-    ] {
-        let uri = format!("data:image/png;base64,{payload}");
-        assert_eq!(
-            split_base64_image_data_uri(&uri, TEN_MB),
-            Err(ImageDataUriRejection::MalformedBase64),
-            "expected payload {payload:?} to be rejected"
-        );
-    }
-}
-
-#[test]
-fn split_data_uri_rejects_payloads_over_the_ceiling() {
-    let uri = format!("data:image/png;base64,{CANONICAL_PNG_B64}");
-    assert_eq!(
-        split_base64_image_data_uri(&uri, CANONICAL_PNG_B64.len() - 1),
-        Err(ImageDataUriRejection::TooLarge)
-    );
-    // Exactly at the ceiling is accepted.
-    assert!(split_base64_image_data_uri(&uri, CANONICAL_PNG_B64.len()).is_ok());
-}
-
-#[test]
-fn split_data_uri_rejections_carry_a_short_reason() {
-    assert_eq!(
-        ImageDataUriRejection::TooLarge.to_string(),
-        "image payload exceeds the per-image ceiling"
-    );
-    assert_eq!(
-        ImageDataUriRejection::MalformedBase64.to_string(),
-        "malformed base64 payload"
-    );
-}
-
 #[test]
 fn strip_media_markers_replaces_image_local_path() {
     let input = "Look at [IMAGE:/zeroclaw-data/workspace/telegram_files/photo_1.jpg]";
@@ -829,10 +683,7 @@ async fn prepare_messages_strips_stale_tool_image_while_normalizing_current_user
             role: "assistant".to_string(),
             content: "I generated the screenshot.".to_string(),
         },
-        ChatMessage::user(format!(
-            "Now inspect this [IMAGE:{}]",
-            fresh_path.display().to_string()
-        )),
+        ChatMessage::user(format!("Now inspect this [IMAGE:{}]", fresh_path.display())),
     ];
 
     let prepared = prepare_messages_for_provider(&messages, &MultimodalConfig::default())
@@ -1254,9 +1105,9 @@ async fn prepare_messages_trims_then_normalizes_surviving_images() {
     }
 
     let messages = vec![
-        ChatMessage::user(format!("[IMAGE:{}]\nOld", paths[0].display().to_string())),
-        ChatMessage::user(format!("[IMAGE:{}]\nMid", paths[1].display().to_string())),
-        ChatMessage::user(format!("[IMAGE:{}]\nNew", paths[2].display().to_string())),
+        ChatMessage::user(format!("[IMAGE:{}]\nOld", paths[0].display())),
+        ChatMessage::user(format!("[IMAGE:{}]\nMid", paths[1].display())),
+        ChatMessage::user(format!("[IMAGE:{}]\nNew", paths[2].display())),
     ];
 
     let config = MultimodalConfig {
@@ -1541,13 +1392,6 @@ async fn skipped_images_do_not_consume_image_budget() {
             .content
             .contains("https://example.com/missing.png")
     );
-}
-
-#[test]
-fn extract_ollama_image_payload_supports_data_uris() {
-    let payload = extract_ollama_image_payload("data:image/png;base64,abcd==")
-        .expect("payload should be extracted");
-    assert_eq!(payload, "abcd==");
 }
 
 #[test]

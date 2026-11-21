@@ -1,7 +1,7 @@
 //! Test-only provider-wire token budget for the Hyperion lean profile.
 //!
 //! Counts tokens the way a native OpenAI turn does: `build_iteration_tool_specs`
-//! then `OpenAiModelProvider::chat_tools_wire` (the `NativeChatRequest.tools`
+//! then `OpenAiResponsesModelProvider::tools_wire` (the Responses request’s `tools`
 //! array). The gate is `ceil(tools_json.len() / 4)` on that whole array, not a
 //! sum of per-tool ceils.
 
@@ -12,7 +12,7 @@ use crate::security::SecurityPolicy;
 use crate::skills::Skill;
 use reiclaw_config::schema::{Config, MemoryConfig};
 use reiclaw_memory::Memory;
-use reiclaw_providers::openai::OpenAiModelProvider;
+use reiclaw_providers::openai::OpenAiResponsesModelProvider;
 use serde_json::Value;
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
@@ -329,7 +329,7 @@ async fn assemble_turn(req: TurnRequest<'_>) -> (ScopedAssembled, WireBudget) {
     .await
     .expect("assemble must not hang");
 
-    let provider = OpenAiModelProvider::builder("wire-budget").build();
+    let provider = OpenAiResponsesModelProvider::builder("wire-budget").build();
     let iteration = crate::agent::turn::build_iteration_tool_specs(
         &provider,
         &assembled.registry,
@@ -337,7 +337,7 @@ async fn assemble_turn(req: TurnRequest<'_>) -> (ScopedAssembled, WireBudget) {
         assembled.activated_handle.as_ref(),
     )
     .expect("iteration tool specs");
-    let tools_json = OpenAiModelProvider::chat_tools_wire(&iteration.tool_specs)
+    let tools_json = OpenAiResponsesModelProvider::tools_wire(&iteration.tool_specs)
         .expect("native tools array must serialize");
     let native_tools_tokens = estimate_tokens(&tools_json);
     let params_json = serde_json::to_string(

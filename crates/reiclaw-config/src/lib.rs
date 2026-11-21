@@ -31,7 +31,6 @@ pub mod paths;
 pub mod persona;
 pub mod policy_defaults;
 pub mod presets;
-pub mod provider_aliases;
 pub mod providers;
 mod retired_security;
 mod retired_session_backend;

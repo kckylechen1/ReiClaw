@@ -2,7 +2,7 @@ use super::*;
 use serde_json::{Value, json};
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use reiclaw_config::schema::{
-    AliasedAgentConfig, CustomModelProviderConfig, GatewayBridgeConfig, GatewayDeviceBridgeConfig,
+    AliasedAgentConfig, OpenAIModelProviderConfig, GatewayBridgeConfig, GatewayDeviceBridgeConfig,
     ModelProviderConfig, RiskProfileConfig, RuntimeProfileConfig,
 };
 
@@ -164,42 +164,35 @@ async fn device_provider(
     if let Some(response) = turn_control_tests::provider_response(&request).await {
         return response;
     }
-    let messages = request["messages"].as_array().unwrap();
-    let tool_needed = messages.last().is_some_and(|message| {
-        message["role"] == "user" && message["content"].to_string().contains("approval-probe")
-    });
-    let mut message = json!({"role":"assistant", "content":"device response"});
-    let confinement_probe = messages.last().is_some_and(|m| m["role"] == "user" && m["content"].to_string().contains("device-tool-probe"));
-    let cap_probe = messages.iter().any(|m| m["role"] == "user" && m["content"].to_string().contains("device-cap-probe"));
-    let finish = if cap_probe {
-        message["content"] = Value::Null;
-        message["tool_calls"] = json!([{"index":0,"id":format!("cap-{}", messages.len()),"type":"function",
-            "function":{"name":format!("absent_{}", messages.len()),"arguments":"{}"}}]);
-        "tool_calls"
+    let input = request["input"].as_array().unwrap();
+    let user_contains = |item: &Value, needle: &str| {
+        item["role"] == "user" && item["content"].to_string().contains(needle)
+    };
+    let tool_needed = input.iter().any(|item| user_contains(item, "approval-probe"))
+        && !input.iter().any(|item| item["type"] == "function_call_output");
+    let confinement_probe = input.last().is_some_and(|item| user_contains(item, "device-tool-probe"));
+    let cap_probe = input.iter().any(|item| user_contains(item, "device-cap-probe"));
+    let response = if cap_probe {
+        json!({"output":[{"type":"function_call","call_id":format!("cap-{}", input.len()),
+            "name":format!("absent_{}", input.len()),"arguments":"{}"}]})
     } else if confinement_probe {
-        message["content"] = Value::Null;
-        message["tool_calls"] = json!(["shell", "file_write", "notify", "memory_store", "sessions_send", "cron_add", "public__probe"].iter().enumerate().map(|(i, name)| json!({
-            "index":i, "id":format!("device-probe-{i}"), "type":"function",
-            "function":{"name":name,"arguments":json!({"path":"forbidden.txt","content":"forbidden","command":"touch forbidden.txt"}).to_string()}
-        })).collect::<Vec<_>>());
-        "tool_calls"
+        let tools = ["shell", "file_write", "notify", "memory_store", "sessions_send", "cron_add", "public__probe"];
+        let calls = tools.iter().enumerate().map(|(index, name)| json!({
+            "type":"function_call","call_id":format!("device-probe-{index}"),"name":name,
+            "arguments":json!({"path":"forbidden.txt","content":"forbidden","command":"touch forbidden.txt"}).to_string(),
+        })).collect::<Vec<_>>();
+        json!({"output":calls})
     } else if tool_needed {
-        message["content"] = Value::Null;
-        message["tool_calls"] = json!([{
-            "index":0,"id":"approval-file-call","type":"function",
-            "function":{"name":"file_write","arguments":json!({"path":"approved.txt","content":"owner-approved"}).to_string()}
-        }]);
-        "tool_calls"
+        json!({"output":[{"type":"function_call","call_id":"approval-file-call","name":"file_write",
+            "arguments":json!({"path":"approved.txt","content":"owner-approved"}).to_string()}]})
     } else {
-        "stop"
+        json!({"output_text":"device response"})
     };
     if request["stream"] == true {
-        (
-            [("content-type", "text/event-stream")],
-            format!("data: {}\n\ndata: [DONE]\n\n", json!({"id":"local-response","choices":[{"index":0,"delta":message,"finish_reason":finish}]})),
-        ).into_response()
+        let completed = json!({"type":"response.completed","response":response});
+        ([("content-type", "text/event-stream")], format!("data: {completed}\n\n")).into_response()
     } else {
-        axum::Json(json!({"id":"local-response","choices":[{"index":0,"message":message,"finish_reason":finish}]})).into_response()
+        axum::Json(response).into_response()
     }
 }
 
@@ -235,11 +228,11 @@ impl DeviceFixture {
         let seen = Arc::new(parking_lot::Mutex::new(Vec::new()));
         let provider_listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
         let provider_uri = format!(
-            "http://{}/v1/chat/completions",
+            "http://{}/v1/responses",
             provider_listener.local_addr().unwrap()
         );
         let provider_app = axum::Router::new()
-            .route("/v1/chat/completions", axum::routing::post(device_provider))
+            .route("/v1/responses", axum::routing::post(device_provider))
             .with_state(Arc::clone(&seen));
         let provider_task = ::reiclaw_log::spawn!(async move {
             axum::serve(provider_listener, provider_app).await.unwrap();
@@ -258,13 +251,12 @@ impl DeviceFixture {
         std::fs::create_dir(&workspace).unwrap();
         {
             let mut config = state.config.write();
-            config.providers.models.custom.insert(
+            config.providers.models.openai.insert(
                 "test".into(),
-                CustomModelProviderConfig {
+                OpenAIModelProviderConfig {
                     base: ModelProviderConfig {
                         model: Some("local-device-test".into()),
                         uri: Some(provider_uri),
-                        native_tools: Some(true),
                         timeout_secs: Some(5),
                         ..Default::default()
                     },
@@ -296,7 +288,7 @@ impl DeviceFixture {
             );
             for alias in ["device-agent", "other-agent"] {
                 let mut agent = AliasedAgentConfig {
-                    model_provider: "custom.test".into(),
+                    model_provider: "openai.test".into(),
                     risk_profile: "test".into(),
                     runtime_profile: "test".into(),
                     ..Default::default()
@@ -432,7 +424,7 @@ async fn device_wire_binding_is_trusted_and_conflicts_fail_before_provider_use()
     let seen = fixture.seen.lock();
     assert_eq!(seen.len(), 1, "one admitted turn reaches the real provider");
     assert_eq!(seen[0]["model"], "local-device-test");
-    assert!(seen[0]["messages"].to_string().contains("hello device"));
+    assert!(seen[0]["input"].to_string().contains("hello device"));
 }
 
 #[tokio::test]
@@ -1173,11 +1165,11 @@ command = "http://127.0.0.1:1/private"
         assert_eq!(memory.count().await.unwrap(), memory_before, "device turns must not write memory");
         let seen = fixture.seen.lock();
         assert_eq!(seen.len(), 2, "one tool round and final answer, no consolidation");
-        assert!(!seen[0]["messages"].to_string().contains("PRIVATE_RECALL_SENTINEL"));
-        assert!(!seen[0]["messages"].to_string().contains("PRIVATE_SKILL_SENTINEL"));
+        assert!(!seen[0]["input"].to_string().contains("PRIVATE_RECALL_SENTINEL"));
+        assert!(!seen[0]["input"].to_string().contains("PRIVATE_SKILL_SENTINEL"));
         for name in ["shell", "file_write", "notify", "memory_store", "sessions_send", "cron_add", "public__probe"] {
             assert!(!seen[0]["tools"].to_string().contains(name));
-            assert!(seen[1]["messages"].to_string().contains(&format!("Unknown tool: {name}")));
+            assert!(seen[1]["input"].to_string().contains(&format!("Unknown tool: {name}")));
         }
         assert!(!fixture.workspace.join("forbidden.txt").exists());
         assert!(fixture.state.session_backend.as_ref().unwrap().load(&format!("gw_{SESSION}")).iter().any(|m| m.role == "user"));
@@ -1232,7 +1224,7 @@ async fn device_turn_prompt_excludes_private_context_but_owner_keeps_it() {
     {
         let seen = fixture.seen.lock();
         for request in seen.iter() {
-            let prompt = request["messages"][0]["content"].as_str().unwrap();
+            let prompt = request["instructions"].as_str().unwrap();
             assert!(prompt.contains("Same Identity"));
             assert!(prompt.contains("## Principles"));
             assert!(prompt.contains("## Tone"));
@@ -1244,7 +1236,7 @@ async fn device_turn_prompt_excludes_private_context_but_owner_keeps_it() {
     let mut owner = fixture.socket(OWNER_TOKEN).await;
     fixture.send_turn(&mut owner, "owner", "owner question").await;
     let seen = fixture.seen.lock();
-    let owner_prompt = seen.last().unwrap()["messages"][0]["content"].as_str().unwrap();
+    let owner_prompt = seen.last().unwrap()["instructions"].as_str().unwrap();
     for marker in ["Same Identity", "PRIVATE_STORY_SENTINEL", "PRIVATE_EXEMPLAR_SENTINEL", "PRIVATE_USER_MODEL_SENTINEL"] {
         assert!(owner_prompt.contains(marker), "owner regression: {marker}");
     }
@@ -1274,11 +1266,11 @@ async fn device_tool_rounds_stop_at_three_or_the_agents_lower_limit() {
         assert_eq!(rounds.len(), limit.min(3));
         for round in rounds {
             assert_eq!(round["tools"].as_array().unwrap().len(), 1);
-            assert_eq!(round["tools"][0]["function"]["name"], "web_search_tool");
+            assert_eq!(round["tools"][0]["name"], "web_search_tool");
         }
         assert!(summary["tools"].is_null());
-        assert!(summary["messages"].as_array().unwrap().last().unwrap()["content"]
-            .as_str().unwrap().contains("maximum number of tool iterations"));
+        assert!(summary["input"].as_array().unwrap().last().unwrap()["content"]
+            .to_string().contains("maximum number of tool iterations"));
     }
 }
 

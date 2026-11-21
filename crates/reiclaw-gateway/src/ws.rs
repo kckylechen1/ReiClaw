@@ -3147,9 +3147,7 @@ mod tests {
     #[test]
     fn ws_sleep_model_follows_the_live_provider_reference() {
         use reiclaw_api::attribution::Attributable as _;
-        use reiclaw_config::schema::{
-            ModelProviderConfig, OllamaModelProviderConfig, OpenAIModelProviderConfig,
-        };
+        use reiclaw_config::schema::{ModelProviderConfig, OpenAIModelProviderConfig};
         let mut config = reiclaw_config::schema::Config::default();
         config.providers.models.openai.insert(
             "install".to_string(),
@@ -3161,9 +3159,9 @@ mod tests {
                 },
             },
         );
-        config.providers.models.ollama.insert(
+        config.providers.models.openai.insert(
             "local".to_string(),
-            OllamaModelProviderConfig {
+            OpenAIModelProviderConfig {
                 base: ModelProviderConfig {
                     model: Some("local-model".to_string()),
                     temperature: Some(0.3),
@@ -3174,7 +3172,7 @@ mod tests {
 
         let resolved = reiclaw_runtime::agent::sleep_compactor::resolve_fast_sleep_model(
             &config,
-            "ollama.local",
+            "openai.local",
             "llama3",
         )
         .unwrap();
@@ -3184,7 +3182,7 @@ mod tests {
 
         let fallback = reiclaw_runtime::agent::sleep_compactor::resolve_fast_sleep_model(
             &config,
-            "ollama.local",
+            "openai.local",
             "",
         )
         .unwrap();
@@ -3196,7 +3194,7 @@ mod tests {
         assert!(
             reiclaw_runtime::agent::sleep_compactor::resolve_fast_sleep_model(
                 &config,
-                "ollama.removed",
+                "openai.removed",
                 "llama3",
             )
             .is_none()

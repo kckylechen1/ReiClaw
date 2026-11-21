@@ -747,7 +747,7 @@ mod tests {
     async fn peer_task_owner_is_the_recipient_and_cannot_follow_a_reused_alias() {
         use axum::{Json, Router, extract::State, routing::post};
         use reiclaw_config::schema::{
-            ModelProviderConfig, OllamaModelProviderConfig, RiskProfileConfig,
+            ModelProviderConfig, OpenAIModelProviderConfig, RiskProfileConfig,
         };
         use reiclaw_infra::session_sqlite::{SqliteSessionBackend, agent_tasks::TaskOp};
         use reiclaw_memory::companion as identity;
@@ -759,33 +759,33 @@ mod tests {
             State((revision, requests)): State<Requests>,
             Json(body): Json<serde_json::Value>,
         ) -> Json<serde_json::Value> {
-            let has_result = body["messages"]
+            let has_result = body["input"]
                 .as_array()
                 .unwrap()
                 .iter()
-                .any(|message| message["role"] == "tool");
+                .any(|message| message["type"] == "function_call_output");
             let is_relay = body["model"] == "relay-model";
             requests.send(body).unwrap();
             let message = if has_result {
-                json!({"role": "assistant", "content": "done"})
+                json!({"output_text": "done"})
             } else if is_relay {
-                json!({"role": "assistant", "content": null, "tool_calls": [{
-                    "id": "peer-forward", "type": "function",
-                    "function": {"name": "send_message_to_peer", "arguments": json!({
+                json!({"output": [{
+                    "call_id": "peer-forward", "type": "function_call", "name": "send_message_to_peer", "arguments": json!({
                         "channel": "telegram.prod", "target": "recipient",
                         "message": "update your commitments"
-                    }).to_string()}
-                }]})
+                    }).to_string()}] })
             } else {
-                json!({"role": "assistant", "content": null, "tool_calls": [{
-                    "id": "task-write", "type": "function",
-                    "function": {"name": "task_list", "arguments": json!({
+                json!({"output": [{
+                    "call_id": "task-write",
+                    "type": "function_call",
+                    "name": "task_list",
+                    "arguments": json!({
                         "expected_revision": revision.load(Ordering::SeqCst),
                         "ops": [{"op": "add", "description": "peer commitment"}]
-                    }).to_string()}
+                    }).to_string()
                 }]})
             };
-            Json(json!({"choices": [{"message": message}]}))
+            Json(message)
         }
 
         let revision = Arc::new(AtomicI64::new(0));
@@ -793,7 +793,7 @@ mod tests {
         let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
         let addr = listener.local_addr().unwrap();
         let app = Router::new()
-            .route("/v1/chat/completions", post(chat))
+            .route("/v1/responses", post(chat))
             .with_state((revision.clone(), requests_tx));
         let server = reiclaw_log::spawn!(async move {
             axum::serve(listener, app).await.unwrap();
@@ -809,25 +809,23 @@ mod tests {
         }
         config.memory.backend = "none".into();
         config.memory.auto_save = false;
-        config.providers.models.ollama.insert(
+        config.providers.models.openai.insert(
             "tasks".into(),
-            OllamaModelProviderConfig {
+            OpenAIModelProviderConfig {
                 base: ModelProviderConfig {
                     model: Some("task-model".into()),
-                    uri: Some(format!("http://{addr}")),
-                    native_tools: Some(true),
+                    uri: Some(format!("http://{addr}/v1")),
                     timeout_secs: Some(5),
                     ..Default::default()
                 },
             },
         );
-        config.providers.models.ollama.insert(
+        config.providers.models.openai.insert(
             "relay".into(),
-            OllamaModelProviderConfig {
+            OpenAIModelProviderConfig {
                 base: ModelProviderConfig {
                     model: Some("relay-model".into()),
-                    uri: Some(format!("http://{addr}")),
-                    native_tools: Some(true),
+                    uri: Some(format!("http://{addr}/v1")),
                     timeout_secs: Some(5),
                     ..Default::default()
                 },
@@ -847,9 +845,9 @@ mod tests {
                 AliasedAgentConfig {
                     channels: vec!["telegram.prod".into()],
                     model_provider: if alias == "relay" {
-                        "ollama.relay"
+                        "openai.relay"
                     } else {
-                        "ollama.tasks"
+                        "openai.tasks"
                     }
                     .into(),
                     risk_profile: "tasks".into(),
@@ -898,11 +896,11 @@ mod tests {
             .unwrap();
         assert!(!first.to_string().contains("sender-only commitment"));
         assert!(
-            result["messages"]
+            result["input"]
                 .as_array()
                 .unwrap()
                 .iter()
-                .any(|message| message["role"] == "tool")
+                .any(|message| message["type"] == "function_call_output")
         );
         let committed = sqlite.task_list(old_recipient.as_str()).unwrap();
         assert_eq!(
@@ -1183,14 +1181,14 @@ mod tests {
         use crate::cost::CostTracker;
         use axum::{Json, Router, extract::State, routing::post};
         use reiclaw_config::schema::{
-            CostConfig, ModelProviderConfig, OllamaModelProviderConfig, RiskProfileConfig,
+            CostConfig, ModelProviderConfig, OpenAIModelProviderConfig, RiskProfileConfig,
         };
         use std::collections::HashMap;
 
-        // `[providers.models.ollama.*]` dispatches through the shared
+        // `[providers.models.openai.*]` dispatches through the shared
         // OpenAI-compatible client (`factory::build_ollama_compat_provider`),
         // not the native `/api/chat` wire format, so the fake stands in at
-        // the OpenAI-compatible `/v1/chat/completions` boundary.
+        // the OpenAI-compatible `/v1/responses` boundary.
         type RequestCount = Arc<Mutex<u32>>;
         async fn capture_chat(
             State(count): State<RequestCount>,
@@ -1198,8 +1196,8 @@ mod tests {
         ) -> Json<serde_json::Value> {
             *count.lock() += 1;
             Json(serde_json::json!({
-                "choices": [{"message": {"content": "peer turn complete"}}],
-                "usage": {"prompt_tokens": 1_000, "completion_tokens": 200}
+                "output_text": "peer turn complete",
+                "usage": {"input_tokens": 1_000, "output_tokens": 200}
             }))
         }
 
@@ -1209,7 +1207,7 @@ mod tests {
             .expect("mock provider listener should bind");
         let mock_addr = listener.local_addr().expect("mock provider addr");
         let app = Router::new()
-            .route("/v1/chat/completions", post(capture_chat))
+            .route("/v1/responses", post(capture_chat))
             .with_state(request_count.clone());
         let server = reiclaw_log::spawn!(async move {
             axum::serve(listener, app)
@@ -1236,12 +1234,12 @@ mod tests {
             track_per_agent: true,
             ..CostConfig::default()
         };
-        config.providers.models.ollama.insert(
+        config.providers.models.openai.insert(
             "default".to_string(),
-            OllamaModelProviderConfig {
+            OpenAIModelProviderConfig {
                 base: ModelProviderConfig {
                     model: Some("mock-model".to_string()),
-                    uri: Some(format!("http://{mock_addr}")),
+                    uri: Some(format!("http://{mock_addr}/v1")),
                     timeout_secs: Some(5),
                     pricing: HashMap::from([
                         ("mock-model.input".to_string(), 3.0),
@@ -1262,7 +1260,7 @@ mod tests {
             "recipient".to_string(),
             AliasedAgentConfig {
                 channels: vec!["telegram.prod".into()],
-                model_provider: "ollama.default".into(),
+                model_provider: "openai.default".into(),
                 risk_profile: "default".into(),
                 ..AliasedAgentConfig::default()
             },

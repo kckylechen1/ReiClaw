@@ -304,20 +304,20 @@ fn opaque_model_binding_leaks_no_credential_material() {
     let entry = config
         .providers
         .models
-        .ensure("custom", "test")
+        .ensure("openai", "test")
         .expect("custom is a known provider type");
     entry.api_key = Some("super-secret-credential".into());
     entry.model = Some("m".into());
     let config_binding = OpaqueModelBinding::from_config(
         Arc::new(config),
         reiclaw_api::subagent_v1::ModelPolicyV1 {
-            provider_ref: "custom.test".into(),
+            provider_ref: "openai.test".into(),
             model: None,
             temperature: None,
         },
     );
     let config_debug = format!("{config_binding:?}");
-    assert!(config_debug.contains("custom.test"));
+    assert!(config_debug.contains("openai.test"));
     assert!(!config_debug.contains("super-secret-credential"));
 }
 
@@ -1095,7 +1095,7 @@ fn advisor_config() -> Arc<Config> {
         let entry = config
             .providers
             .models
-            .ensure("custom", alias)
+            .ensure("openai", alias)
             .expect("custom is a known provider type");
         entry.api_key = Some("k".into());
         entry.model = Some(model.into());
@@ -1107,9 +1107,9 @@ fn advisor_config() -> Arc<Config> {
         "parent-agent".to_string(),
         AliasedAgentConfig {
             risk_profile: "default".into(),
-            model_provider: "custom.default".into(),
+            model_provider: "openai.default".into(),
             advisor: Some(reiclaw_config::advisor::AdvisorTarget::Model(
-                "custom.big".into(),
+                "openai.big".into(),
             )),
             ..AliasedAgentConfig::default()
         },
@@ -1123,7 +1123,7 @@ fn advisor_tool() -> ReasoningSubagentTool {
         "parent-agent",
         Arc::new(reiclaw_policy::SecurityPolicy::default()),
     )
-    .with_advisor("custom.big")
+    .with_advisor("openai.big")
 }
 
 #[test]
@@ -1136,21 +1136,21 @@ fn advisor_provider_ref_replaces_the_parents_provider() {
         Arc::new(reiclaw_policy::SecurityPolicy::default()),
     );
     let policy = plain.resolve_model_policy(&profile).unwrap();
-    assert_eq!(policy.provider_ref, "custom.default");
+    assert_eq!(policy.provider_ref, "openai.default");
     assert_eq!(policy.model.as_deref(), Some("small-model"));
 
     let advised = advisor_tool();
     let policy = advised.resolve_model_policy(&profile).unwrap();
-    assert_eq!(policy.provider_ref, "custom.big");
+    assert_eq!(policy.provider_ref, "openai.big");
     // The advisor alias's own `model` is read by the binding at use time.
     assert_eq!(policy.model, None);
 
     // A profile that pins its own model keeps it: the pin is part of the
     // admitted, digest-bound contract.
     let mut pinned = profile.clone();
-    pinned.model_policy.provider_ref = "custom.default".into();
+    pinned.model_policy.provider_ref = "openai.default".into();
     let policy = advised.resolve_model_policy(&pinned).unwrap();
-    assert_eq!(policy.provider_ref, "custom.default");
+    assert_eq!(policy.provider_ref, "openai.default");
 }
 
 #[test]
@@ -1168,7 +1168,7 @@ fn advisor_changes_the_description_but_not_the_input_schema() {
     let schema = advised.parameters_schema();
     let props = schema["properties"].as_object().unwrap();
     assert_eq!(props.keys().collect::<Vec<_>>(), vec!["objective"]);
-    assert_eq!(advised.advisor_ref(), Some("custom.big"));
+    assert_eq!(advised.advisor_ref(), Some("openai.big"));
     assert_eq!(plain.advisor_ref(), None);
 }
 
@@ -1183,7 +1183,7 @@ async fn advisor_calls_are_capped_per_turn() {
             let result = call().await.unwrap();
             assert!(result.success, "{:?}", result.error);
             assert!(
-                result.output.as_str().contains("advisor custom.big"),
+                result.output.as_str().contains("advisor openai.big"),
                 "the result names who answered: {}",
                 result.output.as_str()
             );
@@ -1339,8 +1339,8 @@ async fn resolver_records_cost_under_the_resolved_type_alias() {
     let server = MockServer::start().await;
     Mock::given(method("POST"))
         .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({
-            "choices": [{"message": {"role": "assistant", "content": "advice"}}],
-            "usage": {"prompt_tokens": 1000, "completion_tokens": 200}
+            "output_text": "advice",
+            "usage": {"input_tokens": 1000, "output_tokens": 200}
         })))
         .mount(&server)
         .await;
@@ -1353,7 +1353,7 @@ async fn resolver_records_cost_under_the_resolved_type_alias() {
                 api_key: Some("test-key".into()),
                 uri: Some(server.uri()),
                 model: Some("big-model".into()),
-                wire_api: Some(reiclaw_config::schema::WireApi::ChatCompletions),
+                wire_api: Some(reiclaw_config::schema::WireApi::Responses),
                 ..Default::default()
             },
         },

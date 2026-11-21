@@ -138,7 +138,7 @@ pub struct Config {
     /// All configured provider profiles, grouped by category under a
     /// single `[providers]` root. Categories today: `models`, `tts`,
     /// `transcription`. Shape: `[providers.<category>.<type>.<alias>]`,
-    /// e.g. `[providers.models.anthropic.default]`,
+    /// e.g. `[providers.models.openai.default]`,
     /// `[providers.tts.openai.default]`,
     /// `[providers.transcription.groq.default]`.
     #[serde(default)]
@@ -490,70 +490,38 @@ pub struct OnboardStateConfig {
 /// Keeps fresh model_provider entries clean — a default-constructed
 /// `ModelProviderConfig` for one model_provider family shouldn't write flag fields
 /// that only apply to a different family.
-fn is_false(value: &bool) -> bool {
-    !*value
-}
-
-/// One trait per family-endpoint enum. Returns the URL for the chosen
-/// variant, such as `https://api.openai.com/v1` for a fixed endpoint.
-///
-/// Resolution order at runtime is uniform across every model model_provider family:
-/// operator's `cfg.uri` first; family endpoint enum's `uri()` second; loud
-/// failure when neither is set.
-pub trait ModelEndpoint {
-    fn uri(&self) -> &'static str;
-}
-
-/// Implemented by every `*ModelProviderConfig`. Multi-region families
-/// override to return `Some(self.endpoint.uri())`; single-endpoint families
-/// inherit the `None` default. Drives `ModelProviders::resolved_endpoint_uri`,
-/// which is itself driven by the `for_each_model_provider_slot!` macro — so
-/// adding a new family without an impl is a compile error.
-pub trait FamilyEndpoint {
-    fn endpoint_uri(&self) -> Option<&'static str> {
-        None
-    }
-}
-
-/// Wire protocol flavor for the model_provider client. `responses` routes
-/// through OpenAI's Responses API (`POST /v1/responses`);
-/// `chat_completions` routes through the legacy `/v1/chat/completions` (or
-/// the family's chat-completions-compatible endpoint). New OpenAI provider
-/// slots default to `responses`; other families default to chat-completions
-/// (or ignore the field) when unset.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, reiclaw_macros::ConfigEnum)]
+/// OpenAI's Responses API wire protocol.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, reiclaw_macros::ConfigEnum)]
 #[cfg_attr(feature = "schema-export", derive(schemars::JsonSchema))]
 #[serde(rename_all = "snake_case")]
 pub enum WireApi {
     Responses,
-    ChatCompletions,
 }
 
 impl WireApi {
     #[must_use]
     pub fn as_str(self) -> &'static str {
-        match self {
-            Self::Responses => "responses",
-            Self::ChatCompletions => "chat_completions",
-        }
+        "responses"
     }
 }
 
-/// Authentication mode for model model_provider families that support more than one
-/// (e.g. Qwen, Minimax can use API key OR OAuth). Families that only support a
-/// single auth flow simply omit this field from their config struct.
-#[derive(
-    Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default, reiclaw_macros::ConfigEnum,
-)]
-#[cfg_attr(feature = "schema-export", derive(schemars::JsonSchema))]
-#[serde(rename_all = "snake_case")]
-pub enum AuthMode {
-    /// Standard API key authentication via the `api_key` field.
-    #[default]
-    ApiKey,
-    /// OAuth flow — credential resolution defers to the family runtime impl
-    /// (typically reading a vendor-specific token cache or env var).
-    OAuth,
+impl<'de> Deserialize<'de> for WireApi {
+    fn deserialize<D: serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+        let wire = String::deserialize(deserializer)?;
+        crate::providers::reject_responses_wire_api(&wire).map_err(serde::de::Error::custom)?;
+        Ok(Self::Responses)
+    }
+}
+
+fn reject_codex_auth_setting<'de, D: serde::Deserializer<'de>>(
+    deserializer: D,
+) -> Result<(), D::Error> {
+    if bool::deserialize(deserializer)? {
+        return Err(serde::de::Error::custom(
+            crate::providers::reject_retired_openai_auth(),
+        ));
+    }
+    Ok(())
 }
 
 /// Named model_provider profile definition.
@@ -561,24 +529,26 @@ pub enum AuthMode {
 #[cfg_attr(feature = "schema-export", derive(schemars::JsonSchema))]
 #[prefix = "providers.models"]
 pub struct ModelProviderConfig {
-    /// Secret API token for this model_provider. Grab it from the model_provider's dashboard (OpenAI platform, Anthropic console, OpenRouter keys page, etc.). Stored via the OS keyring when possible; never commit it to config.toml directly.
+    /// API key for the OpenAI Responses endpoint, including a vault reference.
     #[secret]
     #[credential_class = "encrypted_secret"]
     #[tab(Connection)]
     #[cfg_attr(feature = "schema-export", schemars(extend("x-secret" = true)))]
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub api_key: Option<String>,
-    /// Provider implementation to instantiate for this profile. Use this
-    /// when a canonical typed slot should run through a compatible
-    /// implementation, e.g. `[providers.models.openai.proxy] kind =
-    /// "openai-compatible"`.
+    /// Model provider implementation. Only openai is supported.
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub kind: Option<String>,
-    /// Endpoint URI the client hits. Override the family's default endpoint when pointing at a self-hosted gateway (LiteLLM, vLLM, Ollama), a custom proxy, or any non-standard URL. Leave unset to use the family's default URI from its `ModelEndpoint` impl. Set this to the FULL endpoint URL; there is no separate path-suffix field.
+    /// OpenAI Responses base URL or full /responses endpoint. Also accepted as base_url or api_url in TOML.
     #[tab(Connection)]
-    #[serde(default, skip_serializing_if = "Option::is_none")]
+    #[serde(
+        default,
+        alias = "base_url",
+        alias = "api_url",
+        skip_serializing_if = "Option::is_none"
+    )]
     pub uri: Option<String>,
-    /// Model identifier to send with each request: the ID string from the model_provider's catalog (e.g. `gpt-4o`, `claude-sonnet-4-5`, `llama-3.3-70b`). Must match a model the model_provider actually serves on this account.
+    /// Model identifier understood by the Responses endpoint.
     #[tab(Model)]
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub model: Option<String>,
@@ -607,7 +577,7 @@ pub struct ModelProviderConfig {
     #[tab(Model)]
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub temperature: Option<f64>,
-    /// HTTP request timeout in seconds. Bump this for slow local model_providers (Ollama on CPU, big local models) or high-latency networks; leave unset otherwise.
+    /// HTTP request timeout in seconds. Increase for slow endpoints or high-latency networks.
     #[tab(Model)]
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub timeout_secs: Option<u64>,
@@ -617,30 +587,14 @@ pub struct ModelProviderConfig {
     #[secret]
     #[cfg_attr(feature = "schema-export", schemars(extend("x-secret" = true)))]
     pub extra_headers: HashMap<String, String>,
-    /// Wire protocol flavor: `responses` for OpenAI's Responses API (`POST /v1/responses`), `chat_completions` for the legacy chat wire and most OpenAI-compatible gateways. New OpenAI provider slots default to `responses`; other families default to chat-completions (or ignore the field). Only override if you're forcing an unusual combination.
+    /// Responses API wire protocol. Defaults to responses when omitted.
     #[tab(Advanced)]
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub wire_api: Option<WireApi>,
-    /// When true, the client pulls credentials from ReiClaw's stored `openai-codex` auth profile instead of the `api_key` field above. Import an existing Codex CLI login with `rei auth login --model-provider openai-codex --import ~/.codex/auth.json`, or run `rei auth login --model-provider openai-codex`. Turn on only for the OpenAI Codex model_provider; leave off for standard API-key model_providers.
-    #[tab(Connection)]
-    #[serde(default, skip_serializing_if = "is_false")]
-    #[credential_class = "external_auth_store"]
-    pub requires_openai_auth: bool,
     /// Hard cap on response length in tokens. Most models enforce sensible built-in limits already; leave unset unless you specifically need to clip long outputs for cost or latency reasons.
     #[tab(Model)]
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub max_tokens: Option<u32>,
-    /// ModelProvider-specific quirk: fold the system prompt into the first user message instead of sending a separate system role. Only needed for models that reject (or mishandle) a standalone system role, e.g. certain older Mistral variants.
-    #[tab(Advanced)]
-    #[serde(default, skip_serializing_if = "is_false")]
-    pub merge_system_into_user: bool,
-    /// Extra JSON parameters to include in API requests.
-    /// Merged at the top level of the request body, allowing provider-specific
-    /// features (routing, transforms, etc.) without code changes.
-    /// Example: `provider_extra = { model_provider = { only = ["Anthropic"] } }`
-    #[tab(Advanced)]
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub provider_extra: Option<serde_json::Value>,
     /// Per-model pricing for cost tracking, USD per 1M tokens.
     ///
     /// Free-form key/value map. Keys are user-defined model identifiers; an
@@ -655,75 +609,10 @@ pub struct ModelProviderConfig {
     #[tab(Advanced)]
     #[serde(default, skip_serializing_if = "HashMap::is_empty")]
     pub pricing: HashMap<String, f64>,
-    /// Whether stored assistant reasoning should be replayed on outbound
-    /// assistant history messages. `Some(false)` strips `reasoning_content`
-    /// and `reasoning` before sending. `None` (default) honours the provider's
-    /// built-in default (true for most compat providers, false for Groq).
-    #[tab(Advanced)]
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub replay_assistant_reasoning: Option<bool>,
-    /// Pull live token prices for this provider's models from its own
-    /// OpenAI-compatible `/models` listing (the gateway is the source of truth
-    /// for its prices), filling cost-tracking rates for models the operator
-    /// has NOT priced under `[cost.rates]` / `pricing`. Models the gateway does
-    /// not price (or providers with no HTTP `/models` listing at all, such as
-    /// a provider without HTTP model listing) fall back to the public models.dev
-    /// catalog. Configured rates always win; live prices only fill gaps. A
-    /// background task refreshes the price snapshot hourly; the cost-recording
-    /// path reads the cached snapshot and never blocks on the network. Default
-    /// `false`: off means no fetching and behavior identical to a build
-    /// without the feature.
-    #[tab(Advanced)]
-    #[serde(default, skip_serializing_if = "is_false")]
-    pub live_pricing: bool,
-    /// Override the provider's default for native tool calling.
-    /// `None` (default) honors the provider's built-in choice. `Some(true)`
-    /// forces native tool calls on, `Some(false)` forces text-fallback.
-    /// Currently consulted only by the Groq factory, which defaults to
-    /// text-fallback because llama-family Groq models reject native tool
-    /// calls with HTTP 400. Setting `native_tools = true` re-enables native
-    /// tool calling for Groq models that support it.
-    #[tab(Advanced)]
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub native_tools: Option<bool>,
-    /// Enable or disable chain-of-thought thinking for models that support it
-    /// (e.g. Qwen3, GLM-4). `true` turns thinking on, `false` turns it off.
-    /// `None` (default) lets the model decide. Forwarded as `enable_thinking`
-    /// in the request body; mirrors the Ollama provider's `think` field.
-    #[tab(Advanced)]
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub think: Option<bool>,
-    /// Override the provider's vision (image input) capability.
-    /// `None` (default) uses the provider family's built-in default. Several
-    /// families (llama.cpp, the generic OpenAI-compatible endpoint, etc.)
-    /// assume vision-capable because they can serve multimodal models. Set
-    /// `vision = false` for a text-only model served by such a family (e.g. a
-    /// text LLM behind llama.cpp) so image messages are routed to a configured
-    /// `[multimodal] vision_model_provider` instead of being sent to a model
-    /// that rejects them. `Some(true)` forces vision on.
+    /// Override whether the Responses endpoint accepts image input for this alias.
     #[tab(Advanced)]
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub vision: Option<bool>,
-    /// Arbitrary key/value pairs forwarded verbatim as a top-level
-    /// `chat_template_kwargs` object in the request body of OpenAI-compatible
-    /// providers. Consumed by chat-template-aware backends such as vLLM,
-    /// SGLang, and llama.cpp to pass model-family template variables that
-    /// control behaviour not exposed by other fields. Must be a JSON object
-    /// (TOML inline table); non-object values are ignored with a warning.
-    /// Example (Qwen3 thinking suppression):
-    ///   `chat_template_kwargs = { enable_thinking = false }`
-    #[tab(Advanced)]
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub chat_template_kwargs: Option<serde_json::Value>,
-    /// Send the runtime `reasoning_effort` to every model on this
-    /// OpenAI-compatible provider. By default it is sent only to OpenAI
-    /// reasoning models (o1/o3/o4/gpt-5, gpt-*codex*), because some backends
-    /// reject unknown request fields with HTTP 400. Turn this on only for a
-    /// backend known to accept `reasoning_effort`, such as GLM, Kimi,
-    /// DeepSeek, or Qwen reasoners behind an OpenAI-compatible gateway.
-    #[tab(Advanced)]
-    #[serde(default, skip_serializing_if = "is_false")]
-    pub reasoning_effort_passthrough: bool,
     /// Context window size (max input tokens) for this model.
     /// Auto-populated on setup from provider's /models endpoint if available.
     /// Override manually for custom endpoints or when auto-detection fails.
@@ -738,73 +627,34 @@ pub struct ModelProviderConfig {
     pub tls_ca_cert_path: Option<String>,
 }
 
-// ── Per-family model model_provider configs ────────────────────────────
-//
-// Each family carries its own typed config (composing `ModelProviderConfig`
-// via `#[serde(flatten)]`) plus a per-family `*Endpoint` enum that names the
-// known endpoints and resolves them via the `ModelEndpoint` trait. Families
-// that support multiple auth flows additionally carry an `auth_mode` field.
-//
-// Pattern reference for adding a new family:
-// - Single-endpoint family with no extras: see `AnthropicModelProviderConfig`
-// - Family with extras: see `OpenAIModelProviderConfig`
-// - Multi-region family with a required `endpoint` field: see `MoonshotModelProviderConfig`
-//
-// The `ModelProviders` container in `crates/reiclaw-config/src/model_providers.rs`
-// holds a typed slot per family; the runtime impls in zeroclaw-providers
-// consume the typed configs directly.
-
-// ── OpenAI ──
-
-/// OpenAI canonical endpoint. Single variant — OpenAI publishes one base URL.
-#[derive(
-    Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default, reiclaw_macros::ConfigEnum,
-)]
-#[cfg_attr(feature = "schema-export", derive(schemars::JsonSchema))]
-#[serde(rename_all = "snake_case")]
-pub enum OpenAIEndpoint {
-    #[default]
-    Default,
-}
-
-impl ModelEndpoint for OpenAIEndpoint {
-    fn uri(&self) -> &'static str {
-        match self {
-            Self::Default => "https://api.openai.com/v1",
-        }
-    }
-}
-
-/// OpenAI model model_provider config. The OpenAI-family extras (`wire_api`,
-/// `requires_openai_auth`) live on the shared `ModelProviderConfig` base
-/// because they're consumed by validation and runtime helpers that operate
-/// on the base struct without family awareness; this wrapper is a thin
-/// typed slot, no extra fields.
-///
-/// New OpenAI provider entries **persisted via `create_map_key` / `ensure`**
-/// (quickstart, gateway/config UI, programmatic slot creation) default to
-/// `wire_api = "responses"` because OpenAI has moved recent GPT models onto
-/// `POST /v1/responses` as the primary wire. OpenAI-compatible families
-/// (`custom`, `llamacpp`, branded vendors, …) keep the shared
-/// `ModelProviderConfig` default of unset / chat-completions.
-///
-/// This default governs **persisted slot creation only**. Two paths keep the
-/// legacy chat-completions wire for backward compatibility:
-/// - Existing persisted configs that omit `wire_api` deserialize as `None`, and
-///   the factory falls back to chat-completions.
-/// - Implicit dispatch with no config entry at all — a bare
-///   `model_provider = "openai"` reference or a dotted ref to a nonexistent
-///   alias — is built from a chat-anchored fallback config (see
-///   `openai_missing_entry_fallback_config` in `zeroclaw-providers`), not this
-///   `Default`, and stays on the chat wire so existing bare-ref installs don't
-///   flip wire + tool-calling mode on upgrade.
-#[derive(Debug, Clone, Serialize, Deserialize, Configurable)]
+/// Named OpenAI Responses provider configuration.
+#[derive(Debug, Clone, Serialize, Configurable)]
 #[cfg_attr(feature = "schema-export", derive(schemars::JsonSchema))]
 #[prefix = "providers.models.openai"]
 pub struct OpenAIModelProviderConfig {
     #[nested]
     #[serde(flatten)]
     pub base: ModelProviderConfig,
+}
+
+impl<'de> Deserialize<'de> for OpenAIModelProviderConfig {
+    fn deserialize<D: serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+        #[derive(Deserialize)]
+        struct Entry {
+            #[serde(flatten)]
+            base: ModelProviderConfig,
+            #[serde(
+                default,
+                rename = "requires_openai_auth",
+                deserialize_with = "reject_codex_auth_setting"
+            )]
+            _retired_codex_auth: (),
+        }
+        let entry = Entry::deserialize(deserializer)?;
+        crate::providers::validate_responses_entry(&entry.base)
+            .map_err(serde::de::Error::custom)?;
+        Ok(Self { base: entry.base })
+    }
 }
 
 impl Default for OpenAIModelProviderConfig {
@@ -817,442 +667,6 @@ impl Default for OpenAIModelProviderConfig {
             },
         }
     }
-}
-
-// ── Anthropic ──
-
-/// Anthropic canonical endpoint.
-#[derive(
-    Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default, reiclaw_macros::ConfigEnum,
-)]
-#[cfg_attr(feature = "schema-export", derive(schemars::JsonSchema))]
-#[serde(rename_all = "snake_case")]
-pub enum AnthropicEndpoint {
-    #[default]
-    Default,
-}
-
-impl ModelEndpoint for AnthropicEndpoint {
-    fn uri(&self) -> &'static str {
-        match self {
-            Self::Default => "https://api.anthropic.com",
-        }
-    }
-}
-
-/// Anthropic model model_provider config. No family-specific extras yet — typed
-/// slot reserved for future Anthropic-only knobs (cache_control, beta
-/// headers) so they land cleanly without another schema rework.
-#[derive(Debug, Clone, Default, Serialize, Deserialize, Configurable)]
-#[cfg_attr(feature = "schema-export", derive(schemars::JsonSchema))]
-#[prefix = "providers.models.anthropic"]
-pub struct AnthropicModelProviderConfig {
-    #[nested]
-    #[serde(flatten)]
-    pub base: ModelProviderConfig,
-}
-
-// ── Qwen (multi-region + auth_mode exemplar) ──
-
-/// Qwen endpoint variants. Operators pick the region matching their account.
-#[derive(
-    Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default, reiclaw_macros::ConfigEnum,
-)]
-#[cfg_attr(feature = "schema-export", derive(schemars::JsonSchema))]
-#[serde(rename_all = "snake_case")]
-pub enum QwenEndpoint {
-    /// Mainland China (DashScope).
-    Cn,
-    /// International (alicloud international).
-    #[default]
-    Intl,
-    /// United States (DashScope US).
-    Us,
-    /// Code-specialist endpoint.
-    Code,
-}
-
-impl ModelEndpoint for QwenEndpoint {
-    fn uri(&self) -> &'static str {
-        match self {
-            Self::Cn => "https://dashscope.aliyuncs.com/compatible-mode/v1",
-            Self::Intl => "https://dashscope-intl.aliyuncs.com/compatible-mode/v1",
-            Self::Us => "https://dashscope-us.aliyuncs.com/compatible-mode/v1",
-            Self::Code => {
-                "https://dashscope.aliyuncs.com/api/v1/services/aigc/text-generation/generation"
-            }
-        }
-    }
-}
-
-/// Qwen model model_provider config. Multi-region (`endpoint` required) and
-/// supports both API key and OAuth flows (`auth_mode` chooses which).
-#[derive(Debug, Clone, Default, Serialize, Deserialize, Configurable)]
-#[cfg_attr(feature = "schema-export", derive(schemars::JsonSchema))]
-#[prefix = "providers.models.qwen"]
-pub struct QwenModelProviderConfig {
-    #[nested]
-    #[serde(flatten)]
-    pub base: ModelProviderConfig,
-    #[serde(default)]
-    pub endpoint: QwenEndpoint,
-    /// Auth flow. Defaults to `api_key`; set to `oauth` to use the vendor's
-    /// OAuth-cache integration instead of the `api_key` field.
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub auth_mode: Option<AuthMode>,
-    /// Long-lived Qwen OAuth refresh token. When set, the runtime
-    /// exchanges it for a short-lived access token at provider
-    /// construction time. Operators relying on the upstream `qwen login`
-    /// tool (which writes `~/.qwen/oauth_creds.json`) leave this unset;
-    /// the file-cache integration takes over.
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    #[secret(category = "model_provider")]
-    pub oauth_refresh_token: Option<String>,
-    /// Override of Qwen's published OAuth client_id. Most operators
-    /// should leave this unset.
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub oauth_client_id: Option<String>,
-    /// Operator override of the resource URL the refreshed access token
-    /// is paired with. When unset, the runtime falls back to the
-    /// `endpoint`-derived URL (or the cached `resource_url` when reading
-    /// from `~/.qwen/oauth_creds.json`).
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub oauth_resource_url: Option<String>,
-}
-
-impl FamilyEndpoint for QwenModelProviderConfig {
-    fn endpoint_uri(&self) -> Option<&'static str> {
-        Some(self.endpoint.uri())
-    }
-}
-
-// ── Ollama (local-default endpoint) ──
-
-#[derive(
-    Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default, reiclaw_macros::ConfigEnum,
-)]
-#[cfg_attr(feature = "schema-export", derive(schemars::JsonSchema))]
-#[serde(rename_all = "snake_case")]
-pub enum OllamaEndpoint {
-    #[default]
-    LocalDefault,
-}
-
-impl ModelEndpoint for OllamaEndpoint {
-    fn uri(&self) -> &'static str {
-        match self {
-            Self::LocalDefault => "http://localhost:11434",
-        }
-    }
-}
-
-#[derive(Debug, Clone, Default, Serialize, Deserialize, Configurable)]
-#[cfg_attr(feature = "schema-export", derive(schemars::JsonSchema))]
-#[prefix = "providers.models.ollama"]
-pub struct OllamaModelProviderConfig {
-    #[nested]
-    #[serde(flatten)]
-    pub base: ModelProviderConfig,
-}
-
-// ── Groq ──
-
-#[derive(
-    Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default, reiclaw_macros::ConfigEnum,
-)]
-#[cfg_attr(feature = "schema-export", derive(schemars::JsonSchema))]
-#[serde(rename_all = "snake_case")]
-pub enum GroqEndpoint {
-    #[default]
-    Default,
-}
-
-impl ModelEndpoint for GroqEndpoint {
-    fn uri(&self) -> &'static str {
-        match self {
-            Self::Default => "https://api.groq.com/openai/v1",
-        }
-    }
-}
-
-#[derive(Debug, Clone, Default, Serialize, Deserialize, Configurable)]
-#[cfg_attr(feature = "schema-export", derive(schemars::JsonSchema))]
-#[prefix = "providers.models.groq"]
-pub struct GroqModelProviderConfig {
-    #[nested]
-    #[serde(flatten)]
-    pub base: ModelProviderConfig,
-}
-
-// ── OVH ──
-
-#[derive(
-    Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default, reiclaw_macros::ConfigEnum,
-)]
-#[cfg_attr(feature = "schema-export", derive(schemars::JsonSchema))]
-#[serde(rename_all = "snake_case")]
-pub enum OvhEndpoint {
-    #[default]
-    Default,
-}
-impl ModelEndpoint for OvhEndpoint {
-    fn uri(&self) -> &'static str {
-        match self {
-            Self::Default => "https://oai.endpoints.kepler.ai.cloud.ovh.net/v1",
-        }
-    }
-}
-#[derive(Debug, Clone, Default, Serialize, Deserialize, Configurable)]
-#[cfg_attr(feature = "schema-export", derive(schemars::JsonSchema))]
-#[prefix = "providers.models.ovh"]
-pub struct OvhModelProviderConfig {
-    #[nested]
-    #[serde(flatten)]
-    pub base: ModelProviderConfig,
-}
-
-// ── Minimax (multi-region + auth_mode) ──
-
-#[derive(
-    Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default, reiclaw_macros::ConfigEnum,
-)]
-#[cfg_attr(feature = "schema-export", derive(schemars::JsonSchema))]
-#[serde(rename_all = "snake_case")]
-pub enum MinimaxEndpoint {
-    Cn,
-    #[default]
-    Intl,
-}
-impl ModelEndpoint for MinimaxEndpoint {
-    fn uri(&self) -> &'static str {
-        match self {
-            Self::Cn => "https://api.minimaxi.com/v1",
-            Self::Intl => "https://api.minimax.io/v1",
-        }
-    }
-}
-
-impl MinimaxEndpoint {
-    /// OAuth `/oauth/token` endpoint for this region. Used by
-    /// `refresh_minimax_oauth_access_token` to mint short-lived access
-    /// tokens from the operator-supplied `oauth_refresh_token`.
-    pub fn oauth_token_endpoint(self) -> &'static str {
-        match self {
-            Self::Cn => "https://api.minimaxi.com/oauth/token",
-            Self::Intl => "https://api.minimax.io/oauth/token",
-        }
-    }
-}
-
-#[derive(Debug, Clone, Default, Serialize, Deserialize, Configurable)]
-#[cfg_attr(feature = "schema-export", derive(schemars::JsonSchema))]
-#[prefix = "providers.models.minimax"]
-pub struct MinimaxModelProviderConfig {
-    #[nested]
-    #[serde(flatten)]
-    pub base: ModelProviderConfig,
-    #[serde(default)]
-    pub endpoint: MinimaxEndpoint,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub auth_mode: Option<AuthMode>,
-    /// Long-lived OAuth refresh token issued by MiniMax. When set, the
-    /// runtime exchanges it for a short-lived access token at provider
-    /// construction time and uses that as the API credential. Operators
-    /// who prefer dashboard-generated long-lived API keys can leave this
-    /// unset and populate `api_key` directly.
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    #[secret(category = "model_provider")]
-    pub oauth_refresh_token: Option<String>,
-    /// Override of MiniMax's published OAuth client_id. Most operators
-    /// should leave this unset; the runtime defaults to the
-    /// vendor-published client_id (same one MiniMax's own portal uses).
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub oauth_client_id: Option<String>,
-}
-
-impl FamilyEndpoint for MinimaxModelProviderConfig {
-    fn endpoint_uri(&self) -> Option<&'static str> {
-        Some(self.endpoint.uri())
-    }
-}
-
-// ── Gemini (OAuth-capable) ──
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default)]
-#[cfg_attr(feature = "schema-export", derive(schemars::JsonSchema))]
-#[serde(rename_all = "snake_case")]
-pub enum GeminiEndpoint {
-    #[default]
-    Default,
-}
-impl ModelEndpoint for GeminiEndpoint {
-    fn uri(&self) -> &'static str {
-        match self {
-            Self::Default => "https://generativelanguage.googleapis.com/v1beta",
-        }
-    }
-}
-#[derive(Debug, Clone, Default, Serialize, Deserialize, Configurable)]
-#[cfg_attr(feature = "schema-export", derive(schemars::JsonSchema))]
-#[prefix = "providers.models.gemini"]
-pub struct GeminiModelProviderConfig {
-    #[nested]
-    #[serde(flatten)]
-    pub base: ModelProviderConfig,
-    /// Auth flow. Defaults to `api_key`; `oauth` uses GeminiModelProvider's
-    /// OAuth-cache integration instead of the `api_key` field.
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub auth_mode: Option<AuthMode>,
-    /// Google OAuth app `client_id`, used when this alias drives ReiClaw's
-    /// own browser/device-code login flow (`rei auth login
-    /// --model-provider gemini --profile <alias>`). Operators relying on
-    /// the upstream `gemini login` tool don't need this; that tool writes
-    /// its own client_id / client_secret into `~/.gemini/oauth_creds.json`.
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    #[secret(category = "model_provider")]
-    pub oauth_client_id: Option<String>,
-    /// Google OAuth app `client_secret`. Set alongside `oauth_client_id`.
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    #[secret(category = "model_provider")]
-    pub oauth_client_secret: Option<String>,
-    /// Pin a specific GCP project ID for the OAuth `loadCodeAssist`
-    /// discovery call. When unset, the discovery probes for an
-    /// already-onboarded project on the credential's account. Replaces
-    /// `GOOGLE_CLOUD_PROJECT` / `GOOGLE_CLOUD_PROJECT_ID` env vars.
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub oauth_project: Option<String>,
-}
-
-// ── LMStudio (local default) ──
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default)]
-#[cfg_attr(feature = "schema-export", derive(schemars::JsonSchema))]
-#[serde(rename_all = "snake_case")]
-pub enum LmstudioEndpoint {
-    #[default]
-    LocalDefault,
-}
-impl ModelEndpoint for LmstudioEndpoint {
-    fn uri(&self) -> &'static str {
-        match self {
-            Self::LocalDefault => "http://localhost:1234/v1",
-        }
-    }
-}
-#[derive(Debug, Clone, Default, Serialize, Deserialize, Configurable)]
-#[cfg_attr(feature = "schema-export", derive(schemars::JsonSchema))]
-#[prefix = "providers.models.lmstudio"]
-pub struct LmstudioModelProviderConfig {
-    #[nested]
-    #[serde(flatten)]
-    pub base: ModelProviderConfig,
-}
-
-// ── llama.cpp (local default) ──
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default)]
-#[cfg_attr(feature = "schema-export", derive(schemars::JsonSchema))]
-#[serde(rename_all = "snake_case")]
-pub enum LlamacppEndpoint {
-    #[default]
-    LocalDefault,
-}
-impl ModelEndpoint for LlamacppEndpoint {
-    fn uri(&self) -> &'static str {
-        match self {
-            Self::LocalDefault => "http://localhost:8080/v1",
-        }
-    }
-}
-#[derive(Debug, Clone, Default, Serialize, Deserialize, Configurable)]
-#[cfg_attr(feature = "schema-export", derive(schemars::JsonSchema))]
-#[prefix = "providers.models.llamacpp"]
-pub struct LlamacppModelProviderConfig {
-    #[nested]
-    #[serde(flatten)]
-    pub base: ModelProviderConfig,
-}
-
-// ── Osaurus (local default) ──
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default)]
-#[cfg_attr(feature = "schema-export", derive(schemars::JsonSchema))]
-#[serde(rename_all = "snake_case")]
-pub enum OsaurusEndpoint {
-    #[default]
-    LocalDefault,
-}
-impl ModelEndpoint for OsaurusEndpoint {
-    fn uri(&self) -> &'static str {
-        match self {
-            Self::LocalDefault => "http://localhost:1337/v1",
-        }
-    }
-}
-#[derive(Debug, Clone, Default, Serialize, Deserialize, Configurable)]
-#[cfg_attr(feature = "schema-export", derive(schemars::JsonSchema))]
-#[prefix = "providers.models.osaurus"]
-pub struct OsaurusModelProviderConfig {
-    #[nested]
-    #[serde(flatten)]
-    pub base: ModelProviderConfig,
-}
-
-// ── Custom (user-supplied URL, no canonical default) ──
-
-/// Custom catch-all for operator-defined endpoints. The endpoint variant has
-/// no canonical URL — operators must always set `base.uri`. The trait return
-/// is a sentinel string; the runtime constructor must verify `base.uri` is
-/// set for `custom` entries and fail with a clear error if not.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize, Default)]
-#[cfg_attr(feature = "schema-export", derive(schemars::JsonSchema))]
-#[serde(rename_all = "snake_case")]
-pub enum CustomEndpoint {
-    #[default]
-    OperatorSupplied,
-}
-impl ModelEndpoint for CustomEndpoint {
-    fn uri(&self) -> &'static str {
-        match self {
-            Self::OperatorSupplied => "operator-supplied:set-cfg-uri",
-        }
-    }
-}
-#[derive(Debug, Clone, Default, Serialize, Deserialize, Configurable)]
-#[cfg_attr(feature = "schema-export", derive(schemars::JsonSchema))]
-#[prefix = "providers.models.custom"]
-pub struct CustomModelProviderConfig {
-    #[nested]
-    #[serde(flatten)]
-    pub base: ModelProviderConfig,
-}
-
-// ── FamilyEndpoint default impls (single-endpoint families) ─────
-//
-// Multi-endpoint families (Qwen, Minimax) define
-// their own `impl FamilyEndpoint` next to the struct. Every other family
-// gets the `None` default via this list. The list is exhaustive: a new
-// family with no impl here AND no manual impl elsewhere will fail to
-// compile against `ModelProviders::resolved_endpoint_uri`, which expands
-// `endpoint_uri()` per slot through `for_each_model_provider_slot!`.
-
-macro_rules! impl_default_family_endpoint {
-    ($($t:ty),+ $(,)?) => {
-        $( impl FamilyEndpoint for $t {} )+
-    };
-}
-
-impl_default_family_endpoint! {
-    OpenAIModelProviderConfig,
-    AnthropicModelProviderConfig,
-    OllamaModelProviderConfig,
-    GroqModelProviderConfig,
-    OvhModelProviderConfig,
-    GeminiModelProviderConfig,
-    LmstudioModelProviderConfig,
-    LlamacppModelProviderConfig,
-    OsaurusModelProviderConfig,
-    CustomModelProviderConfig,
 }
 
 // ── Aliased Agents ───────────────────────────────────────────────
@@ -1440,7 +854,7 @@ pub struct AliasedAgentConfig {
     /// expensive answering model (e.g. `qwen3.6-plus`).
     ///
     /// Note: TOML table names cannot contain `.`, so alias `kimi-k2.5`
-    /// must be written as `[providers.models.custom.kimi-k2-5]`. The
+    /// must be written as `[providers.models.openai.kimi-k2-5]`. The
     /// underlying `model = "kimi-k2.5"` string can still contain dots.
     ///
     /// ACP channels (IDE-direct) always reply and skip the classifier
@@ -3895,7 +3309,7 @@ pub struct CostConfig {
     /// tool name, …). Layout:
     ///
     /// ```toml
-    /// [cost.rates.providers.models.anthropic."claude-opus-4-7"]
+    /// [cost.rates.providers.models.openai."gpt-5"]
     /// input_per_mtok = 15.0
     /// output_per_mtok = 75.0
     /// cached_input_per_mtok = 1.5

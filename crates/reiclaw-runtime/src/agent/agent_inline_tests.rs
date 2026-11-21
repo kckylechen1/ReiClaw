@@ -21,7 +21,7 @@ fn build_session_model_provider_rejects_undotted_ref() {
 fn build_session_model_provider_requires_a_model() {
     // No configured entry and no override → cannot resolve a model name.
     let config = Config::default();
-    let err = match build_session_model_provider(&config, "anthropic.default", None) {
+    let err = match build_session_model_provider(&config, "openai.default", None) {
         Ok(_) => panic!("missing model must error"),
         Err(e) => e,
     };
@@ -1752,11 +1752,11 @@ fn build_agent_with_persona_from_config(
 #[test]
 fn carded_agent_persona_reaches_this_pipelines_built_prompt() {
     let toml = r#"
-            [providers.models.custom.default]
+            [providers.models.openai.default]
             api_key = "k"
             model = "test-model"
             uri = "https://example.com/v1"
-            wire_api = "chat_completions"
+            wire_api = "responses"
 
             [risk_profiles.default]
             level = "supervised"
@@ -1773,7 +1773,7 @@ fn carded_agent_persona_reaches_this_pipelines_built_prompt() {
 
             [agents.default]
             enabled = true
-            model_provider = "custom.default"
+            model_provider = "openai.default"
             card = "analyst"
         "#;
     let config: reiclaw_config::schema::Config = toml::from_str(toml).expect("valid config");
@@ -1798,11 +1798,11 @@ fn carded_agent_persona_reaches_this_pipelines_built_prompt() {
 #[test]
 fn direct_persona_agent_reaches_this_pipelines_built_prompt() {
     let toml = r#"
-            [providers.models.custom.default]
+            [providers.models.openai.default]
             api_key = "k"
             model = "test-model"
             uri = "https://example.com/v1"
-            wire_api = "chat_completions"
+            wire_api = "responses"
 
             [risk_profiles.default]
             level = "supervised"
@@ -1812,7 +1812,7 @@ fn direct_persona_agent_reaches_this_pipelines_built_prompt() {
 
             [agents.default]
             enabled = true
-            model_provider = "custom.default"
+            model_provider = "openai.default"
             risk_profile = "default"
             persona = "terse"
         "#;
@@ -1839,18 +1839,18 @@ fn direct_persona_agent_reaches_this_pipelines_built_prompt() {
 #[test]
 fn agent_with_no_persona_configured_has_no_tone_section() {
     let toml = r#"
-            [providers.models.custom.default]
+            [providers.models.openai.default]
             api_key = "k"
             model = "test-model"
             uri = "https://example.com/v1"
-            wire_api = "chat_completions"
+            wire_api = "responses"
 
             [risk_profiles.default]
             level = "supervised"
 
             [agents.default]
             enabled = true
-            model_provider = "custom.default"
+            model_provider = "openai.default"
             risk_profile = "default"
         "#;
     let config: reiclaw_config::schema::Config = toml::from_str(toml).expect("valid config");
@@ -1957,6 +1957,22 @@ mod surface2_tests {
         tool_dispatcher: Option<Box<dyn ToolDispatcher>>,
         multimodal_config: Option<reiclaw_config::schema::MultimodalConfig>,
     ) -> Agent {
+        test_agent_with_provider_and_multimodal_and_config(
+            provider,
+            tools,
+            tool_dispatcher,
+            multimodal_config,
+            None,
+        )
+    }
+
+    fn test_agent_with_provider_and_multimodal_and_config(
+        provider: Box<dyn ModelProvider>,
+        tools: Vec<Box<dyn Tool>>,
+        tool_dispatcher: Option<Box<dyn ToolDispatcher>>,
+        multimodal_config: Option<reiclaw_config::schema::MultimodalConfig>,
+        full_config: Option<Arc<reiclaw_config::schema::Config>>,
+    ) -> Agent {
         let memory_cfg = reiclaw_config::schema::MemoryConfig {
             backend: "none".into(),
             ..reiclaw_config::schema::MemoryConfig::default()
@@ -1980,6 +1996,11 @@ mod surface2_tests {
         }
         if let Some(mm) = multimodal_config {
             builder = builder.multimodal_config(mm);
+        }
+        if full_config.is_some() {
+            builder = builder.provider_switch_config(ProviderSwitchConfig {
+                config: full_config,
+            });
         }
         builder.build().expect("agent builder should succeed")
     }
@@ -2129,68 +2150,33 @@ mod surface2_tests {
     }
 
     #[tokio::test]
-    async fn turn_rebuilds_prompt_for_vision_routed_xml_provider() {
-        // Base provider supports native tools but not vision. The configured
-        // vision provider is a custom OpenAI-compatible endpoint: it supports
-        // vision but not native tools.
-        let (base_provider, _captured) = capturing_provider(true);
-        let mm_config = reiclaw_config::schema::MultimodalConfig {
-            vision_model_provider: Some("custom:http://127.0.0.1:9".into()),
-            ..Default::default()
-        };
-        let mut agent = test_agent_with_provider_and_multimodal(
-            base_provider,
-            vec![Box::new(MockTool)],
-            Some(Box::new(NativeToolDispatcher)),
-            Some(mm_config),
-        );
-
-        let msg = "describe this image [IMAGE:data:image/png;base64,iVBORw0KGgo=]";
-
-        // The vision provider will fail to connect to localhost:9, but the
-        // prompt rebuild and provider-visible transcript happen before the
-        // network call.
-        let result = agent.turn(msg).await;
-        assert!(
-            result.is_err(),
-            "vision provider chat should fail to connect"
-        );
-
-        let system_content = match &agent.history[0] {
-            ConversationMessage::Chat(m) => m.content.clone(),
-            _ => panic!("history[0] should be a chat message"),
-        };
-        assert!(
-            system_content.contains(XML_TOOLS_MARKER),
-            "stored system prompt must be rebuilt for XML vision provider"
-        );
-
-        let provider_messages = XmlToolDispatcher.to_provider_messages(&agent.history);
-        let system = provider_messages
-            .iter()
-            .find(|m| m.role == "system")
-            .expect("transcript must contain a system message");
-        assert!(
-            system.content.contains(XML_TOOLS_MARKER),
-            "provider-visible transcript must advertise XML tools for vision provider"
-        );
-    }
-
-    #[tokio::test]
     async fn turn_streamed_rebuilds_prompt_for_vision_routed_native_provider() {
         // Base provider does not support native tools or vision. The
-        // configured vision provider is an Anthropic-compatible endpoint:
-        // it supports both vision and native tools.
+        // configured OpenAI Responses vision alias supports both vision and
+        // native tools.
         let (base_provider, _captured) = capturing_provider(false);
+        let mut config = Config::default();
+        config.providers.models.openai.insert(
+            "vision".into(),
+            reiclaw_config::schema::OpenAIModelProviderConfig {
+                base: reiclaw_config::schema::ModelProviderConfig {
+                    uri: Some("http://127.0.0.1:9".into()),
+                    model: Some("gpt-4o".into()),
+                    wire_api: Some(reiclaw_config::schema::WireApi::Responses),
+                    ..Default::default()
+                },
+            },
+        );
         let mm_config = reiclaw_config::schema::MultimodalConfig {
-            vision_model_provider: Some("anthropic-custom:http://127.0.0.1:9".into()),
+            vision_model_provider: Some("openai.vision".into()),
             ..Default::default()
         };
-        let mut agent = test_agent_with_provider_and_multimodal(
+        let mut agent = test_agent_with_provider_and_multimodal_and_config(
             base_provider,
             vec![Box::new(MockTool)],
             Some(Box::new(XmlToolDispatcher)),
             Some(mm_config),
+            Some(Arc::new(config)),
         );
 
         let msg = "describe this image [IMAGE:data:image/png;base64,iVBORw0KGgo=]";
@@ -2342,7 +2328,7 @@ async fn from_config_passes_extra_headers_to_custom_provider() {
     let captured_headers_clone = captured_headers.clone();
 
     let app = Router::new().route(
-        "/chat/completions",
+        "/responses",
         post(
             move |headers: HeaderMap, Json(_body): Json<serde_json::Value>| {
                 let captured_headers = captured_headers_clone.clone();
@@ -2358,11 +2344,7 @@ async fn from_config_passes_extra_headers_to_custom_provider() {
                         .collect();
                     *captured_headers.lock().unwrap() = Some(collected);
                     Json(serde_json::json!({
-                        "choices": [{
-                            "message": {
-                                "content": "hello from mock"
-                            }
-                        }]
+                        "output_text": "hello from mock"
                     }))
                 }
             },
@@ -2388,7 +2370,7 @@ async fn from_config_passes_extra_headers_to_custom_provider() {
         let entry = config
             .providers
             .models
-            .ensure("custom", "default")
+            .ensure("openai", "default")
             .expect("custom model_provider type slot");
         entry.api_key = Some("test-key".to_string());
         entry.model = Some("test-model".to_string());
@@ -2412,7 +2394,7 @@ async fn from_config_passes_extra_headers_to_custom_provider() {
         reiclaw_config::schema::RiskProfileConfig::default(),
     );
     let agent_cfg = reiclaw_config::schema::AliasedAgentConfig {
-        model_provider: "custom.default".into(),
+        model_provider: "openai.default".into(),
         risk_profile: "test-profile".into(),
         ..reiclaw_config::schema::AliasedAgentConfig::default()
     };
@@ -2443,7 +2425,7 @@ async fn from_config_passes_extra_headers_to_custom_provider() {
 }
 
 #[tokio::test]
-async fn from_config_accepts_openai_alias_with_requires_openai_auth() {
+async fn from_config_accepts_openai_alias_with_responses_endpoint() {
     use reiclaw_config::schema::{
         AliasedAgentConfig, Config, ModelProviderConfig, OpenAIModelProviderConfig,
         RiskProfileConfig, WireApi,
@@ -2469,7 +2451,7 @@ async fn from_config_accepts_openai_alias_with_requires_openai_auth() {
         OpenAIModelProviderConfig {
             base: ModelProviderConfig {
                 model: Some("gpt-5.4".to_string()),
-                requires_openai_auth: true,
+                uri: Some("https://router.example/v1".into()),
                 wire_api: Some(WireApi::Responses),
                 ..ModelProviderConfig::default()
             },
@@ -2488,7 +2470,7 @@ async fn from_config_accepts_openai_alias_with_requires_openai_auth() {
 
     assert!(
         result.is_ok(),
-        "openai alias with requires_openai_auth should construct via Codex OAuth path: {}",
+        "openai Responses alias should construct from its configured endpoint: {}",
         result.err().unwrap()
     );
 }

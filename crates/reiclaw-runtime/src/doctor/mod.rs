@@ -162,66 +162,8 @@ async fn probe_models(config: &Config) -> Vec<DiagResult> {
     collapse_model_probes(probes)
 }
 
-fn codex_auth_wiring_items(codex_profile_present: bool, config: &Config) -> Vec<DiagItem> {
-    const CAT: &str = "providers.auth";
-
-    let auth_slots: Vec<String> = config
-        .providers
-        .models
-        .openai
-        .iter()
-        .filter(|(_, cfg)| cfg.base.requires_openai_auth)
-        .map(|(alias, _)| format!("openai.{alias}"))
-        .collect();
-
-    let mut items = Vec::new();
-    match (codex_profile_present, auth_slots.is_empty()) {
-        // Credential imported, but nothing references it — silent until the
-        // operator wires a slot and points an agent at it.
-        (true, true) => items.push(DiagItem::warn(
-            CAT,
-            "OpenAI Codex credentials are signed in but no model provider slot uses them. Set `requires_openai_auth = true` on an OpenAI provider slot and point an agent's `model_provider` at it, or run `rei quickstart`.".to_string(),
-        )),
-        // Slot opts into Codex auth, but no credential is signed in — fails at
-        // the first model call.
-        (false, false) => items.push(DiagItem::warn(
-            CAT,
-            format!("OpenAI slot(s) {slots} set `requires_openai_auth = true` but no OpenAI Codex credentials are signed in. Run `rei auth login --provider openai-codex`.", slots = auth_slots.join(", ")),
-        )),
-        // Both present — wiring is consistent.
-        (true, false) => items.push(DiagItem::ok(
-            CAT,
-            "OpenAI Codex credentials are signed in and referenced by a model provider slot.".to_string(),
-        )),
-        // Codex unused on both sides — stay silent (no noise for users who
-        // never touch Codex).
-        (false, true) => {}
-    }
-    items
-}
-
-/// Load Codex auth profiles on demand and report any profile/slot wiring
-/// mismatch. Async because the profile store lives on disk; appended to the
-/// report from `run_structured`, mirroring `probe_models`.
-async fn check_codex_auth_wiring(config: &Config) -> Vec<DiagResult> {
-    let auth = reiclaw_providers::auth::AuthService::from_config(config);
-    let codex_profile_present = match auth.list_profile_ids().await {
-        Ok(ids) => ids.iter().any(|id| id.starts_with("openai-codex:")),
-        // Store unreadable: skip rather than emit a "no credentials" warning we
-        // cannot substantiate.
-        Err(_) => return Vec::new(),
-    };
-
-    codex_auth_wiring_items(codex_profile_present, config)
-        .into_iter()
-        .map(DiagItem::into_result)
-        .collect()
-}
-
-/// Run the full Doctor suite and return the structured result used by CLI and RPC.
 pub async fn run_structured(config: &Config) -> Vec<DiagResult> {
     let mut results = diagnose(config);
-    results.extend(check_codex_auth_wiring(config).await);
     results.extend(probe_models(config).await);
     results
 }
@@ -348,6 +290,14 @@ fn create_doctor_model_provider(
     config: &Config,
     provider_name: &str,
 ) -> anyhow::Result<Box<dyn reiclaw_api::model_provider::ModelProvider>> {
+    reiclaw_config::providers::reject_retired_model_provider(provider_name)?;
+    if let Some((family, alias)) = provider_name.split_once('.') {
+        reiclaw_config::providers::require_openai_model_provider(family)?;
+        anyhow::ensure!(
+            config.providers.models.find(family, alias).is_some(),
+            "Model provider alias is not configured. Use [providers.models.openai.<alias>]."
+        );
+    }
     let api_key = configured_model_provider_api_key(config, provider_name);
     let options = reiclaw_providers::options_for_provider_ref(
         config,
@@ -528,28 +478,15 @@ pub async fn update_context_windows(
     });
     let mut updated = 0usize;
 
-    type ProviderTarget = (
-        String,
-        String,
-        String,
-        String,
-        Option<String>,
-        Option<String>,
-        Option<usize>,
-    );
-
     // Collect all the data we need first to avoid borrow conflicts
-    let targets: Vec<ProviderTarget> = if let Some(model_provider) = provider_override {
+    let targets: Vec<_> = if let Some(model_provider) = provider_override {
         // Single provider - use find_by_name to look up by "type.alias" format
         if let Some((t, a, entry)) = config.providers.models.find_by_name(model_provider) {
             vec![(
                 model_provider.to_string(),
                 t.to_string(),
                 a.to_string(),
-                entry.model.clone().unwrap_or_default(),
-                entry.uri.clone(),
-                entry.api_key.clone(),
-                entry.context_window,
+                entry.clone(),
             )]
         } else {
             anyhow::bail!("Model provider '{model_provider}' not found in config");
@@ -560,25 +497,13 @@ pub async fn update_context_windows(
             .providers
             .models
             .iter_entries()
-            .map(|(t, a, e)| {
-                (
-                    format!("{t}.{a}"),
-                    t.to_string(),
-                    a.to_string(),
-                    e.model.clone().unwrap_or_default(),
-                    e.uri.clone(),
-                    e.api_key.clone(),
-                    e.context_window,
-                )
-            })
+            .map(|(t, a, e)| (format!("{t}.{a}"), t.to_string(), a.to_string(), e.clone()))
             .collect()
     };
 
-    for (provider_ref, provider_type, alias, model, uri, api_key, existing_context_window) in
-        targets
-    {
+    for (provider_ref, provider_type, alias, provider_config) in targets {
         // Skip if already has context_window set
-        if let Some(ctx) = existing_context_window {
+        if let Some(ctx) = provider_config.context_window {
             println!(
                 "{provider_ref}: already has context_window = {ctx}",
                 ctx = ctx.to_string().as_str(),
@@ -588,7 +513,11 @@ pub async fn update_context_windows(
         }
 
         // Skip if no model configured
-        if model.is_empty() {
+        if provider_config
+            .model
+            .as_deref()
+            .is_none_or(|model| model.trim().is_empty())
+        {
             println!(
                 "{provider_ref}: no model configured, skipping",
                 provider_ref = provider_ref.as_str()
@@ -596,13 +525,6 @@ pub async fn update_context_windows(
             continue;
         }
 
-        // Fetch context window from provider
-        let provider_config = reiclaw_config::schema::ModelProviderConfig {
-            model: Some(model.clone()),
-            uri: uri.clone(),
-            api_key,
-            ..Default::default()
-        };
         match fetch_fn(&provider_type, &provider_config).await {
             Some(ctx) => {
                 if dry_run {

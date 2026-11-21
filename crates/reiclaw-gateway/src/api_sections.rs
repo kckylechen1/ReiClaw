@@ -137,9 +137,7 @@ pub async fn handle_catalog_models(
     Query(q): Query<ModelsQuery>,
 ) -> Response {
     let local = reiclaw_runtime::quickstart::model_provider_is_local(&q.model_provider);
-    // Snapshot config so the catalog resolves the alias credential and can reach
-    // the native /models endpoint (surfacing new native-only models that the
-    // models.dev snapshot may not carry yet) instead of silently falling back.
+    // The catalog resolves the named alias and queries its /models endpoint.
     let cfg = state.config.read().clone();
     let (models, pricing, live) =
         reiclaw_runtime::quickstart::model_catalog_with_config(Some(&cfg), &q.model_provider).await;
@@ -225,7 +223,7 @@ fn quickstart_agent_missing_requirements(
     let model_ref = agent.model_provider.trim();
     if model_ref.is_empty() {
         missing.push(format!("Set a model provider for agent `{alias}`."));
-    } else if let Some((family, _, provider)) = cfg.resolved_model_provider_for_agent(alias) {
+    } else if let Some((_, _, provider)) = cfg.resolved_model_provider_for_agent(alias) {
         let has_model = provider
             .model
             .as_deref()
@@ -233,10 +231,7 @@ fn quickstart_agent_missing_requirements(
             .is_some_and(|m| !m.is_empty());
         if !has_model {
             missing.push(format!("Choose a model for model provider `{model_ref}`."));
-        } else if !model_provider_alias_usable(
-            provider,
-            reiclaw_runtime::quickstart::model_provider_is_local(family),
-        ) {
+        } else if !model_provider_alias_usable(provider) {
             missing.push(format!(
                 "Set credential/auth for model provider `{model_ref}`."
             ));
@@ -586,7 +581,7 @@ fn providers_picker(cfg: &reiclaw_config::schema::Config) -> Vec<PickerItem> {
             } else {
                 None
             },
-            badge: provider_type_badge(cfg, p.name, p.local),
+            badge: provider_type_badge(cfg, p.name),
         })
         .collect()
 }
@@ -595,19 +590,10 @@ fn any_usable_model_provider(cfg: &reiclaw_config::schema::Config) -> bool {
     cfg.providers
         .models
         .iter_entries()
-        .any(|(family, _, base)| {
-            model_provider_alias_usable(
-                base,
-                reiclaw_runtime::quickstart::model_provider_is_local(family),
-            )
-        })
+        .any(|(_, _, base)| model_provider_alias_usable(base))
 }
 
-fn provider_type_badge(
-    cfg: &reiclaw_config::schema::Config,
-    family: &str,
-    local: bool,
-) -> Option<String> {
+fn provider_type_badge(cfg: &reiclaw_config::schema::Config, family: &str) -> Option<String> {
     let mut has_alias = false;
     let mut has_usable_alias = false;
     for (ty, _, base) in cfg.providers.models.iter_entries() {
@@ -615,7 +601,7 @@ fn provider_type_badge(
             continue;
         }
         has_alias = true;
-        if model_provider_alias_usable(base, local) {
+        if model_provider_alias_usable(base) {
             has_usable_alias = true;
         }
     }
@@ -628,24 +614,11 @@ fn provider_type_badge(
     }
 }
 
-fn model_provider_alias_usable(
-    base: &reiclaw_config::schema::ModelProviderConfig,
-    local: bool,
-) -> bool {
-    let has_model = base
-        .model
+fn model_provider_alias_usable(base: &reiclaw_config::schema::ModelProviderConfig) -> bool {
+    base.model
         .as_deref()
-        .map(str::trim)
-        .is_some_and(|model| !model.is_empty());
-    if !has_model {
-        return false;
-    }
-    base.api_key
-        .as_deref()
-        .map(str::trim)
-        .is_some_and(|key| !key.is_empty())
-        || base.requires_openai_auth
-        || local
+        .is_some_and(|model| !model.trim().is_empty())
+        && reiclaw_providers::model_provider_endpoint_ready(base)
 }
 
 fn storage_picker(cfg: &reiclaw_config::schema::Config) -> Vec<PickerItem> {
@@ -1099,7 +1072,7 @@ mod tests {
     #[test]
     fn build_agent_options_returns_every_configured_alias() {
         let mut cfg = reiclaw_config::schema::Config::default();
-        cfg.create_map_key("providers.models.anthropic", "default")
+        cfg.create_map_key("providers.models.openai", "default")
             .unwrap();
         cfg.create_map_key("risk_profiles", "alpha_risk").unwrap();
         cfg.create_map_key("runtime_profiles", "alpha_runtime")
@@ -1110,7 +1083,7 @@ mod tests {
 
         let resp = build_agent_options(&cfg);
 
-        assert_eq!(resp.model_providers, vec!["anthropic.default".to_string()]);
+        assert_eq!(resp.model_providers, vec!["openai.default".to_string()]);
         assert_eq!(resp.risk_profiles, vec!["alpha_risk".to_string()]);
         assert_eq!(resp.runtime_profiles, vec!["alpha_runtime".to_string()]);
         assert_eq!(resp.skill_bundles, vec!["alpha_skills".to_string()]);
@@ -1122,8 +1095,7 @@ mod tests {
     fn typed_provider_catalog_keys_create_snake_config_sections() {
         let mut cfg = reiclaw_config::schema::Config::default();
         let cases = [
-            ("providers.models", "lmstudio"),
-            ("providers.models", "llamacpp"),
+            ("providers.models", "openai"),
             ("providers.transcription", "local_whisper"),
         ];
 
@@ -1134,12 +1106,8 @@ mod tests {
         }
 
         assert!(
-            cfg.providers.models.lmstudio.contains_key("default"),
-            "created LM Studio alias should land in the lmstudio provider map",
-        );
-        assert!(
-            cfg.providers.models.llamacpp.contains_key("default"),
-            "created llama.cpp alias should land in the llamacpp provider map",
+            cfg.providers.models.openai.contains_key("default"),
+            "created alias should land in the OpenAI provider map",
         );
         assert!(
             cfg.providers
@@ -1157,7 +1125,7 @@ mod tests {
         assert!(resp.needs_quickstart);
         assert_eq!(resp.reason, "fresh_install");
 
-        cfg.create_map_key("providers.models.anthropic", "default")
+        cfg.create_map_key("providers.models.openai", "default")
             .unwrap();
         let resp = derive_section_status(&cfg);
         assert!(
@@ -1183,7 +1151,7 @@ mod tests {
         );
 
         let agent = cfg.agents.get_mut("default").unwrap();
-        agent.model_provider = "anthropic.default".into();
+        agent.model_provider = "openai.default".into();
         agent.risk_profile = "default".into();
         agent.runtime_profile = "default".into();
         let resp = derive_section_status(&cfg);
@@ -1194,10 +1162,10 @@ mod tests {
         assert!(
             resp.missing
                 .iter()
-                .any(|m| m == "Choose a model for model provider `anthropic.default`.")
+                .any(|m| m == "Choose a model for model provider `openai.default`.")
         );
 
-        cfg.set_prop("providers.models.anthropic.default.model", "claude-sonnet")
+        cfg.set_prop("providers.models.openai.default.model", "claude-sonnet")
             .unwrap();
         let resp = derive_section_status(&cfg);
         assert!(
@@ -1207,10 +1175,10 @@ mod tests {
         assert!(
             resp.missing
                 .iter()
-                .any(|m| m == "Set credential/auth for model provider `anthropic.default`.")
+                .any(|m| m == "Set credential/auth for model provider `openai.default`.")
         );
 
-        cfg.set_prop("providers.models.anthropic.default.api_key", "sk-test")
+        cfg.set_prop("providers.models.openai.default.api_key", "sk-test")
             .unwrap();
         let resp = derive_section_status(&cfg);
         assert!(!resp.needs_quickstart);
@@ -1235,7 +1203,7 @@ mod tests {
     #[test]
     fn apply_first_run_agent_defaults_binds_existing_provider_and_profiles() {
         let mut cfg = reiclaw_config::schema::Config::default();
-        cfg.create_map_key("providers.models.anthropic", "work")
+        cfg.create_map_key("providers.models.openai", "work")
             .unwrap();
         cfg.create_map_key("risk_profiles", "default").unwrap();
         cfg.create_map_key("runtime_profiles", "deep_work").unwrap();
@@ -1244,7 +1212,7 @@ mod tests {
         apply_first_run_agent_defaults(&mut cfg, "default");
 
         let agent = cfg.agents.get("default").unwrap();
-        assert_eq!(agent.model_provider.as_str(), "anthropic.work");
+        assert_eq!(agent.model_provider.as_str(), "openai.work");
         assert_eq!(agent.risk_profile, "default");
         assert_eq!(agent.runtime_profile, "deep_work");
     }
@@ -1417,28 +1385,11 @@ mod tests {
 
     #[test]
     fn providers_picker_sources_from_list_providers() {
-        // Single source of truth: reiclaw_providers::list_model_providers().
-        // Anthropic / OpenAI / Gemini must surface in the picker.
         let cfg = empty_cfg();
         let items = providers_picker(&cfg);
         let names: Vec<&str> = items.iter().map(|i| i.key.as_str()).collect();
-        assert!(
-            names.contains(&"anthropic"),
-            "expected anthropic in picker, got: {names:?}"
-        );
-        assert!(names.contains(&"openai"), "expected openai in picker");
-        assert!(names.contains(&"gemini"), "expected gemini in picker");
-
-        // Display name is human-readable, not the canonical key.
-        let anthropic = items.iter().find(|i| i.key == "anthropic").unwrap();
-        assert_eq!(anthropic.label, "Anthropic");
-
-        // Local-only model_providers carry a description hint.
-        let local = items.iter().find(|i| i.description.is_some());
-        assert!(
-            local.is_some(),
-            "at least one model_provider should be marked local"
-        );
+        assert_eq!(names, reiclaw_providers::canonical_model_provider_slots());
+        assert_eq!(items[0].label, "OpenAI Responses");
 
         // Empty config has no model_provider aliases — no badges yet.
         assert!(
@@ -1454,29 +1405,26 @@ mod tests {
         // operator-named aliases. Creating the alias alone is not enough
         // for chat dispatch; it still needs model + credential/auth.
         let mut cfg = empty_cfg();
-        cfg.create_map_key("providers.models.anthropic", "default")
+        cfg.create_map_key("providers.models.openai", "default")
             .expect("create_map_key");
         let items = providers_picker(&cfg);
-        let anthropic = items.iter().find(|i| i.key == "anthropic").unwrap();
+        let openai = items.iter().find(|i| i.key == "openai").unwrap();
         assert_eq!(
-            anthropic.badge.as_deref(),
+            openai.badge.as_deref(),
             Some("needs setup"),
-            "anthropic should need setup after adding an empty alias"
+            "openai should need setup after adding an empty alias"
         );
 
-        cfg.set_prop(
-            "providers.models.anthropic.default.model",
-            "claude-sonnet-4-5",
-        )
-        .expect("set model");
-        cfg.set_prop("providers.models.anthropic.default.api_key", "sk-test")
+        cfg.set_prop("providers.models.openai.default.model", "claude-sonnet-4-5")
+            .expect("set model");
+        cfg.set_prop("providers.models.openai.default.api_key", "sk-test")
             .expect("set api key");
         let items = providers_picker(&cfg);
-        let anthropic = items.iter().find(|i| i.key == "anthropic").unwrap();
+        let openai = items.iter().find(|i| i.key == "openai").unwrap();
         assert_eq!(
-            anthropic.badge.as_deref(),
+            openai.badge.as_deref(),
             Some("configured"),
-            "anthropic should be marked configured once required chat fields are present"
+            "openai should be marked configured once required chat fields are present"
         );
     }
 

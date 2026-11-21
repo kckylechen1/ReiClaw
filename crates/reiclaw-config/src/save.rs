@@ -392,6 +392,7 @@ impl Config {
     }
 
     pub fn set_prop_persistent(&mut self, name: &str, value_str: &str) -> Result<()> {
+        crate::providers::check_model_provider_prop(name, value_str)?;
         if let Some(expected) = self.tracked_prop_identities.get(name)
             && self.encode_prop_snapshot_key(None, name).as_deref()
                 != Some(expected.encoded_key.as_str())
@@ -2227,7 +2228,16 @@ fn apply_dirty_map_key_path(
         segments.extend(inner_segments);
     }
 
-    let segs: Vec<&str> = segments.iter().map(String::as_str).collect();
+    let mut segs: Vec<&str> = segments.iter().map(String::as_str).collect();
+    if let ["providers", "models", "openai", _, "uri"] = segs.as_slice() {
+        // TOML accepts both public URL spellings. A URI property edit writes
+        // the canonical key without leaving a duplicate alias on disk.
+        for field in ["base_url", "api_url"] {
+            segs[4] = field;
+            delete_path_in_doc(root, &segs);
+        }
+        segs[4] = "uri";
+    }
     write_or_delete_leaf(root, full_table, default_table, &segs);
     Ok(())
 }

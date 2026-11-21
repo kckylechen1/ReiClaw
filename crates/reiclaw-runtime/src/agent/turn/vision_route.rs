@@ -403,14 +403,14 @@ mod tests {
         let config: Config = toml::from_str(
             r#"
 schema_version = 3
-[providers.models.llamacpp.forced_off]
+[providers.models.openai.forced_off]
 model = "qwen3-4b"
 vision = false
 "#,
         )
         .expect("config parses");
         let multimodal = MultimodalConfig {
-            vision_model_provider: Some("llamacpp.forced_off".to_string()),
+            vision_model_provider: Some("openai.forced_off".to_string()),
             ..Default::default()
         };
         let history = vec![ChatMessage::user("look [IMAGE:/tmp/x.png]".to_string())];
@@ -456,7 +456,7 @@ vision = false
             )
             .expect("test receiver remains open");
             Json(json!({
-                "choices": [{"message": {"content": "ok"}}]
+                "output_text": "ok"
             }))
         }
 
@@ -492,7 +492,7 @@ vision = false
             .expect("bind test provider");
         let addr = listener.local_addr().expect("test provider address");
         let app = Router::new()
-            .route("/v1/chat/completions", post(capture_model))
+            .route("/v1/responses", post(capture_model))
             .with_state(model_tx);
         let server = reiclaw_log::spawn!(async move {
             axum::serve(listener, app)
@@ -506,14 +506,14 @@ vision = false
         let config: Config = toml::from_str(&format!(
             r#"
 schema_version = 3
-[providers.models.custom.myvision]
+[providers.models.openai.myvision]
 uri = "http://{addr}/v1"
 model = "vision-model"
 "#
         ))
         .expect("config parses");
         let multimodal = MultimodalConfig {
-            vision_model_provider: Some("custom.myvision".to_string()),
+            vision_model_provider: Some("openai.myvision".to_string()),
             ..Default::default()
         };
         let history = vec![ChatMessage::user("look [IMAGE:/tmp/x.png]".to_string())];
@@ -561,7 +561,7 @@ model = "vision-model"
         );
 
         let explicit = MultimodalConfig {
-            vision_model_provider: Some("custom.myvision".to_string()),
+            vision_model_provider: Some("openai.myvision".to_string()),
             vision_model: Some("explicit-vision-model".to_string()),
             ..Default::default()
         };

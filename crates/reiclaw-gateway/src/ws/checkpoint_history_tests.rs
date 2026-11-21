@@ -79,7 +79,7 @@ async fn ws_foreground_checkpoint_cold_restore_and_live_promotion_reach_provider
     let (mut client, epoch) = checkpoint_client(&harness).await;
 
     checkpoint_turn(&mut client, &epoch, "first-live-question").await;
-    let first = harness.seen.lock()[0]["messages"].to_string();
+    let first = harness.seen.lock()[0]["input"].to_string();
     assert!(first.contains("active-original-decision"));
     assert!(first.contains("raw-delta-request"));
     assert!(!first.contains("covered-original-request"));
@@ -88,7 +88,7 @@ async fn ws_foreground_checkpoint_cold_restore_and_live_promotion_reach_provider
 
     sqlite.promote_staged_checkpoint("gw_checkpoint").unwrap();
     checkpoint_turn(&mut client, &epoch, "second-live-question").await;
-    let second = harness.seen.lock()[1]["messages"].to_string();
+    let second = harness.seen.lock()[1]["input"].to_string();
     assert!(second.contains("promoted-cumulative-decision"));
     assert!(second.contains("first-live-question"));
     assert!(second.contains("second-live-question"));
@@ -135,7 +135,7 @@ async fn ws_foreground_checkpoint_keeps_unsaved_live_turn_after_append_failure()
         .unwrap();
     sqlite.promote_staged_checkpoint("gw_checkpoint").unwrap();
     checkpoint_turn(&mut client, &epoch, "next-live-question").await;
-    let second = harness.seen.lock()[1]["messages"].to_string();
+    let second = harness.seen.lock()[1]["input"].to_string();
     assert!(second.contains("unsaved-live-question"));
     assert!(second.contains("next-live-question"));
     assert!(!second.contains("new-checkpoint-after-failed-write"));

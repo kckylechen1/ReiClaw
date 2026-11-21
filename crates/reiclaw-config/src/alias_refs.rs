@@ -577,6 +577,8 @@ pub fn create_map_key_checked(
     if path == "agents" && is_reserved_agent_alias(key) {
         return Err(CreateError::Reserved(RESERVED_DEFAULT_AGENT.to_string()));
     }
+    crate::providers::check_model_provider_prop(path, "")
+        .map_err(|err| CreateError::Invalid(err.to_string()))?;
     cfg.create_map_key(path, key).map_err(CreateError::Invalid)
 }
 

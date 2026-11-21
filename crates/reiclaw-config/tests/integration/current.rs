@@ -1094,19 +1094,19 @@ fn get_prop_resolves_model_field_for_typed_provider_alias() {
     let raw = r#"
 schema_version = 3
 
-[providers.models.anthropic.glados]
+[providers.models.openai.glados]
 model = "claude-opus-4-7"
 max_tokens = 25000
 
-[providers.models.anthropic.clamps]
+[providers.models.openai.clamps]
 model = "claude-sonnet-4-6"
 "#;
     let cfg: Config = toml::from_str(raw).expect("parse");
     let glados_model = cfg
-        .get_prop("providers.models.anthropic.glados.model")
+        .get_prop("providers.models.openai.glados.model")
         .expect("get_prop must resolve for typed provider alias .model field");
     let clamps_model = cfg
-        .get_prop("providers.models.anthropic.clamps.model")
+        .get_prop("providers.models.openai.clamps.model")
         .expect("get_prop must resolve for the other alias too");
     eprintln!("glados.model = {glados_model:?}");
     eprintln!("clamps.model = {clamps_model:?}");
@@ -1124,17 +1124,17 @@ fn prop_fields_includes_providers_models_alias_model_path() {
     let raw = r#"
 schema_version = 3
 
-[providers.models.anthropic.glados]
+[providers.models.openai.glados]
 model = "claude-opus-4-7"
 "#;
     let cfg: Config = toml::from_str(raw).expect("parse");
-    let want = "providers.models.anthropic.glados.model";
+    let want = "providers.models.openai.glados.model";
     let all = cfg.prop_fields();
     let found = all.iter().any(|f| f.name == want);
     if !found {
         let candidates: Vec<String> = all
             .iter()
-            .filter(|f| f.name.contains("anthropic.glados"))
+            .filter(|f| f.name.contains("openai.glados"))
             .map(|f| f.name.clone())
             .collect();
         panic!("prop_fields() missing `{want}` — candidates: {candidates:?}",);
@@ -1146,7 +1146,7 @@ fn typed_family_root_is_not_a_map_keyed_section() {
     use reiclaw_config::schema::Config;
     let raw = r#"
 schema_version = 3
-[providers.models.anthropic.glados]
+[providers.models.openai.glados]
 model = "claude-opus-4-7"
 "#;
     let cfg: Config = toml::from_str(raw).expect("parse");
@@ -1155,7 +1155,7 @@ model = "claude-opus-4-7"
         "typed-family root must NOT resolve as a single map — typed wrapper has per-type HashMap fields",
     );
     assert_eq!(
-        cfg.get_map_keys("providers.models.anthropic"),
+        cfg.get_map_keys("providers.models.openai"),
         Some(vec!["glados".to_string()]),
         "the per-type slot IS a map keyed by alias",
     );
@@ -1174,7 +1174,7 @@ fn map_key_sections_exposes_typed_family_slots() {
         .map(|s| s.path)
         .collect();
     for required in [
-        "providers.models.anthropic",
+        "providers.models.openai",
         "providers.models.openai",
         "providers.tts.openai",
         "providers.transcription.openai",
@@ -1350,16 +1350,16 @@ fn development_templates_are_native_current_config_with_explicit_policy() {
         let config = parse_current(raw).unwrap();
         assert!(Config::unknown_keys(raw).is_empty());
         assert_eq!(config.schema_version, CURRENT_SCHEMA_VERSION);
-        let provider = &config.providers.models.ollama["default"].base;
+        let provider = &config.providers.models.openai["default"].base;
         assert_eq!(
             provider.uri.as_deref(),
-            Some("http://host.docker.internal:11434")
+            Some("http://host.docker.internal:8080/v1")
         );
         assert!(provider.api_key.is_none());
         assert_eq!(provider.model.as_deref(), Some("llama3.2"));
         assert_eq!(
             config.agents["default"].model_provider.as_str(),
-            "ollama.default"
+            "openai.default"
         );
         assert_eq!(config.agents["default"].risk_profile, "default");
         assert_eq!(config.agents["default"].runtime_profile, "default");

@@ -146,8 +146,8 @@ async fn apply_comments_deep_dotted_traversal() {
     let (dir, path) = write_temp_config(
         "[providers]\n\n\
          [providers.models]\n\n\
-         [providers.models.anthropic]\n\n\
-         [providers.models.anthropic.default]\n\
+         [providers.models.openai]\n\n\
+         [providers.models.openai.default]\n\
          api_key = \"sk-test\"\n\
          model = \"claude-sonnet-4\"\n",
     )
@@ -156,8 +156,8 @@ async fn apply_comments_deep_dotted_traversal() {
     apply_comments(
         &path,
         &[(
-            String::from("providers.models.anthropic.default.api_key"),
-            String::from("Anthropic API key"),
+            String::from("providers.models.openai.default.api_key"),
+            String::from("OpenAI API key"),
         )],
     )
     .await
@@ -171,7 +171,7 @@ async fn apply_comments_deep_dotted_traversal() {
         .position(|l| l.starts_with("api_key ="))
         .expect("api_key key must be present");
     assert!(
-        api_key_idx > 0 && lines[api_key_idx - 1].contains("# Anthropic API key"),
+        api_key_idx > 0 && lines[api_key_idx - 1].contains("# OpenAI API key"),
         "comment must appear above `api_key = ...`; line above: {:?}",
         lines[api_key_idx - 1]
     );
@@ -182,7 +182,7 @@ async fn apply_comments_deep_dotted_traversal() {
         .and_then(toml::Value::as_table)
         .and_then(|t| t.get("models"))
         .and_then(toml::Value::as_table)
-        .and_then(|t| t.get("anthropic"))
+        .and_then(|t| t.get("openai"))
         .and_then(toml::Value::as_table)
         .and_then(|t| t.get("default"))
         .and_then(toml::Value::as_table)

@@ -29,16 +29,7 @@ pub use schema::{
     WebFetchConfig, WebSearchConfig, WebhookConfig, read_persisted_proxy_for_boot,
 };
 
-pub use schema::ModelProviderConfig;
-// Per-family model model_provider configs (typed split — Re-exported here
-// so tests + downstream binary callers can construct typed family entries
-// without reaching into `reiclaw_config::schema` directly.
-pub use schema::{
-    AnthropicModelProviderConfig, CustomModelProviderConfig, GeminiModelProviderConfig,
-    GroqModelProviderConfig, LlamacppModelProviderConfig, LmstudioModelProviderConfig,
-    MinimaxModelProviderConfig, OllamaModelProviderConfig, OpenAIModelProviderConfig,
-    OsaurusModelProviderConfig, OvhModelProviderConfig, QwenModelProviderConfig,
-};
+pub use schema::{ModelProviderConfig, OpenAIModelProviderConfig};
 pub use traits::HasPropKind;
 pub use traits::PropFieldInfo;
 pub use traits::PropFieldSpec;

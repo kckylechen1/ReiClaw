@@ -19,7 +19,15 @@ fn parse_provider_category(category: &str) -> Result<ProviderCategory> {
     }
 }
 
-/// The map-key section path for a kind (e.g. `agents`, `providers.models.anthropic`,
+fn parse_provider_family(category: &str, family: String) -> Result<AliasKind> {
+    let category = parse_provider_category(category)?;
+    if category == ProviderCategory::Models {
+        reiclaw_config::providers::require_openai_model_provider(&family)?;
+    }
+    Ok(AliasKind::Provider { category, family })
+}
+
+/// The map-key section path for a kind (e.g. `agents`, `providers.models.openai`,
 /// `channels.telegram`).
 fn section_path(kind: &AliasKind) -> String {
     match kind {
@@ -495,11 +503,8 @@ pub async fn handle_providers(cmd: ProvidersCommands, config: &mut Config) -> Re
             family,
             alias,
         } => {
-            let cat = parse_provider_category(&category)?;
-            let section = section_path(&AliasKind::Provider {
-                category: cat,
-                family,
-            });
+            let kind = parse_provider_family(&category, family)?;
+            let section = section_path(&kind);
             create_entry(config, &section, &alias)?;
             save(config).await
         }
@@ -509,13 +514,8 @@ pub async fn handle_providers(cmd: ProvidersCommands, config: &mut Config) -> Re
             from,
             to,
         } => {
-            let category = parse_provider_category(&category)?;
-            rename_config(
-                config,
-                &AliasKind::Provider { category, family },
-                &from,
-                &to,
-            )?;
+            let kind = parse_provider_family(&category, family)?;
+            rename_config(config, &kind, &from, &to)?;
             save(config).await
         }
         ProvidersCommands::Delete {
@@ -525,8 +525,7 @@ pub async fn handle_providers(cmd: ProvidersCommands, config: &mut Config) -> Re
             dry_run,
             yes,
         } => {
-            let category = parse_provider_category(&category)?;
-            let kind = AliasKind::Provider { category, family };
+            let kind = parse_provider_family(&category, family)?;
             delete_config(config, &kind, &alias, dry_run, yes)?;
             if yes && !dry_run {
                 save(config).await?;
@@ -1023,9 +1022,9 @@ mod tests {
         assert_eq!(
             section_path(&AliasKind::Provider {
                 category: ProviderCategory::Models,
-                family: "anthropic".to_string(),
+                family: "openai".to_string(),
             }),
-            "providers.models.anthropic"
+            "providers.models.openai"
         );
         assert_eq!(
             section_path(&AliasKind::Provider {

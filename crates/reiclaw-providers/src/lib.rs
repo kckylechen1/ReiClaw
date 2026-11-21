@@ -1,52 +1,27 @@
-#![allow(clippy::to_string_in_format_args)]
-//! ModelProvider subsystem for model inference backends.
+//! Model inference through the OpenAI Responses API.
 
-pub mod anthropic;
-pub mod auth;
-pub mod catalog;
-pub mod compatible;
 pub mod dispatch;
-pub mod factory;
-pub mod gemini;
 pub mod model_pin;
-pub mod models_dev;
 pub mod multimodal;
 pub mod openai;
-pub mod openai_codex;
-pub mod openrouter_catalog;
-pub mod pricing;
 pub mod reliable;
 pub mod router;
 pub(crate) mod stream_guard;
 pub mod traits;
 pub mod vision_override;
 
+mod responses;
+
 pub use dispatch::{ProviderDispatch, ProviderDispatchRef};
-
-mod request_payload;
-
-#[allow(unused_imports)]
 pub use traits::{
     ChatMessage, ChatRequest, ChatResponse, ConversationMessage, ModelProvider,
     ProviderCapabilityError, ToolCall, ToolResultMessage,
 };
 
+use reiclaw_config::providers::{reject_responses_wire_api, require_openai_model_provider};
 use reliable::{ReliableModelProvider, ReliableModelProviderEntry};
-use serde::Deserialize;
-use std::path::PathBuf;
 
 const MAX_API_ERROR_CHARS: usize = 500;
-const MINIMAX_INTL_BASE_URL: &str = "https://api.minimax.io/v1";
-/// MiniMax-published OAuth client_id (same one their portal uses).
-/// Operators with a custom OAuth app override via
-/// `[providers.models.minimax.<alias>] oauth_client_id = "..."`.
-const MINIMAX_OAUTH_DEFAULT_CLIENT_ID: &str = "78257093-7e40-4613-99e0-527b14b39113";
-const QWEN_CN_BASE_URL: &str = "https://dashscope.aliyuncs.com/compatible-mode/v1";
-const QWEN_OAUTH_BASE_FALLBACK_URL: &str = QWEN_CN_BASE_URL;
-const QWEN_OAUTH_TOKEN_ENDPOINT: &str = "https://chat.qwen.ai/api/v1/oauth2/token";
-const QWEN_OAUTH_PLACEHOLDER: &str = "qwen-oauth";
-const QWEN_OAUTH_DEFAULT_CLIENT_ID: &str = "f0304373b74a44d2b584a3fb70ca9e56";
-const QWEN_OAUTH_CREDENTIAL_FILE: &str = ".qwen/oauth_creds.json";
 
 pub(crate) fn extract_endpoint_host(url: &str) -> Option<String> {
     reqwest::Url::parse(url)
@@ -54,619 +29,55 @@ pub(crate) fn extract_endpoint_host(url: &str) -> Option<String> {
         .and_then(|parsed| parsed.host_str().map(str::to_string))
 }
 
-pub fn is_minimax_intl_alias(name: &str) -> bool {
-    matches!(
-        name,
-        "minimax"
-            | "minimax-intl"
-            | "minimax-io"
-            | "minimax-global"
-            | "minimax-oauth"
-            | "minimax-portal"
-            | "minimax-oauth-global"
-            | "minimax-portal-global"
-    )
-}
-pub fn is_minimax_cn_alias(name: &str) -> bool {
-    matches!(
-        name,
-        "minimax-cn" | "minimaxi" | "minimax-oauth-cn" | "minimax-portal-cn"
-    )
-}
-pub fn is_minimax_alias(name: &str) -> bool {
-    is_minimax_intl_alias(name) || is_minimax_cn_alias(name)
-}
-pub fn is_qwen_cn_alias(name: &str) -> bool {
-    matches!(name, "qwen" | "dashscope" | "qwen-cn" | "dashscope-cn")
-}
-
-pub fn is_qwen_intl_alias(name: &str) -> bool {
-    matches!(
-        name,
-        "qwen-intl" | "dashscope-intl" | "qwen-international" | "dashscope-international"
-    )
-}
-
-pub fn is_qwen_us_alias(name: &str) -> bool {
-    matches!(name, "qwen-us" | "dashscope-us")
-}
-
-pub fn is_qwen_oauth_alias(name: &str) -> bool {
-    matches!(name, "qwen-code" | "qwen-oauth" | "qwen_oauth")
-}
-
-pub fn is_bailian_alias(name: &str) -> bool {
-    matches!(name, "bailian" | "aliyun-bailian" | "aliyun")
-}
-
-pub fn is_qwen_alias(name: &str) -> bool {
-    is_qwen_cn_alias(name)
-        || is_qwen_intl_alias(name)
-        || is_qwen_us_alias(name)
-        || is_qwen_oauth_alias(name)
-}
-
-#[derive(Clone, Deserialize, Default)]
-pub(crate) struct QwenOauthCredentials {
-    #[serde(default)]
-    pub(crate) access_token: Option<String>,
-    #[serde(default)]
-    pub(crate) refresh_token: Option<String>,
-    #[serde(default)]
-    pub(crate) resource_url: Option<String>,
-    #[serde(default)]
-    pub(crate) expiry_date: Option<i64>,
-}
-
-impl std::fmt::Debug for QwenOauthCredentials {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        f.debug_struct("QwenOauthCredentials")
-            .field("resource_url", &self.resource_url)
-            .field("expiry_date", &self.expiry_date)
-            .finish_non_exhaustive()
-    }
-}
-
-#[derive(Debug, Deserialize)]
-struct QwenOauthTokenResponse {
-    #[serde(default)]
-    access_token: Option<String>,
-    #[serde(default)]
-    refresh_token: Option<String>,
-    #[serde(default)]
-    expires_in: Option<i64>,
-    #[serde(default)]
-    resource_url: Option<String>,
-    #[serde(default)]
-    error: Option<String>,
-    #[serde(default)]
-    error_description: Option<String>,
-}
-
-#[derive(Clone, Default)]
-pub(crate) struct QwenOauthProviderContext {
-    pub(crate) credential: Option<String>,
-    pub(crate) base_url: Option<String>,
-}
-
-impl std::fmt::Debug for QwenOauthProviderContext {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        f.debug_struct("QwenOauthProviderContext")
-            .field("base_url", &self.base_url)
-            .finish_non_exhaustive()
-    }
-}
-
-fn qwen_oauth_client_id() -> String {
-    QWEN_OAUTH_DEFAULT_CLIENT_ID.to_string()
-}
-
-fn qwen_oauth_credentials_file_path() -> Option<PathBuf> {
-    // OS path resolution; not a config override.
-    std::env::var_os("HOME")
-        .map(PathBuf::from)
-        .or_else(|| std::env::var_os("USERPROFILE").map(PathBuf::from))
-        .map(|home| home.join(QWEN_OAUTH_CREDENTIAL_FILE))
-}
-
-fn normalize_qwen_oauth_base_url(raw: &str) -> Option<String> {
-    let trimmed = raw.trim().trim_end_matches('/');
-    if trimmed.is_empty() {
-        return None;
-    }
-
-    let with_scheme = if trimmed.starts_with("http://") || trimmed.starts_with("https://") {
-        trimmed.to_string()
-    } else {
-        format!("https://{trimmed}")
-    };
-
-    let normalized = with_scheme.trim_end_matches('/').to_string();
-    if normalized.ends_with("/v1") {
-        Some(normalized)
-    } else {
-        Some(format!("{normalized}/v1"))
-    }
-}
-
-fn read_qwen_oauth_cached_credentials() -> Option<QwenOauthCredentials> {
-    let path = qwen_oauth_credentials_file_path()?;
-    let content = std::fs::read_to_string(path).ok()?;
-    serde_json::from_str::<QwenOauthCredentials>(&content).ok()
-}
-
-fn normalized_qwen_expiry_millis(raw: i64) -> i64 {
-    if raw < 10_000_000_000 {
-        raw.saturating_mul(1000)
-    } else {
-        raw
-    }
-}
-
-fn qwen_oauth_token_expired(credentials: &QwenOauthCredentials) -> bool {
-    let Some(expiry) = credentials.expiry_date else {
-        return false;
-    };
-
-    let expiry_millis = normalized_qwen_expiry_millis(expiry);
-    let now_millis = std::time::SystemTime::now()
-        .duration_since(std::time::UNIX_EPOCH)
-        .ok()
-        .and_then(|duration| i64::try_from(duration.as_millis()).ok())
-        .unwrap_or(i64::MAX);
-
-    expiry_millis <= now_millis.saturating_add(30_000)
-}
-
-pub(crate) fn refresh_qwen_oauth_access_token(
-    refresh_token: &str,
-    client_id: &str,
-) -> anyhow::Result<QwenOauthCredentials> {
-    let client = reqwest::blocking::Client::builder()
-        .timeout(std::time::Duration::from_secs(15))
-        .connect_timeout(std::time::Duration::from_secs(5))
-        .build()
-        .unwrap_or_else(|_| reqwest::blocking::Client::new());
-
-    let response = client
-        .post(QWEN_OAUTH_TOKEN_ENDPOINT)
-        .header("Content-Type", "application/x-www-form-urlencoded")
-        .header("Accept", "application/json")
-        .form(&[
-            ("grant_type", "refresh_token"),
-            ("refresh_token", refresh_token),
-            ("client_id", client_id),
-        ])
-        .send()
-        .map_err(|error| {
-            ::reiclaw_log::record!(
-                ERROR,
-                ::reiclaw_log::Event::new(module_path!(), ::reiclaw_log::Action::Fail)
-                    .with_outcome(::reiclaw_log::EventOutcome::Failure)
-                    .with_attrs(::serde_json::json!({
-                        "oauth_provider": "qwen",
-                        "phase": "refresh_request",
-                        "error": format!("{}", error),
-                    })),
-                "qwen: OAuth refresh request failed"
-            );
-            anyhow::Error::msg(format!("OAuth refresh request failed: {error}"))
-        })?;
-
-    let status = response.status();
-    let body = response
-        .text()
-        .unwrap_or_else(|_| "<failed to read Qwen OAuth response body>".to_string());
-
-    let parsed = serde_json::from_str::<QwenOauthTokenResponse>(&body).ok();
-
-    if !status.is_success() {
-        let detail = parsed
-            .as_ref()
-            .and_then(|payload| payload.error_description.as_deref())
-            .or_else(|| parsed.as_ref().and_then(|payload| payload.error.as_deref()))
-            .filter(|msg| !msg.trim().is_empty())
-            .unwrap_or(body.as_str());
-        anyhow::bail!("OAuth refresh failed (HTTP {status}): {detail}");
-    }
-
-    let payload = parsed.ok_or_else(|| {
-        ::reiclaw_log::record!(
-            ERROR,
-            ::reiclaw_log::Event::new(module_path!(), ::reiclaw_log::Action::Fail)
-                .with_outcome(::reiclaw_log::EventOutcome::Failure)
-                .with_attrs(::serde_json::json!({
-                    "oauth_provider": "qwen",
-                    "phase": "refresh_parse",
-                })),
-            "qwen: OAuth refresh response is not JSON"
-        );
-        anyhow::Error::msg("OAuth refresh response is not JSON")
-    })?;
-
-    if let Some(error_code) = payload
-        .error
-        .as_deref()
-        .filter(|value| !value.trim().is_empty())
-    {
-        let detail = payload.error_description.as_deref().unwrap_or(error_code);
-        anyhow::bail!("OAuth refresh failed: {detail}");
-    }
-
-    let access_token = payload
-        .access_token
-        .as_deref()
-        .map(str::trim)
-        .filter(|token| !token.is_empty())
-        .ok_or_else(|| {
-            ::reiclaw_log::record!(
-                ERROR,
-                ::reiclaw_log::Event::new(module_path!(), ::reiclaw_log::Action::Fail)
-                    .with_outcome(::reiclaw_log::EventOutcome::Failure)
-                    .with_attrs(::serde_json::json!({
-                        "oauth_provider": "qwen",
-                        "field": "access_token",
-                    })),
-                "qwen: OAuth refresh response missing access_token"
-            );
-            anyhow::Error::msg("OAuth refresh response missing access_token")
-        })?
-        .to_string();
-
-    let expiry_date = payload.expires_in.and_then(|seconds| {
-        let now_secs = std::time::SystemTime::now()
-            .duration_since(std::time::UNIX_EPOCH)
-            .ok()
-            .and_then(|duration| i64::try_from(duration.as_secs()).ok())?;
-        now_secs
-            .checked_add(seconds)
-            .and_then(|unix_secs| unix_secs.checked_mul(1000))
-    });
-
-    Ok(QwenOauthCredentials {
-        access_token: Some(access_token),
-        refresh_token: payload
-            .refresh_token
-            .as_deref()
-            .map(str::trim)
-            .filter(|value| !value.is_empty())
-            .map(ToString::to_string),
-        resource_url: payload
-            .resource_url
-            .as_deref()
-            .map(str::trim)
-            .filter(|value| !value.is_empty())
-            .map(ToString::to_string),
-        expiry_date,
-    })
-}
-
-#[derive(Debug, Deserialize)]
-struct MinimaxOauthRefreshResponse {
-    #[serde(default)]
-    status: Option<String>,
-    #[serde(default)]
-    access_token: Option<String>,
-    #[serde(default)]
-    base_resp: Option<MinimaxOauthBaseResponse>,
-}
-
-#[derive(Debug, Deserialize)]
-struct MinimaxOauthBaseResponse {
-    #[serde(default)]
-    status_msg: Option<String>,
-}
-
-/// Exchange a long-lived MiniMax `oauth_refresh_token` for a short-lived
-/// access token. Synchronous (`reqwest::blocking`) by design — this runs
-/// during provider construction, before any async runtime is necessarily
-/// available; matches the pre-deletion behavior.
-pub(crate) fn refresh_minimax_oauth_access_token(
-    refresh_token: &str,
-    client_id: &str,
-    region: reiclaw_config::schema::MinimaxEndpoint,
-) -> anyhow::Result<String> {
-    let endpoint = region.oauth_token_endpoint();
-    let client = reqwest::blocking::Client::builder()
-        .timeout(std::time::Duration::from_secs(15))
-        .connect_timeout(std::time::Duration::from_secs(5))
-        .build()
-        .unwrap_or_else(|_| reqwest::blocking::Client::new());
-
-    let response = client
-        .post(endpoint)
-        .header("Content-Type", "application/x-www-form-urlencoded")
-        .header("Accept", "application/json")
-        .form(&[
-            ("grant_type", "refresh_token"),
-            ("refresh_token", refresh_token),
-            ("client_id", client_id),
-        ])
-        .send()
-        .map_err(|error| {
-            ::reiclaw_log::record!(
-                ERROR,
-                ::reiclaw_log::Event::new(module_path!(), ::reiclaw_log::Action::Fail)
-                    .with_outcome(::reiclaw_log::EventOutcome::Failure)
-                    .with_attrs(::serde_json::json!({
-                        "oauth_provider": "minimax",
-                        "phase": "refresh_request",
-                        "error": format!("{}", error),
-                    })),
-                "minimax: OAuth refresh request failed"
-            );
-            anyhow::Error::msg(format!("MiniMax OAuth refresh request failed: {error}"))
-        })?;
-
-    let status = response.status();
-    let body = response
-        .text()
-        .unwrap_or_else(|_| "<failed to read MiniMax OAuth response body>".to_string());
-    let parsed = serde_json::from_str::<MinimaxOauthRefreshResponse>(&body).ok();
-
-    if !status.is_success() {
-        let detail = parsed
-            .as_ref()
-            .and_then(|payload| payload.base_resp.as_ref())
-            .and_then(|base| base.status_msg.as_deref())
-            .filter(|msg| !msg.trim().is_empty())
-            .unwrap_or(body.as_str());
-        anyhow::bail!("MiniMax OAuth refresh failed (HTTP {status}): {detail}");
-    }
-
-    if let Some(payload) = parsed {
-        if let Some(status_text) = payload.status.as_deref()
-            && !status_text.eq_ignore_ascii_case("success")
-        {
-            let detail = payload
-                .base_resp
-                .as_ref()
-                .and_then(|base| base.status_msg.as_deref())
-                .unwrap_or(status_text);
-            anyhow::bail!("MiniMax OAuth refresh failed: {detail}");
-        }
-        if let Some(token) = payload
-            .access_token
-            .as_deref()
-            .map(str::trim)
-            .filter(|token| !token.is_empty())
-        {
-            return Ok(token.to_string());
-        }
-    }
-    anyhow::bail!("MiniMax OAuth refresh response missing access_token")
-}
-
-fn resolve_qwen_oauth_context(credential_override: Option<&str>) -> QwenOauthProviderContext {
-    let override_value = credential_override
-        .map(str::trim)
-        .filter(|value| !value.is_empty());
-    let placeholder_requested = override_value
-        .map(|value| value.eq_ignore_ascii_case(QWEN_OAUTH_PLACEHOLDER))
-        .unwrap_or(false);
-
-    if let Some(explicit) = override_value
-        && !placeholder_requested
-    {
-        return QwenOauthProviderContext {
-            credential: Some(explicit.to_string()),
-            base_url: None,
-        };
-    }
-
-    // Qwen OAuth: file cache at `~/.qwen/oauth_creds.json` (populated by the
-    // upstream Qwen CLI's `qwen login` flow) is the ambient source. Direct
-    // injection goes through the schema-mirror grammar.
-    let mut cached = read_qwen_oauth_cached_credentials();
-
-    let should_refresh = cached.as_ref().is_some_and(qwen_oauth_token_expired)
-        || cached
-            .as_ref()
-            .and_then(|credentials| credentials.access_token.as_deref())
-            .is_none_or(|value| value.trim().is_empty());
-
-    if should_refresh
-        && let Some(refresh_token) = cached
-            .as_ref()
-            .and_then(|credentials| credentials.refresh_token.clone())
-    {
-        match refresh_qwen_oauth_access_token(&refresh_token, &qwen_oauth_client_id()) {
-            Ok(refreshed) => {
-                cached = Some(refreshed);
-            }
-            Err(error) => {
-                ::reiclaw_log::record!(
-                    WARN,
-                    ::reiclaw_log::Event::new(module_path!(), ::reiclaw_log::Action::Note)
-                        .with_outcome(::reiclaw_log::EventOutcome::Unknown)
-                        .with_attrs(::serde_json::json!({"error": format!("{}", error)})),
-                    "OAuth refresh failed"
-                );
-            }
-        }
-    }
-
-    let credential = cached
-        .as_ref()
-        .and_then(|credentials| credentials.access_token.as_deref())
-        .map(str::trim)
-        .filter(|value| !value.is_empty())
-        .map(ToString::to_string);
-
-    let base_url = cached
-        .as_ref()
-        .and_then(|credentials| credentials.resource_url.as_deref())
-        .and_then(normalize_qwen_oauth_base_url);
-
-    QwenOauthProviderContext {
-        credential,
-        base_url,
-    }
-}
-
-#[derive(Debug, Clone)]
+#[derive(Debug, Clone, Default)]
 pub struct ModelProviderRuntimeOptions {
-    pub auth_profile_override: Option<String>,
-    /// Explicit provider implementation from `[providers.models.<family>.<alias>].kind`.
-    /// When unset, provider resolution falls back to the configured family.
     pub provider_kind: Option<String>,
     pub provider_api_url: Option<String>,
-    pub zeroclaw_dir: Option<PathBuf>,
-    pub secrets_encrypt: bool,
-    pub reasoning_enabled: Option<bool>,
     pub reasoning_effort: Option<String>,
-    /// Send `reasoning_effort` to every model, not only OpenAI reasoning
-    /// models. From `ModelProviderConfig::reasoning_effort_passthrough`.
-    pub reasoning_effort_passthrough: bool,
-    /// HTTP request timeout in seconds for LLM model_provider API calls.
-    /// `None` uses the model_provider's built-in default (120s for compatible model_providers).
     pub provider_timeout_secs: Option<u64>,
-    /// Extra HTTP headers to include in model_provider API requests.
     pub extra_headers: std::collections::HashMap<String, String>,
-    /// Custom API path suffix for OpenAI-compatible model_providers
-    /// (e.g. "/v2/generate" instead of the default "/chat/completions").
-    pub api_path: Option<String>,
-    /// Maximum output tokens for LLM model_provider API requests.
-    /// `None` uses the model_provider's built-in default.
     pub provider_max_tokens: Option<u32>,
-    /// When true, system messages are merged into the first user message before
-    /// sending. Propagated from `ModelProviderConfig::merge_system_into_user`.
-    pub merge_system_into_user: bool,
-    /// Extra JSON parameters merged into API request bodies at the top level.
-    /// Propagated from `ModelProviderConfig::provider_extra`.
-    pub provider_extra: Option<serde_json::Value>,
-    /// When `Some(false)`, strip assistant reasoning fields from outbound
-    /// history replay. `None` honours provider default.
-    pub replay_assistant_reasoning: Option<bool>,
-    /// When set, the provider is asked to use its native tool-calling
-    /// schema instead of OpenAI-compat tool calls. Generic across families.
-    pub native_tools: Option<bool>,
-    /// Wire protocol to use for this provider.
-    /// `Some("responses")` routes the provider through the OpenResponses
-    /// `/v1/responses` API instead of chat_completions.  `None` uses the
-    /// provider's built-in default (chat_completions for most providers).
     pub wire_api: Option<String>,
-    /// Enable or disable chain-of-thought thinking. Forwarded as
-    /// `enable_thinking` in the request body. `None` lets the model decide.
-    pub think: Option<bool>,
-    /// Override the provider's vision (image input) capability. `None` keeps
-    /// the provider family's built-in default; `Some(false)` marks a text-only
-    /// model served by a vision-capable family as non-vision. Mapped from
-    /// `ModelProviderConfig::vision`.
     pub vision: Option<bool>,
-    /// Forwarded verbatim as a top-level `chat_template_kwargs` object in the
-    /// request body for OpenAI-compatible providers (folded into `extra_body`
-    /// by `apply_compat_options`). Consumed by chat-template-aware backends
-    /// such as vLLM, SGLang, and llama.cpp.
-    pub chat_template_kwargs: Option<serde_json::Value>,
-    /// Path to a custom CA certificate file for TLS connections.
     pub tls_ca_cert_path: Option<String>,
-}
-
-impl Default for ModelProviderRuntimeOptions {
-    fn default() -> Self {
-        Self {
-            auth_profile_override: None,
-            provider_kind: None,
-            provider_api_url: None,
-            zeroclaw_dir: None,
-            secrets_encrypt: true,
-            reasoning_enabled: None,
-            reasoning_effort: None,
-            reasoning_effort_passthrough: false,
-            provider_timeout_secs: None,
-            extra_headers: std::collections::HashMap::new(),
-            api_path: None,
-            provider_max_tokens: None,
-            merge_system_into_user: false,
-            provider_extra: None,
-            replay_assistant_reasoning: None,
-            native_tools: None,
-            wire_api: None,
-            think: None,
-            vision: None,
-            chat_template_kwargs: None,
-            tls_ca_cert_path: None,
-        }
-    }
 }
 
 pub fn model_provider_runtime_options_from_model_provider_entry(
     config: &reiclaw_config::schema::Config,
     entry: Option<&reiclaw_config::schema::ModelProviderConfig>,
 ) -> ModelProviderRuntimeOptions {
-    let tls_ca_cert_path = entry.and_then(|e| e.tls_ca_cert_path.clone());
-
     ModelProviderRuntimeOptions {
-        auth_profile_override: None,
-        provider_kind: entry.and_then(|e| {
-            e.kind
-                .as_deref()
-                .map(str::trim)
-                .filter(|value| !value.is_empty())
-                .map(ToString::to_string)
-        }),
+        provider_kind: entry.and_then(|e| e.kind.clone()),
         provider_api_url: entry.and_then(|e| e.uri.clone()),
-        zeroclaw_dir: config.config_path.parent().map(PathBuf::from),
-        secrets_encrypt: config.secrets.encrypt,
-        reasoning_enabled: config.runtime.reasoning_enabled,
         reasoning_effort: config.runtime.reasoning_effort.clone(),
-        reasoning_effort_passthrough: entry.is_some_and(|e| e.reasoning_effort_passthrough),
-        provider_timeout_secs: Some(entry.and_then(|e| e.timeout_secs).unwrap_or(120)),
+        provider_timeout_secs: entry.and_then(|e| e.timeout_secs),
         extra_headers: entry.map(|e| e.extra_headers.clone()).unwrap_or_default(),
-        api_path: None,
         provider_max_tokens: entry.and_then(|e| e.max_tokens),
-        merge_system_into_user: entry.is_some_and(|e| e.merge_system_into_user),
-        provider_extra: entry.and_then(|e| e.provider_extra.clone()),
-        replay_assistant_reasoning: entry.and_then(|e| e.replay_assistant_reasoning),
-        native_tools: entry.and_then(|e| e.native_tools),
         wire_api: entry.and_then(|e| e.wire_api.map(|w| w.as_str().to_string())),
-        think: entry.and_then(|e| e.think),
         vision: entry.and_then(|e| e.vision),
-        chat_template_kwargs: entry.and_then(|e| e.chat_template_kwargs.clone()),
-        tls_ca_cert_path,
+        tls_ca_cert_path: entry.and_then(|e| e.tls_ca_cert_path.clone()),
     }
 }
 
-/// Resolve `ModelProviderRuntimeOptions` from an agent's `model_provider` alias
-/// (`"<type>.<alias>"`). Returns safe defaults when the agent alias doesn't
-/// exist, doesn't have a `model_provider` set, or names a non-existent entry.
 pub fn provider_runtime_options_for_agent(
     config: &reiclaw_config::schema::Config,
     agent_alias: &str,
 ) -> ModelProviderRuntimeOptions {
-    let entry = config.model_provider_for_agent(agent_alias);
-    let mut options = model_provider_runtime_options_from_model_provider_entry(config, entry);
-
-    if let Some(agent) = config.agents.get(agent_alias)
-        && let Some((family, alias)) = agent.model_provider.split_once('.')
-    {
-        // Multi-endpoint families: pre-resolve the URI via the centralized
-        // `resolved_endpoint_uri` dispatch (driven by
-        // `for_each_model_provider_slot!`). Operator-set `base.uri` already
-        // populated above wins over the family default.
-        if options.provider_api_url.is_none()
-            && let Some(uri) = config.providers.models.resolved_endpoint_uri(family, alias)
-        {
-            options.provider_api_url = Some(uri.to_string());
-        }
-    }
-
-    options
+    model_provider_runtime_options_from_model_provider_entry(
+        config,
+        config.model_provider_for_agent(agent_alias),
+    )
 }
+
 pub fn provider_runtime_options_for_alias(
     config: &reiclaw_config::schema::Config,
     family: &str,
     alias: &str,
 ) -> ModelProviderRuntimeOptions {
-    let entry = config.providers.models.find(family, alias);
-    let mut options = model_provider_runtime_options_from_model_provider_entry(config, entry);
-    if options.provider_api_url.is_none()
-        && let Some(uri) = config.providers.models.resolved_endpoint_uri(family, alias)
-    {
-        options.provider_api_url = Some(uri.to_string());
-    }
-    options
+    model_provider_runtime_options_from_model_provider_entry(
+        config,
+        config.providers.models.find(family, alias),
+    )
 }
 
 /// Options to use when building a provider from a name that may be either
@@ -846,55 +257,52 @@ pub async fn api_error(model_provider: &str, response: reqwest::Response) -> any
 /// Resolve API key for a model_provider from config and environment variables.
 /// Return the typed-alias `api_key` field, trimmed. Env-var overrides land on
 /// the field at config-load via the `REI_*` schema-mirror grammar.
-fn resolve_model_provider_credential(
-    _name: &str,
-    credential_override: Option<&str>,
-) -> Option<String> {
-    credential_override
-        .map(str::trim)
-        .filter(|value| !value.is_empty())
-        .map(ToString::to_string)
+fn nonempty(value: Option<&str>) -> Option<&str> {
+    value.map(str::trim).filter(|value| !value.is_empty())
 }
 
-/// Single source of truth for `(key_prefix, canonical_model_provider_family)`
-/// pairs used by `check_api_key_prefix`. Order matters: longer prefixes
-/// must come before shorter ones that share a head (`sk-ant-` and `sk-or-`
-/// must precede `sk-`).
-const KEY_PREFIX_MODEL_PROVIDERS: &[(&str, &str)] = &[
+// Guard the official endpoint against recognizable credentials belonging to
+// other vendors. Custom routers require their own explicit credential.
+const RETIRED_KEY_PREFIXES: &[(&str, &str)] = &[
     ("sk-ant-", "anthropic"),
-    ("sk-", "openai"),
+    ("sk-or-", "openrouter"),
     ("gsk_", "groq"),
-    // Credential-safety tombstones: retiring an adapter must not allow its
-    // vendor's key to be sent to a recognized retained provider. These names
-    // are all in `RETIRED_MODEL_PROVIDERS`, so a mismatch fails with the
-    // retirement error instead of forwarding the key.
+    ("AIza", "gemini"),
     ("pplx-", "perplexity"),
     ("xai-", "xai"),
     ("nvapi-", "nvidia"),
     ("KEY-", "telnyx"),
 ];
 
-fn check_api_key_prefix(model_provider_name: &str, key: &str) -> Option<&'static str> {
-    let likely_model_provider = KEY_PREFIX_MODEL_PROVIDERS
-        .iter()
-        .find(|(prefix, _)| key.starts_with(prefix))
-        .map(|(_, name)| *name)?;
-
-    // Only flag mismatch when the configured `model_provider_name` is itself
-    // one whose key format we recognize — derived from the same table so the
-    // gate can never drift from the prefix detection above.
-    let recognized = KEY_PREFIX_MODEL_PROVIDERS
-        .iter()
-        .any(|(_, name)| *name == model_provider_name);
-    if !recognized {
-        return None;
+fn validate_endpoint_credential(url: Option<&str>, key: Option<&str>) -> anyhow::Result<()> {
+    if let Some(url) = url {
+        openai::validate_endpoint(url)?;
     }
+    if url.is_none_or(openai::is_official_endpoint)
+        && let Some(key) = key
+        && let Some((_, provider)) = RETIRED_KEY_PREFIXES
+            .iter()
+            .find(|(prefix, _)| key.starts_with(prefix))
+    {
+        anyhow::bail!(
+            "The configured credential looks like a {provider} API key. Set an OpenAI API key for the official endpoint, or configure the router URL and its key on [providers.models.openai.<alias>]."
+        );
+    }
+    Ok(())
+}
 
-    if model_provider_name == likely_model_provider {
-        None
+/// Whether a configured alias has a usable endpoint and its required credential.
+pub fn model_provider_endpoint_ready(entry: &reiclaw_config::schema::ModelProviderConfig) -> bool {
+    let url = nonempty(entry.uri.as_deref());
+    let explicit_key = nonempty(entry.api_key.as_deref());
+    let ambient_key = if explicit_key.is_none() && url.is_none() {
+        std::env::var("OPENAI_API_KEY").ok()
     } else {
-        Some(likely_model_provider)
-    }
+        None
+    };
+    let key = explicit_key.or_else(|| nonempty(ambient_key.as_deref()));
+    validate_endpoint_credential(url, key).is_ok()
+        && (key.is_some() || url.is_some_and(|url| !openai::is_official_endpoint(url)))
 }
 
 pub fn create_model_provider(
@@ -960,61 +368,6 @@ pub fn create_model_provider_for_alias_with_url(
     create_model_provider_inner(Some(config), family, alias, api_key, api_url, options)
 }
 
-#[must_use]
-pub fn canonicalize_v2_model_provider_name(name: &str) -> &str {
-    match name {
-        // Vendor-canonical synonyms.
-        "google" | "google-gemini" => "gemini",
-        "lm-studio" => "lmstudio",
-        "ovhcloud" => "ovh",
-        "llama.cpp" => "llamacpp",
-        // Qwen / DashScope / Bailian.
-        "qwen-cn"
-        | "qwen-intl"
-        | "qwen-us"
-        | "qwen-international"
-        | "qwen-code"
-        | "qwen-oauth"
-        | "qwen_oauth"
-        | "dashscope"
-        | "dashscope-cn"
-        | "dashscope-intl"
-        | "dashscope-us"
-        | "dashscope-international"
-        | "bailian"
-        | "aliyun-bailian"
-        | "aliyun" => "qwen",
-        // Minimax (cn/intl + oauth).
-        "minimax-intl"
-        | "minimax-io"
-        | "minimax-global"
-        | "minimax-portal"
-        | "minimax-portal-global"
-        | "minimax-cn"
-        | "minimaxi"
-        | "minimax-portal-cn"
-        | "minimax-oauth"
-        | "minimax-oauth-global"
-        | "minimax-oauth-cn" => "minimax",
-        // Anthropic special folds.
-        "claude-code" | "anthropic-custom" => "anthropic",
-        // Already canonical, or a name the factory's match arms can reject
-        // with a useful error.
-        _ => name,
-    }
-}
-
-fn split_v2_colon_url(name: &str) -> (&str, Option<&str>) {
-    if let Some(idx) = name.find(':') {
-        let (prefix, rest) = name.split_at(idx);
-        let url = &rest[1..];
-        if url.starts_with("http://") || url.starts_with("https://") {
-            return (prefix, Some(url));
-        }
-    }
-    (name, None)
-}
-
 /// Apply the config `vision` capability override to a freshly-constructed
 /// provider. Called at every exit of `create_model_provider_inner`, the single
 /// construction choke point every subsystem funnels through, so the override
@@ -1033,97 +386,55 @@ fn apply_vision_override(
     }
 }
 
-/// Factory: create model_provider with optional base URL and runtime options.
-#[allow(clippy::too_many_lines)]
 fn create_model_provider_inner(
     config: Option<&reiclaw_config::schema::Config>,
-    raw_name: &str,
+    name: &str,
     alias: &str,
     api_key: Option<&str>,
     api_url: Option<&str>,
     options: &ModelProviderRuntimeOptions,
 ) -> anyhow::Result<Box<dyn ModelProvider>> {
-    reiclaw_config::providers::reject_retired_model_provider(raw_name)?;
-    if let Some(kind) = options.provider_kind.as_deref() {
-        reiclaw_config::providers::reject_retired_model_provider(kind.trim())?;
+    require_openai_model_provider(name)?;
+    if let Some(kind) = nonempty(options.provider_kind.as_deref()) {
+        require_openai_model_provider(kind)?;
     }
-    if let Some(idx) = raw_name.find(':') {
-        let prefix = &raw_name[..idx];
-        let url = raw_name[idx + 1..].trim();
-        if matches!(prefix, "custom" | "anthropic-custom")
-            && (url.is_empty() || !(url.starts_with("http://") || url.starts_with("https://")))
-        {
-            anyhow::bail!(
-                "Custom model_provider `{prefix}:<url>` requires a URL beginning with http:// or https://. \
-                 Set `[providers.models.custom.<alias>] uri = \"https://your-api.com\"` or pass a valid URL."
-            );
-        }
+    if let Some(wire) = options.wire_api.as_deref() {
+        reject_responses_wire_api(wire)?;
     }
-    let (split_name, split_url) = split_v2_colon_url(raw_name);
-    let api_url = api_url.or(split_url);
-    let name = canonicalize_v2_model_provider_name(split_name);
-    let provider_kind = options
-        .provider_kind
-        .as_deref()
-        .map(str::trim)
-        .filter(|value| !value.is_empty())
-        .map(canonicalize_v2_model_provider_name)
-        .unwrap_or(name);
-
-    // V2 spelled OpenAI Codex as `openai-codex` / `openai_codex` / `codex`.
-    // V3 dispatches via `requires_openai_auth = true` on the typed alias, but
-    // factory callers that pass the legacy spelling expect a working
-    // construction here.
-    if matches!(provider_kind, "openai-codex" | "openai_codex" | "codex") {
-        return Ok(apply_vision_override(
-            Box::new(openai_codex::OpenAiCodexModelProvider::new(
-                alias, options, api_key,
-            )?),
-            options.vision,
-        ));
+    let entry = config.and_then(|cfg| cfg.providers.models.find(name, alias));
+    if let Some(entry) = entry {
+        reiclaw_config::providers::validate_responses_entry(entry)?;
     }
-    let resolved_credential = resolve_model_provider_credential(provider_kind, api_key)
-        .map(|v| String::from_utf8(v.into_bytes()).unwrap_or_default());
-    #[allow(clippy::option_as_ref_deref)]
-    let key = resolved_credential.as_ref().map(String::as_str);
-
-    // Pre-flight: catch obvious API-key / model_provider mismatches early.
-    if let Some(key_value) = key {
-        let is_custom =
-            provider_kind.starts_with("custom:") || provider_kind.starts_with("anthropic-custom:");
-        let has_custom_url = api_url.map(str::trim).filter(|u| !u.is_empty()).is_some();
-        if !is_custom
-            && !has_custom_url
-            && let Some(likely_model_provider) = check_api_key_prefix(provider_kind, key_value)
-        {
-            reiclaw_config::providers::reject_retired_model_provider(likely_model_provider)?;
-            let visible = &key_value[..key_value.len().min(8)];
-            anyhow::bail!(
-                "API key prefix mismatch: key \"{visible}...\" looks like a \
-                     {likely_model_provider} key, but model_provider \"{provider_kind}\" is selected. \
-                     Set the correct provider-specific env var or use `-p {likely_model_provider}`."
-            );
-        }
+    let url = nonempty(api_url)
+        .or_else(|| nonempty(options.provider_api_url.as_deref()))
+        .or_else(|| entry.and_then(|e| nonempty(e.uri.as_deref())));
+    let explicit_key =
+        nonempty(api_key).or_else(|| entry.and_then(|e| nonempty(e.api_key.as_deref())));
+    let ambient_key = if explicit_key.is_none() && url.is_none() {
+        std::env::var("OPENAI_API_KEY").ok()
+    } else {
+        None
+    };
+    let key = explicit_key.or_else(|| nonempty(ambient_key.as_deref()));
+    validate_endpoint_credential(url, key)?;
+    let mut builder = openai::OpenAiResponsesModelProvider::builder(alias)
+        .credential(key)
+        .max_tokens(options.provider_max_tokens)
+        .reasoning_effort(options.reasoning_effort.clone())
+        .extra_headers(options.extra_headers.clone());
+    if let Some(url) = url {
+        builder = builder.api_url(url);
     }
-
-    // Resolve the effective endpoint URL for the dispatch arms below.
-    // Precedence: `api_url` parameter (operator-set base.uri), then
-    // `options.provider_api_url` (pre-resolved family endpoint URI from the
-    // typed alias's `*Endpoint::uri()` for multi-endpoint families).
-    let resolved_url: Option<&str> =
-        api_url
-            .map(str::trim)
-            .filter(|v| !v.is_empty())
-            .or_else(|| {
-                options
-                    .provider_api_url
-                    .as_deref()
-                    .map(str::trim)
-                    .filter(|v| !v.is_empty())
-            });
-
-    factory::dispatch_family_factory(config, provider_kind, alias, key, resolved_url, options)
-        .map(|provider| apply_vision_override(provider, options.vision))
+    if let Some(timeout) = options.provider_timeout_secs {
+        builder = builder.timeout_secs(timeout);
+    }
+    if let Some(path) = options.tls_ca_cert_path.as_deref() {
+        builder = builder.tls_ca_cert_path(path)?;
+    }
+    Ok(apply_vision_override(
+        Box::new(builder.build()),
+        options.vision,
+    ))
 }
 
 pub fn create_resilient_model_provider_with_options(
@@ -1149,8 +460,7 @@ pub fn create_resilient_model_provider_with_options(
 
 /// Wrap the primary model_provider in a retry/backoff harness with full
 /// alias context. Production callers (gateway, orchestrator) use this so
-/// the dispatch sees the typed alias config and routes Codex/Gemini
-/// extras correctly.
+/// the factory sees the endpoint and credential for the configured alias.
 pub fn create_resilient_model_provider_for_alias(
     config: &reiclaw_config::schema::Config,
     family: &str,
@@ -1283,6 +593,7 @@ fn append_fallback_chain(
     }
     for fallback_ref in refs {
         let raw = fallback_ref.as_str().trim();
+        reiclaw_config::providers::reject_retired_model_provider(raw)?;
         if raw.is_empty() {
             continue;
         }
@@ -1309,18 +620,10 @@ fn append_fallback_chain(
         }
 
         let opts = provider_runtime_options_for_alias(config, family, &alias);
-        if !factory::fallback_auth_ready_for_alias(
-            config,
-            family,
-            &alias,
-            entry.api_key.as_deref(),
-            &opts,
-        ) {
+        if nonempty(entry.api_key.as_deref()).is_none() {
             let profile = format!("[providers.models.{family}.{alias}]");
             anyhow::bail!(
-                "Fallback provider `{raw}` resolved to `{resolved}` ({profile}) but no \
-                 profile-resolved credential exists. Set `api_key` on {profile}, configure \
-                 the alias's external auth flow, or remove it from `fallback`."
+                "Fallback provider `{raw}` resolved to `{resolved}` ({profile}) but no                  profile-resolved credential exists. Set `api_key` on {profile} or remove it from `fallback`."
             );
         }
 
@@ -1376,9 +679,8 @@ pub struct ResolvedModelProviderRef {
     pub model: Option<String>,
 }
 
-/// Build a **bare** (non-resilient) provider named by `name` - a bare family
-/// (`"llamacpp"`), a dotted alias (`"llamacpp.text_model"`), or a `custom:<url>`
-/// ref - resolving its alias-specific runtime options from `config`: the
+/// Build a non-resilient provider by family (`"openai"`) or configured alias
+/// (`"openai.text_model"`), resolving alias-specific options from `config`: the
 /// `vision` capability override, the endpoint URI, and per-alias credentials
 /// from `[providers.models.<family>.<alias>]`.
 ///
@@ -1397,27 +699,14 @@ pub fn create_model_provider_from_ref(
 
 /// Resolve a provider reference and its alias-owned model as one materialized
 /// view. Callers may apply their own explicit model override after resolution;
-/// when the reference is bare or URL-based, `model` is `None`.
+/// when the reference is bare, `model` is `None`.
 pub fn create_model_provider_from_ref_with_model(
     config: &reiclaw_config::schema::Config,
     name: &str,
 ) -> anyhow::Result<ResolvedModelProviderRef> {
-    // A dotted `<family>.<alias>` that names a REAL configured entry resolves
-    // through the alias factory (honoring the alias's `vision` override, endpoint
-    // URI and credentials). Two exclusions keep the intact name flowing to the
-    // factory instead:
-    //   * a `custom:<url>` / `anthropic-custom:<url>` colon ref whose host carries
-    //     dots (the pre-dot segment holds the scheme colon, e.g. `custom:https://api`
-    //     from `custom:https://api.example.com/v1`) - splitting would truncate it;
-    //   * a dotted ref to a NON-existent alias - splitting it and building the bare
-    //     family would silently fall OPEN to a family-default provider (e.g. a
-    //     typoed `vision_model_provider = "llamacpp.typo"` would route images to a
-    //     default llama.cpp instead of erroring).
-    // In both cases the intact name reaches `create_model_provider_inner`, which
-    // applies family defaults or errors on an unknown provider - keeping a bad ref
-    // fail-closed, exactly as the legacy `create_model_provider(vp, None)` did.
+    // Resolve an explicitly configured alias or let the bare-family factory
+    // reject the intact reference. A missing alias must never use the default endpoint.
     if let Some((family, alias)) = name.split_once('.')
-        && !family.contains(':')
         && let Some(entry) = config.providers.models.find(family, alias)
     {
         let options = provider_runtime_options_for_alias(config, family, alias);
@@ -1460,6 +749,14 @@ fn create_resilient_model_provider_from_ref_with_model_override(
     options: &ModelProviderRuntimeOptions,
     primary_model_override: Option<&str>,
 ) -> anyhow::Result<Box<dyn ModelProvider>> {
+    reiclaw_config::providers::reject_retired_model_provider(name)?;
+    if let Some((family, alias)) = name.split_once('.') {
+        require_openai_model_provider(family)?;
+        anyhow::ensure!(
+            config.providers.models.find(family, alias).is_some(),
+            "Model provider alias is not configured. Add it under [providers.models.openai.<alias>]."
+        );
+    }
     match name.split_once('.') {
         Some((family, alias)) => create_resilient_model_provider_for_alias_with_model_override(
             config,
@@ -1517,6 +814,7 @@ pub fn create_routed_model_provider_with_options(
     // upstream for the owning agent).
     let mut model_providers: Vec<(String, Box<dyn ModelProvider>)> = Vec::new();
     for name in &needed {
+        reiclaw_config::providers::reject_retired_model_provider(name)?;
         let is_primary = name == primary_name;
         let routed_credential = model_routes
             .iter()
@@ -1587,248 +885,72 @@ pub fn create_routed_model_provider_with_options(
     )))
 }
 
-/// Information about a supported model model_provider for display purposes.
+/// A built-in model provider available to setup and provider listing.
 pub struct ModelProviderInfo {
-    /// Canonical name used in config (e.g. `"openrouter"`)
     pub name: &'static str,
-    /// Human-readable display name
     pub display_name: &'static str,
-    /// Whether the model model_provider runs locally (no API key required)
     pub local: bool,
-    /// Registry category, the grouping the CLI list and docs render by.
     pub category: ModelProviderCategory,
 }
 
-/// Grouping for a model-provider family. Replaces the section comments in the
-/// registry list with data so surfaces (CLI list, docs capability table) can
-/// group families without re-typing the membership. Mirrors the registry's
-/// own sections exactly; locality is the separate `local` flag, not a category.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum ModelProviderCategory {
-    /// First-party / flagship vendor APIs.
     Primary,
-    /// OpenAI-compatible HTTP endpoints, each with its own canonical slot.
-    OpenAiCompatible,
-    /// Cloud-vendor AI endpoints.
-    CloudEndpoint,
 }
 
 impl ModelProviderCategory {
-    /// Stable identifier for this category, matching the Rust variant name.
-    /// Surfaces address a category by this token (CLI filters, docs directives)
-    /// without re-typing the variant set.
     #[must_use]
     pub fn as_str(self) -> &'static str {
-        match self {
-            Self::Primary => "Primary",
-            Self::OpenAiCompatible => "OpenAiCompatible",
-            Self::CloudEndpoint => "CloudEndpoint",
-        }
+        "Primary"
     }
 
-    /// Every category, in registry display order. Lets surfaces walk the set
-    /// instead of hardcoding it.
     #[must_use]
-    pub fn all() -> &'static [ModelProviderCategory] {
-        &[Self::Primary, Self::OpenAiCompatible, Self::CloudEndpoint]
+    pub fn all() -> &'static [Self] {
+        &[Self::Primary]
     }
 }
 
-/// Canonical base URL for `name`, mirroring what `create_model_provider`
-/// would dial. `None` for families without a fixed default (custom,
-/// multi-region, CLI shims).
-#[must_use]
-pub fn default_model_provider_url(name: &str) -> Option<&'static str> {
-    use reiclaw_config::schema::{ModelEndpoint, OllamaEndpoint};
-
-    match name {
-        "anthropic" => Some(anthropic::BASE_URL),
-        "openai" => Some(openai::BASE_URL),
-        "ollama" => Some(OllamaEndpoint::default().uri()),
-        "gemini" => Some(gemini::BASE_URL),
-        _ => None,
-    }
-}
-
-/// Append a section of provider families under one category. DRY builder so the
-/// registry lists `(name, display_name, local)` once per family and the category
-/// is stamped from the section, not repeated on every entry.
-fn push_family(
-    out: &mut Vec<ModelProviderInfo>,
-    category: ModelProviderCategory,
-    families: &[(&'static str, &'static str, bool)],
-) {
-    out.extend(
-        families
-            .iter()
-            .map(|&(name, display_name, local)| ModelProviderInfo {
-                name,
-                display_name,
-                local,
-                category,
-            }),
-    );
-}
-
-/// Return the list of all known model_providers for display in `zeroclaw model_providers list`.
-///
-/// This is intentionally separate from the factory match in `create_model_provider`
-/// (display concern vs. construction concern).
-///
-/// This handwritten list and the `for_each_model_provider_slot!` macro in
-/// `zeroclaw-config` are a dual-maintenance surface: the macro carries the
-/// canonical slot set, this list adds display-only fields (`display_name`,
-/// `local`). The `listed_model_providers_match_canonical_slots` test enforces
-/// that the two cover exactly the same slots, so a provider added to the macro
-/// without a display entry here (or vice versa) fails `cargo test`.
 pub fn list_model_providers() -> Vec<ModelProviderInfo> {
-    let mut out: Vec<ModelProviderInfo> = Vec::new();
-    push_family(
-        &mut out,
-        ModelProviderCategory::Primary,
-        &[
-            ("anthropic", "Anthropic", false),
-            ("openai", "OpenAI", false),
-            ("ollama", "Ollama", true),
-            ("gemini", "Google Gemini", false),
-        ],
-    );
-    push_family(
-        &mut out,
-        ModelProviderCategory::OpenAiCompatible,
-        &[
-            ("minimax", "MiniMax", false),
-            ("qwen", "Qwen (DashScope / Qwen Code OAuth)", false),
-            ("groq", "Groq", false),
-            ("lmstudio", "LM Studio", true),
-            ("llamacpp", "llama.cpp server", true),
-            ("osaurus", "Osaurus", true),
-            ("custom", "Custom (OpenAI-compatible)", false),
-        ],
-    );
-    push_family(
-        &mut out,
-        ModelProviderCategory::CloudEndpoint,
-        &[("ovh", "OVHcloud AI Endpoints", false)],
-    );
-    debug_assert_eq!(
-        out.iter()
-            .map(|p| p.name)
-            .collect::<std::collections::BTreeSet<_>>(),
-        canonical_model_provider_slots()
-            .into_iter()
-            .collect::<std::collections::BTreeSet<_>>(),
-        "list_model_providers() drifted from for_each_model_provider_slot!: \
-         every canonical slot needs exactly one display entry and vice versa"
-    );
-    out
+    vec![ModelProviderInfo {
+        name: "openai",
+        display_name: "OpenAI Responses",
+        local: false,
+        category: ModelProviderCategory::Primary,
+    }]
 }
 
 #[must_use]
 pub fn canonical_model_provider_slots() -> Vec<&'static str> {
-    macro_rules! collect_slot_names {
-        ($(($field:ident, $type_str:literal, $cfg_ty:ty)),+ $(,)?) => {
-            vec![$($type_str),+]
-        };
-    }
-    reiclaw_config::for_each_model_provider_slot!(collect_slot_names)
+    reiclaw_config::providers::ModelProviders::slot_names().to_vec()
 }
 
-#[cfg(test)]
-pub mod test_util {
-    use std::sync::{Mutex, MutexGuard, OnceLock};
-
-    /// Process-wide lock for tests that mutate environment variables.
-    pub fn env_lock() -> MutexGuard<'static, ()> {
-        static LOCK: OnceLock<Mutex<()>> = OnceLock::new();
-        LOCK.get_or_init(|| Mutex::new(()))
-            .lock()
-            .expect("env lock poisoned")
-    }
-
-    /// RAII guard that sets or unsets an env var and restores the original
-    /// value on drop. Always acquire [`env_lock`] before creating guards.
-    pub struct EnvGuard {
-        key: String,
-        original: Option<String>,
-    }
-
-    impl EnvGuard {
-        pub fn set(key: &str, value: Option<&str>) -> Self {
-            let original = std::env::var(key).ok();
-            match value {
-                // SAFETY: test-only, single-threaded test runner.
-                Some(v) => unsafe { std::env::set_var(key, v) },
-                // SAFETY: test-only, single-threaded test runner.
-                None => unsafe { std::env::remove_var(key) },
-            }
-            Self {
-                key: key.to_string(),
-                original,
-            }
-        }
-    }
-
-    impl Drop for EnvGuard {
-        fn drop(&mut self) {
-            if let Some(original) = self.original.as_deref() {
-                // SAFETY: test-only, single-threaded test runner.
-                unsafe { std::env::set_var(&self.key, original) };
-            } else {
-                // SAFETY: test-only, single-threaded test runner.
-                unsafe { std::env::remove_var(&self.key) };
-            }
-        }
-    }
-}
-
-#[cfg(test)]
-mod tests;
-
-/// Attempt to fetch context window from provider's /models endpoint.
-/// Returns `None` on any failure (network, parsing, missing field) — caller uses fallback.
+/// Look up optional context-window metadata from the configured Responses endpoint.
 pub async fn fetch_context_window(
     provider_type: &str,
     config: &reiclaw_config::schema::ModelProviderConfig,
 ) -> Option<usize> {
-    match provider_type {
-        "groq" => {
-            fetch_openai_compatible_context_window("https://api.groq.com/openai/v1", config).await
-        }
-        _ => None, // anthropic, openai, ollama, etc. don't expose it
+    require_openai_model_provider(provider_type).ok()?;
+    reiclaw_config::providers::validate_responses_entry(config).ok()?;
+    let key = nonempty(config.api_key.as_deref())?;
+    if reiclaw_config::secrets::SecretStore::is_encrypted(key) {
+        return None;
     }
+    let url = nonempty(config.uri.as_deref());
+    validate_endpoint_credential(url, Some(key)).ok()?;
+    let mut builder = openai::OpenAiResponsesModelProvider::builder("context-window")
+        .credential(Some(key))
+        .extra_headers(config.extra_headers.clone());
+    if let Some(url) = url {
+        builder = builder.api_url(url);
+    }
+    if let Some(path) = config.tls_ca_cert_path.as_deref() {
+        builder = builder.tls_ca_cert_path(path).ok()?;
+    }
+    builder
+        .build()
+        .context_window(config.model.as_deref()?)
+        .await
 }
 
-async fn fetch_openai_compatible_context_window(
-    default_uri: &'static str,
-    config: &reiclaw_config::schema::ModelProviderConfig,
-) -> Option<usize> {
-    let client = reqwest::Client::new();
-    let base_url = config
-        .uri
-        .as_deref()
-        .filter(|s| !s.is_empty() && *s != "<unset>")
-        .unwrap_or(default_uri);
-    let url = format!("{}/models", base_url.trim_end_matches('/'));
-    let mut req = client.get(&url);
-    if let Some(key) = config.api_key.as_deref() {
-        req = req.bearer_auth(key);
-    }
-    let resp = req
-        .send()
-        .await
-        .ok()?
-        .json::<serde_json::Value>()
-        .await
-        .ok()?;
-    let model = config.model.as_deref().unwrap_or("");
-    let model_entry = resp["data"]
-        .as_array()?
-        .iter()
-        .find(|m| m["id"].as_str() == Some(model))?;
-    model_entry
-        .get("context_length")
-        .or_else(|| model_entry.get("context_window"))
-        .and_then(|v| v.as_u64())
-        .map(|v| v as usize)
-}
+#[cfg(test)]
+mod tests;

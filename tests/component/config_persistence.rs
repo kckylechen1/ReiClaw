@@ -20,11 +20,11 @@ fn config_default_validates_without_provider_profiles() {
 
 #[test]
 fn config_toml_roundtrip_preserves_provider() {
-    use reiclaw::config::{GroqModelProviderConfig, ModelProviderConfig};
+    use reiclaw::config::{ModelProviderConfig, OpenAIModelProviderConfig};
     let mut config = Config::default();
-    config.providers.models.groq.insert(
+    config.providers.models.openai.insert(
         "default".to_string(),
-        GroqModelProviderConfig {
+        OpenAIModelProviderConfig {
             base: ModelProviderConfig {
                 model: Some("groq-test-model".into()),
                 temperature: Some(0.5),
@@ -38,14 +38,14 @@ fn config_toml_roundtrip_preserves_provider() {
         .expect("TOML should round-trip through current parsing");
 
     assert!(
-        parsed.providers.models.find("groq", "default").is_some(),
-        "groq.default entry should survive round-trip"
+        parsed.providers.models.find("openai", "default").is_some(),
+        "openai.default entry should survive round-trip"
     );
     assert_eq!(
         parsed
             .providers
             .models
-            .find("groq", "default")
+            .find("openai", "default")
             .and_then(|e| e.model.as_deref()),
         Some("groq-test-model")
     );
@@ -53,7 +53,7 @@ fn config_toml_roundtrip_preserves_provider() {
         (parsed
             .providers
             .models
-            .find("groq", "default")
+            .find("openai", "default")
             .and_then(|e| e.temperature)
             .unwrap_or(0.7)
             - 0.5)

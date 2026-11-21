@@ -1,4 +1,3 @@
-use super::test_util::{EnvGuard, env_lock};
 use super::*;
 
 // Compile-time proof that both reqwest TLS-root features are enabled.
@@ -15,170 +14,19 @@ fn provider_http_client_trusts_both_webpki_and_native_roots() {
 }
 
 #[test]
-fn resolve_provider_credential_returns_trimmed_override() {
-    let resolved = resolve_model_provider_credential("groq", Some("  explicit-key  "));
-    assert_eq!(resolved, Some("explicit-key".to_string()));
-}
-
-#[test]
-fn resolve_provider_credential_filters_empty_override() {
-    assert!(resolve_model_provider_credential("groq", Some("   ")).is_none());
-    assert!(resolve_model_provider_credential("groq", None).is_none());
-}
-
-#[test]
-fn resolve_qwen_oauth_context_prefers_explicit_override() {
-    let _env_lock = env_lock();
-    let context = resolve_qwen_oauth_context(Some("  explicit-qwen-token  "));
-    assert_eq!(context.credential.as_deref(), Some("explicit-qwen-token"));
-    assert!(context.base_url.is_none());
-}
-
-#[test]
-fn resolve_qwen_oauth_context_reads_cached_credentials_file() {
-    let _env_lock = env_lock();
-    let fake_home = format!("/tmp/zeroclaw-qwen-oauth-home-{}-file", std::process::id());
-    let creds_dir = PathBuf::from(&fake_home).join(".qwen");
-    std::fs::create_dir_all(&creds_dir).unwrap();
-    let creds_path = creds_dir.join("oauth_creds.json");
-    std::fs::write(
-            &creds_path,
-            r#"{"access_token":"cached-token","refresh_token":"cached-refresh","resource_url":"https://resource.example.com","expiry_date":4102444800000}"#,
-        )
-        .unwrap();
-
-    let _home_guard = EnvGuard::set("HOME", Some(fake_home.as_str()));
-
-    let context = resolve_qwen_oauth_context(Some(QWEN_OAUTH_PLACEHOLDER));
-
-    assert_eq!(context.credential.as_deref(), Some("cached-token"));
-    assert_eq!(
-        context.base_url.as_deref(),
-        Some("https://resource.example.com/v1")
-    );
-}
-
-#[test]
-fn resolve_qwen_oauth_context_returns_none_without_cache() {
-    let _env_lock = env_lock();
-    let fake_home = format!("/tmp/zeroclaw-qwen-oauth-home-{}-empty", std::process::id());
-    let _home_guard = EnvGuard::set("HOME", Some(fake_home.as_str()));
-
-    let context = resolve_qwen_oauth_context(Some(QWEN_OAUTH_PLACEHOLDER));
-    assert!(context.credential.is_none());
-}
-
-#[test]
-fn regional_alias_predicates_cover_expected_variants() {
-    assert!(is_minimax_alias("minimax-io"));
-    assert!(is_minimax_alias("minimaxi"));
-    assert!(is_minimax_alias("minimax-oauth"));
-    assert!(is_minimax_alias("minimax-portal-cn"));
-    assert!(is_qwen_alias("dashscope"));
-    assert!(is_qwen_alias("qwen-us"));
-    assert!(is_qwen_alias("qwen-code"));
-    assert!(is_qwen_oauth_alias("qwen-code"));
-    assert!(is_qwen_oauth_alias("qwen_oauth"));
-
-    assert!(!is_qwen_alias("gemini"));
-}
-
-// ── Primary model_providers ────────────────────────────────────
-
-#[test]
-fn factory_resolves_builtin_families_and_aliases() {
-    // Every built-in family (and the user-facing aliases that map onto
-    // one) must construct from a bare name. `None` rows are families
-    // that run without a key (local servers or managed auth).
-    let cases: &[(&str, Option<&str>)] = &[
-        ("anthropic", Some("provider-test-credential")),
-        ("openai", Some("provider-test-credential")),
-        ("ollama", None),
-        ("ollama", Some("dummy")),
-        ("ollama", Some("any-value-here")),
-        ("gemini", Some("test-key")),
-        ("gemini", None),
-        ("minimax", Some("key")),
-        ("qwen", Some("key")),
-        ("lmstudio", Some("key")),
-        ("lmstudio", None),
-        ("llamacpp", Some("key")),
-        ("llamacpp", None),
-        ("osaurus", None),
-        ("osaurus", Some("custom-key")),
-        ("groq", Some("key")),
-        // Aliases resolved onto the families above.
-        ("ovhcloud", Some("test-key")),
-        ("google", Some("test-key")),
-        ("google-gemini", Some("test-key")),
-        ("lm-studio", None),
-        ("llama.cpp", None),
-    ];
-    for (name, key) in cases {
-        if let Err(e) = create_model_provider(name, *key) {
-            panic!("{name} (key: {key:?}) should resolve: {e}");
-        }
-    }
-}
-
-#[test]
-fn factory_openai_codex() {
-    let options = ModelProviderRuntimeOptions::default();
-    assert!(create_model_provider_with_options("openai-codex", None, &options).is_ok());
-}
-
-// ── OpenAI-compatible model_providers ──────────────────────────
-
-#[test]
-fn factory_minimax_supports_native_tool_calling() {
-    let minimax =
-        create_model_provider("minimax", Some("key")).expect("model_provider should resolve");
-    assert!(minimax.supports_native_tools());
-}
-
-#[test]
-fn qwen_provider_supports_vision() {
-    let model_provider =
-        create_model_provider("qwen", Some("key")).expect("qwen model_provider should build");
-    assert!(model_provider.supports_vision());
-}
-
-#[test]
-fn vision_override_applies_once_at_construction_for_any_family() {
-    // llama.cpp and the generic custom endpoint both default to
-    // vision-capable. `vision = Some(false)` must mark the constructed
-    // provider non-vision regardless of family, and show up in BOTH
-    // `supports_vision()` and `capabilities().vision` so every consumer
-    // (routing gate, media pipeline, model router) agrees.
-    for name in ["llamacpp", "custom:http://localhost:8080/v1"] {
-        let off = ModelProviderRuntimeOptions {
-            vision: Some(false),
+fn vision_override_applies_once_at_construction() {
+    for (vision, expected) in [(None, true), (Some(false), false), (Some(true), true)] {
+        let options = ModelProviderRuntimeOptions {
+            vision,
             ..Default::default()
         };
         let provider =
-            create_model_provider_inner(None, name, "default", None, None, &off).unwrap();
-        assert!(
-            !provider.supports_vision(),
-            "{name}: vision=false should mark the provider non-vision"
-        );
-        assert!(
-            !provider.capabilities().vision,
-            "{name}: capabilities().vision must stay consistent with supports_vision()"
-        );
-
-        // `None` preserves the family default (vision-capable here).
-        let provider = create_model_provider_inner(
-            None,
-            name,
-            "default",
-            None,
-            None,
-            &ModelProviderRuntimeOptions::default(),
-        )
-        .unwrap();
-        assert!(
-            provider.supports_vision(),
-            "{name}: no override should keep the family default"
+            create_model_provider_inner(None, "openai", "default", None, None, &options).unwrap();
+        assert_eq!(provider.supports_vision(), expected, "vision={vision:?}");
+        assert_eq!(
+            provider.capabilities().vision,
+            expected,
+            "vision={vision:?}"
         );
     }
 }
@@ -196,23 +44,6 @@ fn vision_config_field_maps_into_runtime_options() {
 }
 
 #[test]
-fn reasoning_effort_passthrough_maps_into_runtime_options() {
-    use reiclaw_config::schema::{Config, ModelProviderConfig};
-    let config = Config::default();
-    let off = model_provider_runtime_options_from_model_provider_entry(
-        &config,
-        Some(&ModelProviderConfig::default()),
-    );
-    assert!(!off.reasoning_effort_passthrough);
-    let entry = ModelProviderConfig {
-        reasoning_effort_passthrough: true,
-        ..Default::default()
-    };
-    let on = model_provider_runtime_options_from_model_provider_entry(&config, Some(&entry));
-    assert!(on.reasoning_effort_passthrough);
-}
-
-#[test]
 fn openai_responses_alias_honors_configured_vision_capability() {
     use reiclaw_config::schema::{Config, ModelProviderConfig, OpenAIModelProviderConfig, WireApi};
 
@@ -223,7 +54,7 @@ fn openai_responses_alias_honors_configured_vision_capability() {
             base: ModelProviderConfig {
                 model: Some("gpt-4o".to_string()),
                 wire_api: Some(WireApi::Responses),
-                vision: Some(true),
+                vision: Some(false),
                 ..Default::default()
             },
         },
@@ -244,8 +75,8 @@ fn openai_responses_alias_honors_configured_vision_capability() {
         "the alias must use the Responses provider"
     );
     assert!(
-        provider.capabilities_for_model("gpt-4o").vision,
-        "vision=true must reach the exact OpenAI Responses production factory path"
+        !provider.capabilities_for_model("gpt-4o").vision,
+        "vision=false must override the Responses default through the production factory path"
     );
 }
 
@@ -259,95 +90,8 @@ fn options_for_bare_provider_ref_does_not_inherit_fallback_vision() {
         vision: Some(false),
         ..Default::default()
     };
-    let resolved = options_for_provider_ref(&Config::default(), "llamacpp", &fallback);
+    let resolved = options_for_provider_ref(&Config::default(), "openai", &fallback);
     assert_eq!(resolved.vision, None);
-}
-
-#[test]
-fn factory_osaurus_custom_url() {
-    // Verify that a custom api_url overrides the default localhost endpoint.
-    let p = create_model_provider_with_url(
-        "osaurus",
-        Some("key"),
-        Some("http://192.168.1.100:1337/v1"),
-    );
-    assert!(p.is_ok());
-}
-
-// ── Extended ecosystem ───────────────────────────────────
-
-#[test]
-fn factory_groq_disables_native_tools_by_default() {
-    // Default behavior preserves the blanket disable: llama-family
-    // Groq models reject native tool calls with HTTP 400.
-    let model_provider = create_model_provider_with_options(
-        "groq",
-        Some("key"),
-        &ModelProviderRuntimeOptions::default(),
-    )
-    .expect("groq factory must succeed");
-    assert!(
-        !model_provider.supports_native_tools(),
-        "Groq must default to text-fallback for llama-family compatibility"
-    );
-}
-
-#[test]
-fn factory_groq_honors_native_tools_override_true() {
-    // Operator opt-in via `[providers.models.groq.<alias>] native_tools = true`
-    // skips the default disable so non-llama Groq models can use native
-    // tool calling.
-    let options = ModelProviderRuntimeOptions {
-        native_tools: Some(true),
-        ..Default::default()
-    };
-    let model_provider = create_model_provider_with_options("groq", Some("key"), &options)
-        .expect("groq factory must succeed");
-    assert!(
-        model_provider.supports_native_tools(),
-        "Groq with `native_tools = true` must enable native tool calling"
-    );
-}
-
-#[test]
-fn factory_groq_native_tools_override_false_keeps_disable() {
-    // Explicit `native_tools = false` matches the default behavior; this
-    // documents that the option is tri-state and `Some(false)` is not a
-    // no-op surprise.
-    let options = ModelProviderRuntimeOptions {
-        native_tools: Some(false),
-        ..Default::default()
-    };
-    let model_provider = create_model_provider_with_options("groq", Some("key"), &options)
-        .expect("groq factory must succeed");
-    assert!(
-        !model_provider.supports_native_tools(),
-        "Groq with explicit `native_tools = false` must remain text-fallback"
-    );
-}
-
-#[test]
-fn provider_runtime_options_from_config_propagates_native_tools() {
-    use reiclaw_config::schema::{GroqModelProviderConfig, ModelProviderConfig};
-    let mut config = reiclaw_config::schema::Config::default();
-    config.providers.models.groq.insert(
-        "default".to_string(),
-        GroqModelProviderConfig {
-            base: ModelProviderConfig {
-                uri: Some("https://api.groq.com/openai/v1".to_string()),
-                native_tools: Some(true),
-                ..Default::default()
-            },
-        },
-    );
-
-    let entry = config.providers.models.find("groq", "default");
-    let options = model_provider_runtime_options_from_model_provider_entry(&config, entry);
-    assert_eq!(
-        options.native_tools,
-        Some(true),
-        "native_tools must propagate from the active model_provider entry to runtime options"
-    );
 }
 
 #[test]
@@ -384,7 +128,7 @@ fn provider_runtime_options_from_config_propagates_provider_kind() {
         "primary".to_string(),
         OpenAIModelProviderConfig {
             base: ModelProviderConfig {
-                kind: Some("openai-compatible".to_string()),
+                kind: Some("openai".to_string()),
                 uri: Some("http://primary.example/v1".to_string()),
                 ..Default::default()
             },
@@ -392,7 +136,7 @@ fn provider_runtime_options_from_config_propagates_provider_kind() {
     );
 
     let options = provider_runtime_options_for_alias(&config, "openai", "primary");
-    assert_eq!(options.provider_kind.as_deref(), Some("openai-compatible"));
+    assert_eq!(options.provider_kind.as_deref(), Some("openai"));
     assert_eq!(
         options.provider_api_url.as_deref(),
         Some("http://primary.example/v1")
@@ -421,7 +165,7 @@ async fn routed_alias_uses_call_model_instead_of_configured_pin() {
         (
             StatusCode::OK,
             Json(json!({
-                "choices": [{"message": {"content": "ok"}}]
+                "output_text": "ok"
             })),
         )
     }
@@ -432,7 +176,7 @@ async fn routed_alias_uses_call_model_instead_of_configured_pin() {
         .expect("bind test server");
     let addr = listener.local_addr().expect("test server addr");
     let app = Router::new()
-        .route("/v1/chat/completions", post(capture_chat_request))
+        .route("/v1/responses", post(capture_chat_request))
         .with_state(capture.clone());
     let server = ::reiclaw_log::spawn!(async move {
         axum::serve(listener, app).await.expect("serve test server");
@@ -486,13 +230,13 @@ async fn routed_alias_uses_call_model_instead_of_configured_pin() {
 #[test]
 fn route_provider_options_clear_primary_only_state_for_bare_routes() {
     let inherited = ModelProviderRuntimeOptions {
-        provider_kind: Some("openai-compatible".to_string()),
+        provider_kind: Some("openai".to_string()),
         provider_api_url: Some("http://primary.example/v1".to_string()),
         ..Default::default()
     };
     let config = reiclaw_config::schema::Config::default();
 
-    let route_options = options_for_provider_ref(&config, "anthropic", &inherited);
+    let route_options = options_for_provider_ref(&config, "openai", &inherited);
 
     assert_eq!(route_options.provider_kind, None);
     assert_eq!(route_options.provider_api_url, None);
@@ -506,7 +250,7 @@ fn routed_bare_provider_does_not_inherit_primary_endpoint() {
         "primary".to_string(),
         OpenAIModelProviderConfig {
             base: ModelProviderConfig {
-                kind: Some("openai-compatible".to_string()),
+                kind: Some("openai".to_string()),
                 uri: Some("http://primary.example/v1".to_string()),
                 ..Default::default()
             },
@@ -518,7 +262,7 @@ fn routed_bare_provider_does_not_inherit_primary_endpoint() {
         Some("http://primary.example/v1")
     );
 
-    let route_options = options_for_provider_ref(&config, "anthropic", &options);
+    let route_options = options_for_provider_ref(&config, "openai", &options);
 
     assert_eq!(route_options.provider_kind, None);
     assert_eq!(route_options.provider_api_url, None);
@@ -527,8 +271,7 @@ fn routed_bare_provider_does_not_inherit_primary_endpoint() {
 #[test]
 fn routed_primary_alias_kind_does_not_leak_to_canonical_route_provider() {
     use reiclaw_config::schema::{
-        AnthropicModelProviderConfig, ModelProviderConfig, ModelRouteConfig,
-        OpenAIModelProviderConfig,
+        ModelProviderConfig, ModelRouteConfig, OpenAIModelProviderConfig,
     };
 
     let mut config = reiclaw_config::schema::Config::default();
@@ -536,20 +279,21 @@ fn routed_primary_alias_kind_does_not_leak_to_canonical_route_provider() {
         "primary".to_string(),
         OpenAIModelProviderConfig {
             base: ModelProviderConfig {
-                kind: Some("openai-compatible".to_string()),
+                kind: Some("openai".to_string()),
+                vision: Some(true),
                 uri: Some("http://primary.example/v1".to_string()),
                 ..Default::default()
             },
         },
     );
-    config.providers.models.anthropic.insert(
+    config.providers.models.openai.insert(
         "route".to_string(),
-        AnthropicModelProviderConfig {
+        OpenAIModelProviderConfig {
             base: ModelProviderConfig::default(),
         },
     );
     let options = provider_runtime_options_for_alias(&config, "openai", "primary");
-    assert_eq!(options.provider_kind.as_deref(), Some("openai-compatible"));
+    assert_eq!(options.provider_kind.as_deref(), Some("openai"));
 
     let provider = create_routed_model_provider_with_options(
         &config,
@@ -559,7 +303,7 @@ fn routed_primary_alias_kind_does_not_leak_to_canonical_route_provider() {
         &config.reliability,
         &[ModelRouteConfig {
             hint: "fast".to_string(),
-            model_provider: "anthropic.route".to_string(),
+            model_provider: "openai.route".to_string(),
             model: "claude-test".to_string(),
             api_key: None,
         }],
@@ -570,51 +314,7 @@ fn routed_primary_alias_kind_does_not_leak_to_canonical_route_provider() {
 
     assert!(
         provider.supports_vision(),
-        "primary openai-compatible provider should remain the router default"
-    );
-}
-
-#[test]
-fn factory_custom_with_resolved_uri() {
-    let options = ModelProviderRuntimeOptions {
-        provider_api_url: Some("https://my-llm.example.com".to_string()),
-        ..ModelProviderRuntimeOptions::default()
-    };
-    assert!(create_model_provider_with_options("custom", Some("key"), &options).is_ok());
-}
-
-#[test]
-fn factory_custom_without_uri_errors() {
-    match create_model_provider("custom", Some("key")) {
-        Err(e) => assert!(
-            e.to_string().contains("requires `uri`"),
-            "Expected `uri` error, got: {e}"
-        ),
-        Ok(_) => {
-            panic!("Expected error when custom model model_provider has no URI configured")
-        }
-    }
-}
-
-#[test]
-fn create_model_provider_from_ref_preserves_custom_url_with_dotted_host() {
-    use reiclaw_api::attribution::Attributable;
-    use reiclaw_config::schema::Config;
-    // A `custom:<url>` vision route whose host contains dots (e.g. 127.0.0.1)
-    // must NOT be split on '.' into a bogus `<family>.<alias>` - the whole ref
-    // must reach the factory intact, exactly as the legacy
-    // `create_model_provider(vp, None)` did. Regression for the alias-aware ref
-    // factory added for the dedicated vision route.
-    let config = Config::default();
-    let url = "custom:http://127.0.0.1:9999/v1";
-    let via_ref =
-        create_model_provider_from_ref(&config, url).expect("ref factory builds custom URL");
-    let via_legacy = create_model_provider(url, None).expect("legacy factory builds custom URL");
-    assert_eq!(
-        via_ref.alias(),
-        via_legacy.alias(),
-        "custom:<url> with a dotted host must build identically to the legacy \
-             factory (not be mis-split into a bogus family/alias)"
+        "primary OpenAI Responses provider should remain the router default"
     );
 }
 
@@ -628,187 +328,25 @@ fn create_model_provider_from_ref_fails_closed_on_nonexistent_dotted_alias() {
     // would (wrongly) succeed and route images to a default llama.cpp.
     let config = Config::default();
     assert!(
-        create_model_provider_from_ref(&config, "llamacpp.typo").is_err(),
+        create_model_provider_from_ref(&config, "openai.typo").is_err(),
         "a dotted ref to a non-existent alias must fail closed, not fall open to a default provider"
     );
     // Same fail-closed behavior as the legacy factory the vision route used.
-    assert!(create_model_provider("llamacpp.typo", None).is_err());
+    assert!(create_model_provider("openai.typo", None).is_err());
 }
-
-// ── Error cases ──────────────────────────────────────────
 
 #[test]
 fn factory_unknown_provider_errors() {
     let p = create_model_provider("nonexistent", None);
     assert!(p.is_err());
     let msg = p.err().unwrap().to_string();
-    assert!(msg.contains("Unknown model_provider family"));
-    assert!(msg.contains("nonexistent"));
+    assert!(msg.contains("Unknown model provider or alias"));
+    assert!(msg.contains("[providers.models.openai.<alias>]"));
 }
 
 #[test]
 fn factory_empty_name_errors() {
     assert!(create_model_provider("", None).is_err());
-}
-
-#[test]
-fn ollama_with_custom_url() {
-    assert_eq!(
-        default_model_provider_url("ollama"),
-        Some("http://localhost:11434")
-    );
-    let model_provider =
-        create_model_provider_with_url("ollama", None, Some("http://10.100.2.32:11434"));
-    assert!(model_provider.is_ok());
-}
-
-#[test]
-fn ollama_cloud_with_custom_url() {
-    let model_provider =
-        create_model_provider_with_url("ollama", Some("ollama-key"), Some("https://ollama.com"));
-    assert!(model_provider.is_ok());
-}
-
-#[tokio::test]
-async fn ollama_private_remote_cloud_request_omits_auth_and_preserves_model() {
-    use axum::{
-        Json, Router,
-        extract::State,
-        http::{HeaderMap, StatusCode},
-        routing::post,
-    };
-    use serde_json::{Value, json};
-    use std::sync::{Arc, Mutex};
-
-    type Capture = Arc<Mutex<Option<(Option<String>, String)>>>;
-
-    async fn capture_chat_request(
-        State(capture): State<Capture>,
-        headers: HeaderMap,
-        Json(body): Json<Value>,
-    ) -> (StatusCode, Json<Value>) {
-        let auth = headers
-            .get("authorization")
-            .and_then(|value| value.to_str().ok())
-            .map(str::to_string);
-        let model = body
-            .get("model")
-            .and_then(Value::as_str)
-            .unwrap_or_default()
-            .to_string();
-        *capture.lock().expect("capture lock poisoned") = Some((auth, model));
-        (
-            StatusCode::OK,
-            Json(json!({
-                "choices": [{"message": {"content": "ok"}}]
-            })),
-        )
-    }
-
-    let capture: Capture = Arc::new(Mutex::new(None));
-    let listener = tokio::net::TcpListener::bind("127.0.0.1:0")
-        .await
-        .expect("bind test server");
-    let addr = listener.local_addr().expect("test server addr");
-    let app = Router::new()
-        .route("/v1/chat/completions", post(capture_chat_request))
-        .with_state(capture.clone());
-    let server = ::reiclaw_log::spawn!(async move {
-        axum::serve(listener, app).await.expect("serve test server");
-    });
-
-    let base_url = format!("http://{addr}");
-    let model_provider = create_model_provider_with_url("ollama", None, Some(&base_url))
-        .expect("ollama provider should build");
-    let response = model_provider
-        .chat_with_system(None, "hello", "qwen3:cloud", Some(0.7))
-        .await
-        .expect("chat request should succeed");
-
-    assert_eq!(response, "ok");
-    let (auth, model) = capture
-        .lock()
-        .expect("capture lock poisoned")
-        .take()
-        .expect("server should capture request");
-    assert_eq!(auth, None);
-    assert_eq!(model, "qwen3:cloud");
-    server.abort();
-}
-
-#[tokio::test]
-async fn ollama_private_remote_lists_models_without_auth() {
-    use axum::{Json, Router, extract::State, http::HeaderMap, routing::get};
-    use serde_json::{Value, json};
-    use std::sync::{Arc, Mutex};
-
-    type Capture = Arc<Mutex<Option<Option<String>>>>;
-
-    async fn capture_models_request(
-        State(capture): State<Capture>,
-        headers: HeaderMap,
-    ) -> Json<Value> {
-        let auth = headers
-            .get("authorization")
-            .and_then(|value| value.to_str().ok())
-            .map(str::to_string);
-        *capture.lock().expect("capture lock poisoned") = Some(auth);
-        Json(json!({
-            "data": [{"id": "qwen3:cloud"}]
-        }))
-    }
-
-    let capture: Capture = Arc::new(Mutex::new(None));
-    let listener = tokio::net::TcpListener::bind("127.0.0.1:0")
-        .await
-        .expect("bind test server");
-    let addr = listener.local_addr().expect("test server addr");
-    let app = Router::new()
-        .route("/v1/models", get(capture_models_request))
-        .with_state(capture.clone());
-    let server = ::reiclaw_log::spawn!(async move {
-        axum::serve(listener, app).await.expect("serve test server");
-    });
-
-    let base_url = format!("http://{addr}");
-    let model_provider = create_model_provider_with_url("ollama", None, Some(&base_url))
-        .expect("ollama provider should build");
-    let models = model_provider
-        .list_models()
-        .await
-        .expect("model list should succeed");
-
-    assert_eq!(models, vec!["qwen3:cloud".to_string()]);
-    let auth = capture
-        .lock()
-        .expect("capture lock poisoned")
-        .take()
-        .expect("server should capture request");
-    assert_eq!(auth, None);
-    server.abort();
-}
-
-#[test]
-fn factory_all_canonical_model_providers_create_successfully() {
-    let canonical = [
-        "anthropic",
-        "openai",
-        "ollama",
-        "gemini",
-        "minimax",
-        "qwen",
-        "lmstudio",
-        "llamacpp",
-        "osaurus",
-        "groq",
-        "ovh",
-    ];
-    for name in canonical {
-        assert!(
-            create_model_provider(name, Some("test-key")).is_ok(),
-            "Canonical model model_provider '{name}' should create successfully"
-        );
-    }
 }
 
 #[test]
@@ -855,8 +393,6 @@ fn listed_model_providers_are_constructible() {
         );
     }
 }
-
-// ── API error sanitization ───────────────────────────────
 
 #[test]
 fn format_error_chain_includes_sources_and_sanitizes_output() {
@@ -1060,59 +596,6 @@ fn scrub_github_fine_grained_pat() {
     assert_eq!(result, "failed: [REDACTED]");
 }
 
-// ── API key prefix pre-flight ───────────────────────────
-
-#[test]
-fn api_key_prefix_cross_provider_mismatch() {
-    // Anthropic key used with openai
-    assert_eq!(
-        check_api_key_prefix("openai", "sk-ant-xyz"),
-        Some("anthropic")
-    );
-    // Groq key used with openai
-    assert_eq!(check_api_key_prefix("openai", "gsk_xyz"), Some("groq"));
-}
-
-#[test]
-fn factory_rejects_retired_telnyx_credentials_for_retained_providers() {
-    let retired_key = "KEY-private-telnyx-fixture";
-    for destination in ["openai", "anthropic", "groq"] {
-        assert_eq!(
-            check_api_key_prefix(destination, retired_key),
-            Some("telnyx")
-        );
-        let error = create_model_provider(destination, Some(retired_key))
-            .err()
-            .expect("retired credential must be rejected before a provider can send it")
-            .to_string();
-        assert!(error.contains("telnyx") && error.contains("is retired"));
-        assert!(!error.contains("KEY-private"));
-    }
-    // The destination still accepts its own recognized credential.
-    assert!(create_model_provider("openai", Some("sk-provider-fixture")).is_ok());
-}
-
-#[test]
-fn api_key_prefix_correct_match() {
-    assert_eq!(check_api_key_prefix("anthropic", "sk-ant-api03-xyz"), None);
-    assert_eq!(check_api_key_prefix("openai", "sk-proj-xyz"), None);
-    assert_eq!(check_api_key_prefix("groq", "gsk_xyz"), None);
-}
-
-#[test]
-fn api_key_prefix_unknown_provider_skips() {
-    // Providers without known key formats should never flag a mismatch.
-    assert_eq!(check_api_key_prefix("custom", "sk-ant-xyz"), None);
-    assert_eq!(check_api_key_prefix("ollama", "anything"), None);
-}
-
-#[test]
-fn api_key_prefix_unknown_key_format_skips() {
-    // Keys without a recognisable prefix should never flag a mismatch.
-    assert_eq!(check_api_key_prefix("openai", "my-custom-key-123"), None);
-    assert_eq!(check_api_key_prefix("anthropic", "some-random-key"), None);
-}
-
 #[test]
 fn provider_runtime_options_default_has_empty_extra_headers() {
     let options = ModelProviderRuntimeOptions::default();
@@ -1131,172 +614,15 @@ fn provider_runtime_options_extra_headers_passed_through() {
     assert_eq!(options.extra_headers.get("X-Title").unwrap(), "zeroclaw");
 }
 
-#[test]
-fn ollama_uses_resolved_url_from_runtime_options() {
-    // V0.8.0: `ZEROCLAW_PROVIDER_URL` env-var override eradicated. Ollama
-    // base URL flows through the typed alias's `api_url`/`uri` field which
-    // pre-populates `provider_api_url` on `ModelProviderRuntimeOptions`.
-    let model_provider =
-        create_model_provider_with_url("ollama", None, Some("http://config-ollama:11434"));
-    assert!(model_provider.is_ok());
-}
-
-// ── Per-alias provider_runtime_options resolution ──
-
-#[test]
-fn alias_and_agent_keep_system_merge_without_explicit_uri() {
-    use reiclaw_config::schema::{
-        AliasedAgentConfig, Config, LlamacppModelProviderConfig, ModelProviderConfig,
-    };
-
-    let mut config = Config::default();
-    config.providers.models.llamacpp.insert(
-        "local".into(),
-        LlamacppModelProviderConfig {
-            base: ModelProviderConfig {
-                merge_system_into_user: true,
-                ..Default::default()
-            },
-        },
-    );
-    config.agents.insert(
-        "local_agent".into(),
-        AliasedAgentConfig {
-            model_provider: "llamacpp.local".into(),
-            ..Default::default()
-        },
-    );
-
-    for options in [
-        provider_runtime_options_for_alias(&config, "llamacpp", "local"),
-        provider_runtime_options_for_agent(&config, "local_agent"),
-    ] {
-        assert!(options.merge_system_into_user);
-        assert!(options.provider_api_url.is_none());
-    }
-    assert!(!provider_runtime_options_for_agent(&config, "missing").merge_system_into_user);
-}
-
-#[tokio::test]
-async fn aliases_sharing_uri_keep_distinct_system_message_modes() {
-    use axum::{Json, Router, extract::State, routing::post};
-    use reiclaw_config::schema::{
-        AliasedAgentConfig, Config, LlamacppModelProviderConfig, ModelProviderConfig,
-    };
-    use serde_json::{Value, json};
-    use std::sync::{Arc, Mutex};
-
-    type Capture = Arc<Mutex<Option<Value>>>;
-    async fn capture_chat_request(
-        State(capture): State<Capture>,
-        Json(body): Json<Value>,
-    ) -> Json<Value> {
-        *capture.lock().expect("capture lock poisoned") = Some(body["messages"].clone());
-        Json(json!({"choices": [{"message": {"content": "ok"}}]}))
-    }
-
-    let capture: Capture = Arc::new(Mutex::new(None));
-    let listener = tokio::net::TcpListener::bind("127.0.0.1:0")
-        .await
-        .expect("bind test server");
-    let addr = listener.local_addr().expect("test server addr");
-    let app = Router::new()
-        .route("/v1/chat/completions", post(capture_chat_request))
-        .with_state(capture.clone());
-    let server = ::reiclaw_log::spawn!(async move {
-        axum::serve(listener, app).await.expect("serve test server");
-    });
-
-    let mut config = Config::default();
-    for (alias, merge) in [("plain", false), ("merged", true)] {
-        config.providers.models.llamacpp.insert(
-            alias.into(),
-            LlamacppModelProviderConfig {
-                base: ModelProviderConfig {
-                    uri: Some(format!("http://{addr}/v1")),
-                    model: Some("test-model".into()),
-                    merge_system_into_user: merge,
-                    ..Default::default()
-                },
-            },
-        );
-        config.agents.insert(
-            alias.into(),
-            AliasedAgentConfig {
-                model_provider: format!("llamacpp.{alias}").into(),
-                ..Default::default()
-            },
-        );
-    }
-
-    // Exercise both alias-reference construction and the agent's routed factory.
-    // Checking both aliases makes a URI-based first-match lookup fail regardless
-    // of the order in which the aliases are stored.
-    for (alias, merge) in [("plain", false), ("merged", true)] {
-        let provider_ref = format!("llamacpp.{alias}");
-        let options = provider_runtime_options_for_agent(&config, alias);
-        assert_eq!(options.merge_system_into_user, merge);
-        let direct = create_model_provider_from_ref(&config, &provider_ref)
-            .expect("alias provider should build");
-        assert!(direct.capabilities().native_tool_calling);
-        let routed = create_routed_model_provider_with_options(
-            &config,
-            &provider_ref,
-            None,
-            None,
-            &config.reliability,
-            &[],
-            "test-model",
-            &options,
-        )
-        .expect("agent provider should build");
-
-        for provider in [direct, routed] {
-            let messages = [
-                ChatMessage::system("system text"),
-                ChatMessage::user("user text"),
-            ];
-            let response = provider
-                .chat(
-                    ChatRequest {
-                        messages: &messages,
-                        tools: None,
-                        thinking: None,
-                    },
-                    "test-model",
-                    None,
-                )
-                .await
-                .expect("chat should succeed");
-            assert_eq!(response.text.as_deref(), Some("ok"));
-            let sent = capture
-                .lock()
-                .expect("capture lock poisoned")
-                .take()
-                .expect("captured request");
-            let expected = if merge {
-                json!([{"role": "user", "content": "system text\n\nuser text"}])
-            } else {
-                json!([
-                    {"role": "system", "content": "system text"},
-                    {"role": "user", "content": "user text"}
-                ])
-            };
-            assert_eq!(sent, expected, "system message mode for {provider_ref}");
-        }
-    }
-    server.abort();
-}
-
 /// Build a `Config` with two `anthropic` aliases at different base_urls
 /// so the test can prove `provider_runtime_options_for_agent` selects
 /// the alias-specific entry via explicit `<type>.<alias>` resolution.
-fn config_with_two_anthropic_aliases() -> reiclaw_config::schema::Config {
+fn config_with_two_openai_aliases() -> reiclaw_config::schema::Config {
     use reiclaw_config::schema::{
-        AliasedAgentConfig, AnthropicModelProviderConfig, Config, ModelProviderConfig,
+        AliasedAgentConfig, Config, ModelProviderConfig, OpenAIModelProviderConfig,
     };
     let mut config = Config::default();
-    let default_alias = AnthropicModelProviderConfig {
+    let default_alias = OpenAIModelProviderConfig {
         base: ModelProviderConfig {
             model: Some("claude-default".into()),
             api_key: Some("default-key".into()),
@@ -1304,7 +630,7 @@ fn config_with_two_anthropic_aliases() -> reiclaw_config::schema::Config {
             ..ModelProviderConfig::default()
         },
     };
-    let work_alias = AnthropicModelProviderConfig {
+    let work_alias = OpenAIModelProviderConfig {
         base: ModelProviderConfig {
             model: Some("claude-work".into()),
             api_key: Some("work-key".into()),
@@ -1315,20 +641,20 @@ fn config_with_two_anthropic_aliases() -> reiclaw_config::schema::Config {
     config
         .providers
         .models
-        .anthropic
+        .openai
         .insert("default".to_string(), default_alias);
     config
         .providers
         .models
-        .anthropic
+        .openai
         .insert("work".to_string(), work_alias);
     let work_agent = AliasedAgentConfig {
-        model_provider: "anthropic.work".into(),
+        model_provider: "openai.work".into(),
         ..AliasedAgentConfig::default()
     };
     config.agents.insert("work_agent".to_string(), work_agent);
     let default_agent = AliasedAgentConfig {
-        model_provider: "anthropic.default".into(),
+        model_provider: "openai.default".into(),
         ..AliasedAgentConfig::default()
     };
     config
@@ -1339,7 +665,7 @@ fn config_with_two_anthropic_aliases() -> reiclaw_config::schema::Config {
 
 #[test]
 fn provider_runtime_options_for_agent_resolves_alias_specific_uri() {
-    let config = config_with_two_anthropic_aliases();
+    let config = config_with_two_openai_aliases();
     let work = provider_runtime_options_for_agent(&config, "work_agent");
     let dflt = provider_runtime_options_for_agent(&config, "default_agent");
 
@@ -1357,7 +683,7 @@ fn provider_runtime_options_for_agent_resolves_alias_specific_uri() {
 
 #[test]
 fn provider_runtime_options_for_agent_unknown_agent_returns_safe_defaults() {
-    let config = config_with_two_anthropic_aliases();
+    let config = config_with_two_openai_aliases();
     let opts = provider_runtime_options_for_agent(&config, "nonexistent");
     assert!(
         opts.provider_api_url.is_none(),
@@ -1584,95 +910,6 @@ fn routed_model_provider_fails_when_routed_provider_fallback_lacks_profile_crede
 }
 
 #[test]
-fn dotted_alias_routes_openai_codex_via_requires_openai_auth() {
-    use reiclaw_config::schema::{ModelProviderConfig, OpenAIModelProviderConfig};
-
-    // Use an intentionally arbitrary alias to prove the routing is alias-agnostic.
-    let arbitrary_alias = "qwertfoozp";
-
-    let mut config = reiclaw_config::schema::Config::default();
-    config.providers.models.openai.insert(
-        arbitrary_alias.to_string(),
-        OpenAIModelProviderConfig {
-            base: ModelProviderConfig {
-                requires_openai_auth: true,
-                ..Default::default()
-            },
-        },
-    );
-
-    // Verify the alias-aware factory path sees `requires_openai_auth = true`
-    // and routes to OpenAiCodexModelProvider. `dispatch_family_factory` is
-    // called directly (no ReliableModelProvider wrapper) so `capabilities()`
-    // reflects the inner provider's values.
-    let result = factory::dispatch_family_factory(
-        Some(&config),
-        "openai",
-        arbitrary_alias,
-        None,
-        None,
-        &ModelProviderRuntimeOptions::default(),
-    );
-    assert!(
-        result.is_ok(),
-        "codex alias construction should succeed: {}",
-        result.err().unwrap()
-    );
-    assert!(
-        result.unwrap().capabilities().native_tool_calling,
-        "openai.{arbitrary_alias} with requires_openai_auth=true must route to \
-             OpenAiCodexModelProvider (native_tool_calling=true), not the standard provider"
-    );
-}
-
-#[test]
-fn resilient_alias_builds_with_fallback_chain() {
-    use reiclaw_config::schema::{Config, ModelProviderConfig, OpenAIModelProviderConfig};
-
-    let mut config = Config::default();
-    config.providers.models.openai.insert(
-        "primary".to_string(),
-        OpenAIModelProviderConfig {
-            base: ModelProviderConfig {
-                model: Some("gpt-4o".to_string()),
-                api_key: Some("primary-key".to_string()),
-                fallback_models: vec!["gpt-4o-mini".to_string()],
-                fallback: vec![reiclaw_config::providers::ModelProviderRef::new(
-                    "openai.backup",
-                )],
-                ..Default::default()
-            },
-        },
-    );
-    config.providers.models.openai.insert(
-        "backup".to_string(),
-        OpenAIModelProviderConfig {
-            base: ModelProviderConfig {
-                model: Some("gpt-4.1".to_string()),
-                api_key: Some("backup-key".to_string()),
-                ..Default::default()
-            },
-        },
-    );
-
-    let reliability = reiclaw_config::schema::ReliabilityConfig::default();
-    let result = create_resilient_model_provider_for_alias(
-        &config,
-        "openai",
-        "primary",
-        None,
-        None,
-        &reliability,
-        &ModelProviderRuntimeOptions::default(),
-    );
-    assert!(
-        result.is_ok(),
-        "multi-alias fallback chain must build: {}",
-        result.err().unwrap()
-    );
-}
-
-#[test]
 fn resilient_alias_fails_when_resolved_fallback_lacks_profile_credential() {
     use reiclaw_config::schema::{Config, ModelProviderConfig, OpenAIModelProviderConfig};
 
@@ -1752,7 +989,7 @@ fn resilient_alias_fails_when_resolved_fallback_uri_lacks_profile_credential() {
         OpenAIModelProviderConfig {
             base: ModelProviderConfig {
                 model: Some("gpt-4.1".to_string()),
-                kind: Some("openai-compatible".to_string()),
+                kind: Some("openai".to_string()),
                 uri: Some("https://api.openai.com/v1".to_string()),
                 ..Default::default()
             },
@@ -1788,63 +1025,8 @@ fn resilient_alias_fails_when_resolved_fallback_uri_lacks_profile_credential() {
 }
 
 #[test]
-fn resilient_alias_fails_when_minimax_fallback_lacks_auth_source() {
-    use reiclaw_config::schema::{
-        Config, MinimaxModelProviderConfig, ModelProviderConfig, OpenAIModelProviderConfig,
-    };
-
-    let mut config = Config::default();
-    config.providers.models.openai.insert(
-        "primary".to_string(),
-        OpenAIModelProviderConfig {
-            base: ModelProviderConfig {
-                model: Some("gpt-4o".to_string()),
-                api_key: Some("primary-key".to_string()),
-                fallback: vec![reiclaw_config::providers::ModelProviderRef::new(
-                    "minimax.backup",
-                )],
-                ..Default::default()
-            },
-        },
-    );
-    config.providers.models.minimax.insert(
-        "backup".to_string(),
-        MinimaxModelProviderConfig {
-            base: ModelProviderConfig {
-                model: Some("minimax-text-01".to_string()),
-                ..Default::default()
-            },
-            ..Default::default()
-        },
-    );
-
-    let result = create_resilient_model_provider_for_alias(
-        &config,
-        "openai",
-        "primary",
-        Some("primary-key"),
-        None,
-        &reiclaw_config::schema::ReliabilityConfig::default(),
-        &ModelProviderRuntimeOptions::default(),
-    );
-    assert!(
-        result.is_err(),
-        "MiniMax fallback without api_key or oauth_refresh_token must fail loudly"
-    );
-    let message = result.err().unwrap().to_string();
-    assert!(
-        message.contains("minimax.backup"),
-        "error must name resolved fallback alias: {message}"
-    );
-    assert!(
-        message.contains("api_key"),
-        "error must name the credential field to set: {message}"
-    );
-}
-
-#[test]
 fn resilient_alias_fails_when_resolved_fallback_factory_fails() {
-    use reiclaw_config::schema::{Config, CustomModelProviderConfig, ModelProviderConfig};
+    use reiclaw_config::schema::{Config, ModelProviderConfig, OpenAIModelProviderConfig};
 
     let mut config = Config::default();
     config.providers.models.openai.insert(
@@ -1854,17 +1036,19 @@ fn resilient_alias_fails_when_resolved_fallback_factory_fails() {
                 model: Some("gpt-4o".to_string()),
                 api_key: Some("primary-key".to_string()),
                 fallback: vec![reiclaw_config::providers::ModelProviderRef::new(
-                    "custom.backup",
+                    "openai.backup",
                 )],
                 ..Default::default()
             },
         },
     );
-    config.providers.models.custom.insert(
+    config.providers.models.openai.insert(
         "backup".to_string(),
-        CustomModelProviderConfig {
+        OpenAIModelProviderConfig {
             base: ModelProviderConfig {
-                model: Some("custom-model".to_string()),
+                model: Some("router-model".to_string()),
+                api_key: Some("router-key".to_string()),
+                uri: Some("invalid-url".to_string()),
                 ..Default::default()
             },
         },
@@ -1886,105 +1070,16 @@ fn resilient_alias_fails_when_resolved_fallback_factory_fails() {
     let err = result.err().unwrap();
     let message = err.to_string();
     assert!(
-        message.contains("custom.backup"),
+        message.contains("openai.backup"),
         "error must name resolved fallback alias: {message}"
     );
     assert!(
-        message.contains("[providers.models.custom.backup]"),
+        message.contains("[providers.models.openai.backup]"),
         "error must name the profile to fix: {message}"
     );
     assert!(
-        message.contains("uri"),
+        message.contains("valid URL"),
         "factory error must preserve the missing field detail: {message}"
-    );
-}
-
-#[test]
-fn resilient_alias_allows_openai_external_auth_fallback_without_api_key() {
-    use reiclaw_config::schema::{Config, ModelProviderConfig, OpenAIModelProviderConfig};
-
-    let mut config = Config::default();
-    config.providers.models.openai.insert(
-        "primary".to_string(),
-        OpenAIModelProviderConfig {
-            base: ModelProviderConfig {
-                model: Some("gpt-4o".to_string()),
-                api_key: Some("primary-key".to_string()),
-                fallback: vec![reiclaw_config::providers::ModelProviderRef::new(
-                    "openai.codex",
-                )],
-                ..Default::default()
-            },
-        },
-    );
-    config.providers.models.openai.insert(
-        "codex".to_string(),
-        OpenAIModelProviderConfig {
-            base: ModelProviderConfig {
-                model: Some("gpt-5-codex".to_string()),
-                requires_openai_auth: true,
-                ..Default::default()
-            },
-        },
-    );
-
-    let result = create_resilient_model_provider_for_alias(
-        &config,
-        "openai",
-        "primary",
-        Some("primary-key"),
-        None,
-        &reiclaw_config::schema::ReliabilityConfig::default(),
-        &ModelProviderRuntimeOptions::default(),
-    );
-    assert!(
-        result.is_ok(),
-        "OpenAI external-auth fallbacks may intentionally omit api_key: {}",
-        result.err().unwrap()
-    );
-}
-
-#[test]
-fn resilient_alias_allows_local_fallback_without_profile_api_key() {
-    use reiclaw_config::schema::{Config, ModelProviderConfig, OllamaModelProviderConfig};
-
-    let mut config = Config::default();
-    config.providers.models.openai.insert(
-        "primary".to_string(),
-        reiclaw_config::schema::OpenAIModelProviderConfig {
-            base: ModelProviderConfig {
-                model: Some("gpt-4o".to_string()),
-                api_key: Some("primary-key".to_string()),
-                fallback: vec![reiclaw_config::providers::ModelProviderRef::new(
-                    "ollama.local",
-                )],
-                ..Default::default()
-            },
-        },
-    );
-    config.providers.models.ollama.insert(
-        "local".to_string(),
-        OllamaModelProviderConfig {
-            base: ModelProviderConfig {
-                model: Some("llama3.2".to_string()),
-                ..Default::default()
-            },
-        },
-    );
-
-    let result = create_resilient_model_provider_for_alias(
-        &config,
-        "openai",
-        "primary",
-        Some("primary-key"),
-        None,
-        &reiclaw_config::schema::ReliabilityConfig::default(),
-        &ModelProviderRuntimeOptions::default(),
-    );
-    assert!(
-        result.is_ok(),
-        "local fallback providers may intentionally omit api_key: {}",
-        result.err().unwrap()
     );
 }
 
@@ -2142,15 +1237,7 @@ fn retired_model_providers_fail_before_alias_or_kind_override_can_reroute() {
             .to_string()
             .contains("is retired")
         );
-        assert!(crate::catalog::catalog_source_for(retired).is_none());
         assert!(!canonical_model_provider_slots().contains(&retired));
     }
-    // Regular Gemini and its existing OAuth path are distinct consumers and
-    // remain covered by the existing adapter tests.
-    for retained in ["anthropic", "openai", "gemini", "google", "qwen", "groq"] {
-        assert!(
-            create_model_provider(retained, Some("provider-test-credential")).is_ok(),
-            "{retained}"
-        );
-    }
+    assert!(create_model_provider("openai", Some("test-key")).is_ok());
 }

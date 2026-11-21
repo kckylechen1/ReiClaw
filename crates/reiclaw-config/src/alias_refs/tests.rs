@@ -29,7 +29,7 @@ fn provider_models_hard_and_soft() {
     cfg.agents.insert(
         "researcher".to_string(),
         AliasedAgentConfig {
-            model_provider: "anthropic.default".into(),
+            model_provider: "openai.default".into(),
             ..Default::default()
         },
     );
@@ -37,18 +37,18 @@ fn provider_models_hard_and_soft() {
         "triage".to_string(),
         AliasedAgentConfig {
             model_provider: "openai.fast".into(), // unrelated, must not match
-            classifier_provider: "anthropic.default".into(),
+            classifier_provider: "openai.default".into(),
             ..Default::default()
         },
     );
     cfg.model_routes.push(ModelRouteConfig {
         hint: "deep".to_string(),
-        model_provider: "anthropic.default".to_string(),
+        model_provider: "openai.default".to_string(),
         model: "claude".to_string(),
         api_key: None,
     });
 
-    let kind = provider_kind("anthropic");
+    let kind = provider_kind("openai");
     let sites = find_all_references(&cfg, &kind, "default");
     assert_eq!(sites.len(), 3, "model_provider + classifier + route");
 
@@ -182,7 +182,7 @@ fn agent_heartbeat_soft_when_disabled() {
 #[test]
 fn no_references_is_allowed_and_empty() {
     let cfg = empty_config();
-    let report = plan_delete(&cfg, &provider_kind("anthropic"), "default");
+    let report = plan_delete(&cfg, &provider_kind("openai"), "default");
     assert!(report.allowed);
     assert!(report.blockers.is_empty() && report.scrubs.is_empty());
 }
@@ -194,12 +194,12 @@ fn ref_sites_are_sorted_by_owner() {
         cfg.agents.insert(
             name.to_string(),
             AliasedAgentConfig {
-                classifier_provider: "anthropic.default".into(),
+                classifier_provider: "openai.default".into(),
                 ..Default::default()
             },
         );
     }
-    let sites = find_all_references(&cfg, &provider_kind("anthropic"), "default");
+    let sites = find_all_references(&cfg, &provider_kind("openai"), "default");
     let paths: Vec<_> = sites.iter().map(|s| s.path.as_str()).collect();
     assert_eq!(
         paths,
@@ -219,18 +219,18 @@ fn whitespace_padded_provider_refs_are_found() {
     cfg.agents.insert(
         "researcher".to_string(),
         AliasedAgentConfig {
-            model_provider: "  anthropic.default  ".into(),
-            classifier_provider: " anthropic.default ".into(),
+            model_provider: "  openai.default  ".into(),
+            classifier_provider: " openai.default ".into(),
             ..Default::default()
         },
     );
     cfg.model_routes.push(ModelRouteConfig {
         hint: "deep".to_string(),
-        model_provider: " anthropic.default ".to_string(),
+        model_provider: " openai.default ".to_string(),
         model: "claude".to_string(),
         api_key: None,
     });
-    let kind = provider_kind("anthropic");
+    let kind = provider_kind("openai");
     let sites = find_all_references(&cfg, &kind, "default");
     assert_eq!(
         sites.len(),
@@ -242,7 +242,7 @@ fn whitespace_padded_provider_refs_are_found() {
         .iter()
         .find(|s| s.path == "agents.researcher.model_provider")
         .unwrap();
-    assert_eq!(mp.raw_value, "  anthropic.default  ");
+    assert_eq!(mp.raw_value, "  openai.default  ");
     assert!(
         !plan_delete(&cfg, &kind, "default").allowed,
         "padded hard ref still blocks"
@@ -289,15 +289,15 @@ fn provider_fallback_and_embedding_route_refs_found() {
         .models
         .ensure("openai", "main")
         .unwrap()
-        .fallback = vec!["anthropic.default".into()];
+        .fallback = vec!["openai.default".into()];
     cfg.embedding_routes.push(EmbeddingRouteConfig {
         hint: "sem".to_string(),
-        model_provider: "anthropic.default".to_string(),
+        model_provider: "openai.default".to_string(),
         model: "emb".to_string(),
         dimensions: None,
         api_key: None,
     });
-    let sites = find_all_references(&cfg, &provider_kind("anthropic"), "default");
+    let sites = find_all_references(&cfg, &provider_kind("openai"), "default");
     let paths: Vec<_> = sites.iter().map(|s| s.path.as_str()).collect();
     assert!(paths.contains(&"providers.models.openai.main.fallback[0]"));
     assert!(paths.iter().any(|p| p.starts_with("embedding_routes[")));
@@ -479,15 +479,15 @@ fn cfg_with_provider(family: &str, alias: &str) -> Config {
 
 #[test]
 fn cascade_refuses_when_model_provider_is_hard_ref() {
-    let mut cfg = cfg_with_provider("anthropic", "default");
+    let mut cfg = cfg_with_provider("openai", "default");
     cfg.agents.insert(
         "researcher".to_string(),
         AliasedAgentConfig {
-            model_provider: "anthropic.default".into(),
+            model_provider: "openai.default".into(),
             ..Default::default()
         },
     );
-    let kind = provider_kind("anthropic");
+    let kind = provider_kind("openai");
     let err =
         delete_with_cascade(&mut cfg, &kind, "default", CascadePolicy::RefuseOnHard).unwrap_err();
     match err {
@@ -495,44 +495,44 @@ fn cascade_refuses_when_model_provider_is_hard_ref() {
         other => panic!("expected Refused, got {other:?}"),
     }
     // No mutation on refuse.
-    assert!(cfg.providers.models.find("anthropic", "default").is_some());
+    assert!(cfg.providers.models.find("openai", "default").is_some());
     assert_eq!(
         cfg.agents["researcher"].model_provider.as_str(),
-        "anthropic.default"
+        "openai.default"
     );
 }
 
 #[test]
 fn cascade_scrubs_soft_refs_and_removes_entry() {
-    let mut cfg = cfg_with_provider("anthropic", "default");
+    let mut cfg = cfg_with_provider("openai", "default");
     // Another provider whose fallback points at the target.
     cfg.providers
         .models
         .ensure("openai", "main")
         .unwrap()
-        .fallback = vec!["anthropic.default".into()];
+        .fallback = vec!["openai.default".into()];
     cfg.agents.insert(
         "triage".to_string(),
         AliasedAgentConfig {
-            classifier_provider: "anthropic.default".into(),
+            classifier_provider: "openai.default".into(),
             ..Default::default()
         },
     );
     cfg.model_routes.push(ModelRouteConfig {
         hint: "deep".to_string(),
-        model_provider: "anthropic.default".to_string(),
+        model_provider: "openai.default".to_string(),
         model: "claude".to_string(),
         api_key: None,
     });
     cfg.embedding_routes.push(EmbeddingRouteConfig {
         hint: "sem".to_string(),
-        model_provider: "anthropic.default".to_string(),
+        model_provider: "openai.default".to_string(),
         model: "emb".to_string(),
         dimensions: None,
         api_key: None,
     });
 
-    let kind = provider_kind("anthropic");
+    let kind = provider_kind("openai");
     let report = delete_with_cascade(&mut cfg, &kind, "default", CascadePolicy::RefuseOnHard)
         .expect("soft-only delete succeeds");
     assert_eq!(
@@ -542,9 +542,9 @@ fn cascade_scrubs_soft_refs_and_removes_entry() {
     );
     assert_eq!(
         report.deleted_entry.as_deref(),
-        Some("providers.models.anthropic.default")
+        Some("providers.models.openai.default")
     );
-    assert!(cfg.providers.models.find("anthropic", "default").is_none());
+    assert!(cfg.providers.models.find("openai", "default").is_none());
     assert!(cfg.agents["triage"].classifier_provider.is_empty());
     assert!(
         cfg.providers
@@ -563,21 +563,21 @@ fn cascade_scrubs_soft_refs_and_removes_entry() {
 fn cascade_scrubs_whitespace_padded_refs() {
     // scrub must trim like find/validate, else a padded ref find() flags is
     // left behind and the post-condition fails.
-    let mut cfg = cfg_with_provider("anthropic", "default");
+    let mut cfg = cfg_with_provider("openai", "default");
     cfg.agents.insert(
         "triage".to_string(),
         AliasedAgentConfig {
-            classifier_provider: "  anthropic.default  ".into(),
+            classifier_provider: "  openai.default  ".into(),
             ..Default::default()
         },
     );
     cfg.model_routes.push(ModelRouteConfig {
         hint: "deep".to_string(),
-        model_provider: " anthropic.default ".to_string(),
+        model_provider: " openai.default ".to_string(),
         model: "claude".to_string(),
         api_key: None,
     });
-    let kind = provider_kind("anthropic");
+    let kind = provider_kind("openai");
     let report = delete_with_cascade(&mut cfg, &kind, "default", CascadePolicy::RefuseOnHard)
         .expect("padded soft refs scrubbed, post-condition passes");
     assert_eq!(report.applied.len(), 2);
@@ -587,7 +587,7 @@ fn cascade_scrubs_whitespace_padded_refs() {
 
 #[test]
 fn cascade_scrubs_all_matching_fallback_entries() {
-    let mut cfg = cfg_with_provider("anthropic", "default");
+    let mut cfg = cfg_with_provider("openai", "default");
     // openai.main lists the target twice in fallback (plus an unrelated one);
     // retain must drop BOTH matches and keep the unrelated entry.
     cfg.providers
@@ -595,11 +595,11 @@ fn cascade_scrubs_all_matching_fallback_entries() {
         .ensure("openai", "main")
         .unwrap()
         .fallback = vec![
-        "anthropic.default".into(),
-        "anthropic.fast".into(),
-        "anthropic.default".into(),
+        "openai.default".into(),
+        "openai.fast".into(),
+        "openai.default".into(),
     ];
-    let kind = provider_kind("anthropic");
+    let kind = provider_kind("openai");
     let report = delete_with_cascade(&mut cfg, &kind, "default", CascadePolicy::RefuseOnHard)
         .expect("soft-only delete succeeds");
     assert_eq!(
@@ -614,28 +614,28 @@ fn cascade_scrubs_all_matching_fallback_entries() {
         .unwrap()
         .fallback;
     assert_eq!(fallback.len(), 1);
-    assert_eq!(fallback[0].as_str(), "anthropic.fast");
+    assert_eq!(fallback[0].as_str(), "openai.fast");
 }
 
 #[test]
 fn cascade_dry_run_mutates_nothing() {
-    let mut cfg = cfg_with_provider("anthropic", "default");
+    let mut cfg = cfg_with_provider("openai", "default");
     cfg.agents.insert(
         "triage".to_string(),
         AliasedAgentConfig {
-            classifier_provider: "anthropic.default".into(),
+            classifier_provider: "openai.default".into(),
             ..Default::default()
         },
     );
-    let kind = provider_kind("anthropic");
+    let kind = provider_kind("openai");
     let report = delete_with_cascade(&mut cfg, &kind, "default", CascadePolicy::DryRun).unwrap();
     assert!(report.deleted_entry.is_none());
     assert!(report.applied.is_empty());
     assert_eq!(report.plan.scrubs.len(), 1);
-    assert!(cfg.providers.models.find("anthropic", "default").is_some());
+    assert!(cfg.providers.models.find("openai", "default").is_some());
     assert_eq!(
         cfg.agents["triage"].classifier_provider.as_str(),
-        "anthropic.default"
+        "openai.default"
     );
 }
 
@@ -644,7 +644,7 @@ fn cascade_not_found_for_missing_provider() {
     let mut cfg = empty_config();
     let err = delete_with_cascade(
         &mut cfg,
-        &provider_kind("anthropic"),
+        &provider_kind("openai"),
         "ghost",
         CascadePolicy::RefuseOnHard,
     )
@@ -654,10 +654,10 @@ fn cascade_not_found_for_missing_provider() {
 
 #[test]
 fn cascade_removes_unreferenced_provider() {
-    let mut cfg = cfg_with_provider("anthropic", "spare");
+    let mut cfg = cfg_with_provider("openai", "spare");
     let report = delete_with_cascade(
         &mut cfg,
-        &provider_kind("anthropic"),
+        &provider_kind("openai"),
         "spare",
         CascadePolicy::RefuseOnHard,
     )
@@ -665,9 +665,9 @@ fn cascade_removes_unreferenced_provider() {
     assert!(report.applied.is_empty());
     assert_eq!(
         report.deleted_entry.as_deref(),
-        Some("providers.models.anthropic.spare")
+        Some("providers.models.openai.spare")
     );
-    assert!(cfg.providers.models.find("anthropic", "spare").is_none());
+    assert!(cfg.providers.models.find("openai", "spare").is_none());
 }
 
 #[test]
@@ -1242,7 +1242,7 @@ fn create_map_key_checked_refuses_reserved_default_agent() {
     assert!(cfg.agents.contains_key("scout"));
     // Agent-scoped only: `default` is a free key for non-agent kinds, so the
     // guard delegates rather than refusing it as reserved.
-    assert!(create_map_key_checked(&mut cfg, "providers.models.anthropic", "default").unwrap());
+    assert!(create_map_key_checked(&mut cfg, "providers.models.openai", "default").unwrap());
     // An unknown section surfaces as Invalid, not Reserved.
     assert!(matches!(
         create_map_key_checked(&mut cfg, "not.a.real.section", "x").unwrap_err(),
@@ -1283,12 +1283,12 @@ fn rename_rejects_deleted_marker_target() {
 
 #[test]
 fn rename_model_provider_rewrites_dotted_refs() {
-    let mut cfg = cfg_with_provider("anthropic", "default");
+    let mut cfg = cfg_with_provider("openai", "default");
     cfg.agents.insert(
         "researcher".to_string(),
         AliasedAgentConfig {
-            model_provider: "anthropic.default".into(), // HARD — rewritten, not refused
-            classifier_provider: "anthropic.default".into(),
+            model_provider: "openai.default".into(), // HARD — rewritten, not refused
+            classifier_provider: "openai.default".into(),
             ..Default::default()
         },
     );
@@ -1299,31 +1299,31 @@ fn rename_model_provider_rewrites_dotted_refs() {
         .expect("ensure");
     for (_t, al, p) in cfg.providers.models.iter_entries_mut() {
         if al == "fast" {
-            p.fallback.push("anthropic.default".into());
+            p.fallback.push("openai.default".into());
         }
     }
     cfg.model_routes.push(ModelRouteConfig {
         hint: "deep".to_string(),
-        model_provider: "anthropic.default".to_string(),
+        model_provider: "openai.default".to_string(),
         model: "claude".to_string(),
         api_key: None,
     });
 
-    let kind = provider_kind("anthropic");
+    let kind = provider_kind("openai");
     let report =
         rename_with_cascade(&mut cfg, &kind, "default", "prod").expect("provider rename succeeds");
     assert_eq!(report.new_alias, "prod");
-    assert!(cfg.providers.models.find("anthropic", "default").is_none());
-    assert!(cfg.providers.models.find("anthropic", "prod").is_some());
+    assert!(cfg.providers.models.find("openai", "default").is_none());
+    assert!(cfg.providers.models.find("openai", "prod").is_some());
     assert_eq!(
         cfg.agents["researcher"].model_provider.as_str(),
-        "anthropic.prod"
+        "openai.prod"
     );
     assert_eq!(
         cfg.agents["researcher"].classifier_provider.as_str(),
-        "anthropic.prod"
+        "openai.prod"
     );
-    assert_eq!(cfg.model_routes[0].model_provider, "anthropic.prod");
+    assert_eq!(cfg.model_routes[0].model_provider, "openai.prod");
     let fast_fallback: Vec<String> = cfg
         .providers
         .models
@@ -1333,7 +1333,7 @@ fn rename_model_provider_rewrites_dotted_refs() {
         .collect();
     assert_eq!(
         fast_fallback,
-        vec!["anthropic.prod".to_string()],
+        vec!["openai.prod".to_string()],
         "fallback rewritten"
     );
     assert!(find_all_references(&cfg, &kind, "default").is_empty());
@@ -1455,8 +1455,8 @@ fn dirty_entry_for_truncates_ref_paths_to_persistable_entries() {
     );
     // provider entry → the 4-segment entry path.
     assert_eq!(
-        dirty_entry_for("providers.models.anthropic.default.fallback[0]"),
-        "providers.models.anthropic.default"
+        dirty_entry_for("providers.models.openai.default.fallback[0]"),
+        "providers.models.openai.default"
     );
 }
 
@@ -1543,28 +1543,28 @@ fn bundle_refs_find_scrub_rewrite() {
 fn advisor_model_ref_is_scrubbed_on_delete_and_rewritten_on_rename() {
     use crate::advisor::AdvisorTarget;
 
-    let mut cfg = cfg_with_provider("anthropic", "default");
+    let mut cfg = cfg_with_provider("openai", "default");
     cfg.agents.insert(
         "fast".to_string(),
         AliasedAgentConfig {
-            advisor: Some(AdvisorTarget::Model("anthropic.default".into())),
+            advisor: Some(AdvisorTarget::Model("openai.default".into())),
             ..Default::default()
         },
     );
-    let kind = provider_kind("anthropic");
+    let kind = provider_kind("openai");
 
     let sites = find_all_references(&cfg, &kind, "default");
     assert!(
         sites
             .iter()
-            .any(|s| s.path == "agents.fast.advisor" && s.raw_value == "model:anthropic.default"),
+            .any(|s| s.path == "agents.fast.advisor" && s.raw_value == "model:openai.default"),
         "advisor must be listed as a soft reference: {sites:?}"
     );
 
     rename_with_cascade(&mut cfg, &kind, "default", "prod").expect("rename succeeds");
     assert_eq!(
         cfg.agents["fast"].advisor,
-        Some(AdvisorTarget::Model("anthropic.prod".into()))
+        Some(AdvisorTarget::Model("openai.prod".into()))
     );
 
     delete_with_cascade(&mut cfg, &kind, "prod", CascadePolicy::RefuseOnHard)
