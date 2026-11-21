@@ -842,49 +842,142 @@ async fn reserve_and_send_continuation(
     }
 }
 
+/// Failure leaves the existing binding pending. Retries consume the ordinary
+/// bounded observer page, at most once per binding per sweep; no extra loop or queue.
 async fn digest_terminal_result_fail_soft(
-    agent_alias: &str,
-    request_id: &str,
-    dispatch_id: &str,
+    config: &RwLock<Config>,
+    data_dir: &Path,
+    stop: &tokio_util::sync::CancellationToken,
+    row: &DispatchBindingRow,
     status: &RunStatus,
     route_snapshot: &reiclaw_config::tachi::TachiConfig,
     deps: &SweepDeps<'_>,
 ) {
-    let is_digestible_terminal = matches!(status.state, RunState::Completed)
-        || (status.state == RunState::InputRequired
-            && status.closure_kind.as_deref() == Some("partial"));
-    if !is_digestible_terminal || status.result_written == Some(false) {
-        return;
+    if let Err(error) =
+        digest_terminal_result(config, data_dir, stop, row, status, route_snapshot, deps).await
+    {
+        ::reiclaw_log::record!(
+            WARN,
+            ::reiclaw_log::Event::new(module_path!(), ::reiclaw_log::Action::Fail)
+                .with_outcome(::reiclaw_log::EventOutcome::Failure)
+                .with_attrs(::serde_json::json!({
+                    "agent": row.agent_alias,
+                    "request_id": row.request_id,
+                    "dispatch_id": row.dispatch_id,
+                    "error": reiclaw_providers::sanitize_api_error(&format!("{error:#}")),
+                })),
+            "delegation terminal digestion failed (will retry on a later sweep)"
+        );
+    }
+}
+
+async fn digest_terminal_result(
+    config: &RwLock<Config>,
+    data_dir: &Path,
+    stop: &tokio_util::sync::CancellationToken,
+    row: &DispatchBindingRow,
+    status: &RunStatus,
+    route_snapshot: &reiclaw_config::tachi::TachiConfig,
+    deps: &SweepDeps<'_>,
+) -> anyhow::Result<()> {
+    use reiclaw_api::attribution::{MemoryKind, Role};
+    use reiclaw_api::memory_traits::MemoryCategory;
+    let digestible = |status: &RunStatus| {
+        matches!(terminal_outcome(status), Some("completed" | "partial"))
+            && status.result_written != Some(false)
+    };
+    if !digestible(status)
+        || row.terminal_digest.as_deref() == Some("stored")
+        || status.revision.is_some_and(|rev| {
+            row.terminal_digest.as_deref() == Some(format!("empty:{rev}").as_str())
+        })
+    {
+        return Ok(());
     }
     let Some(memory) = deps.memory else {
-        return;
+        return Ok(());
     };
-    if memory.name() == "none" {
-        return;
+    // These installed backends do not implement durable Episode writes. Attribution
+    // survives the Gateway's audit/scanning/retrieval decorators and custom aliases.
+    if matches!(
+        memory.role(),
+        Role::Memory(MemoryKind::None | MemoryKind::Markdown | MemoryKind::AgentScopedMarkdown)
+    ) {
+        return Ok(());
     }
     let Some(fetch_result) = deps.fetch_result else {
-        return;
+        return Ok(());
     };
-    let result = match fetch_result(agent_alias, dispatch_id, route_snapshot).await {
-        Ok(result) => result,
-        Err(error) => {
-            ::reiclaw_log::record!(
-                WARN,
-                ::reiclaw_log::Event::new(module_path!(), ::reiclaw_log::Action::Fail)
-                    .with_outcome(::reiclaw_log::EventOutcome::Failure)
-                    .with_attrs(::serde_json::json!({
-                        "agent": agent_alias,
-                        "request_id": request_id,
-                        "dispatch_id": dispatch_id,
-                        "error": reiclaw_providers::sanitize_api_error(&format!("{error:#}")),
-                    })),
-                "delegation terminal result fetch failed (fail-soft)"
-            );
-            return;
+    let admitted = || {
+        matches!(
+            current_target_snapshot(
+                config,
+                data_dir,
+                stop,
+                &row.agent_alias,
+                row.route_digest.as_deref()
+            ),
+            Ok(Some(_))
+        )
+    };
+    if !admitted() {
+        return Ok(());
+    }
+    anyhow::ensure!(
+        status.dispatch_id == row.dispatch_id,
+        "terminal digest status dispatch mismatch"
+    );
+    let episode_id = format!("delegation:{}", row.request_id);
+    // The Episode itself recovers the commit/receipt crash window and old notice
+    // markers. Never use an unscoped recent-record query or overwrite a collision.
+    if let Some(entry) = memory.get_for_agent(&episode_id, &row.agent_alias).await? {
+        anyhow::ensure!(
+            entry.key == episode_id
+                && entry.agent_id.as_deref() == Some(row.agent_alias.as_str())
+                && entry.session_id.as_deref() == Some(row.request_id.as_str())
+                && entry.namespace == "sleep_episode"
+                && entry.category == MemoryCategory::Custom("sleep_episode".into()),
+            "terminal digest Episode identity conflicts"
+        );
+        let episode: EpisodeRecord = serde_json::from_str(&entry.content)?;
+        episode.validate()?;
+        anyhow::ensure!(
+            episode.episode_id == episode_id
+                && episode.agent_id == row.agent_alias
+                && episode.session_key == row.request_id
+                && episode.source_kind == EpisodeSourceKind::DelegationDigest,
+            "terminal digest Episode scope conflicts"
+        );
+        if admitted() {
+            SqliteSessionBackend::new(data_dir)?.record_terminal_digest(row, None)?;
         }
-    };
-    let Some(summary) = result.body.as_deref().and_then(digest_result_body) else {
-        return;
+        return Ok(());
+    }
+    if !admitted() {
+        return Ok(());
+    }
+    let result = fetch_result(&row.agent_alias, &row.dispatch_id, route_snapshot).await?;
+    if !admitted() {
+        return Ok(());
+    }
+    anyhow::ensure!(
+        result.status.dispatch_id == row.dispatch_id && result.state == result.status.state,
+        "terminal digest result identity mismatch"
+    );
+    let summary = digestible(&result.status)
+        .then(|| result.body.as_deref().and_then(digest_result_body))
+        .flatten();
+    let Some(summary) = summary else {
+        // A successful empty or ineligible report is not a transport failure. Reconsider only
+        // after a canonical revision changes, including across observer restarts.
+        if let Some(revision) = result
+            .status
+            .revision
+            .filter(|rev| Some(*rev) == status.revision)
+        {
+            SqliteSessionBackend::new(data_dir)?.record_terminal_digest(row, Some(revision))?;
+        }
+        return Ok(());
     };
     let ended_at = status
         .updated_at
@@ -893,9 +986,9 @@ async fn digest_terminal_result_fail_soft(
         .map(str::to_string)
         .unwrap_or_else(|| reiclaw_api::time::format_rfc3339(jiff::Timestamp::now()));
     let episode = EpisodeRecord {
-        episode_id: format!("delegation:{request_id}"),
-        agent_id: agent_alias.to_string(),
-        session_key: request_id.to_string(),
+        episode_id,
+        agent_id: row.agent_alias.clone(),
+        session_key: row.request_id.clone(),
         started_at: ended_at.clone(),
         ended_at,
         up_to_message_id: None,
@@ -906,20 +999,11 @@ async fn digest_terminal_result_fail_soft(
         entities: Vec::new(),
         source_kind: EpisodeSourceKind::DelegationDigest,
     };
-    if let Err(error) = memory.commit_episode(&episode).await {
-        ::reiclaw_log::record!(
-            WARN,
-            ::reiclaw_log::Event::new(module_path!(), ::reiclaw_log::Action::Fail)
-                .with_outcome(::reiclaw_log::EventOutcome::Failure)
-                .with_attrs(::serde_json::json!({
-                    "agent": agent_alias,
-                    "request_id": request_id,
-                    "episode_id": episode.episode_id,
-                    "error": reiclaw_providers::sanitize_api_error(&format!("{error:#}")),
-                })),
-            "delegation terminal episode commit failed (fail-soft)"
-        );
+    memory.commit_episode(&episode).await?;
+    if admitted() {
+        SqliteSessionBackend::new(data_dir)?.record_terminal_digest(row, None)?;
     }
+    Ok(())
 }
 
 struct TargetSnapshot {
@@ -1333,98 +1417,98 @@ pub(crate) async fn reconcile_with_deps(
             Ok(None) => continue,
             Err(_) => break,
         };
-        // Destination-scoped suppression: skip only when THIS outcome was
-        // already notified to THIS destination — bridge, recipient AND
-        // thread, the same triple permits_delivery gates on (across the whole remembered
-        // target history, so A→B→A stays silent after retention eviction).
-        let thread = target.thread_id.as_deref();
-        let entry = marker_entry(outcome, &target.bridge, &target.recipient, thread);
-        if row.notified_outcome.as_deref().is_some_and(|list| {
-            already_notified(list, outcome, &target.bridge, &target.recipient, thread)
-        }) {
-            continue;
-        }
-        let source_id = source_identity(&row.agent_alias, &row.request_id);
-        let legacy_entry = legacy_marker_entry(outcome, &target.bridge, &target.recipient);
-        // The old producer marked at enqueue, not delivery, and used a bare
-        // outcome event id even for threaded rows. Recover the old destination
-        // from that receipt before interpreting its thread-blind marker. This
-        // also handles a crash after enqueue but before the marker was saved.
-        let legacy_receipt = match outbox.source_event(
-            &target.bridge,
-            &target.recipient,
-            DELEGATION,
-            &source_id,
-            outcome,
-        ) {
-            Ok(receipt) => receipt,
-            Err(error) => {
-                outbox_failure = Some(error);
-                break;
+        let notice_result = (|| -> anyhow::Result<()> {
+            // Destination-scoped suppression: skip only when THIS outcome was
+            // already notified to THIS destination — bridge, recipient AND
+            // thread, the same triple permits_delivery gates on (across the whole remembered
+            // target history, so A→B→A stays silent after retention eviction).
+            let thread = target.thread_id.as_deref();
+            let entry = marker_entry(outcome, &target.bridge, &target.recipient, thread);
+            if row.notified_outcome.as_deref().is_some_and(|list| {
+                already_notified(list, outcome, &target.bridge, &target.recipient, thread)
+            }) {
+                return Ok(());
             }
-        };
-        if let Some(receipt) = legacy_receipt {
+            let source_id = source_identity(&row.agent_alias, &row.request_id);
+            let legacy_entry = legacy_marker_entry(outcome, &target.bridge, &target.recipient);
+            // The old producer marked at enqueue, not delivery, and used a bare
+            // outcome event id even for threaded rows. Recover the old destination
+            // from that receipt before interpreting its thread-blind marker. This
+            // also handles a crash after enqueue but before the marker was saved.
+            let legacy_receipt = outbox.source_event(
+                &target.bridge,
+                &target.recipient,
+                DELEGATION,
+                &source_id,
+                outcome,
+            )?;
+            if let Some(receipt) = legacy_receipt {
+                marks.push(MarkerUpdate {
+                    rowid: row.rowid,
+                    entry: marker_entry(
+                        outcome,
+                        &target.bridge,
+                        &target.recipient,
+                        receipt.thread_id.as_deref(),
+                    ),
+                    replaces: Some(legacy_entry),
+                });
+                if receipt.thread_id.as_deref() == thread {
+                    // Reuse the original candidate/receipt. In particular, an
+                    // uncertain or sent attempt must never be automatically replayed.
+                    return Ok(());
+                }
+                // A different configured thread is a new destination. Leave the
+                // original row and its owner actions untouched, as for new-format
+                // A→B retargeting; only the new destination may get a new row.
+            } else if row
+                .notified_outcome
+                .as_deref()
+                .is_some_and(|list| marker_contains(list, &legacy_entry))
+            {
+                // Retention has erased the evidence needed to identify the old
+                // thread. Do not guess that an old notification was never attempted.
+                return Ok(());
+            }
+            let content = format!(
+                "Delegated task {request} finished with outcome {outcome}. Ask the agent or query tachi_result for dispatch {dispatch}.",
+                dispatch = short(&row.dispatch_id),
+                request = short(&row.request_id)
+            );
+            // An enqueue failure (e.g. outbox capacity) must not discard the
+            // markers of rows already enqueued this pass: record the error, stop
+            // enqueueing further rows, and still flush what succeeded.
+            outbox.enqueue_source(
+                &target.bridge,
+                &target.recipient,
+                thread,
+                &content,
+                DELEGATION,
+                &source_id,
+                &destination_event_id(outcome, thread),
+            )?;
             marks.push(MarkerUpdate {
                 rowid: row.rowid,
-                entry: marker_entry(
-                    outcome,
-                    &target.bridge,
-                    &target.recipient,
-                    receipt.thread_id.as_deref(),
-                ),
-                replaces: Some(legacy_entry),
+                entry,
+                replaces: None,
             });
-            if receipt.thread_id.as_deref() == thread {
-                // Reuse the original candidate/receipt. In particular, an
-                // uncertain or sent attempt must never be automatically replayed.
-                continue;
-            }
-            // A different configured thread is a new destination. Leave the
-            // original row and its owner actions untouched, as for new-format
-            // A→B retargeting; only the new destination may get a new row.
-        } else if row
-            .notified_outcome
-            .as_deref()
-            .is_some_and(|list| marker_contains(list, &legacy_entry))
-        {
-            // Retention has erased the evidence needed to identify the old
-            // thread. Do not guess that an old notification was never attempted.
-            continue;
-        }
-        let content = format!(
-            "Delegated task {request} finished with outcome {outcome}. Ask the agent or query tachi_result for dispatch {dispatch}.",
-            dispatch = short(&row.dispatch_id),
-            request = short(&row.request_id)
-        );
-        // An enqueue failure (e.g. outbox capacity) must not discard the
-        // markers of rows already enqueued this pass: record the error, stop
-        // enqueueing further rows, and still flush what succeeded.
-        if let Err(error) = outbox.enqueue_source(
-            &target.bridge,
-            &target.recipient,
-            thread,
-            &content,
-            DELEGATION,
-            &source_id,
-            &destination_event_id(outcome, thread),
-        ) {
+            notified += 1;
+
+            Ok(())
+        })();
+        if let Err(error) = notice_result {
             outbox_failure = Some(error);
             break;
         }
-        marks.push(MarkerUpdate {
-            rowid: row.rowid,
-            entry,
-            replaces: None,
-        });
-        notified += 1;
 
         // Fail-soft terminal result digestion into EpisodeRecord: runs after
         // the #63 BridgeOutbox notice is safely enqueued so any failure in
         // result fetch or episode commit never suppresses or delays delivery.
         digest_terminal_result_fail_soft(
-            &row.agent_alias,
-            &row.request_id,
-            &row.dispatch_id,
+            config,
+            data_dir,
+            stop,
+            row,
             &status,
             &route_snapshot,
             deps,

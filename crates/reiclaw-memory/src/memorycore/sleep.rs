@@ -79,9 +79,10 @@ impl MemoryCore {
         path: &str,
         key: &str,
         agent_id: &str,
+        include_archived: bool,
     ) -> anyhow::Result<Option<portable_kernel::MemoryEntry>> {
         let rows = store
-            .list_by_path(path, 8, false)
+            .list_by_path(path, 8, include_archived)
             .map_err(|e| anyhow::Error::msg(format!("tachi sleep identity lookup failed: {e}")))?;
         Ok(rows.into_iter().find(|entry| {
             entry.path == path
@@ -249,10 +250,26 @@ impl MemoryCore {
         let agent_id = episode.agent_id.clone();
         let session_key = episode.session_key.clone();
         let entities = episode.entities.clone();
+        let immutable =
+            episode.source_kind == crate::sleep_records::EpisodeSourceKind::DelegationDigest;
 
         tokio::task::spawn_blocking(move || -> anyhow::Result<String> {
             let mut store = store.lock();
-            let existing = Self::resolve_existing_at_path(&store, &path, &episode_id, &agent_id)?;
+            let existing =
+                Self::resolve_existing_at_path(&store, &path, &episode_id, &agent_id, immutable)?;
+            if immutable && let Some(existing) = &existing {
+                let stored: EpisodeRecord = serde_json::from_str(&existing.text)?;
+                stored.validate()?;
+                ensure!(
+                    stored.episode_id == episode_id
+                        && stored.agent_id == agent_id
+                        && stored.session_key == session_key
+                        && stored.source_kind
+                            == crate::sleep_records::EpisodeSourceKind::DelegationDigest,
+                    "delegation Episode identity conflicts"
+                );
+                return Ok(existing.id.clone());
+            }
             let entry = Self::build_sleep_entry(
                 existing.as_ref(),
                 path,
@@ -490,6 +507,7 @@ impl MemoryCore {
                 &new_path,
                 &new_key_owned,
                 &agent_owned,
+                false,
             )? {
                 Some(row) => Some(row),
                 None => Self::rows_matching_key(&store, &new_key_owned, Some(&agent_owned))?
@@ -648,8 +666,13 @@ impl MemoryCore {
 
         tokio::task::spawn_blocking(move || -> anyhow::Result<String> {
             let mut store = store.lock();
-            let existing =
-                Self::resolve_existing_at_path(&store, &path, SLEEP_PINNED_DIGEST_KEY, &agent_id)?;
+            let existing = Self::resolve_existing_at_path(
+                &store,
+                &path,
+                SLEEP_PINNED_DIGEST_KEY,
+                &agent_id,
+                false,
+            )?;
             let entry = Self::build_sleep_entry(
                 existing.as_ref(),
                 path,
@@ -744,7 +767,8 @@ impl MemoryCore {
 
         tokio::task::spawn_blocking(move || -> anyhow::Result<String> {
             let mut store = store.lock();
-            let existing = Self::resolve_existing_at_path(&store, &path, &day_key, &agent_id)?;
+            let existing =
+                Self::resolve_existing_at_path(&store, &path, &day_key, &agent_id, false)?;
             let entry = Self::build_sleep_entry(
                 existing.as_ref(),
                 path,
@@ -871,6 +895,42 @@ mod tests {
             entities: vec!["zeroclaw_project".to_string()],
             source_kind: EpisodeSourceKind::Dialogue,
         }
+    }
+
+    #[tokio::test]
+    async fn delegation_episode_retry_preserves_existing_and_archived_identity() {
+        let (_tmp, mem) = temp_memory();
+        let mut episode = sample_episode(
+            "delegation:req",
+            "butler",
+            "req",
+            "2026-11-18T00:00:00Z",
+            "2026-11-18T01:00:00Z",
+            "Original report",
+        );
+        episode.source_kind = EpisodeSourceKind::DelegationDigest;
+        let id = mem.commit_episode(&episode).await.unwrap();
+        episode.summary = "Replacement must not overwrite".into();
+        assert_eq!(mem.commit_episode(&episode).await.unwrap(), id);
+        {
+            let store = mem.store_handle().lock();
+            let existing = store.get_with_options(&id, true).unwrap().unwrap();
+            assert!(existing.text.contains("Original report"));
+            store.archive_memory(&id).unwrap();
+        }
+        assert_eq!(mem.commit_episode(&episode).await.unwrap(), id);
+        {
+            let store = mem.store_handle().lock();
+            let existing = store.get_with_options(&id, true).unwrap().unwrap();
+            assert!(existing.archived);
+            assert!(existing.text.contains("Original report"));
+        }
+        episode.session_key = "foreign-session".into();
+        assert!(mem.commit_episode(&episode).await.is_err());
+        let store = mem.store_handle().lock();
+        let existing = store.get_with_options(&id, true).unwrap().unwrap();
+        assert!(existing.archived);
+        assert!(existing.text.contains("Original report"));
     }
 
     #[tokio::test]

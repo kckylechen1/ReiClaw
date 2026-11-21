@@ -185,6 +185,23 @@ with Tachi's receipts. Notices are withheld when the agent is disabled or the
 destination stops matching, and delivery follows the attention policy (quiet
 hours, snooze, mute) like any other source.
 
+Terminal Episode persistence has a separate receipt on the existing session
+binding. A completed or partial run with a written result can recover from a
+transient Result read or Episode write failure on its next eligible observer
+visit, even after its notice was delivered. Recovery uses the same route and
+agent checks and the existing 500-binding page / 60-second sweep budget; it does
+not resend the notice or create a new queue. Disabled or unsupported memory
+backends and ineligible terminal states do not trigger Result reads.
+
+A successful Episode receipt prevents further Result reads and Episode writes,
+including after restart. An older notification marker without this receipt is
+pending: an existing scoped `delegation:<request_id>` Episode satisfies it
+without being overwritten; otherwise the observer attempts the canonical Result.
+Archived Episodes are preserved. A successful empty or ineligible result is remembered for its
+canonical revision and reconsidered only when that revision changes. Transport
+and persistence failures remain pending for later bounded sweeps. The sessions
+store owns this receipt; the memory store remains the source of Episode content.
+
 A managed, supervised native session can remain canonically working while
 paused at an `awaiting_instruction` turn boundary. When the same status receipt
 confirms running execution and available control, and lacks cancellation or
