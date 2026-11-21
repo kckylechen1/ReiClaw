@@ -1144,7 +1144,13 @@ impl SoulProfileStore {
                 BEGIN SELECT RAISE(ABORT, 'soul anchors are append-only'); END;
              CREATE TRIGGER IF NOT EXISTS soul_anchors_no_delete
                 BEFORE DELETE ON soul_anchors
-                BEGIN SELECT RAISE(ABORT, 'soul anchors are append-only'); END;",
+                BEGIN SELECT RAISE(ABORT, 'soul anchors are append-only'); END;
+             CREATE INDEX IF NOT EXISTS idx_soul_proposals_agent
+                ON soul_proposals (agent);
+             CREATE INDEX IF NOT EXISTS idx_soul_reflections_agent
+                ON soul_reflections (agent);
+             CREATE INDEX IF NOT EXISTS idx_soul_anchors_agent
+                ON soul_anchors (agent);",
         )?;
         // Stores created by an earlier build of this branch lack the newer
         // columns; add them in place (ALTER TABLE ADD COLUMN keeps every row).
@@ -5702,5 +5708,257 @@ mod tests {
             store.export("nova"),
             Err(SoulProfileError::Storage(message)) if message.contains("unknown soul layer")
         ));
+    }
+
+    fn index_count(conn: &Connection, name: &str) -> i64 {
+        conn.query_row(
+            "SELECT COUNT(*) FROM sqlite_master WHERE type = 'index' AND name = ?1",
+            [name],
+            |row| row.get(0),
+        )
+        .unwrap()
+    }
+
+    fn index_columns(conn: &Connection, name: &str) -> Vec<String> {
+        let mut stmt = conn.prepare(&format!("PRAGMA index_info({name})")).unwrap();
+        stmt.query_map([], |row| row.get::<_, String>(2))
+            .unwrap()
+            .collect::<Result<Vec<_>, _>>()
+            .unwrap()
+    }
+
+    fn eqp_lines(conn: &Connection, sql: &str, params: Vec<rusqlite::types::Value>) -> Vec<String> {
+        let explain = format!("EXPLAIN QUERY PLAN {sql}");
+        let mut stmt = conn.prepare(&explain).unwrap();
+        stmt.query_map(rusqlite::params_from_iter(params), |row| {
+            row.get::<_, String>(3)
+        })
+        .unwrap()
+        .collect::<Result<Vec<_>, _>>()
+        .unwrap()
+    }
+
+    /// Interleaved history for two agents plus a sparse third agent, so both
+    /// seek correctness and inter-agent isolation are exercised.
+    fn seed_soul_agent_fixture(conn: &Connection) {
+        conn.execute_batch(
+            "INSERT INTO soul_reflections
+                 (agent, period_from_unix, messages_read, proposals_created,
+                  user_model_candidates_created, outcome, ran_at_unix, drift_json)
+             VALUES ('a', 1, 5, 0, 0, 'ok', 10, NULL),
+                    ('b', 1, 6, 0, 0, 'ok', 11, NULL),
+                    ('a', 2, 7, 0, 0, 'ok', 12, NULL),
+                    ('b', 2, 8, 0, 0, 'ok', 13, NULL),
+                    ('c', 1, 1, 0, 0, 'ok', 14, NULL);
+             INSERT INTO soul_anchors
+                 (agent, tone_revision_id, story_revision_id, set_at_unix, source)
+             VALUES ('a', 1, 1, 10, 'owner'), ('b', 2, 2, 11, 'owner');
+             INSERT INTO soul_proposals
+                 (agent, layer, proposal, rationale, trait_key, level, growth_kind,
+                  retire_index, target_revision, target_kind, target_text, session_ref, created_at_unix)
+             VALUES ('a', 'voice', 'p-a1', 'why', NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL, 10),
+                    ('b', 'voice', 'p-b1', 'why', NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL, 11),
+                    ('a', 'voice', 'p-a2', 'why', NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL, 12);",
+        )
+        .unwrap();
+    }
+
+    #[test]
+    fn predecessor_store_gains_agent_indexes_and_preserves_rows() {
+        let dir = tempfile::tempdir().unwrap();
+        let db_path = dir.path().join(SOUL_PROFILE_DB_FILE);
+        SoulProfileStore::open(dir.path()).unwrap();
+        // Synthesize the predecessor state: the current schema without the
+        // three agent indexes, seeded with interleaved history.
+        {
+            let conn = Connection::open(&db_path).unwrap();
+            conn.execute_batch(
+                "DROP INDEX idx_soul_proposals_agent;
+                 DROP INDEX idx_soul_reflections_agent;
+                 DROP INDEX idx_soul_anchors_agent;",
+            )
+            .unwrap();
+            seed_soul_agent_fixture(&conn);
+        }
+        let store = SoulProfileStore::open(dir.path()).unwrap();
+        assert_eq!(store.reflections("a", 200).unwrap().len(), 2);
+        assert_eq!(store.reflections("b", 200).unwrap().len(), 2);
+        assert_eq!(store.reflections("c", 200).unwrap().len(), 1);
+        assert_eq!(store.proposals("a", false).unwrap().len(), 2);
+        assert_eq!(store.proposals("b", false).unwrap().len(), 1);
+        assert!(store.last_reflection("c").unwrap().is_some());
+        {
+            let conn = Connection::open(&db_path).unwrap();
+            for name in [
+                "idx_soul_proposals_agent",
+                "idx_soul_reflections_agent",
+                "idx_soul_anchors_agent",
+            ] {
+                assert_eq!(
+                    index_count(&conn, name),
+                    1,
+                    "{name} must exist exactly once"
+                );
+                assert_eq!(
+                    index_columns(&conn, name),
+                    vec!["agent".to_string()],
+                    "{name} must be keyed by agent alone; id is a rowid alias"
+                );
+            }
+        }
+        // Reopening stays idempotent and rows are unchanged.
+        drop(store);
+        let store = SoulProfileStore::open(dir.path()).unwrap();
+        assert_eq!(store.reflections("a", 200).unwrap().len(), 2);
+        let conn = Connection::open(&db_path).unwrap();
+        for name in [
+            "idx_soul_proposals_agent",
+            "idx_soul_reflections_agent",
+            "idx_soul_anchors_agent",
+        ] {
+            assert_eq!(index_count(&conn, name), 1);
+        }
+    }
+
+    #[test]
+    fn soul_review_query_plans_use_agent_indexes() {
+        // Production query texts copied verbatim from last_reflection,
+        // reflections, anchor_of, anchor_rows and proposals. Keep in sync.
+        let last_reflection_sql = "SELECT period_from_unix, messages_read, proposals_created, outcome, ran_at_unix, user_model_candidates_created, drift_json
+                 FROM soul_reflections WHERE agent = ?1 ORDER BY id DESC LIMIT 1";
+        let reflections_sql = "SELECT id, period_from_unix, messages_read, proposals_created, outcome, ran_at_unix, user_model_candidates_created, drift_json FROM soul_reflections WHERE agent = ?1 ORDER BY id DESC LIMIT ?2";
+        let anchor_of_sql = "SELECT id, tone_revision_id, story_revision_id, set_at_unix, source
+             FROM soul_anchors WHERE agent = ?1 ORDER BY id DESC LIMIT 1";
+        let anchor_rows_sql = "SELECT id, tone_revision_id, story_revision_id, set_at_unix, source
+         FROM soul_anchors WHERE agent = ?1 ORDER BY id ASC";
+        let proposals_sql = format!(
+            "{PROPOSAL_SELECT} WHERE p.agent = ?1 AND (?2 = 0 OR r.proposal_id IS NULL)
+             ORDER BY p.id ASC"
+        );
+        use rusqlite::types::Value;
+
+        let dir = tempfile::tempdir().unwrap();
+        let db_path = dir.path().join(SOUL_PROFILE_DB_FILE);
+        let store = SoulProfileStore::open(dir.path()).unwrap();
+        {
+            let conn = Connection::open(&db_path).unwrap();
+            seed_soul_agent_fixture(&conn);
+        }
+        let conn = Connection::open(&db_path).unwrap();
+
+        // With the indexes each read is a bounded agent seek, not a walk over
+        // every agent's history. (ORDER BY id needs no sort in either state:
+        // with the index the seek is already id-ordered, and without it a
+        // rowid scan happens to be ordered too; the win is the seek.)
+        for (label, sql, params, index_name) in [
+            (
+                "last_reflection",
+                last_reflection_sql,
+                vec![Value::Text("a".into())],
+                "idx_soul_reflections_agent",
+            ),
+            (
+                "reflections",
+                reflections_sql,
+                vec![Value::Text("a".into()), Value::Integer(200)],
+                "idx_soul_reflections_agent",
+            ),
+            (
+                "anchor_of",
+                anchor_of_sql,
+                vec![Value::Text("a".into())],
+                "idx_soul_anchors_agent",
+            ),
+            (
+                "anchor_rows",
+                anchor_rows_sql,
+                vec![Value::Text("a".into())],
+                "idx_soul_anchors_agent",
+            ),
+            (
+                "proposals",
+                proposals_sql.as_str(),
+                vec![Value::Text("a".into()), Value::Integer(0)],
+                "idx_soul_proposals_agent",
+            ),
+        ] {
+            let plan = eqp_lines(&conn, sql, params);
+            assert!(
+                plan.iter().any(|l| l.contains(index_name)),
+                "{label} must use {index_name}: {plan:?}"
+            );
+            assert!(
+                !plan.iter().any(|l| l.contains("USE TEMP B-TREE")),
+                "{label} must not sort: {plan:?}"
+            );
+        }
+
+        // Equivalence anchors before degrading the schema.
+        let indexed_last = store.last_reflection("a").unwrap();
+        let indexed_reflections = store.reflections("b", 10).unwrap();
+        let indexed_proposals = store.proposals("a", false).unwrap();
+
+        // Degrade to the predecessor state: the same reads table-scan the
+        // agent dimension, results stay identical.
+        conn.execute_batch(
+            "DROP INDEX idx_soul_proposals_agent;
+             DROP INDEX idx_soul_reflections_agent;
+             DROP INDEX idx_soul_anchors_agent;",
+        )
+        .unwrap();
+        for (label, sql, params, table) in [
+            (
+                "last_reflection",
+                last_reflection_sql,
+                vec![Value::Text("a".into())],
+                "SCAN soul_reflections",
+            ),
+            (
+                "anchor_of",
+                anchor_of_sql,
+                vec![Value::Text("a".into())],
+                "SCAN soul_anchors",
+            ),
+            (
+                "proposals",
+                proposals_sql.as_str(),
+                vec![Value::Text("a".into()), Value::Integer(0)],
+                "SCAN p",
+            ),
+        ] {
+            let plan = eqp_lines(&conn, sql, params);
+            assert!(
+                plan.iter().any(|l| l.contains(table)),
+                "unindexed {label} must scan: {plan:?}"
+            );
+        }
+        assert_eq!(store.last_reflection("a").unwrap(), indexed_last);
+        assert_eq!(
+            store.reflections("b", 10).unwrap().len(),
+            indexed_reflections.len()
+        );
+        assert_eq!(
+            store
+                .proposals("a", false)
+                .unwrap()
+                .iter()
+                .map(|p| p.id)
+                .collect::<Vec<_>>(),
+            indexed_proposals.iter().map(|p| p.id).collect::<Vec<_>>()
+        );
+
+        // Reopening restores the indexes (idempotent additive migration).
+        drop(conn);
+        drop(store);
+        let store = SoulProfileStore::open(dir.path()).unwrap();
+        assert!(store.last_reflection("c").unwrap().is_some());
+        let conn = Connection::open(&db_path).unwrap();
+        for name in [
+            "idx_soul_proposals_agent",
+            "idx_soul_reflections_agent",
+            "idx_soul_anchors_agent",
+        ] {
+            assert_eq!(index_count(&conn, name), 1);
+        }
     }
 }
