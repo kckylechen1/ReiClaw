@@ -1202,6 +1202,7 @@ fn golden_staffing_contract_matches_our_receipt_and_terminal_rules() {
         result_written: None,
         updated_at: None,
         read_projection: None,
+        native: Default::default(),
     };
     for state in contract["terminal_semantics"]["terminal_states"]
         .as_array()
@@ -1422,6 +1423,7 @@ async fn continue_run_sends_tachi_staff_params_and_maps_receipt() {
         args,
         &json!({
             "action": "continue",
+            "format": "json",
             "dispatch_id": "d-cont",
             "expected_status_revision": 7,
             "task": "Proceed with option A"
@@ -1562,8 +1564,10 @@ async fn finish_run_sends_tachi_staff_params_and_maps_receipt() {
         assert_eq!(args["action"], "finish");
         Reply::Ok(json!({
             "dispatch_id": args["dispatch_id"],
-            "state": "TASK_STATE_COMPLETED",
-            "status_revision": 12
+            "state": "TASK_STATE_WORKING",
+            "status_revision": 12,
+            "controller_epoch_id": "fixture-epoch",
+            "session": {"phase": "finished", "session_id": "fixture-session", "turn": 2}
         }))
     })
     .await;
@@ -1577,7 +1581,7 @@ async fn finish_run_sends_tachi_staff_params_and_maps_receipt() {
         receipt,
         FinishReceipt {
             dispatch_id: "d-fin".to_string(),
-            state: RunState::Completed,
+            state: RunState::Working,
             status_revision: Some(12),
         }
     );
@@ -1589,6 +1593,7 @@ async fn finish_run_sends_tachi_staff_params_and_maps_receipt() {
         args,
         &json!({
             "action": "finish",
+            "format": "json",
             "dispatch_id": "d-fin",
             "expected_status_revision": 11
         })
@@ -1599,6 +1604,33 @@ async fn finish_run_sends_tachi_staff_params_and_maps_receipt() {
             "`{key}` is not a TachiStaffParams field"
         );
     }
+}
+
+#[tokio::test]
+async fn native_success_shaped_reply_without_state_is_unknown_and_not_retried() {
+    let (fake, endpoint) = serve(|tool, args| {
+        assert_eq!(tool, TACHI_STAFF_TOOL);
+        Reply::Ok(json!({
+            "dispatch_id": args["dispatch_id"],
+            "status_revision": 12,
+            "controller_epoch_id": "fixture-epoch",
+            "session": {"phase": "instruction_accepted", "session_id": "fixture-session", "turn": 1}
+        }))
+    })
+    .await;
+    let client = client(&endpoint);
+    assert!(matches!(
+        client.continue_run("d-native", 11, "Check once.").await,
+        Err(TachiStaffError::SubmissionUnknown(_))
+    ));
+    assert!(matches!(
+        client.finish_run("another-native", 11).await,
+        Err(TachiStaffError::SubmissionUnknown(_))
+    ));
+    let calls = fake.staff_calls();
+    assert_eq!(calls.len(), 2);
+    assert_eq!(calls[0].1["action"], "continue");
+    assert_eq!(calls[1].1["action"], "finish");
 }
 
 #[tokio::test]
@@ -1626,6 +1658,7 @@ async fn proxy_continuation_gate_enforces_cap_and_refuses_auth_required_and_part
         result_written: None,
         updated_at: None,
         read_projection: None,
+        native: Default::default(),
     };
     assert_eq!(
         gate.continue_run(&client, &auth_status, "approved")
@@ -1642,6 +1675,7 @@ async fn proxy_continuation_gate_enforces_cap_and_refuses_auth_required_and_part
         result_written: None,
         updated_at: None,
         read_projection: None,
+        native: Default::default(),
     };
     assert_eq!(
         gate.continue_run(&client, &partial_status, "proceed")
@@ -1663,6 +1697,7 @@ async fn proxy_continuation_gate_enforces_cap_and_refuses_auth_required_and_part
             result_written: None,
             updated_at: None,
             read_projection: None,
+            native: Default::default(),
         };
         let receipt = gate
             .continue_run(&client, &ready, &format!("Grounded answer {rev}"))
@@ -1684,6 +1719,7 @@ async fn proxy_continuation_gate_enforces_cap_and_refuses_auth_required_and_part
         result_written: None,
         updated_at: None,
         read_projection: None,
+        native: Default::default(),
     };
     assert_eq!(
         gate.continue_run(&client, &fourth, "Fourth round")
@@ -1726,4 +1762,85 @@ fn redacted_task_brief_formatting_enforces_size_markers_and_task_intent_guards()
         format_redacted_task_with_brief("Check parity", Some("use --full-auto")).unwrap_err(),
         TaskBriefError::Admission(_)
     ));
+}
+
+/// Opt-in product-pair test. The external runner owns the isolated, disposable
+/// worker and counts actual upstream mutations across fresh client processes.
+#[tokio::test]
+#[ignore = "requires the #725 isolated Tachi native fixture and loopback transport"]
+async fn paired_native_staff_contract() {
+    let env = |name| std::env::var(name).unwrap_or_else(|_| panic!("missing {name}"));
+    let endpoint = env("REI725_MCP_ENDPOINT");
+    let uri: axum::http::Uri = endpoint.parse().expect("literal loopback MCP URI");
+    assert_eq!(uri.scheme_str(), Some("http"));
+    assert_eq!(uri.host(), Some("127.0.0.1"));
+    assert_ne!(uri.port_u16().expect("explicit fixture port"), 6919);
+    assert_eq!(uri.path_and_query().unwrap().as_str(), "/mcp");
+    let workspace = std::path::PathBuf::from(env("REI725_WORKSPACE"));
+    assert_eq!(
+        std::fs::read_to_string(workspace.join("README.md")).expect("disposable fixture readme"),
+        "dogfood fixture\n"
+    );
+    let dispatch = env("REI725_DISPATCH_ID");
+    let expect_revision: u64 = env("REI725_EXPECT_REV").parse().expect("revision");
+    let expect_turn: u64 = env("REI725_EXPECT_TURN").parse().expect("turn");
+    let stage = env("REI725_STAGE");
+    let dropped = env("REI725_EXPECT_DROPPED") == "1";
+    let client = TachiStaffClient::from_config(
+        &TachiConfig {
+            enabled: true,
+            endpoint,
+            agent_identity: Some(env("REI725_AGENT_ID")),
+            project: Some(env("REI725_PROJECT")),
+            ..Default::default()
+        },
+        "paired-fixture",
+    )
+    .expect("fixture route");
+    let read = client
+        .status(&dispatch)
+        .await
+        .expect("canonical Staff status");
+    assert_eq!(read.dispatch_id, dispatch);
+    assert_eq!(read.revision, Some(expect_revision));
+    if stage == "after_finish" {
+        assert_eq!(read.state, RunState::Completed);
+        assert!(read.is_terminal());
+        assert_eq!(read.supervised_native_waiting_turn(), None);
+        return;
+    }
+    assert_eq!(read.state, RunState::Working);
+    assert_eq!(read.supervised_native_waiting_turn(), Some(expect_turn));
+    let result = match stage.as_str() {
+        "after_continue" => return,
+        "continue" => client
+            .continue_run(
+                &dispatch,
+                expect_revision,
+                "Review the same disposable fixture once more.",
+            )
+            .await
+            .map(|receipt| (receipt.dispatch_id, receipt.state, receipt.status_revision)),
+        "finish" => client
+            .finish_run(&dispatch, expect_revision)
+            .await
+            .map(|receipt| (receipt.dispatch_id, receipt.state, receipt.status_revision)),
+        _ => panic!("unknown fixture stage: {stage}"),
+    };
+    if dropped {
+        assert!(
+            matches!(result, Err(TachiStaffError::SubmissionUnknown(_))),
+            "{result:?}"
+        );
+    } else {
+        let (receipt_dispatch, receipt_state, receipt_revision) =
+            result.expect("the actual Tachi success receipt decodes");
+        assert_eq!(receipt_dispatch, dispatch);
+        assert_eq!(
+            receipt_state,
+            RunState::Working,
+            "acceptance is not completion"
+        );
+        assert!(receipt_revision.is_some_and(|revision| revision > expect_revision));
+    }
 }

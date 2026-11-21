@@ -438,7 +438,7 @@ impl TachiStaffClient {
         })
     }
 
-    /// Continue an `INPUT_REQUIRED` run with a follow-up `task` instruction,
+    /// Continue an admitted run with a follow-up `task` instruction,
     /// quoting `expected_status_revision` from the last canonical [`Self::status`]
     /// read.
     ///
@@ -469,6 +469,7 @@ impl TachiStaffClient {
         }
         let args = json!({
             "action": "continue",
+            "format": "json",
             "dispatch_id": dispatch_id,
             "expected_status_revision": expected_status_revision,
             "task": task,
@@ -483,7 +484,7 @@ impl TachiStaffClient {
         .await
     }
 
-    /// Finish a supervised run at an `INPUT_REQUIRED` boundary, quoting
+    /// Finish a supervised run at its admitted turn boundary, quoting
     /// `expected_status_revision` from the last canonical [`Self::status`] read.
     ///
     /// # Errors
@@ -506,6 +507,7 @@ impl TachiStaffClient {
         }
         let args = json!({
             "action": "finish",
+            "format": "json",
             "dispatch_id": dispatch_id,
             "expected_status_revision": expected_status_revision,
         });
@@ -1124,6 +1126,7 @@ pub fn run_status_from_receipt(receipt: &StaffReceipt) -> RunStatus {
         result_written: None,
         updated_at: None,
         read_projection: None,
+        native: Default::default(),
     }
 }
 
@@ -1138,6 +1141,7 @@ pub fn nonterminal_status_for_dispatch(dispatch_id: &str) -> RunStatus {
         result_written: None,
         updated_at: None,
         read_projection: None,
+        native: Default::default(),
     }
 }
 
@@ -1175,6 +1179,7 @@ mod mirror_contract_tests {
             result_written: None,
             updated_at: Some("2026-10-29T00:00:00Z".to_string()),
             read_projection: Some(json!({"execution_state": "running"})),
+            native: Default::default(),
         }
     }
 
