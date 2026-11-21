@@ -34,7 +34,9 @@ use reiclaw_api::tachi_staff::{ContinueReceipt, RunResult, RunState, RunStatus, 
 use reiclaw_config::schema::Config;
 use reiclaw_infra::bridge_outbox::BridgeOutbox;
 use reiclaw_infra::session_backend::SessionBackend;
-use reiclaw_infra::session_sqlite::SqliteSessionBackend;
+use reiclaw_infra::session_sqlite::{
+    DispatchBindingRow, ProxyContinuationAdmission, ProxyContinuationState, SqliteSessionBackend,
+};
 use reiclaw_memory::Memory;
 use reiclaw_providers::ProviderDispatch;
 use reiclaw_tools::tachi_delegation::{
@@ -587,26 +589,161 @@ fn sanitize_escalation_reason(fallback: &str, prompt: Option<&str>) -> String {
     fallback.to_string()
 }
 
-fn record_proxy_continuation_best_effort(
+enum ProxySubmission {
+    Continued { round: u8 },
+    Escalate(String),
+    Skipped,
+}
+
+/// Recheck local eligibility after awaited resolution and immediately before
+/// handing the mutation to the sender. The validated route snapshot is still
+/// the one used for the status read; a route change cannot redirect this send.
+/// This does not supply the originating task grant or the transport's live
+/// estop handle: both remain prerequisites for production resolver activation.
+fn continuation_is_current(
+    config: &RwLock<Config>,
     data_dir: &Path,
-    rowid: i64,
+    stop: &tokio_util::sync::CancellationToken,
+    row: &DispatchBindingRow,
+) -> bool {
+    let current = config.read();
+    if stop.is_cancelled()
+        || !eligible(&current, data_dir)
+        || !current
+            .agents
+            .get(&row.agent_alias)
+            .is_some_and(|a| a.enabled)
+        || row.route_digest.as_deref()
+            != Some(
+                reiclaw_tools::tachi_delegation::route_fingerprint(
+                    &current.tachi,
+                    &row.agent_alias,
+                )
+                .as_str(),
+            )
+    {
+        return false;
+    }
+    if current.security.estop.enabled {
+        let config_dir = current
+            .config_path
+            .parent()
+            .unwrap_or_else(|| Path::new("."));
+        let estop =
+            reiclaw_policy::estop::EstopHandle::for_config(&current.security.estop, config_dir);
+        let Ok(endpoint) = current.tachi.endpoint.trim().parse::<axum::http::Uri>() else {
+            return false;
+        };
+        if estop.enforce_tool("tachi_staff").is_err()
+            || estop.enforce_network(endpoint.host()).is_err()
+        {
+            return false;
+        }
+    }
+    true
+}
+
+/// The reservation is durable before the callback is invoked, including before
+/// its future is first polled. Dropping this future never refunds an attempt:
+/// a crash or cancellation cannot prove that the mutation was not transmitted.
+#[allow(clippy::too_many_arguments)]
+async fn reserve_and_send_continuation(
+    config: &RwLock<Config>,
+    data_dir: &Path,
+    stop: &tokio_util::sync::CancellationToken,
+    row: &DispatchBindingRow,
+    route: &reiclaw_config::tachi::TachiConfig,
     revision: u64,
-    new_count: u8,
-) {
-    let result = SqliteSessionBackend::new(data_dir)
-        .and_then(|sessions| sessions.record_proxy_continuation(rowid, revision, new_count));
-    if let Err(error) = result {
-        ::reiclaw_log::record!(
-            WARN,
-            ::reiclaw_log::Event::new(module_path!(), ::reiclaw_log::Action::Fail)
-                .with_outcome(::reiclaw_log::EventOutcome::Failure)
-                .with_attrs(::serde_json::json!({
-                    "rowid": rowid,
-                    "revision": revision,
-                    "error": reiclaw_providers::sanitize_api_error(&format!("{error:#}")),
-                })),
-            "failed to persist durable proxy continuation state"
+    answer: &str,
+    send: ContinueSender<'_>,
+) -> anyhow::Result<ProxySubmission> {
+    if !continuation_is_current(config, data_dir, stop, row) {
+        return Ok(ProxySubmission::Skipped);
+    }
+    let reservation = match SqliteSessionBackend::new(data_dir)?.reserve_proxy_continuation(
+        row,
+        revision,
+        MAX_PROXY_CONTINUATIONS_PER_DISPATCH,
+    )? {
+        ProxyContinuationAdmission::Reserved(reservation) => reservation,
+        ProxyContinuationAdmission::Unresolved => {
+            return Ok(ProxySubmission::Escalate(
+                "prior continuation outcome unresolved; canonical reconciliation required".into(),
+            ));
+        }
+        ProxyContinuationAdmission::CapExceeded { prior, max } => {
+            return Ok(ProxySubmission::Escalate(format!(
+                "proxy continuation cap reached ({prior}/{max})"
+            )));
+        }
+        ProxyContinuationAdmission::AlreadyRecorded { .. }
+        | ProxyContinuationAdmission::StaleRevision { .. } => {
+            return Ok(ProxySubmission::Escalate(
+                "continuation revision already reserved or superseded".into(),
+            ));
+        }
+    };
+    // Opening/acquiring the database can block. A concurrent cancellation or
+    // config/estop change before sender invocation is still provably unsent.
+    if !continuation_is_current(config, data_dir, stop, row) {
+        anyhow::ensure!(
+            SqliteSessionBackend::new(data_dir)?.release_unsent_proxy_continuation(&reservation)?,
+            "continuation reservation changed before unsent release"
         );
+        return Ok(ProxySubmission::Skipped);
+    }
+    let result = send(&row.agent_alias, &row.dispatch_id, route, revision, answer).await;
+    let sessions = SqliteSessionBackend::new(data_dir)?;
+    match result {
+        Ok(receipt)
+            if receipt.dispatch_id == row.dispatch_id
+                && receipt
+                    .status_revision
+                    .is_none_or(|observed| observed > revision) =>
+        {
+            anyhow::ensure!(
+                sessions.settle_proxy_continuation(&reservation)?,
+                "continuation reservation changed before receipt settlement"
+            );
+            Ok(ProxySubmission::Continued {
+                round: reservation.round(),
+            })
+        }
+        Err(TachiStaffError::Unavailable(_)) => {
+            // The Staff client emits Unavailable before constructing/sending
+            // the continue POST (configuration or MCP bootstrap failure).
+            anyhow::ensure!(
+                sessions.release_unsent_proxy_continuation(&reservation)?,
+                "continuation reservation changed before unavailable release"
+            );
+            Ok(ProxySubmission::Escalate(
+                "continuation unavailable before transmission".into(),
+            ))
+        }
+        other => {
+            // Protocol can mean a mismatched post-send receipt. Refused and
+            // StaleRevision are not trustworthy transmission-phase evidence:
+            // the client also derives them from free-form server errors.
+            anyhow::ensure!(
+                sessions.mark_proxy_continuation_unknown(&reservation)?,
+                "continuation reservation changed before unknown settlement"
+            );
+            if let Err(error) = other {
+                ::reiclaw_log::record!(
+                    WARN,
+                    ::reiclaw_log::Event::new(module_path!(), ::reiclaw_log::Action::Fail)
+                        .with_outcome(::reiclaw_log::EventOutcome::Failure)
+                        .with_attrs(::serde_json::json!({
+                            "dispatch_id": row.dispatch_id,
+                            "error": reiclaw_providers::sanitize_api_error(&error.to_string()),
+                        })),
+                    "proxy continuation outcome unresolved; preserving durable reservation"
+                );
+            }
+            Ok(ProxySubmission::Escalate(
+                "continuation submission outcome unknown; canonical reconciliation required".into(),
+            ))
+        }
     }
 }
 
@@ -857,9 +994,29 @@ pub(crate) async fn reconcile_with_deps(
                     Some("missing status revision".to_string())
                 }
                 Err(_) => Some("proxy continuation refused".to_string()),
-                Ok(revision) if row.last_proxy_revision == Some(revision) => Some(
-                    sanitize_escalation_reason("awaiting owner confirmation", prompt.as_deref()),
-                ),
+                Ok(_)
+                    if matches!(
+                        row.proxy_continuation_state,
+                        ProxyContinuationState::Reserved | ProxyContinuationState::Unknown
+                    ) =>
+                {
+                    Some(
+                        "prior continuation outcome unresolved; canonical reconciliation required"
+                            .into(),
+                    )
+                }
+                Ok(revision)
+                    if row.last_proxy_revision.is_some_and(|last| {
+                        revision < last
+                            || (revision == last
+                                && row.proxy_continuation_state != ProxyContinuationState::Unsent)
+                    }) =>
+                {
+                    Some(sanitize_escalation_reason(
+                        "awaiting owner confirmation",
+                        prompt.as_deref(),
+                    ))
+                }
                 Ok(revision) => {
                     if let (Some(resolver), Some(send_continue)) =
                         (deps.continuation_resolver, deps.send_continue)
@@ -875,24 +1032,19 @@ pub(crate) async fn reconcile_with_deps(
                         match resolver.resolve(&ctx).await {
                             Ok(Some(answer)) => match gate.admit(&status, &answer) {
                                 Ok(expected_rev) => {
-                                    match send_continue(
-                                        &row.agent_alias,
-                                        &row.dispatch_id,
+                                    match reserve_and_send_continuation(
+                                        config,
+                                        data_dir,
+                                        stop,
+                                        row,
                                         &route_snapshot,
                                         expected_rev,
                                         answer.trim(),
+                                        send_continue,
                                     )
-                                    .await
+                                    .await?
                                     {
-                                        Ok(_receipt) => {
-                                            let new_count =
-                                                row.proxy_continuations.saturating_add(1);
-                                            record_proxy_continuation_best_effort(
-                                                data_dir,
-                                                row.rowid,
-                                                expected_rev,
-                                                new_count,
-                                            );
+                                        ProxySubmission::Continued { round } => {
                                             let target = match current_target_snapshot(
                                                 config,
                                                 data_dir,
@@ -905,7 +1057,7 @@ pub(crate) async fn reconcile_with_deps(
                                             };
                                             let audit_outcome =
                                                 format!("proxy_continued:{expected_rev}");
-                                            let round_str = new_count.to_string();
+                                            let round_str = round.to_string();
                                             let max_str =
                                                 MAX_PROXY_CONTINUATIONS_PER_DISPATCH.to_string();
                                             let content = format!(
@@ -930,42 +1082,8 @@ pub(crate) async fn reconcile_with_deps(
                                             }
                                             continue;
                                         }
-                                        Err(TachiStaffError::SubmissionUnknown(_)) => {
-                                            let new_count =
-                                                row.proxy_continuations.saturating_add(1);
-                                            record_proxy_continuation_best_effort(
-                                                data_dir,
-                                                row.rowid,
-                                                expected_rev,
-                                                new_count,
-                                            );
-                                            Some(
-                                                "continuation submission outcome unknown"
-                                                    .to_string(),
-                                            )
-                                        }
-                                        Err(TachiStaffError::StaleRevision { .. }) => {
-                                            continue;
-                                        }
-                                        Err(error) => {
-                                            ::reiclaw_log::record!(
-                                                WARN,
-                                                ::reiclaw_log::Event::new(
-                                                    module_path!(),
-                                                    ::reiclaw_log::Action::Fail,
-                                                )
-                                                .with_outcome(::reiclaw_log::EventOutcome::Failure)
-                                                .with_attrs(::serde_json::json!({
-                                                    "dispatch_id": row.dispatch_id,
-                                                    "error": reiclaw_providers::sanitize_api_error(&error.to_string()),
-                                                })),
-                                                "proxy continuation call failed; escalating to owner"
-                                            );
-                                            Some(sanitize_escalation_reason(
-                                                "automatic continuation refused",
-                                                prompt.as_deref(),
-                                            ))
-                                        }
+                                        ProxySubmission::Escalate(reason) => Some(reason),
+                                        ProxySubmission::Skipped => continue,
                                     }
                                 }
                                 Err(_) => Some(sanitize_escalation_reason(

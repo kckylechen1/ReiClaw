@@ -14,6 +14,10 @@ pub mod agent_tasks;
 mod bridge_intake;
 mod checkpoints;
 mod delegation;
+pub use delegation::{
+    DispatchBindingRow, ProxyContinuationAdmission, ProxyContinuationReservation,
+    ProxyContinuationState,
+};
 mod jsonl_import;
 pub mod reminder_occurrences;
 #[cfg(test)]

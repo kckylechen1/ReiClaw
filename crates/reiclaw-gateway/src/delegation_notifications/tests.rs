@@ -1,7 +1,8 @@
 use super::*;
 use futures_util::FutureExt;
-use reiclaw_infra::session_sqlite::SqliteSessionBackend;
+use reiclaw_infra::session_sqlite::{ProxyContinuationAdmission, SqliteSessionBackend};
 use reiclaw_tools::tachi_delegation::route_fingerprint;
+use std::sync::atomic::{AtomicUsize, Ordering};
 
 fn fixture_config() -> (tempfile::TempDir, Config) {
     let tmp = tempfile::tempdir().unwrap();
@@ -1231,6 +1232,61 @@ impl ContinuationResolver for FixedResolver {
     }
 }
 
+/// Read through another connection so a sender observes committed state,
+/// rather than the reservation writer's in-memory view or transaction.
+fn persisted_continuation(data_dir: &Path, request: &str) -> (u8, Option<u64>, String) {
+    rusqlite::Connection::open(data_dir.join("sessions/sessions.db"))
+        .unwrap()
+        .query_row(
+            "SELECT proxy_continuations, last_proxy_revision, proxy_continuation_state
+             FROM session_delegations WHERE request_id = ?1",
+            [request],
+            |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?)),
+        )
+        .unwrap()
+}
+
+/// Exercise the existing observer with a fresh rotation and its normal DB
+/// opens. A new canonical revision must not itself reconcile an unknown send.
+async fn continuation_pass(
+    config: &RwLock<Config>,
+    data_dir: &Path,
+    revision: u64,
+    resolver: &dyn ContinuationResolver,
+    send_continue: ContinueSender<'_>,
+) -> anyhow::Result<usize> {
+    let fetch_status = move |_a: &str, dispatch: &str, _r: &reiclaw_config::tachi::TachiConfig| {
+        let dispatch_id = dispatch.to_string();
+        async move {
+            Ok(RunStatus {
+                dispatch_id,
+                state: RunState::InputRequired,
+                revision: Some(revision),
+                closure_kind: None,
+                result_written: None,
+                updated_at: None,
+                read_projection: Some(serde_json::json!({"question": "Column naming convention?"})),
+            })
+        }
+        .boxed()
+    };
+    let deps = SweepDeps {
+        fetch_status: &fetch_status,
+        fetch_result: None,
+        send_continue: Some(send_continue),
+        continuation_resolver: Some(resolver),
+        memory: None,
+    };
+    reconcile_with_deps(
+        config,
+        data_dir,
+        &tokio_util::sync::CancellationToken::new(),
+        &mut Rotation::default(),
+        &deps,
+    )
+    .await
+}
+
 #[tokio::test]
 async fn input_required_auth_required_hard_escalates_once_without_calling_resolver() {
     let (tmp, config) = fixture_config();
@@ -1338,11 +1394,19 @@ async fn grounded_proxy_continuation_tracks_three_rounds_prevents_same_revision_
     };
     let calls_ref = Arc::clone(&continue_calls);
     let rev_for_continue = Arc::clone(&current_rev);
+    let data_dir_for_send = tmp.path().to_path_buf();
     let send_continue = move |_a: &str,
                               _d: &str,
                               _r: &reiclaw_config::tachi::TachiConfig,
                               expected_rev: u64,
                               answer: &str| {
+        let (count, revision, state) = persisted_continuation(&data_dir_for_send, "req-loop");
+        assert_eq!(u64::from(count), expected_rev - 9);
+        assert_eq!(revision, Some(expected_rev));
+        assert!(
+            state.starts_with("reserved:"),
+            "send requires a durable reservation"
+        );
         calls_ref.lock().push((expected_rev, answer.to_string()));
         let next_rev = expected_rev + 1;
         rev_for_continue.store(next_rev, std::sync::atomic::Ordering::SeqCst);
@@ -1396,6 +1460,24 @@ async fn grounded_proxy_continuation_tracks_three_rounds_prevents_same_revision_
     assert_eq!(rows.len(), 4, "3 audit notes + 1 input_required escalation");
     assert_eq!(rows[3]["event_id"], "input_required\u{1f}thread\u{1f}-");
 
+    // A new local request binding cannot reset the dispatch's spent budget.
+    seed_binding(
+        &backend,
+        &shared.read(),
+        "butler",
+        "req-loop-alias",
+        "disp-loop",
+        None,
+    );
+    reconcile_with_deps(&shared, tmp.path(), &stop, &mut rotation, &deps)
+        .await
+        .unwrap();
+    assert_eq!(
+        continue_calls.lock().len(),
+        3,
+        "request IDs do not own the cap"
+    );
+
     // Same-revision idempotency check: if revision is still at a previously
     // answered revision, a new dispatch with count=1 and last_proxy_revision=Some(20)
     // must NOT call continue_run again for rev=20.
@@ -1413,11 +1495,13 @@ async fn grounded_proxy_continuation_tracks_three_rounds_prevents_same_revision_
         .into_iter()
         .find(|r| r.request_id == "req-same-rev")
         .unwrap();
-    assert!(
-        backend
-            .record_proxy_continuation(same_row.rowid, 20, 1)
-            .unwrap()
-    );
+    let ProxyContinuationAdmission::Reserved(reservation) = backend
+        .reserve_proxy_continuation(&same_row, 20, MAX_PROXY_CONTINUATIONS_PER_DISPATCH)
+        .unwrap()
+    else {
+        panic!("fresh dispatch must admit its first continuation");
+    };
+    assert!(backend.settle_proxy_continuation(&reservation).unwrap());
     let fetch_same = |_a: &str, d: &str, _r: &reiclaw_config::tachi::TachiConfig| {
         let d = d.to_string();
         async move {
@@ -1455,6 +1539,662 @@ async fn grounded_proxy_continuation_tracks_three_rounds_prevents_same_revision_
         3,
         "same revision was not re-answered"
     );
+}
+
+#[tokio::test]
+async fn continuation_reservation_write_failure_prevents_transmission() {
+    let (tmp, config) = fixture_config();
+    let backend = SqliteSessionBackend::new(tmp.path()).unwrap();
+    seed_binding(
+        &backend,
+        &config,
+        "butler",
+        "req-write-failure",
+        "disp-write-failure",
+        None,
+    );
+    let shared = RwLock::new(config);
+    let connection = rusqlite::Connection::open(tmp.path().join("sessions/sessions.db")).unwrap();
+    connection
+        .execute_batch(
+            "CREATE TRIGGER reject_proxy_reservation BEFORE UPDATE OF proxy_continuation_state
+         ON session_delegations WHEN NEW.proxy_continuation_state LIKE 'reserved:%'
+         BEGIN SELECT RAISE(ABORT, 'injected reservation failure'); END;",
+        )
+        .unwrap();
+    let calls = Arc::new(AtomicUsize::new(0));
+    let send_calls = Arc::clone(&calls);
+    let send_continue = move |_a: &str,
+                              dispatch: &str,
+                              _r: &reiclaw_config::tachi::TachiConfig,
+                              revision: u64,
+                              _answer: &str| {
+        send_calls.fetch_add(1, Ordering::SeqCst);
+        let dispatch_id = dispatch.to_string();
+        async move {
+            Ok(ContinueReceipt {
+                dispatch_id,
+                state: RunState::Working,
+                status_revision: Some(revision + 1),
+            })
+        }
+        .boxed()
+    };
+    let resolver = FixedResolver(Some("Use snake_case.".into()));
+    assert!(
+        continuation_pass(&shared, tmp.path(), 10, &resolver, &send_continue)
+            .await
+            .is_err()
+    );
+    assert_eq!(calls.load(Ordering::SeqCst), 0);
+    assert_eq!(
+        persisted_continuation(tmp.path(), "req-write-failure"),
+        (0, None, "idle".into())
+    );
+
+    connection
+        .execute("DROP TRIGGER reject_proxy_reservation", [])
+        .unwrap();
+    continuation_pass(&shared, tmp.path(), 10, &resolver, &send_continue)
+        .await
+        .unwrap();
+    assert_eq!(
+        calls.load(Ordering::SeqCst),
+        1,
+        "failed reservation did not spend an attempt"
+    );
+}
+
+#[tokio::test]
+async fn concurrent_sweeps_with_the_same_page_transmit_one_continuation() {
+    struct BarrierResolver(Arc<tokio::sync::Barrier>);
+    #[async_trait::async_trait]
+    impl ContinuationResolver for BarrierResolver {
+        async fn resolve(&self, _ctx: &ContinuationContext<'_>) -> anyhow::Result<Option<String>> {
+            self.0.wait().await;
+            Ok(Some("Use snake_case.".into()))
+        }
+    }
+    let (tmp, config) = fixture_config();
+    let backend = SqliteSessionBackend::new(tmp.path()).unwrap();
+    seed_binding(&backend, &config, "butler", "req-race", "disp-race", None);
+    let shared = RwLock::new(config);
+    let resolver = BarrierResolver(Arc::new(tokio::sync::Barrier::new(2)));
+    let calls = Arc::new(AtomicUsize::new(0));
+    let send_calls = Arc::clone(&calls);
+    let data_dir = tmp.path().to_path_buf();
+    let send_continue = move |_a: &str,
+                              dispatch: &str,
+                              _r: &reiclaw_config::tachi::TachiConfig,
+                              revision: u64,
+                              _answer: &str| {
+        let (count, reserved_revision, state) = persisted_continuation(&data_dir, "req-race");
+        assert_eq!((count, reserved_revision), (1, Some(revision)));
+        assert!(state.starts_with("reserved:"));
+        send_calls.fetch_add(1, Ordering::SeqCst);
+        let dispatch_id = dispatch.to_string();
+        async move {
+            Ok(ContinueReceipt {
+                dispatch_id,
+                state: RunState::Working,
+                status_revision: Some(revision + 1),
+            })
+        }
+        .boxed()
+    };
+    let (first, second) = tokio::time::timeout(std::time::Duration::from_secs(5), async {
+        tokio::join!(
+            continuation_pass(&shared, tmp.path(), 10, &resolver, &send_continue),
+            continuation_pass(&shared, tmp.path(), 10, &resolver, &send_continue),
+        )
+    })
+    .await
+    .expect("both observers reached the same resolver boundary");
+    first.unwrap();
+    second.unwrap();
+    assert_eq!(calls.load(Ordering::SeqCst), 1);
+    let (count, revision, state) = persisted_continuation(tmp.path(), "req-race");
+    assert_eq!((count, revision), (1, Some(10)));
+    assert!(state.starts_with("settled:"));
+}
+
+#[tokio::test]
+async fn unresolved_continuations_block_new_revisions_and_request_ids() {
+    for (case, response) in [
+        (
+            "unknown",
+            Err(TachiStaffError::SubmissionUnknown("receipt dropped".into())),
+        ),
+        (
+            "protocol",
+            Err(TachiStaffError::Protocol("unreadable receipt".into())),
+        ),
+        (
+            "refused",
+            Err(TachiStaffError::Refused("unverified remote refusal".into())),
+        ),
+        (
+            "stale",
+            Err(TachiStaffError::StaleRevision {
+                expected: 10,
+                observed: Some(11),
+            }),
+        ),
+        (
+            "wrong dispatch",
+            Ok(ContinueReceipt {
+                dispatch_id: "another-dispatch".into(),
+                state: RunState::Working,
+                status_revision: Some(11),
+            }),
+        ),
+        (
+            "non-advancing revision",
+            Ok(ContinueReceipt {
+                dispatch_id: "disp-unknown".into(),
+                state: RunState::Working,
+                status_revision: Some(10),
+            }),
+        ),
+    ] {
+        let (tmp, config) = fixture_config();
+        let backend = SqliteSessionBackend::new(tmp.path()).unwrap();
+        seed_binding(
+            &backend,
+            &config,
+            "butler",
+            "req-unknown",
+            "disp-unknown",
+            None,
+        );
+        let shared = RwLock::new(config);
+        let calls = Arc::new(AtomicUsize::new(0));
+        let send_calls = Arc::clone(&calls);
+        let send_continue = move |_a: &str,
+                                  _d: &str,
+                                  _r: &reiclaw_config::tachi::TachiConfig,
+                                  _revision: u64,
+                                  _answer: &str| {
+            send_calls.fetch_add(1, Ordering::SeqCst);
+            let response = response.clone();
+            async move { response }.boxed()
+        };
+        let resolver = FixedResolver(Some("Use snake_case.".into()));
+        continuation_pass(&shared, tmp.path(), 10, &resolver, &send_continue)
+            .await
+            .unwrap();
+        let (count, revision, state) = persisted_continuation(tmp.path(), "req-unknown");
+        assert_eq!((count, revision), (1, Some(10)), "{case}");
+        assert!(state.starts_with("unknown:"), "{case}: {state}");
+        seed_binding(
+            &backend,
+            &shared.read(),
+            "butler",
+            "req-new-id",
+            "disp-unknown",
+            None,
+        );
+        drop(backend);
+        let reopened = SqliteSessionBackend::new(tmp.path()).unwrap();
+        assert_eq!(
+            reopened.list_dispatch_bindings_page(0, 10).unwrap().len(),
+            2
+        );
+        continuation_pass(&shared, tmp.path(), 11, &resolver, &send_continue)
+            .await
+            .unwrap();
+        assert_eq!(
+            calls.load(Ordering::SeqCst),
+            1,
+            "{case}: new revision/request cannot replay an uncertain send"
+        );
+        assert_eq!(
+            persisted_continuation(tmp.path(), "req-unknown"),
+            (count, revision, state)
+        );
+    }
+}
+
+#[tokio::test]
+async fn aborted_sender_leaves_a_durable_reservation_that_restart_cannot_replay() {
+    let (tmp, config) = fixture_config();
+    let backend = SqliteSessionBackend::new(tmp.path()).unwrap();
+    seed_binding(
+        &backend,
+        &config,
+        "butler",
+        "req-aborted",
+        "disp-aborted",
+        None,
+    );
+    let shared = Arc::new(RwLock::new(config));
+    let calls = Arc::new(AtomicUsize::new(0));
+    let entered = Arc::new(tokio::sync::Notify::new());
+    let task = {
+        let config = Arc::clone(&shared);
+        let data_dir = tmp.path().to_path_buf();
+        let calls = Arc::clone(&calls);
+        let entered = Arc::clone(&entered);
+        ::reiclaw_log::spawn!(async move {
+            let resolver = FixedResolver(Some("Use snake_case.".into()));
+            let send_continue = move |_a: &str,
+                                      _d: &str,
+                                      _r: &reiclaw_config::tachi::TachiConfig,
+                                      _revision: u64,
+                                      _answer: &str| {
+                calls.fetch_add(1, Ordering::SeqCst);
+                let entered = Arc::clone(&entered);
+                async move {
+                    entered.notify_one();
+                    std::future::pending::<Result<ContinueReceipt, TachiStaffError>>().await
+                }
+                .boxed()
+            };
+            continuation_pass(&config, &data_dir, 10, &resolver, &send_continue).await
+        })
+    };
+    tokio::time::timeout(std::time::Duration::from_secs(5), entered.notified())
+        .await
+        .expect("sender was polled after reservation");
+    let (count, revision, state) = persisted_continuation(tmp.path(), "req-aborted");
+    assert_eq!((count, revision), (1, Some(10)));
+    assert!(state.starts_with("reserved:"));
+    task.abort();
+    assert!(task.await.unwrap_err().is_cancelled());
+    drop(backend);
+
+    let send_calls = Arc::clone(&calls);
+    let send_continue = move |_a: &str,
+                              dispatch: &str,
+                              _r: &reiclaw_config::tachi::TachiConfig,
+                              revision: u64,
+                              _answer: &str| {
+        send_calls.fetch_add(1, Ordering::SeqCst);
+        let dispatch_id = dispatch.to_string();
+        async move {
+            Ok(ContinueReceipt {
+                dispatch_id,
+                state: RunState::Working,
+                status_revision: Some(revision + 1),
+            })
+        }
+        .boxed()
+    };
+    continuation_pass(
+        &shared,
+        tmp.path(),
+        11,
+        &FixedResolver(Some("Use snake_case.".into())),
+        &send_continue,
+    )
+    .await
+    .unwrap();
+    assert_eq!(calls.load(Ordering::SeqCst), 1);
+    assert_eq!(
+        persisted_continuation(tmp.path(), "req-aborted"),
+        (count, revision, state)
+    );
+}
+
+#[tokio::test]
+async fn continuation_receipt_write_failure_keeps_the_attempt_unresolved() {
+    let (tmp, config) = fixture_config();
+    let backend = SqliteSessionBackend::new(tmp.path()).unwrap();
+    seed_binding(
+        &backend,
+        &config,
+        "butler",
+        "req-receipt-failure",
+        "disp-receipt-failure",
+        None,
+    );
+    let shared = RwLock::new(config);
+    let data_dir = tmp.path().to_path_buf();
+    let calls = Arc::new(AtomicUsize::new(0));
+    let send_calls = Arc::clone(&calls);
+    let send_continue = move |_a: &str,
+                              dispatch: &str,
+                              _r: &reiclaw_config::tachi::TachiConfig,
+                              revision: u64,
+                              _answer: &str| {
+        let (count, reserved_revision, state) =
+            persisted_continuation(&data_dir, "req-receipt-failure");
+        assert_eq!((count, reserved_revision), (1, Some(revision)));
+        assert!(state.starts_with("reserved:"));
+        send_calls.fetch_add(1, Ordering::SeqCst);
+        rusqlite::Connection::open(data_dir.join("sessions/sessions.db"))
+            .unwrap()
+            .execute_batch(
+                "CREATE TRIGGER reject_proxy_receipt BEFORE UPDATE OF proxy_continuation_state
+             ON session_delegations WHEN NEW.proxy_continuation_state LIKE 'settled:%'
+             BEGIN SELECT RAISE(ABORT, 'injected receipt failure'); END;",
+            )
+            .unwrap();
+        let dispatch_id = dispatch.to_string();
+        async move {
+            Ok(ContinueReceipt {
+                dispatch_id,
+                state: RunState::Working,
+                status_revision: Some(revision + 1),
+            })
+        }
+        .boxed()
+    };
+    let resolver = FixedResolver(Some("Use snake_case.".into()));
+    assert!(
+        continuation_pass(&shared, tmp.path(), 10, &resolver, &send_continue)
+            .await
+            .is_err()
+    );
+    let (count, revision, state) = persisted_continuation(tmp.path(), "req-receipt-failure");
+    assert_eq!((count, revision), (1, Some(10)));
+    assert!(state.starts_with("reserved:"));
+    rusqlite::Connection::open(tmp.path().join("sessions/sessions.db"))
+        .unwrap()
+        .execute("DROP TRIGGER reject_proxy_receipt", [])
+        .unwrap();
+    drop(backend);
+    continuation_pass(&shared, tmp.path(), 11, &resolver, &send_continue)
+        .await
+        .unwrap();
+    assert_eq!(
+        calls.load(Ordering::SeqCst),
+        1,
+        "missing local receipt is not evidence of no transmission"
+    );
+    assert_eq!(
+        persisted_continuation(tmp.path(), "req-receipt-failure"),
+        (count, revision, state)
+    );
+}
+
+#[tokio::test]
+async fn known_unsent_release_refunds_only_its_attempt_and_preserves_the_revision_fence() {
+    let (tmp, config) = fixture_config();
+    let backend = SqliteSessionBackend::new(tmp.path()).unwrap();
+    seed_binding(
+        &backend,
+        &config,
+        "butler",
+        "req-unsent",
+        "disp-unsent",
+        None,
+    );
+    let shared = RwLock::new(config);
+    let calls = Arc::new(AtomicUsize::new(0));
+    let unavailable = Arc::new(std::sync::atomic::AtomicBool::new(false));
+    let send_calls = Arc::clone(&calls);
+    let unavailable_for_send = Arc::clone(&unavailable);
+    let send_continue = move |_a: &str,
+                              dispatch: &str,
+                              _r: &reiclaw_config::tachi::TachiConfig,
+                              revision: u64,
+                              _answer: &str| {
+        send_calls.fetch_add(1, Ordering::SeqCst);
+        let not_sent = unavailable_for_send.load(Ordering::SeqCst);
+        let dispatch_id = dispatch.to_string();
+        async move {
+            if not_sent {
+                Err(TachiStaffError::Unavailable(
+                    "disabled before transport".into(),
+                ))
+            } else {
+                Ok(ContinueReceipt {
+                    dispatch_id,
+                    state: RunState::Working,
+                    status_revision: Some(revision + 1),
+                })
+            }
+        }
+        .boxed()
+    };
+    let resolver = FixedResolver(Some("Use snake_case.".into()));
+    continuation_pass(&shared, tmp.path(), 10, &resolver, &send_continue)
+        .await
+        .unwrap();
+    unavailable.store(true, Ordering::SeqCst);
+    continuation_pass(&shared, tmp.path(), 11, &resolver, &send_continue)
+        .await
+        .unwrap();
+    let (count, revision, state) = persisted_continuation(tmp.path(), "req-unsent");
+    assert_eq!(
+        (count, revision),
+        (1, Some(11)),
+        "the accepted revision 10 still consumes an attempt"
+    );
+    assert!(state.starts_with("unsent:"));
+    unavailable.store(false, Ordering::SeqCst);
+    continuation_pass(&shared, tmp.path(), 10, &resolver, &send_continue)
+        .await
+        .unwrap();
+    assert_eq!(
+        calls.load(Ordering::SeqCst),
+        2,
+        "refund cannot reopen an older accepted revision"
+    );
+    continuation_pass(&shared, tmp.path(), 11, &resolver, &send_continue)
+        .await
+        .unwrap();
+    assert_eq!(
+        calls.load(Ordering::SeqCst),
+        3,
+        "only the known-unsent revision is retryable"
+    );
+    let (count, revision, state) = persisted_continuation(tmp.path(), "req-unsent");
+    assert_eq!((count, revision), (2, Some(11)));
+    assert!(state.starts_with("settled:"));
+}
+
+#[tokio::test]
+async fn revocation_during_resolution_prevents_sending_or_spending_an_attempt() {
+    #[derive(Clone, Copy, Debug)]
+    enum Revocation {
+        Route,
+        Agent,
+        DataRoot,
+        FrozenTool,
+    }
+    struct RevokingResolver {
+        config: Arc<RwLock<Config>>,
+        change: Revocation,
+        estop_path: std::path::PathBuf,
+    }
+    #[async_trait::async_trait]
+    impl ContinuationResolver for RevokingResolver {
+        async fn resolve(&self, _ctx: &ContinuationContext<'_>) -> anyhow::Result<Option<String>> {
+            tokio::task::yield_now().await;
+            match self.change {
+                Revocation::Route => {
+                    self.config.write().tachi.endpoint = "http://127.0.0.1:48792/mcp".into();
+                }
+                Revocation::Agent => {
+                    self.config
+                        .write()
+                        .agents
+                        .get_mut("butler")
+                        .unwrap()
+                        .enabled = false;
+                }
+                Revocation::DataRoot => {
+                    let next_root = self.config.read().data_dir.join("changed-root");
+                    self.config.write().data_dir = next_root;
+                }
+                Revocation::FrozenTool => {
+                    let state = reiclaw_policy::estop::EstopState {
+                        frozen_tools: vec!["tachi_staff".into()],
+                        ..Default::default()
+                    };
+                    std::fs::write(&self.estop_path, serde_json::to_vec(&state)?)?;
+                }
+            }
+            Ok(Some("Use snake_case.".into()))
+        }
+    }
+    for change in [
+        Revocation::Route,
+        Revocation::Agent,
+        Revocation::DataRoot,
+        Revocation::FrozenTool,
+    ] {
+        let (tmp, mut config) = fixture_config();
+        let estop_path = tmp.path().join("estop.json");
+        config.security.estop.enabled = true;
+        config.security.estop.state_file = estop_path.to_string_lossy().into_owned();
+        let estop =
+            reiclaw_policy::estop::EstopHandle::for_config(&config.security.estop, tmp.path());
+        std::fs::write(
+            &estop_path,
+            serde_json::to_vec(&reiclaw_policy::estop::EstopState::default()).unwrap(),
+        )
+        .unwrap();
+        assert!(estop.enforce_tool("tachi_staff").is_ok());
+        let backend = SqliteSessionBackend::new(tmp.path()).unwrap();
+        seed_binding(
+            &backend,
+            &config,
+            "butler",
+            "req-revoked",
+            "disp-revoked",
+            None,
+        );
+        let shared = Arc::new(RwLock::new(config));
+        let resolver = RevokingResolver {
+            config: Arc::clone(&shared),
+            change,
+            estop_path,
+        };
+        let calls = Arc::new(AtomicUsize::new(0));
+        let send_calls = Arc::clone(&calls);
+        let send_continue = move |_a: &str,
+                                  dispatch: &str,
+                                  _r: &reiclaw_config::tachi::TachiConfig,
+                                  revision: u64,
+                                  _answer: &str| {
+            send_calls.fetch_add(1, Ordering::SeqCst);
+            let dispatch_id = dispatch.to_string();
+            async move {
+                Ok(ContinueReceipt {
+                    dispatch_id,
+                    state: RunState::Working,
+                    status_revision: Some(revision + 1),
+                })
+            }
+            .boxed()
+        };
+        continuation_pass(&shared, tmp.path(), 10, &resolver, &send_continue)
+            .await
+            .unwrap();
+        assert_eq!(calls.load(Ordering::SeqCst), 0, "{change:?}");
+        assert_eq!(
+            persisted_continuation(tmp.path(), "req-revoked"),
+            (0, None, "idle".into()),
+            "{change:?}"
+        );
+        if matches!(change, Revocation::FrozenTool) {
+            assert!(
+                estop.enforce_tool("tachi_staff").is_err(),
+                "the shared handle observed the live freeze"
+            );
+        }
+    }
+}
+
+#[tokio::test]
+async fn unknown_continuation_still_allows_canonical_terminal_notice_and_digestion() {
+    let (tmp, config) = fixture_config();
+    let backend = SqliteSessionBackend::new(tmp.path()).unwrap();
+    seed_binding(
+        &backend,
+        &config,
+        "butler",
+        "req-terminal",
+        "disp-terminal",
+        None,
+    );
+    let shared = RwLock::new(config);
+    let resolver = FixedResolver(Some("Use snake_case.".into()));
+    let calls = Arc::new(AtomicUsize::new(0));
+    let send_calls = Arc::clone(&calls);
+    let send_continue = move |_a: &str,
+                              _d: &str,
+                              _r: &reiclaw_config::tachi::TachiConfig,
+                              _revision: u64,
+                              _answer: &str| {
+        send_calls.fetch_add(1, Ordering::SeqCst);
+        async { Err(TachiStaffError::SubmissionUnknown("receipt dropped".into())) }.boxed()
+    };
+    continuation_pass(&shared, tmp.path(), 10, &resolver, &send_continue)
+        .await
+        .unwrap();
+    let pending = persisted_continuation(tmp.path(), "req-terminal");
+    assert!(pending.2.starts_with("unknown:"));
+    let memory = RecordingMemory::new(false);
+    let fetch_status = |_a: &str, dispatch: &str, _r: &reiclaw_config::tachi::TachiConfig| {
+        let dispatch_id = dispatch.to_string();
+        async move {
+            Ok(RunStatus {
+                dispatch_id,
+                state: RunState::Completed,
+                revision: Some(12),
+                closure_kind: None,
+                result_written: Some(true),
+                updated_at: Some("2026-11-20T10:00:00Z".into()),
+                read_projection: None,
+            })
+        }
+        .boxed()
+    };
+    let fetch_result = |_a: &str, dispatch: &str, _r: &reiclaw_config::tachi::TachiConfig| {
+        let dispatch_id = dispatch.to_string();
+        async move {
+            Ok(RunResult {
+                state: RunState::Completed,
+                status: RunStatus {
+                    dispatch_id,
+                    ..status(RunState::Completed)
+                },
+                task_state: None,
+                state_basis: None,
+                managed_run: None,
+                body: Some("Column naming verified and task completed.".into()),
+                truncated: false,
+            })
+        }
+        .boxed()
+    };
+    let deps = SweepDeps {
+        fetch_status: &fetch_status,
+        fetch_result: Some(&fetch_result),
+        send_continue: Some(&send_continue),
+        continuation_resolver: Some(&resolver),
+        memory: Some(&memory),
+    };
+    let notified = reconcile_with_deps(
+        &shared,
+        tmp.path(),
+        &tokio_util::sync::CancellationToken::new(),
+        &mut Rotation::default(),
+        &deps,
+    )
+    .await
+    .unwrap();
+    assert_eq!(notified, 1);
+    assert_eq!(
+        calls.load(Ordering::SeqCst),
+        1,
+        "terminal handling never retries the continuation"
+    );
+    assert!(
+        delegation_rows(&tmp)
+            .iter()
+            .any(|row| row["event_id"] == "completed\u{1f}thread\u{1f}-")
+    );
+    let episodes = memory.episodes.lock();
+    assert_eq!(episodes.len(), 1);
+    assert_eq!(episodes[0].episode_id, "delegation:req-terminal");
+    assert_eq!(episodes[0].source_kind, EpisodeSourceKind::DelegationDigest);
+    assert!(episodes[0].summary.contains("Column naming verified"));
+    assert_eq!(persisted_continuation(tmp.path(), "req-terminal"), pending);
 }
 
 #[tokio::test]
