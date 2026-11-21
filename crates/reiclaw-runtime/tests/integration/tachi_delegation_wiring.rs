@@ -1370,6 +1370,7 @@ async fn mirror_restart_after_bind_repairs_register_before_terminal_observe() {
             result_written: None,
             updated_at: None,
             read_projection: None,
+            native: Default::default(),
         }),
         Some("aborted")
     );

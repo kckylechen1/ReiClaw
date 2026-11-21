@@ -838,12 +838,18 @@ fn current_target_snapshot(
     data_dir: &Path,
     stop: &tokio_util::sync::CancellationToken,
     agent_alias: &str,
+    expected_route: Option<&str>,
 ) -> Result<Option<TargetSnapshot>, bool> {
     let current = config.read();
     if stop.is_cancelled() || !eligible(&current, data_dir) {
         return Err(true);
     }
-    if !current.agents.get(agent_alias).is_some_and(|a| a.enabled) {
+    if !current.agents.get(agent_alias).is_some_and(|a| a.enabled)
+        || expected_route.is_some_and(|expected| {
+            reiclaw_tools::tachi_delegation::route_fingerprint(&current.tachi, agent_alias)
+                != expected
+        })
+    {
         return Ok(None);
     }
     let Some(target) = current.tachi.result_notification.as_ref() else {
@@ -899,7 +905,8 @@ fn enqueue_deduped_notice(
 /// route provenance matches, ask the dispatch for its status (through the
 /// SAME owned route snapshot the fingerprint was validated against — no
 /// TOCTOU between validation and request), handle non-partial `INPUT_REQUIRED`
-/// proxy continuations or owner escalations, enqueue terminal notices, and
+/// proxy continuations or owner escalations, surface supervised native waits
+/// without authorizing a continuation, enqueue terminal notices, and
 /// digest terminal `result.md` reports into `EpisodeRecord`s fail-soft.
 pub(crate) async fn reconcile_with_deps(
     config: &RwLock<Config>,
@@ -979,6 +986,48 @@ pub(crate) async fn reconcile_with_deps(
             continue;
         };
 
+        if let Some(turn) = status.supervised_native_waiting_turn() {
+            // This is a supervised turn boundary, not an authoritative
+            // question, owner grant, or model prompt. Never resolve or send
+            // an instruction from this branch, even with a test resolver.
+            if status.dispatch_id != row.dispatch_id {
+                continue;
+            }
+            let target = match current_target_snapshot(
+                config,
+                data_dir,
+                stop,
+                &row.agent_alias,
+                row.route_digest.as_deref(),
+            ) {
+                Ok(Some(target)) => target,
+                Ok(None) => continue,
+                Err(_) => break,
+            };
+            let outcome = format!("native_awaiting_instruction:{turn}");
+            let content = format!(
+                "Delegated task {request} (dispatch {dispatch}) is paused at a supervised Tachi turn boundary. Review the run in Tachi before sending an instruction or finishing it.",
+                request = short(&row.request_id),
+                dispatch = short(&row.dispatch_id),
+            );
+            if let Err(error) = enqueue_deduped_notice(
+                &outbox,
+                row.rowid,
+                &row.agent_alias,
+                &row.request_id,
+                row.notified_outcome.as_deref(),
+                &target,
+                &outcome,
+                &content,
+                &mut marks,
+                &mut notified,
+            ) {
+                outbox_failure = Some(error);
+                break;
+            }
+            continue;
+        }
+
         if status.state == RunState::InputRequired
             && status.closure_kind.as_deref() != Some("partial")
         {
@@ -1050,6 +1099,7 @@ pub(crate) async fn reconcile_with_deps(
                                                 data_dir,
                                                 stop,
                                                 &row.agent_alias,
+                                                None,
                                             ) {
                                                 Ok(Some(target)) => target,
                                                 Ok(None) => continue,
@@ -1125,12 +1175,12 @@ pub(crate) async fn reconcile_with_deps(
             };
 
             if let Some(reason) = escalation_reason {
-                let target = match current_target_snapshot(config, data_dir, stop, &row.agent_alias)
-                {
-                    Ok(Some(target)) => target,
-                    Ok(None) => continue,
-                    Err(_) => break,
-                };
+                let target =
+                    match current_target_snapshot(config, data_dir, stop, &row.agent_alias, None) {
+                        Ok(Some(target)) => target,
+                        Ok(None) => continue,
+                        Err(_) => break,
+                    };
                 let content = format!(
                     "Delegated task {request} (dispatch {dispatch}) requires your input or confirmation ({reason}).",
                     dispatch = short(&row.dispatch_id),
@@ -1162,7 +1212,7 @@ pub(crate) async fn reconcile_with_deps(
         // swap cannot send to a superseded target. The owning agent's
         // eligibility is re-read AFTER the await so a mid-flight disable
         // withholds too.
-        let target = match current_target_snapshot(config, data_dir, stop, &row.agent_alias) {
+        let target = match current_target_snapshot(config, data_dir, stop, &row.agent_alias, None) {
             Ok(Some(target)) => target,
             Ok(None) => continue,
             Err(_) => break,

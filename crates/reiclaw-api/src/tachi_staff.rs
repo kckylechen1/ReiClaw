@@ -163,9 +163,93 @@ pub struct RunStatus {
     /// canonical state or imply a terminal outcome after a daemon restart.
     #[serde(default)]
     pub read_projection: Option<serde_json::Value>,
+    /// Independent native supervision facts, not a rewrite of canonical state.
+    #[serde(flatten)]
+    pub native: NativeStaffStatus,
+}
+
+/// Narrow read-only view of Tachi's optional managed native control fields.
+/// Worker output and permission details are not carried by this view.
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize)]
+pub struct NativeStaffStatus {
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    execution_classification: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    native_session: Option<NativeStaffSession>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+struct NativeStaffSession {
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    supervised: Option<bool>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    phase: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    turn: Option<u64>,
+}
+
+impl<'de> Deserialize<'de> for NativeStaffStatus {
+    fn deserialize<D: Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+        use serde_json::Value;
+        let wire = serde_json::Map::<String, Value>::deserialize(deserializer)?;
+        let execution_classification = wire
+            .get("execution_classification")
+            .and_then(Value::as_str)
+            .map(str::to_owned);
+        // These receipt fields fence native control even if the read
+        // projection still reports a live same-daemon controller. Retain no
+        // field content, and do not project a usable boundary when present.
+        let control_blocked = ["cancellation", "completion_recovery", "resolved_completion"]
+            .iter()
+            .any(|key| wire.contains_key(*key));
+        let native_session = if control_blocked {
+            None
+        } else {
+            wire.get("native_session")
+                .and_then(Value::as_object)
+                .map(|session| NativeStaffSession {
+                    supervised: session.get("supervised").and_then(Value::as_bool),
+                    phase: session
+                        .get("phase")
+                        .and_then(Value::as_str)
+                        .map(str::to_owned),
+                    turn: session.get("turn").and_then(Value::as_u64),
+                })
+        };
+        Ok(Self {
+            execution_classification,
+            native_session,
+        })
+    }
 }
 
 impl RunStatus {
+    /// A supervised native turn boundary is still canonically Working. This
+    /// observation says nothing about the question, approval or authority to send.
+    #[must_use]
+    pub fn supervised_native_waiting_turn(&self) -> Option<u64> {
+        let session = self.native.native_session.as_ref()?;
+        let projection = self.read_projection.as_ref()?;
+        if self.state != RunState::Working
+            || self.closure_kind.as_deref() == Some("partial")
+            || self.revision.is_none_or(|revision| revision == 0)
+            || self.native.execution_classification.as_deref() != Some("managed_native_acp")
+            || session.supervised != Some(true)
+            || session.phase.as_deref() != Some("awaiting_instruction")
+            || projection
+                .get("execution_state")
+                .and_then(serde_json::Value::as_str)
+                != Some("running")
+            || projection
+                .get("control_state")
+                .and_then(serde_json::Value::as_str)
+                != Some("available")
+        {
+            return None;
+        }
+        session.turn.filter(|turn| *turn > 0)
+    }
+
     /// True when Tachi will not move this run any further: completed,
     /// failed, canceled, or input-required with a partial closure.
     #[must_use]
@@ -220,7 +304,7 @@ pub struct CancelReceipt {
     pub state: Option<RunState>,
 }
 
-/// Tachi's receipt for an accepted `continue` action on an `INPUT_REQUIRED` run.
+/// Tachi's receipt for an accepted revision-fenced `continue` action.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct ContinueReceipt {
     /// Canonical run id.
@@ -237,7 +321,7 @@ pub struct ContinueReceipt {
 pub struct FinishReceipt {
     /// Canonical run id.
     pub dispatch_id: String,
-    /// Run state after finishing.
+    /// Canonical state at acceptance; a live native run can still be Working.
     pub state: RunState,
     /// Updated receipt revision, when Tachi reports one.
     #[serde(default)]

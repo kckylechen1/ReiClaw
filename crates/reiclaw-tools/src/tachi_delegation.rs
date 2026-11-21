@@ -1032,6 +1032,7 @@ mod continuity_tests {
             result_written: None,
             updated_at: None,
             read_projection: None,
+            native: Default::default(),
         }
     }
 

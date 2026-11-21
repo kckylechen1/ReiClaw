@@ -57,6 +57,7 @@ fn status(state: RunState) -> RunStatus {
         result_written: None,
         updated_at: None,
         read_projection: None,
+        native: Default::default(),
     }
 }
 
@@ -1266,6 +1267,7 @@ async fn continuation_pass(
                 result_written: None,
                 updated_at: None,
                 read_projection: Some(serde_json::json!({"question": "Column naming convention?"})),
+                native: Default::default(),
             })
         }
         .boxed()
@@ -1319,6 +1321,7 @@ async fn input_required_auth_required_hard_escalates_once_without_calling_resolv
                 read_projection: Some(
                     serde_json::json!({"auth_required": true, "question": "Approve OAuth?"}),
                 ),
+                native: Default::default(),
             })
         }
         .boxed()
@@ -1388,6 +1391,7 @@ async fn grounded_proxy_continuation_tracks_three_rounds_prevents_same_revision_
                 result_written: None,
                 updated_at: None,
                 read_projection: Some(serde_json::json!({"question": "Column naming convention?"})),
+                native: Default::default(),
             })
         }
         .boxed()
@@ -1514,6 +1518,7 @@ async fn grounded_proxy_continuation_tracks_three_rounds_prevents_same_revision_
                     result_written: None,
                     updated_at: None,
                     read_projection: Some(serde_json::json!({"prompt": "Confirm?"})),
+                    native: Default::default(),
                 })
             } else {
                 Err(anyhow::Error::msg("skip"))
@@ -2140,6 +2145,7 @@ async fn unknown_continuation_still_allows_canonical_terminal_notice_and_digesti
                 result_written: Some(true),
                 updated_at: Some("2026-11-20T10:00:00Z".into()),
                 read_projection: None,
+                native: Default::default(),
             })
         }
         .boxed()
@@ -2358,6 +2364,7 @@ async fn terminal_result_digests_episode_and_remains_fail_soft_on_result_or_comm
                 result_written,
                 updated_at: Some("2026-11-18T08:00:00Z".into()),
                 read_projection: None,
+                native: Default::default(),
             })
         }
         .boxed()
@@ -2486,4 +2493,174 @@ async fn wake_notify_triggers_immediate_sweep_pass() {
     let _ = shutdown_tx.send(true);
     drop(task);
     srv.abort();
+}
+
+#[tokio::test]
+async fn managed_native_wait_notifies_only_when_controllable_and_never_sends() {
+    struct NoNativeResolver;
+    #[async_trait::async_trait]
+    impl ContinuationResolver for NoNativeResolver {
+        async fn resolve(&self, _: &ContinuationContext<'_>) -> anyhow::Result<Option<String>> {
+            panic!("a native wait does not authorize resolving a prompt");
+        }
+    }
+
+    let (tmp, config) = fixture_config();
+    let backend = SqliteSessionBackend::new(tmp.path()).unwrap();
+    seed_binding(
+        &backend,
+        &config,
+        "butler",
+        "req-native",
+        "disp-native",
+        None,
+    );
+    let shared = RwLock::new(config);
+    let stop = tokio_util::sync::CancellationToken::new();
+    let base = serde_json::json!({
+        "dispatch_id": "disp-native",
+        "state": "TASK_STATE_WORKING",
+        "status_revision": 10,
+        "execution_classification": "managed_native_acp",
+        "native_session": {
+            "phase": "awaiting_instruction",
+            "supervised": true,
+            "turn": 1,
+            "stop_reason": "end_turn",
+            "last_output_preview": "This worker text is not an authoritative question."
+        },
+        "read_projection": {"execution_state": "running", "control_state": "available"}
+    });
+    let send = |_: &str,
+                _: &str,
+                _: &reiclaw_config::tachi::TachiConfig,
+                _: u64,
+                _: &str|
+     -> BoxFuture<'static, Result<ContinueReceipt, TachiStaffError>> {
+        panic!("a native wait does not authorize a mutation");
+    };
+    let resolver = NoNativeResolver;
+    let mut unknown_control = base.clone();
+    unknown_control["read_projection"] = serde_json::Value::Null;
+    let mut orphan = base.clone();
+    orphan["read_projection"]["execution_state"] = "orphaned".into();
+    // Even a contradictory claim of control is not enough without the run.
+    let mut unavailable = base.clone();
+    unavailable["read_projection"]["control_state"] = "unavailable".into();
+    let mut partial = base.clone();
+    partial["closure_kind"] = "partial".into();
+    let mut unsupervised = base.clone();
+    unsupervised["native_session"]["supervised"] = false.into();
+    let mut generic = base.clone();
+    generic["execution_classification"] = "managed_custom".into();
+    let mut cancelling = base.clone();
+    cancelling["cancellation"] = serde_json::Value::Null;
+    let mut recovering = base.clone();
+    recovering["completion_recovery"] = serde_json::json!({"fixture": true});
+    let mut resolved = base.clone();
+    resolved["resolved_completion"] = serde_json::json!({"fixture": true});
+    let mut malformed = base.clone();
+    malformed["native_session"]["turn"] = "not-a-turn".into();
+    let mut already_accepted = base.clone();
+    already_accepted["native_session"]["phase"] = "instruction_accepted".into();
+    let mut wrong_dispatch = base.clone();
+    wrong_dispatch["dispatch_id"] = "another-dispatch".into();
+    let mut second_turn = base.clone();
+    second_turn["native_session"]["turn"] = 2.into();
+    second_turn["status_revision"] = 14.into();
+    let mut revision_churn = base.clone();
+    revision_churn["status_revision"] = 11.into();
+    for (label, wire, expected) in [
+        ("no controller proof", unknown_control, 0),
+        ("orphaned", orphan, 0),
+        ("unavailable", unavailable, 0),
+        ("partial", partial, 0),
+        ("unsupervised", unsupervised, 0),
+        ("generic working", generic, 0),
+        ("cancelling", cancelling, 0),
+        ("completion recovery", recovering, 0),
+        ("already resolved", resolved, 0),
+        ("malformed optional native fields", malformed, 0),
+        ("instruction already accepted", already_accepted, 0),
+        ("wrong dispatch", wrong_dispatch, 0),
+        ("live turn", base.clone(), 1),
+        ("same turn, advanced revision", revision_churn, 0),
+        ("new turn", second_turn, 1),
+    ] {
+        let status: RunStatus = serde_json::from_value(wire).unwrap();
+        assert_eq!(status.state, RunState::Working);
+        assert!(!status.is_terminal());
+        let fetch = |_: &str, _: &str, _: &reiclaw_config::tachi::TachiConfig| {
+            let status = status.clone();
+            async move { Ok(status) }.boxed()
+        };
+        let deps = SweepDeps {
+            fetch_status: &fetch,
+            fetch_result: None,
+            send_continue: Some(&send),
+            continuation_resolver: Some(&resolver),
+            memory: None,
+        };
+        let actual =
+            reconcile_with_deps(&shared, tmp.path(), &stop, &mut Rotation::default(), &deps)
+                .await
+                .unwrap();
+        assert_eq!(actual, expected, "{label}");
+    }
+    // A still-safe observation must not deliver to a replacement route or
+    // through a stopped observer after the status await.
+    for stop_during_read in [false, true] {
+        let stop = tokio_util::sync::CancellationToken::new();
+        let config = RwLock::new(shared.read().clone());
+        let mut third = base.clone();
+        third["native_session"]["turn"] = 3.into();
+        third["status_revision"] = 17.into();
+        let status: RunStatus = serde_json::from_value(third).unwrap();
+        let fetch = |_: &str, _: &str, _: &reiclaw_config::tachi::TachiConfig| {
+            if stop_during_read {
+                stop.cancel();
+            } else {
+                config.write().tachi.project = Some("replacement".into());
+            }
+            let status = status.clone();
+            async move { Ok(status) }.boxed()
+        };
+        let deps = SweepDeps {
+            fetch_status: &fetch,
+            fetch_result: None,
+            send_continue: Some(&send),
+            continuation_resolver: Some(&resolver),
+            memory: None,
+        };
+        assert_eq!(
+            reconcile_with_deps(&config, tmp.path(), &stop, &mut Rotation::default(), &deps)
+                .await
+                .unwrap(),
+            0
+        );
+    }
+
+    let rows = delegation_rows(&tmp);
+    assert_eq!(rows.len(), 2);
+    for (row, turn) in rows.iter().zip([1, 2]) {
+        assert_eq!(
+            row["event_id"],
+            format!("native_awaiting_instruction:{turn}\u{1f}thread\u{1f}-")
+        );
+        let db = rusqlite::Connection::open(tmp.path().join("sessions/bridge_outbox.db")).unwrap();
+        let content: String = db
+            .query_row(
+                "SELECT content FROM bridge_outbox WHERE id = ?1",
+                [row["id"].as_str().unwrap()],
+                |db_row| db_row.get(0),
+            )
+            .unwrap();
+        assert!(content.contains("supervised Tachi turn boundary"));
+        assert!(!content.contains("This worker text"));
+    }
+    assert_eq!(
+        persisted_continuation(tmp.path(), "req-native"),
+        (0, None, "idle".into()),
+        "an observational wait does not reserve an attempt"
+    );
 }

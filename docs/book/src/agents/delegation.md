@@ -142,7 +142,7 @@ Use immediate status reads to keep chat and voice responsive.
 Status and watch preserve Tachi's `read_projection`: a canonical working receipt
 can coexist with orphaned execution, unavailable control, and unknown outcome.
 
-### Unattended terminal notices
+### Unattended delegation notices
 
 Delegated runs that finish while nobody is watching are delivered through the
 existing attention pipeline (#63), not a new one. With an explicit destination
@@ -184,6 +184,18 @@ status query is an unknown outcome that never notifies; execution truth stays
 with Tachi's receipts. Notices are withheld when the agent is disabled or the
 destination stops matching, and delivery follows the attention policy (quiet
 hours, snooze, mute) like any other source.
+
+A managed, supervised native session can remain canonically working while
+paused at an `awaiting_instruction` turn boundary. When the same status receipt
+confirms running execution and available control, and lacks cancellation or
+completion recovery, that boundary can enqueue one review notice per turn on
+the existing configured destination. The observer does not infer a question or
+an authorization from the pause or worker output, and never automatically sends
+a follow-up at that boundary. Unavailable or orphaned control stays nonterminal
+and does not produce this notice. A successful native `continue` or `finish`
+reply identifies the accepted mutation; `finish` can still report a working
+run at acceptance, so read canonical status to establish completion.
+
 These recovery facts do not imply completion or trigger a replacement launch.
 
 For a successful MCP response, the first `content` block is Tachi's canonical
