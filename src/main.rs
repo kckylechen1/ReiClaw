@@ -1468,8 +1468,8 @@ async fn async_main(command: clap::Command) -> Result<()> {
         } => {
             let _ = (max_sessions, session_timeout);
             anyhow::bail!(
-                "Legacy in-process `rei acp` has been retired; use `rei acp-gateway` \
-                 (or the `rei-acp-bridge` binary) to connect ACP clients to the gateway."
+                "Legacy in-process `rei acp` has been retired; run the `rei-acp-bridge` \
+                 binary to connect ACP clients to the gateway."
             )
         }
 

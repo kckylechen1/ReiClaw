@@ -9,5 +9,6 @@ mod gateway;
 mod gemini_capabilities;
 mod provider_resolution;
 mod provider_schema;
+mod retired_acp_cli;
 mod security;
 mod skills_bundle_cli;
