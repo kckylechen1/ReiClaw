@@ -1,9 +1,13 @@
 # FND-001: Intentional Architecture: ZeroClaw Microkernel Transition
 
-> Starting v0.7.0 · Type: Architecture · Rev. 4
+> Starting v0.7.0 · Type: Architecture · Rev. 6
 >
-> **Canonical reference** · Ratified by the team · Rev. 4
+> **Canonical reference** · Ratified by the team · Rev. 6
 > Discussion thread and full revision history: [#5574](https://github.com/zeroclaw-labs/zeroclaw/issues/5574)
+
+---
+
+> **Fork status (ReiClaw, 2026-11).** This document is the upstream ZeroClaw v0.6.8-era RFC, kept as the historical record of the direction this fork started from. The fork did not adopt its plugin, onboarding-wizard, or desktop-app roadmap, and the "current codebase" measurements and file inventory below describe upstream at v0.6.8, not this repository. The governing architecture decisions here are [ADR-013](../architecture/decisions/ADR-013-channels-as-gateway-clients.md) (channels as gateway clients, gateway extraction), the [ADR-009 retirement note](../architecture/decisions/ADR-009-wit-wasmtime-plugin-execution.md) (WASM plugin host removed, external services via MCP), and [ADR-026](../architecture/decisions/ADR-026-headless-rust-kernel-external-workbenches-and-complexity-budget.md) (headless kernel, complexity budget, external workbenches). For the live tool surface see the [tool inventory](../developing/tool-inventory.md). Historical sections below are intentionally left as written.
 
 ---
 
@@ -37,6 +41,7 @@
 | 3 | 2026-04-10 | Terminology correction per implementation feedback from PR #5559: "kernel" → "runtime" for the agent orchestration layer throughout; "kernel" now refers specifically to the irreducible foundation (`--no-default-features` build); §4.1 updated to describe the explicit two-layer architecture (foundation + runtime); §4.2–§4.3 dependency diagram and component map updated to show `zeroclaw-runtime`; Phase 2 renamed from "The Kernel" to "The Runtime"; binary size targets reframed as aspirational north stars with measured progress tracking rather than hard gates; §7 updated with actual Phase 1 measurement (6.6 MB foundation build) and explicit note that architectural decomposition enables optimization but optimization is a dedicated second pass |
 | 4 | 2026-06-02 | Updated §5.2 to target `wasm32-wasip2` to enable WIT files. Updated Phase 2 §D2 to replace Extism with wasmtime to enable ARM32 targets and WIT files |
 | 5 | 2026-06-29 | Amended §4.4.2 to replace the single always-on `plugins-wasm` row with the three-flag execution-backend taxonomy (`plugins-wasm` host plus `plugins-wasm-cranelift` / `plugins-wasm-pulley` backends), completing the RFC #6943 deconfliction |
+| 6 | 2026-11-21 | ReiClaw fork annotation: added the fork-status notice identifying this document as the upstream v0.6.8-era RFC kept as history, with links to the governing ADRs (ADR-013, ADR-009 retirement note, ADR-026). No upstream content was changed |
 
 ---
 
