@@ -42,6 +42,17 @@ pub(super) fn migrate_route_provenance(conn: &mut Connection) -> Result<()> {
         )
         .context("adding delegation notification schema")?;
     }
+    let has_digest: bool = tx.query_row(
+        "SELECT COUNT(*) > 0 FROM pragma_table_info('session_delegations') WHERE name = 'terminal_digest'",
+        [], |row| row.get(0),
+    ).context("inspecting terminal digest receipt schema")?;
+    if !has_digest {
+        tx.execute(
+            "ALTER TABLE session_delegations ADD COLUMN terminal_digest TEXT",
+            [],
+        )
+        .context("adding terminal digest receipt schema")?;
+    }
     let has_proxy_continuations: bool = tx
         .query_row(
             "SELECT COUNT(*) > 0 FROM pragma_table_info('session_delegations') WHERE name = 'proxy_continuations'",
@@ -110,6 +121,8 @@ pub struct DispatchBindingRow {
     pub dispatch_id: String,
     pub route_digest: Option<String>,
     pub notified_outcome: Option<String>,
+    /// Independent local Episode receipt; NULL also covers pre-upgrade bindings.
+    pub terminal_digest: Option<String>,
     pub proxy_continuations: u8,
     pub last_proxy_revision: Option<u64>,
     pub proxy_continuation_state: ProxyContinuationState,
@@ -538,7 +551,7 @@ impl SqliteSessionBackend {
         let conn = self.conn.lock();
         let mut query = conn.prepare(
             "SELECT rowid, agent_alias, request_id, dispatch_id, route_digest, notified_outcome,
-                    proxy_continuations, last_proxy_revision, proxy_continuation_state, origin_context
+                    proxy_continuations, last_proxy_revision, proxy_continuation_state, origin_context, terminal_digest
              FROM session_delegations
              WHERE dispatch_id IS NOT NULL AND rowid > ?1
              ORDER BY rowid LIMIT ?2",
@@ -612,6 +625,7 @@ impl SqliteSessionBackend {
                     dispatch_id: row.get(3)?,
                     route_digest,
                     notified_outcome: row.get(5)?,
+                    terminal_digest: row.get(10)?,
                     proxy_continuations,
                     last_proxy_revision,
                     proxy_continuation_state,
@@ -675,6 +689,45 @@ impl SqliteSessionBackend {
             params![rowid, outcome],
         )
         .context("marking delegation notification")?;
+        Ok(())
+    }
+
+    /// Record successful local digestion independently of destination notification.
+    /// `None` means an Episode exists; a revision means that canonical result had
+    /// no digestible body. Neither receipt authorizes an external mutation.
+    pub fn record_terminal_digest(
+        &self,
+        binding: &DispatchBindingRow,
+        empty_revision: Option<u64>,
+    ) -> Result<()> {
+        let route = binding
+            .route_digest
+            .as_deref()
+            .context("terminal digest requires route provenance")?;
+        let receipt =
+            empty_revision.map_or_else(|| "stored".to_string(), |rev| format!("empty:{rev}"));
+        let conn = self.conn.lock();
+        let changed = conn
+            .execute(
+                "UPDATE session_delegations
+             SET terminal_digest = CASE WHEN terminal_digest = 'stored' THEN terminal_digest ELSE ?1 END
+             WHERE rowid = ?2 AND request_id = ?3 AND dispatch_id = ?4
+               AND ((agent_alias = ?5 AND route_digest = ?6)
+                 OR (agent_alias = ?5 || ':' || ?6 AND route_digest IS NULL))",
+                params![
+                    receipt,
+                    binding.rowid,
+                    binding.request_id,
+                    binding.dispatch_id,
+                    binding.agent_alias,
+                    route
+                ],
+            )
+            .context("recording terminal digest receipt")?;
+        ensure!(
+            changed == 1,
+            "terminal digest binding changed before receipt commit"
+        );
         Ok(())
     }
 
@@ -1599,6 +1652,7 @@ mod tests {
         let reopened = SqliteSessionBackend::new(tmp.path()).unwrap();
         let rows = reopened.list_dispatch_bindings_page(0, 10).unwrap();
         assert_eq!(rows.len(), 1);
+        assert_eq!(rows[0].terminal_digest, None);
         assert_eq!(rows[0].proxy_continuations, 0);
         assert_eq!(rows[0].last_proxy_revision, None);
         assert_eq!(
@@ -1610,6 +1664,7 @@ mod tests {
         let reopened_again = SqliteSessionBackend::new(tmp.path()).unwrap();
         let rows = reopened_again.list_dispatch_bindings_page(0, 10).unwrap();
         assert_eq!(rows.len(), 1);
+        assert_eq!(rows[0].terminal_digest, None);
         assert_eq!(rows[0].proxy_continuations, 0);
         assert_eq!(rows[0].last_proxy_revision, None);
         assert_eq!(
@@ -1648,6 +1703,54 @@ mod tests {
             .into_iter()
             .find(|row| row.agent_alias == alias && row.request_id == request)
             .unwrap()
+    }
+
+    #[test]
+    fn terminal_digest_receipt_survives_reopen_and_rejects_scope_changes() {
+        let tmp = TempDir::new().unwrap();
+        let store = SqliteSessionBackend::new(tmp.path()).unwrap();
+        let mut binding = proxy_binding(&store, "butler", "req", "route", "dispatch");
+        store.record_terminal_digest(&binding, Some(10)).unwrap();
+        drop(store);
+        let store = SqliteSessionBackend::new(tmp.path()).unwrap();
+        assert_eq!(
+            store.list_dispatch_bindings_page(0, 10).unwrap()[0]
+                .terminal_digest
+                .as_deref(),
+            Some("empty:10")
+        );
+        binding.agent_alias = "foreign".into();
+        assert!(store.record_terminal_digest(&binding, None).is_err());
+        binding.agent_alias = "butler".into();
+        binding.route_digest = Some("other".into());
+        assert!(store.record_terminal_digest(&binding, None).is_err());
+        binding.route_digest = Some("route".into());
+        binding.dispatch_id = "other".into();
+        assert!(store.record_terminal_digest(&binding, None).is_err());
+        binding.dispatch_id = "dispatch".into();
+        store.record_terminal_digest(&binding, None).unwrap();
+        store.record_terminal_digest(&binding, Some(10)).unwrap();
+        assert_eq!(
+            store.list_dispatch_bindings_page(0, 10).unwrap()[0]
+                .terminal_digest
+                .as_deref(),
+            Some("stored")
+        );
+        let route = "a".repeat(64);
+        store.conn.lock().execute("INSERT INTO session_delegations (agent_alias, request_id, request_digest, dispatch_id) VALUES (?1, 'old', 'digest', 'old-dispatch')", [format!("butler:{route}")]).unwrap();
+        let legacy = store
+            .list_dispatch_bindings_page(0, 10)
+            .unwrap()
+            .into_iter()
+            .find(|row| row.request_id == "old")
+            .unwrap();
+        store.record_terminal_digest(&legacy, None).unwrap();
+        assert_eq!(
+            store.list_dispatch_bindings_page(0, 10).unwrap()[1]
+                .terminal_digest
+                .as_deref(),
+            Some("stored")
+        );
     }
 
     fn reserve_proxy(

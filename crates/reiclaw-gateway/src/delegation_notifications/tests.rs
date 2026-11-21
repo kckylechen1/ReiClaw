@@ -1078,6 +1078,9 @@ struct RecordingMemory {
     reads: parking_lot::Mutex<Vec<(&'static str, Option<String>)>>,
     read_hook: Option<Arc<MemoryReadHook>>,
     fail_commit: bool,
+    commit_failures: AtomicUsize,
+    commit_calls: AtomicUsize,
+    kind: reiclaw_api::attribution::MemoryKind,
 }
 
 impl RecordingMemory {
@@ -1088,13 +1091,16 @@ impl RecordingMemory {
             reads: parking_lot::Mutex::new(Vec::new()),
             read_hook: None,
             fail_commit,
+            commit_failures: AtomicUsize::new(0),
+            commit_calls: AtomicUsize::new(0),
+            kind: reiclaw_api::attribution::MemoryKind::InMemory,
         }
     }
 }
 
 impl reiclaw_api::attribution::Attributable for RecordingMemory {
     fn role(&self) -> reiclaw_api::attribution::Role {
-        reiclaw_api::attribution::Role::Memory(reiclaw_api::attribution::MemoryKind::None)
+        reiclaw_api::attribution::Role::Memory(self.kind)
     }
     fn alias(&self) -> &str {
         "recording_memory"
@@ -1130,6 +1136,27 @@ impl Memory for RecordingMemory {
         _key: &str,
     ) -> anyhow::Result<Option<reiclaw_api::memory_traits::MemoryEntry>> {
         Ok(None)
+    }
+    async fn get_for_agent(
+        &self,
+        key: &str,
+        agent_id: &str,
+    ) -> anyhow::Result<Option<reiclaw_api::memory_traits::MemoryEntry>> {
+        self.episodes
+            .lock()
+            .iter()
+            .find(|ep| ep.episode_id == key && ep.agent_id == agent_id)
+            .map(|ep| {
+                serde_json::from_value(serde_json::json!({
+                    "id": ep.episode_id, "key": ep.episode_id,
+                    "content": serde_json::to_string(ep).unwrap(),
+                    "category": "sleep_episode", "timestamp": ep.ended_at,
+                    "session_id": ep.session_key, "agent_id": ep.agent_id,
+                    "namespace": "sleep_episode"
+                }))
+                .map_err(Into::into)
+            })
+            .transpose()
     }
     async fn list(
         &self,
@@ -1182,7 +1209,13 @@ impl Memory for RecordingMemory {
         Ok(self.recall_entries.lock().clone())
     }
     async fn commit_episode(&self, episode: &EpisodeRecord) -> anyhow::Result<String> {
-        if self.fail_commit {
+        self.commit_calls.fetch_add(1, Ordering::SeqCst);
+        if self.fail_commit
+            || self
+                .commit_failures
+                .fetch_update(Ordering::SeqCst, Ordering::SeqCst, |n| n.checked_sub(1))
+                .is_ok()
+        {
             anyhow::bail!("simulated episode commit failure");
         }
         episode.validate()?;
@@ -2890,7 +2923,10 @@ async fn terminal_result_digests_episode_and_remains_fail_soft_on_result_or_comm
             }
             Ok(RunResult {
                 state: RunState::Completed,
-                status: status(RunState::Completed),
+                status: RunStatus {
+                    dispatch_id: d.clone(),
+                    ..status(RunState::Completed)
+                },
                 task_state: None,
                 state_basis: None,
                 managed_run: None,
@@ -3184,4 +3220,285 @@ async fn managed_native_wait_notifies_only_when_controllable_and_never_sends() {
         (0, None, "idle".into()),
         "an observational wait does not reserve an attempt"
     );
+}
+
+/// A delivered terminal notice must not consume the independent Episode retry.
+#[tokio::test]
+async fn terminal_digest_recovers_after_notice_without_replaying_success() {
+    for fail_result in [true, false] {
+        let (tmp, config) = fixture_config();
+        let backend = SqliteSessionBackend::new(tmp.path()).unwrap();
+        seed_binding(
+            &backend,
+            &config,
+            "butler",
+            "req-recovery",
+            "dispatch-recovery",
+            None,
+        );
+        let shared = RwLock::new(config);
+        let stop = tokio_util::sync::CancellationToken::new();
+        let mut rotation = Rotation::default();
+        let memory = RecordingMemory::new(false);
+        if !fail_result {
+            memory.commit_failures.store(1, Ordering::SeqCst);
+        }
+        let calls = Arc::new(AtomicUsize::new(0));
+        let fetch_status = |_a: &str, d: &str, _r: &reiclaw_config::tachi::TachiConfig| {
+            let mut canonical = status(RunState::Completed);
+            canonical.dispatch_id = d.into();
+            canonical.revision = Some(10);
+            canonical.result_written = Some(true);
+            async move { Ok(canonical) }.boxed()
+        };
+        let fetch_result = |_a: &str, d: &str, _r: &reiclaw_config::tachi::TachiConfig| {
+            let attempt = calls.fetch_add(1, Ordering::SeqCst);
+            let mut canonical = status(RunState::Completed);
+            canonical.dispatch_id = d.into();
+            canonical.revision = Some(10);
+            canonical.result_written = Some(true);
+            async move {
+                if fail_result && attempt == 0 {
+                    anyhow::bail!("one-shot Result transport failure");
+                }
+                Ok(RunResult {
+                    state: canonical.state.clone(),
+                    status: canonical,
+                    task_state: None,
+                    state_basis: None,
+                    managed_run: None,
+                    body: Some("A harmless canonical result".into()),
+                    truncated: false,
+                })
+            }
+            .boxed()
+        };
+        let deps = SweepDeps {
+            fetch_status: &fetch_status,
+            fetch_result: Some(&fetch_result),
+            send_continue: None,
+            continuation_resolver: None,
+            authorize_source: None,
+            memory: Some(&memory),
+        };
+        assert_eq!(
+            reconcile_with_deps(&shared, tmp.path(), &stop, &mut rotation, &deps)
+                .await
+                .unwrap(),
+            1
+        );
+        assert_eq!(delegation_rows(&tmp).len(), 1);
+        assert!(memory.episodes.lock().is_empty());
+        // A new observer / reopened binding store must find the same pending digest.
+        drop(backend);
+        rotation = Rotation::default();
+        assert_eq!(
+            reconcile_with_deps(&shared, tmp.path(), &stop, &mut rotation, &deps)
+                .await
+                .unwrap(),
+            0
+        );
+        assert_eq!(
+            memory.episodes.lock().len(),
+            1,
+            "terminal digest must recover after its notice was marked"
+        );
+        assert_eq!(calls.load(Ordering::SeqCst), 2);
+        let commits = memory.commit_calls.load(Ordering::SeqCst);
+        for _ in 0..3 {
+            rotation = Rotation::default();
+            assert_eq!(
+                reconcile_with_deps(&shared, tmp.path(), &stop, &mut rotation, &deps)
+                    .await
+                    .unwrap(),
+                0
+            );
+        }
+        assert_eq!(delegation_rows(&tmp).len(), 1);
+        assert_eq!(memory.episodes.lock().len(), 1);
+        assert_eq!(
+            calls.load(Ordering::SeqCst),
+            2,
+            "successful digest must stop Result reads"
+        );
+        assert_eq!(
+            memory.commit_calls.load(Ordering::SeqCst),
+            commits,
+            "do not overwrite the Episode"
+        );
+    }
+}
+
+#[tokio::test]
+async fn terminal_digest_legacy_receipts_and_ineligible_results_are_scoped() {
+    use reiclaw_api::attribution::MemoryKind;
+    for case in [
+        "legacy",
+        "existing",
+        "empty",
+        "none",
+        "markdown",
+        "unwritten",
+        "failed",
+        "result_unwritten",
+        "wrong_dispatch",
+        "route_revoked",
+        "collision",
+    ] {
+        let (tmp, config) = fixture_config();
+        let backend = SqliteSessionBackend::new(tmp.path()).unwrap();
+        seed_binding(&backend, &config, "butler", "req-edge", "disp-edge", None);
+        let binding = backend
+            .list_dispatch_bindings_page(0, 10)
+            .unwrap()
+            .remove(0);
+        // A pre-thread marker with no surviving outbox receipt remains suppressed.
+        let target = config.tachi.result_notification.as_ref().unwrap();
+        backend
+            .mark_binding_notified(
+                binding.rowid,
+                &legacy_marker_entry("completed", &target.bridge, &target.recipient),
+            )
+            .unwrap();
+        let shared = RwLock::new(config);
+        let stop = tokio_util::sync::CancellationToken::new();
+        let mut memory = RecordingMemory::new(false);
+        if case == "none" {
+            memory.kind = MemoryKind::None;
+        }
+        if case == "markdown" {
+            memory.kind = MemoryKind::Markdown;
+        }
+        let revision = AtomicUsize::new(10);
+        let calls = AtomicUsize::new(0);
+        if matches!(case, "existing" | "collision") {
+            memory.episodes.lock().push(EpisodeRecord {
+                episode_id: "delegation:req-edge".into(),
+                agent_id: "butler".into(),
+                session_key: "req-edge".into(),
+                started_at: "2026-11-18T00:00:00Z".into(),
+                ended_at: "2026-11-18T01:00:00Z".into(),
+                up_to_message_id: None,
+                summary: "Original retained report".into(),
+                why_and_tradeoffs: vec![],
+                settled_decisions: vec![],
+                rejected_options: vec![],
+                entities: vec![],
+                source_kind: if case == "collision" {
+                    EpisodeSourceKind::Dialogue
+                } else {
+                    EpisodeSourceKind::DelegationDigest
+                },
+            });
+        }
+        let fetch_status = |_a: &str, d: &str, _r: &reiclaw_config::tachi::TachiConfig| {
+            let mut canonical = status(if case == "failed" {
+                RunState::Failed
+            } else {
+                RunState::Completed
+            });
+            canonical.dispatch_id = d.into();
+            canonical.revision = Some(revision.load(Ordering::SeqCst) as u64);
+            canonical.result_written = Some(case != "unwritten");
+            async move { Ok(canonical) }.boxed()
+        };
+        let fetch_result = |_a: &str, d: &str, _r: &reiclaw_config::tachi::TachiConfig| {
+            calls.fetch_add(1, Ordering::SeqCst);
+            let mut canonical = status(RunState::Completed);
+            canonical.dispatch_id = if case == "wrong_dispatch" {
+                "foreign".into()
+            } else {
+                d.into()
+            };
+            canonical.revision = Some(revision.load(Ordering::SeqCst) as u64);
+            canonical.result_written = Some(case != "result_unwritten");
+            if case == "route_revoked" {
+                shared.write().tachi.endpoint = "http://127.0.0.1:9/mcp".into();
+            }
+            async move {
+                Ok(RunResult {
+                    state: canonical.state.clone(),
+                    status: canonical,
+                    task_state: None,
+                    state_basis: None,
+                    managed_run: None,
+                    body: Some(
+                        if case == "empty" {
+                            "  "
+                        } else {
+                            "Recovered report"
+                        }
+                        .into(),
+                    ),
+                    truncated: false,
+                })
+            }
+            .boxed()
+        };
+        let deps = SweepDeps {
+            fetch_status: &fetch_status,
+            fetch_result: Some(&fetch_result),
+            send_continue: None,
+            continuation_resolver: None,
+            authorize_source: None,
+            memory: Some(&memory),
+        };
+        for _ in 0..3 {
+            reconcile_with_deps(&shared, tmp.path(), &stop, &mut Rotation::default(), &deps)
+                .await
+                .unwrap();
+        }
+        let expected_calls = match case {
+            "legacy" | "empty" | "route_revoked" | "result_unwritten" => 1,
+            "wrong_dispatch" => 3,
+            _ => 0,
+        };
+        assert_eq!(calls.load(Ordering::SeqCst), expected_calls, "{case}");
+        assert_eq!(
+            memory.episodes.lock().len(),
+            usize::from(matches!(case, "legacy" | "existing" | "collision")),
+            "{case}"
+        );
+        assert_eq!(
+            memory.commit_calls.load(Ordering::SeqCst),
+            usize::from(case == "legacy"),
+            "{case}"
+        );
+        assert_eq!(
+            delegation_rows(&tmp).len(),
+            usize::from(case == "failed"),
+            "legacy notice stays suppressed: {case}"
+        );
+        let receipt = backend
+            .list_dispatch_bindings_page(0, 10)
+            .unwrap()
+            .remove(0)
+            .terminal_digest;
+        assert_eq!(
+            receipt.as_deref(),
+            match case {
+                "legacy" | "existing" => Some("stored"),
+                "empty" | "result_unwritten" => Some("empty:10"),
+                _ => None,
+            },
+            "{case}"
+        );
+        if case == "empty" {
+            revision.store(11, Ordering::SeqCst);
+            reconcile_with_deps(&shared, tmp.path(), &stop, &mut Rotation::default(), &deps)
+                .await
+                .unwrap();
+            assert_eq!(
+                calls.load(Ordering::SeqCst),
+                2,
+                "empty result reconsidered only on new revision"
+            );
+        }
+        if case == "existing" {
+            assert_eq!(
+                memory.episodes.lock()[0].summary,
+                "Original retained report"
+            );
+        }
+    }
 }
