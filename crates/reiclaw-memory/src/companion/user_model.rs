@@ -3490,7 +3490,7 @@ mod owner_correction_tests {
                     ('newest', 'goal', 'Newest', 'k3', 'global', '[]', 40);
              INSERT INTO user_model_review_receipts
                  (id, candidate_id, action, reviewer, note, at_unix)
-             VALUES ('rcpt-1', 'old-reviewed', 'admitted', 'owner', NULL, 20);",
+             VALUES ('rcpt-1', 'old-reviewed', 'reject', 'owner', NULL, 20);",
         )
         .unwrap();
     }
@@ -3529,6 +3529,14 @@ mod owner_correction_tests {
         let all_rows = store.list_candidates().unwrap();
         let all: Vec<&str> = all_rows.iter().map(|c| c.id.as_str()).collect();
         assert_eq!(all, vec!["newest", "tie-zzzz", "tie-aaaa", "old-reviewed"]);
+        // The seeded receipt still decodes through the production history
+        // path after the migration.
+        let (_, receipts) = store
+            .candidate_history("old-reviewed")
+            .unwrap()
+            .expect("seeded candidate must exist");
+        assert_eq!(receipts.len(), 1);
+        assert!(matches!(receipts[0].action, ReviewAction::Reject));
         {
             let conn = store.conn.lock();
             assert_eq!(index_count(&conn, "idx_user_model_receipts_candidate"), 1);
@@ -3659,10 +3667,11 @@ mod owner_correction_tests {
         let indexed_sort_ops = sort_ops_for(&conn, LIST_BY_REVIEW_SQL, vec![Value::Integer(1_i64)]);
         assert_eq!(indexed_sort_ops, 0, "indexed listing must do no sorting");
 
-        // Paged listing: the inner ordered selection uses the candidate order
-        // index (first page scans it in reverse, later pages seek the cursor)
-        // and the receipts probe stays an index seek. The bounded outer
-        // re-sort of at most limit + 1 rows is expected and allowed.
+        // Paged listing: the inner ordered selection is an index walk over
+        // (created_at_unix, id) in the alias `p`. The OR-form cursor cannot
+        // be a direct seek; SQLite may walk from the newest end and discard
+        // newer entries. The receipts probe stays an index seek, and the
+        // bounded outer re-sort of at most limit + 1 rows is expected.
         for page in [
             vec![
                 Value::Integer(1_i64),
@@ -3679,9 +3688,11 @@ mod owner_correction_tests {
         ] {
             let plan = eqp_lines(&conn, PAGE_SQL, page);
             assert!(
-                plan.iter()
-                    .any(|l| l.contains("idx_user_model_candidates_created_id")),
-                "paged inner selection must use the candidate order index: {plan:?}"
+                plan.iter().any(|l| {
+                    l.contains("INDEX idx_user_model_candidates_created_id")
+                        && (l.starts_with("SCAN p ") || l.starts_with("SEARCH p "))
+                }),
+                "inner selection must walk the candidate order index in alias p: {plan:?}"
             );
             assert!(
                 plan.iter()
@@ -3703,7 +3714,7 @@ mod owner_correction_tests {
             .into_iter()
             .map(|c| c.id)
             .collect();
-        let indexed_page = store.list_candidates_page(true, 2, None).unwrap().0;
+        let indexed_page = store.list_candidates_page(true, 2, None).unwrap();
 
         // Degrade to the predecessor state: scans and the full sort return,
         // while results stay identical.
@@ -3737,16 +3748,25 @@ mod owner_correction_tests {
             .map(|c| c.id)
             .collect();
         assert_eq!(indexed_pending, degraded_pending);
-        let degraded_page = store.list_candidates_page(true, 2, None).unwrap().0;
+        let degraded_page = store.list_candidates_page(true, 2, None).unwrap();
         assert_eq!(
-            indexed_page
-                .iter()
-                .map(|c| c.id.clone())
-                .collect::<Vec<_>>(),
-            degraded_page
-                .iter()
-                .map(|c| c.id.clone())
-                .collect::<Vec<_>>()
+            (
+                indexed_page
+                    .0
+                    .iter()
+                    .map(|c| c.id.clone())
+                    .collect::<Vec<_>>(),
+                indexed_page.1
+            ),
+            (
+                degraded_page
+                    .0
+                    .iter()
+                    .map(|c| c.id.clone())
+                    .collect::<Vec<_>>(),
+                degraded_page.1
+            ),
+            "page rows and has_more must match across both schema states"
         );
 
         // Reopening restores the indexes (idempotent additive migration).
@@ -3765,17 +3785,44 @@ mod owner_correction_tests {
     fn review_index_migration_survives_a_competing_writer() {
         let dir = tempfile::tempdir().unwrap();
         let db_path = dir.path().join("user_model.db");
+        // Start from the predecessor schema (both review-query indexes
+        // absent) with seeded rows the migration must keep.
         UserModelStore::open(dir.path()).unwrap();
+        {
+            let conn = rusqlite::Connection::open(&db_path).unwrap();
+            conn.execute_batch(
+                "DROP INDEX idx_user_model_receipts_candidate;
+                 DROP INDEX idx_user_model_candidates_created_id;",
+            )
+            .unwrap();
+            seed_review_fixture(&conn);
+        }
         let holder = rusqlite::Connection::open(&db_path).unwrap();
         holder.execute_batch("BEGIN IMMEDIATE;").unwrap();
         let opener_dir = dir.path().to_path_buf();
-        let opener = std::thread::spawn(move || UserModelStore::open(&opener_dir));
+        let (started_tx, started_rx) = std::sync::mpsc::channel::<()>();
+        let opener = std::thread::spawn(move || {
+            started_tx.send(()).unwrap();
+            UserModelStore::open(&opener_dir)
+        });
+        started_rx.recv().unwrap();
+        // Hold the write lock while the opener runs, so the migration either
+        // waits out the holder within busy_timeout or needs no write lock at
+        // all; either way it must complete and land the indexes.
         std::thread::sleep(std::time::Duration::from_millis(200));
         holder.execute_batch("COMMIT;").unwrap();
         let store = opener
             .join()
             .expect("open thread must not panic")
-            .expect("open under a competing writer must succeed within busy_timeout");
-        assert!(store.list_candidates().unwrap().is_empty());
+            .expect("open under a competing writer must complete");
+        {
+            let conn = store.conn.lock();
+            assert_eq!(index_count(&conn, "idx_user_model_receipts_candidate"), 1);
+            assert_eq!(
+                index_count(&conn, "idx_user_model_candidates_created_id"),
+                1
+            );
+        }
+        assert_eq!(store.list_candidates().unwrap().len(), 4);
     }
 }

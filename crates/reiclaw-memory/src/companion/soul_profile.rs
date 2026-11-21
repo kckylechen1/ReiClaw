@@ -5758,9 +5758,34 @@ mod tests {
                   retire_index, target_revision, target_kind, target_text, session_ref, created_at_unix)
              VALUES ('a', 'voice', 'p-a1', 'why', NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL, 10),
                     ('b', 'voice', 'p-b1', 'why', NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL, 11),
-                    ('a', 'voice', 'p-a2', 'why', NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL, 12);",
+                    ('a', 'voice', 'p-a2', 'why', NULL, NULL, NULL, NULL, NULL, NULL, NULL, NULL, 12);
+             INSERT INTO soul_proposal_resolutions (proposal_id, resolution, note, resolved_at_unix)
+             SELECT id, 'accepted', NULL, 20 FROM soul_proposals WHERE proposal = 'p-b1';",
         )
         .unwrap();
+    }
+
+    fn proposal_rows_raw(conn: &Connection) -> Vec<(i64, String)> {
+        let mut stmt = conn
+            .prepare("SELECT id, proposal FROM soul_proposals WHERE agent = 'a' ORDER BY id")
+            .unwrap();
+        stmt.query_map([], |row| Ok((row.get(0)?, row.get(1)?)))
+            .unwrap()
+            .collect::<Result<Vec<_>, _>>()
+            .unwrap()
+    }
+
+    fn anchor_rows_raw(conn: &Connection) -> Vec<(i64, Option<i64>, Option<i64>)> {
+        let mut stmt = conn
+            .prepare(
+                "SELECT id, tone_revision_id, story_revision_id
+                 FROM soul_anchors WHERE agent = 'a' ORDER BY id",
+            )
+            .unwrap();
+        stmt.query_map([], |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?)))
+            .unwrap()
+            .collect::<Result<Vec<_>, _>>()
+            .unwrap()
     }
 
     #[test]
@@ -5846,57 +5871,96 @@ mod tests {
         }
         let conn = Connection::open(&db_path).unwrap();
 
-        // With the indexes each read is a bounded agent seek, not a walk over
-        // every agent's history. (ORDER BY id needs no sort in either state:
-        // with the index the seek is already id-ordered, and without it a
-        // rowid scan happens to be ordered too; the win is the seek.)
-        for (label, sql, params, index_name) in [
+        // With the indexes each read is a bounded agent equality seek, not a
+        // walk over every agent's history. (ORDER BY id needs no sort in
+        // either state: with the index the seek is already id-ordered, and
+        // without it a rowid scan happens to be ordered too; the win is the
+        // seek.)
+        for (label, sql, params, seek_prefix) in [
             (
                 "last_reflection",
                 last_reflection_sql,
                 vec![Value::Text("a".into())],
-                "idx_soul_reflections_agent",
+                "SEARCH soul_reflections USING INDEX idx_soul_reflections_agent",
             ),
             (
                 "reflections",
                 reflections_sql,
                 vec![Value::Text("a".into()), Value::Integer(200)],
-                "idx_soul_reflections_agent",
+                "SEARCH soul_reflections USING INDEX idx_soul_reflections_agent",
             ),
             (
                 "anchor_of",
                 anchor_of_sql,
                 vec![Value::Text("a".into())],
-                "idx_soul_anchors_agent",
+                "SEARCH soul_anchors USING INDEX idx_soul_anchors_agent",
             ),
             (
                 "anchor_rows",
                 anchor_rows_sql,
                 vec![Value::Text("a".into())],
-                "idx_soul_anchors_agent",
+                "SEARCH soul_anchors USING INDEX idx_soul_anchors_agent",
             ),
             (
                 "proposals",
                 proposals_sql.as_str(),
                 vec![Value::Text("a".into()), Value::Integer(0)],
-                "idx_soul_proposals_agent",
+                "SEARCH p USING INDEX idx_soul_proposals_agent",
             ),
         ] {
             let plan = eqp_lines(&conn, sql, params);
             assert!(
-                plan.iter().any(|l| l.contains(index_name)),
-                "{label} must use {index_name}: {plan:?}"
+                plan.iter().any(|l| l.starts_with(seek_prefix)),
+                "{label} must be an agent equality seek ({seek_prefix}): {plan:?}"
             );
             assert!(
                 !plan.iter().any(|l| l.contains("USE TEMP B-TREE")),
                 "{label} must not sort: {plan:?}"
             );
         }
+        // The proposals join probes resolutions by their integer primary key.
+        let proposals_plan = eqp_lines(
+            &conn,
+            proposals_sql.as_str(),
+            vec![Value::Text("a".into()), Value::Integer(0)],
+        );
+        assert!(
+            proposals_plan.iter().any(|l| {
+                l.contains("USING INTEGER PRIMARY KEY")
+                    && (l.contains("r USING") || l.contains("soul_proposal_resolutions USING"))
+            }),
+            "proposals join must probe resolutions by primary key: {proposals_plan:?}"
+        );
+        // The open-count anti-join (verbatim from submit_proposal_with_tone)
+        // also seeks the proposals agent index.
+        let open_count_sql = "SELECT COUNT(*) FROM soul_proposals p
+             LEFT JOIN soul_proposal_resolutions r ON r.proposal_id = p.id
+             WHERE p.agent = ?1 AND r.proposal_id IS NULL";
+        let open_count_plan = eqp_lines(&conn, open_count_sql, vec![Value::Text("a".into())]);
+        assert!(
+            open_count_plan
+                .iter()
+                .any(|l| l.starts_with("SEARCH p USING") && l.contains("idx_soul_proposals_agent")),
+            "open count must seek the proposals agent index: {open_count_plan:?}"
+        );
 
-        // Equivalence anchors before degrading the schema.
+        // Equivalence anchors before degrading the schema: full values, not
+        // just counts, including the resolved proposal's pending semantics.
         let indexed_last = store.last_reflection("a").unwrap();
         let indexed_reflections = store.reflections("b", 10).unwrap();
-        let indexed_proposals = store.proposals("a", false).unwrap();
+        let indexed_proposal_rows = proposal_rows_raw(&conn);
+        let indexed_anchor_rows = anchor_rows_raw(&conn);
+        let indexed_pending_ids: Vec<i64> = store
+            .proposals("a", true)
+            .unwrap()
+            .iter()
+            .map(|p| p.id)
+            .collect();
+        assert_eq!(indexed_pending_ids.len(), 2);
+        assert!(
+            store.proposals("b", true).unwrap().is_empty(),
+            "the resolved p-b1 proposal must not be pending for agent b"
+        );
 
         // Degrade to the predecessor state: the same reads table-scan the
         // agent dimension, results stay identical.
@@ -5933,18 +5997,17 @@ mod tests {
             );
         }
         assert_eq!(store.last_reflection("a").unwrap(), indexed_last);
-        assert_eq!(
-            store.reflections("b", 10).unwrap().len(),
-            indexed_reflections.len()
-        );
+        assert_eq!(store.reflections("b", 10).unwrap(), indexed_reflections);
+        assert_eq!(proposal_rows_raw(&conn), indexed_proposal_rows);
+        assert_eq!(anchor_rows_raw(&conn), indexed_anchor_rows);
         assert_eq!(
             store
-                .proposals("a", false)
+                .proposals("a", true)
                 .unwrap()
                 .iter()
                 .map(|p| p.id)
                 .collect::<Vec<_>>(),
-            indexed_proposals.iter().map(|p| p.id).collect::<Vec<_>>()
+            indexed_pending_ids
         );
 
         // Reopening restores the indexes (idempotent additive migration).
