@@ -548,16 +548,38 @@ impl SqliteSessionBackend {
         after_rowid: i64,
         limit: usize,
     ) -> Result<Vec<DispatchBindingRow>> {
+        self.dispatch_bindings(
+            "dispatch_id IS NOT NULL AND rowid > ?1",
+            &after_rowid,
+            limit,
+        )
+    }
+
+    /// Bounded lookup by the existing dispatch index for an untrusted wake hint.
+    pub fn dispatch_bindings_for_wake(
+        &self,
+        dispatch_id: &str,
+        limit: usize,
+    ) -> Result<Vec<DispatchBindingRow>> {
+        self.dispatch_bindings("dispatch_id = ?1", &dispatch_id, limit)
+    }
+
+    fn dispatch_bindings(
+        &self,
+        predicate: &str,
+        binding: &dyn rusqlite::ToSql,
+        limit: usize,
+    ) -> Result<Vec<DispatchBindingRow>> {
         let conn = self.conn.lock();
-        let mut query = conn.prepare(
+        let mut query = conn.prepare(&format!(
             "SELECT rowid, agent_alias, request_id, dispatch_id, route_digest, notified_outcome,
                     proxy_continuations, last_proxy_revision, proxy_continuation_state, origin_context, terminal_digest
              FROM session_delegations
-             WHERE dispatch_id IS NOT NULL AND rowid > ?1
+             WHERE {predicate}
              ORDER BY rowid LIMIT ?2",
-        )?;
+        ))?;
         let rows = query
-            .query_map(params![after_rowid, limit as i64], |row| {
+            .query_map(params![binding, limit as i64], |row| {
                 let scope: String = row.get(1)?;
                 let stored_digest: Option<String> = row.get(4)?;
                 // Legacy route scope (`alias:<64-hex>`): report the owner AND

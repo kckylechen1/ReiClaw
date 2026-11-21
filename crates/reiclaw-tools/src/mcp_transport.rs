@@ -155,6 +155,10 @@ fn apply_modern_post_headers(
 /// as-is and never retried.
 #[derive(Debug, thiserror::Error)]
 pub enum McpTransportError {
+    /// Live host admission refused the request before it crossed the writer.
+    #[error("MCP request blocked before transmission by current host policy")]
+    BlockedBeforeWrite,
+
     /// The server no longer recognizes our session (typically after it
     /// restarted). Surfaced from HTTP 404/410 responses.
     #[error("MCP session is stale (HTTP {status})")]
@@ -998,6 +1002,7 @@ pub struct HttpTransport {
     headers: std::collections::HashMap<String, String>,
     session_id: ParkingMutex<Option<String>>,
     estop: Option<Arc<EstopHandle>>,
+    request_guard: Option<Arc<dyn Fn() -> bool + Send + Sync>>,
 }
 
 impl HttpTransport {
@@ -1041,7 +1046,80 @@ impl HttpTransport {
             headers: config.headers.clone(),
             session_id: ParkingMutex::new(None),
             estop,
+            request_guard: None,
         })
+    }
+
+    pub(crate) fn with_request_guard(
+        mut self,
+        guard: Option<Arc<dyn Fn() -> bool + Send + Sync>>,
+    ) -> Self {
+        self.request_guard = guard;
+        self
+    }
+
+    fn check_request_guard(&self) -> Result<()> {
+        if self.request_guard.as_ref().is_some_and(|guard| !guard()) {
+            return Err(McpTransportError::BlockedBeforeWrite.into());
+        }
+        Ok(())
+    }
+
+    pub(crate) async fn read_server_events(
+        &self,
+        peer: &PeerProtocol,
+        mut on_message: impl FnMut(&str) + Send,
+    ) -> Result<()> {
+        anyhow::ensure!(
+            self.session_id.lock().is_some(),
+            "MCP did not issue an event session"
+        );
+        let request = self.apply_session_header(apply_configured_headers(
+            self.client
+                .get(&self.url)
+                .header("Accept", "text/event-stream")
+                .header(MCP_PROTOCOL_VERSION_HEADER, &peer.version),
+            &self.headers,
+            peer.era,
+        ));
+        self.check_request_guard()?;
+        let response = timeout(Duration::from_secs(5), request.send()).await??;
+        anyhow::ensure!(
+            response.status().is_success()
+                && response
+                    .headers()
+                    .get(reqwest::header::CONTENT_TYPE)
+                    .and_then(|value| value.to_str().ok())
+                    .is_some_and(|value| value.split(';').next().is_some_and(|media_type| {
+                        media_type.trim().eq_ignore_ascii_case("text/event-stream")
+                    })),
+            "MCP standalone event stream unavailable"
+        );
+        let stream = response
+            .bytes_stream()
+            .map(|item| item.map_err(std::io::Error::other));
+        let reader = tokio_util::io::StreamReader::new(stream);
+        let mut events = SseEventReader::new(BufReader::new(reader), 16 * 1024);
+        while let Some(SseEvent { event, data, .. }) = events.next_event().await? {
+            if event.as_deref().is_none_or(|kind| kind == "message") {
+                on_message(&data);
+            }
+            // Let shutdown and the lease deadline run even on a hot stream.
+            tokio::task::yield_now().await;
+        }
+        Ok(())
+    }
+
+    pub(crate) async fn close_event_session(&self) {
+        if self.session_id.lock().is_none() || self.check_request_guard().is_err() {
+            return;
+        }
+        let request = self.apply_session_header(apply_configured_headers(
+            self.client.delete(&self.url),
+            &self.headers,
+            PeerEra::Legacy,
+        ));
+        let _ = timeout(Duration::from_secs(2), request.send()).await;
     }
 
     fn apply_session_header(&self, req: reqwest::RequestBuilder) -> reqwest::RequestBuilder {
@@ -1125,6 +1203,7 @@ impl SharedMcpTransportConn for HttpTransport {
         } else {
             req = apply_modern_post_headers(req, request, lifecycle.protocol_version());
         }
+        self.check_request_guard()?;
         lifecycle.mark_outcome_unknown(epoch_guard.epoch());
         let resp = req
             .send()
@@ -1972,6 +2051,7 @@ impl SharedMcpTransportConn for SseTransport {
 
 // ── Factory ──────────────────────────────────────────────────────────────
 
+#[cfg(test)]
 pub(crate) fn create_shared_transport(
     config: &McpServerConfig,
 ) -> Result<Box<dyn SharedMcpTransportConn>> {

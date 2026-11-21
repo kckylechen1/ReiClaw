@@ -1399,8 +1399,7 @@ pub async fn run_gateway(
     let delegation_notifications_task = delegation_notifications::start(
         Arc::clone(&state.config),
         Arc::clone(&state.pairing),
-        Some(Arc::clone(&state.mem)),
-        None,
+        Arc::clone(&state.mem),
         state.shutdown_tx.subscribe(),
     );
     let reminder_notifications_task =
@@ -1782,7 +1781,7 @@ pub async fn run_gateway(
     }
 
     drop(review_notifications_task);
-    drop(delegation_notifications_task);
+    delegation_notifications_task.shutdown().await;
     drop(reminder_notifications_task);
     drop(broadcast_hook_guard);
     Ok(())

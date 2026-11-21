@@ -29,7 +29,7 @@ use crate::mcp_task::{
     TaskHandleError, parse_continuation, poll_delay, require_responses_if_needed,
 };
 use crate::mcp_transport::{
-    McpRequestLifecycle, McpTransportError, SharedMcpTransportConn,
+    HttpTransport, McpRequestLifecycle, McpTransportError, SharedMcpTransportConn,
     create_shared_transport_with_estop,
 };
 use reiclaw_config::schema::{McpServerConfig, McpTransport};
@@ -246,12 +246,13 @@ async fn handshake(
     transport: &dyn SharedMcpTransportConn,
     server_name: &str,
     epoch: u64,
+    version: &str,
 ) -> Result<(McpServerCapabilities, PeerProtocol)> {
     let init_req = JsonRpcRequest::new(
         1,
         "initialize",
         json!({
-            "protocolVersion": MCP_PROTOCOL_VERSION,
+            "protocolVersion": version,
             "capabilities": { "resources": {}, "prompts": {} },
             "clientInfo": {
                 "name": "reiclaw",
@@ -329,10 +330,17 @@ pub(crate) async fn open_session(
             Ok(OpenedSession { capabilities, peer })
         }
         ProbeOutcome::Legacy => {
-            let (capabilities, peer) = handshake(transport, server_name, epoch).await?;
+            let (capabilities, peer) =
+                handshake(transport, server_name, epoch, MCP_PROTOCOL_VERSION).await?;
             Ok(OpenedSession { capabilities, peer })
         }
     }
+}
+
+/// Standalone Streamable HTTP GET requires a session on handshake-era peers.
+pub(crate) async fn open_legacy_event_session(transport: &HttpTransport) -> Result<PeerProtocol> {
+    let (_, peer) = handshake(transport, "tachi", 0, "2025-11-25").await?;
+    Ok(peer)
 }
 
 /// Server-advertised MCP capabilities parsed from the `initialize` result.
@@ -1043,7 +1051,14 @@ impl McpServer {
             return Ok(());
         }
 
-        let refreshed = match handshake(self.transport.as_ref(), &server_name, *epoch).await {
+        let refreshed = match handshake(
+            self.transport.as_ref(),
+            &server_name,
+            *epoch,
+            MCP_PROTOCOL_VERSION,
+        )
+        .await
+        {
             Ok((capabilities, mut peer)) => {
                 peer.era = era;
                 self.inner.lock().await.peer = peer;
