@@ -186,11 +186,13 @@ store opens. Bridge and Node tokens do not gain owner access.
 
 Ordering is newest first by `(created_at_unix, id)`, including ties. Each
 request selects at most `limit + 1` IDs before fetching their evidence; the extra
-row determines whether another page exists. This bounds evidence materialization
-without an index or schema migration. Metadata selection still scans and sorts
-matching history; a page is not a database snapshot across requests. Candidates
-inserted newer than the cursor appear on refresh, and pending rows reviewed
-between requests disappear from subsequent pending pages.
+row determines whether another page exists. This bounds evidence materialization.
+Metadata selection walks the `(created_at_unix, id)` candidate index and probes
+receipts through the `candidate_id` index (both added as idempotent
+`open()` migrations, issue #798) instead of scanning and sorting the full
+matching history; a page is still not a database snapshot across requests.
+Candidates inserted newer than the cursor appear on refresh, and pending rows
+reviewed between requests disappear from subsequent pending pages.
 
 The phone view requests 50 candidates at a time, appends unique IDs after an
 explicit load, and keeps its existing rows and cursor when a page fails. Refresh,
