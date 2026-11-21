@@ -234,10 +234,8 @@ async fn stale_route_is_never_queried_and_pagination_wraps() {
     let stop = tokio_util::sync::CancellationToken::new();
     let queried = std::sync::Arc::new(std::sync::atomic::AtomicUsize::new(0));
     let mut rotation = Rotation {
-        cursor: 0,
         page_size: 2,
-        full_pages_since_wrap: 0,
-        sweep_max_rowid: 0,
+        ..Rotation::default()
     };
     let counter = std::sync::Arc::clone(&queried);
     let fetch =
@@ -303,10 +301,8 @@ async fn static_table_walks_to_full_depth_and_churn_forces_the_rewind() {
     let stop = tokio_util::sync::CancellationToken::new();
     let queries = std::sync::Arc::new(std::sync::atomic::AtomicUsize::new(0));
     let mut rotation = Rotation {
-        cursor: 0,
         page_size: 2,
-        full_pages_since_wrap: 0,
-        sweep_max_rowid: 0,
+        ..Rotation::default()
     };
     let counter = std::sync::Arc::clone(&queries);
     let fetch =
@@ -1399,10 +1395,12 @@ async fn input_required_auth_required_hard_escalates_once_without_calling_resolv
         }
         .boxed()
     };
-    let send_continue =
-        |_a: &str, _d: &str, _r: &reiclaw_config::tachi::TachiConfig, _rev: u64, _ans: &str| {
-            async { panic!("AUTH_REQUIRED must never invoke continue_run") }.boxed()
-        };
+    let send_continue = |_d: &DispatchBindingRow,
+                         _r: &reiclaw_config::tachi::TachiConfig,
+                         _rev: u64,
+                         _ans: &str| {
+        async { panic!("AUTH_REQUIRED must never invoke continue_run") }.boxed()
+    };
     let deps = SweepDeps {
         fetch_status: &fetch_status,
         fetch_result: None,
@@ -1473,8 +1471,7 @@ async fn grounded_proxy_continuation_tracks_three_rounds_prevents_same_revision_
     let calls_ref = Arc::clone(&continue_calls);
     let rev_for_continue = Arc::clone(&current_rev);
     let data_dir_for_send = tmp.path().to_path_buf();
-    let send_continue = move |_a: &str,
-                              _d: &str,
+    let send_continue = move |_d: &DispatchBindingRow,
                               _r: &reiclaw_config::tachi::TachiConfig,
                               expected_rev: u64,
                               answer: &str| {
@@ -1645,13 +1642,12 @@ async fn continuation_reservation_write_failure_prevents_transmission() {
         .unwrap();
     let calls = Arc::new(AtomicUsize::new(0));
     let send_calls = Arc::clone(&calls);
-    let send_continue = move |_a: &str,
-                              dispatch: &str,
+    let send_continue = move |dispatch: &DispatchBindingRow,
                               _r: &reiclaw_config::tachi::TachiConfig,
                               revision: u64,
                               _answer: &str| {
         send_calls.fetch_add(1, Ordering::SeqCst);
-        let dispatch_id = dispatch.to_string();
+        let dispatch_id = dispatch.dispatch_id.clone();
         async move {
             Ok(ContinueReceipt {
                 dispatch_id,
@@ -1704,8 +1700,7 @@ async fn concurrent_sweeps_with_the_same_page_transmit_one_continuation() {
     let calls = Arc::new(AtomicUsize::new(0));
     let send_calls = Arc::clone(&calls);
     let data_dir = tmp.path().to_path_buf();
-    let send_continue = move |_a: &str,
-                              dispatch: &str,
+    let send_continue = move |dispatch: &DispatchBindingRow,
                               _r: &reiclaw_config::tachi::TachiConfig,
                               revision: u64,
                               _answer: &str| {
@@ -1713,7 +1708,7 @@ async fn concurrent_sweeps_with_the_same_page_transmit_one_continuation() {
         assert_eq!((count, reserved_revision), (1, Some(revision)));
         assert!(state.starts_with("reserved:"));
         send_calls.fetch_add(1, Ordering::SeqCst);
-        let dispatch_id = dispatch.to_string();
+        let dispatch_id = dispatch.dispatch_id.clone();
         async move {
             Ok(ContinueReceipt {
                 dispatch_id,
@@ -1791,8 +1786,7 @@ async fn unresolved_continuations_block_new_revisions_and_request_ids() {
         let shared = RwLock::new(config);
         let calls = Arc::new(AtomicUsize::new(0));
         let send_calls = Arc::clone(&calls);
-        let send_continue = move |_a: &str,
-                                  _d: &str,
+        let send_continue = move |_d: &DispatchBindingRow,
                                   _r: &reiclaw_config::tachi::TachiConfig,
                                   _revision: u64,
                                   _answer: &str| {
@@ -1858,8 +1852,7 @@ async fn aborted_sender_leaves_a_durable_reservation_that_restart_cannot_replay(
         let entered = Arc::clone(&entered);
         ::reiclaw_log::spawn!(async move {
             let resolver = FixedResolver(Some("Use snake_case.".into()));
-            let send_continue = move |_a: &str,
-                                      _d: &str,
+            let send_continue = move |_d: &DispatchBindingRow,
                                       _r: &reiclaw_config::tachi::TachiConfig,
                                       _revision: u64,
                                       _answer: &str| {
@@ -1885,13 +1878,12 @@ async fn aborted_sender_leaves_a_durable_reservation_that_restart_cannot_replay(
     drop(backend);
 
     let send_calls = Arc::clone(&calls);
-    let send_continue = move |_a: &str,
-                              dispatch: &str,
+    let send_continue = move |dispatch: &DispatchBindingRow,
                               _r: &reiclaw_config::tachi::TachiConfig,
                               revision: u64,
                               _answer: &str| {
         send_calls.fetch_add(1, Ordering::SeqCst);
-        let dispatch_id = dispatch.to_string();
+        let dispatch_id = dispatch.dispatch_id.clone();
         async move {
             Ok(ContinueReceipt {
                 dispatch_id,
@@ -1933,8 +1925,7 @@ async fn continuation_receipt_write_failure_keeps_the_attempt_unresolved() {
     let data_dir = tmp.path().to_path_buf();
     let calls = Arc::new(AtomicUsize::new(0));
     let send_calls = Arc::clone(&calls);
-    let send_continue = move |_a: &str,
-                              dispatch: &str,
+    let send_continue = move |dispatch: &DispatchBindingRow,
                               _r: &reiclaw_config::tachi::TachiConfig,
                               revision: u64,
                               _answer: &str| {
@@ -1951,7 +1942,7 @@ async fn continuation_receipt_write_failure_keeps_the_attempt_unresolved() {
              BEGIN SELECT RAISE(ABORT, 'injected receipt failure'); END;",
             )
             .unwrap();
-        let dispatch_id = dispatch.to_string();
+        let dispatch_id = dispatch.dispatch_id.clone();
         async move {
             Ok(ContinueReceipt {
                 dispatch_id,
@@ -2006,14 +1997,13 @@ async fn known_unsent_release_refunds_only_its_attempt_and_preserves_the_revisio
     let unavailable = Arc::new(std::sync::atomic::AtomicBool::new(false));
     let send_calls = Arc::clone(&calls);
     let unavailable_for_send = Arc::clone(&unavailable);
-    let send_continue = move |_a: &str,
-                              dispatch: &str,
+    let send_continue = move |dispatch: &DispatchBindingRow,
                               _r: &reiclaw_config::tachi::TachiConfig,
                               revision: u64,
                               _answer: &str| {
         send_calls.fetch_add(1, Ordering::SeqCst);
         let not_sent = unavailable_for_send.load(Ordering::SeqCst);
-        let dispatch_id = dispatch.to_string();
+        let dispatch_id = dispatch.dispatch_id.clone();
         async move {
             if not_sent {
                 Err(TachiStaffError::Unavailable(
@@ -2146,13 +2136,12 @@ async fn revocation_during_resolution_prevents_sending_or_spending_an_attempt() 
         };
         let calls = Arc::new(AtomicUsize::new(0));
         let send_calls = Arc::clone(&calls);
-        let send_continue = move |_a: &str,
-                                  dispatch: &str,
+        let send_continue = move |dispatch: &DispatchBindingRow,
                                   _r: &reiclaw_config::tachi::TachiConfig,
                                   revision: u64,
                                   _answer: &str| {
             send_calls.fetch_add(1, Ordering::SeqCst);
-            let dispatch_id = dispatch.to_string();
+            let dispatch_id = dispatch.dispatch_id.clone();
             async move {
                 Ok(ContinueReceipt {
                     dispatch_id,
@@ -2196,8 +2185,7 @@ async fn unknown_continuation_still_allows_canonical_terminal_notice_and_digesti
     let resolver = FixedResolver(Some("Use snake_case.".into()));
     let calls = Arc::new(AtomicUsize::new(0));
     let send_calls = Arc::clone(&calls);
-    let send_continue = move |_a: &str,
-                              _d: &str,
+    let send_continue = move |_d: &DispatchBindingRow,
                               _r: &reiclaw_config::tachi::TachiConfig,
                               _revision: u64,
                               _answer: &str| {
@@ -2432,9 +2420,10 @@ async fn grounded_resolver_uses_only_source_facts_and_excludes_protected_or_unsc
         "source-session",
         "SQLite uses WAL mode for concurrent reads.",
     );
-    episode
-        .settled_decisions
-        .push("Enable PRAGMA journal_mode=WAL".into());
+    episode.settled_decisions.extend([
+        "Enable PRAGMA journal_mode=WAL".into(),
+        "Use WAL mode.".into(),
+    ]);
     let mut foreign_episode = source_episode("source-session", "FOREIGN_AGENT_EPISODE");
     foreign_episode.agent_id = "other-agent".into();
     mem.episodes.lock().extend([
@@ -2568,7 +2557,7 @@ async fn source_without_proven_memory_namespace_skips_ordinary_recall() {
     memory
         .episodes
         .lock()
-        .push(source_episode("source-session", "Source episode says WAL."));
+        .push(source_episode("source-session", "Use WAL mode."));
     memory
         .recall_entries
         .lock()
@@ -2635,8 +2624,7 @@ async fn source_revoked_during_status_await_stops_before_resolver() {
         }
         .boxed()
     };
-    let send = |_a: &str,
-                _d: &str,
+    let send = |_d: &DispatchBindingRow,
                 _r: &reiclaw_config::tachi::TachiConfig,
                 _v: u64,
                 _answer: &str|
@@ -2707,8 +2695,7 @@ async fn live_revocation_at_each_await_stops_further_grounding_and_never_sends()
             async move { Ok(question) }.boxed()
         };
         let sends = AtomicUsize::new(0);
-        let send = |_a: &str,
-                    _d: &str,
+        let send = |_d: &DispatchBindingRow,
                     _r: &reiclaw_config::tachi::TachiConfig,
                     _v: u64,
                     _answer: &str| {
@@ -3016,15 +3003,13 @@ async fn wake_notify_triggers_immediate_sweep_pass() {
 
     let shared = Arc::new(RwLock::new(config.clone()));
     let (shutdown_tx, shutdown_rx) = tokio::sync::watch::channel(false);
-    let wake = Arc::new(tokio::sync::Notify::new());
-    let task = start(
+    let (_hints, hint_rx) = mpsc::channel(WAKE_QUEUE_CAP);
+    let task = start_with_resolver(
         Arc::clone(&shared),
-        Arc::new(reiclaw_runtime::security::pairing::PairingGuard::new(
-            true,
-            &[],
-        )),
         None,
-        Some(Arc::clone(&wake)),
+        None,
+        Arc::new(|_, _| false),
+        hint_rx,
         shutdown_rx,
     );
     // Let the initial t=0 pass finish on an empty table (0 hits) and park.
@@ -3086,8 +3071,7 @@ async fn managed_native_wait_notifies_only_when_controllable_and_never_sends() {
         },
         "read_projection": {"execution_state": "running", "control_state": "available"}
     });
-    let send = |_: &str,
-                _: &str,
+    let send = |_: &DispatchBindingRow,
                 _: &reiclaw_config::tachi::TachiConfig,
                 _: u64,
                 _: &str|
@@ -3501,4 +3485,302 @@ async fn terminal_digest_legacy_receipts_and_ineligible_results_are_scoped() {
             );
         }
     }
+}
+
+#[tokio::test]
+async fn production_start_uses_sse_hints_then_canonical_status_and_stops_both_workers() {
+    use axum::Json;
+    use axum::extract::State;
+    use axum::http::{HeaderMap, StatusCode};
+    use axum::response::{IntoResponse, Sse, sse::Event};
+    use serde_json::{Value, json};
+    use std::convert::Infallible;
+    use std::time::Duration;
+
+    const ANSWER: &str = "SQLite journal mode is WAL.";
+    struct Fixture {
+        stream: parking_lot::Mutex<Option<mpsc::Receiver<Event>>>,
+        calls: mpsc::UnboundedSender<(String, Value)>,
+        paused: AtomicBool,
+    }
+
+    async fn rpc(
+        State(fixture): State<Arc<Fixture>>,
+        Json(body): Json<Value>,
+    ) -> axum::response::Response {
+        let id = &body["id"];
+        match body["method"].as_str() {
+            Some("initialize") => (
+                [("mcp-session-id", "fixture-session")],
+                Json(json!({"jsonrpc":"2.0", "id":id, "result":{
+                    "protocolVersion":"2025-11-25", "capabilities":{"tools":{}},
+                    "serverInfo":{"name":"test-tachi","version":"1"}
+                }})),
+            )
+                .into_response(),
+            Some("notifications/initialized") => StatusCode::ACCEPTED.into_response(),
+            Some("tools/call") => {
+                assert_eq!(body["params"]["name"], "tachi_staff");
+                let args = &body["params"]["arguments"];
+                let action = args["action"].as_str().unwrap();
+                fixture
+                    .calls
+                    .send((action.to_owned(), args.clone()))
+                    .unwrap();
+                let dispatch = args["dispatch_id"].as_str().unwrap();
+                if dispatch == "disp-stall" {
+                    return std::future::pending().await;
+                }
+                let status = if action == "continue" {
+                    json!({"dispatch_id":dispatch, "state":"TASK_STATE_WORKING", "status_revision":8})
+                } else if !fixture.paused.load(Ordering::SeqCst) {
+                    json!({"dispatch_id":dispatch, "state":"TASK_STATE_WORKING", "status_revision":6})
+                } else if dispatch == "disp-auth" {
+                    json!({"dispatch_id":dispatch, "state":"TASK_STATE_AUTH_REQUIRED", "status_revision":7})
+                } else {
+                    json!({"dispatch_id":dispatch, "state":"TASK_STATE_INPUT_REQUIRED",
+                           "status_revision":7, "read_projection":{"question":"Which SQLite journal mode?"}})
+                };
+                Json(json!({"jsonrpc":"2.0","id":id,"result":{
+                    "content":[{"type":"text","text":status.to_string()}]
+                }}))
+                .into_response()
+            }
+            _ => (
+                StatusCode::UNPROCESSABLE_ENTITY,
+                "Unexpected message, expect initialize request",
+            )
+                .into_response(),
+        }
+    }
+
+    async fn events(State(fixture): State<Arc<Fixture>>, headers: HeaderMap) -> impl IntoResponse {
+        assert_eq!(headers["mcp-session-id"], "fixture-session");
+        assert_eq!(headers["mcp-protocol-version"], "2025-11-25");
+        assert_eq!(headers["x-tachi-agent-identity"], "reiclaw:butler");
+        assert_eq!(headers["x-tachi-profile"], "standard");
+        assert_eq!(headers["x-tachi-project"], "fixture");
+        fixture.calls.send(("sse".into(), Value::Null)).unwrap();
+        let rx = fixture.stream.lock().take().unwrap();
+        Sse::new(futures_util::StreamExt::map(
+            tokio_stream::wrappers::ReceiverStream::new(rx),
+            Ok::<_, Infallible>,
+        ))
+    }
+
+    async fn model(State(fixture): State<Arc<Fixture>>, Json(body): Json<Value>) -> Json<Value> {
+        assert_eq!(body["model"], "fixture-model");
+        let messages = body["messages"].as_array().unwrap();
+        let prompt: Value =
+            serde_json::from_str(messages.last().unwrap()["content"].as_str().unwrap()).unwrap();
+        assert_eq!(prompt["worker_question"], "Which SQLite journal mode?");
+        assert!(
+            prompt["grounded_facts"]
+                .as_array()
+                .unwrap()
+                .contains(&json!(ANSWER))
+        );
+        fixture.calls.send(("model".into(), Value::Null)).unwrap();
+        Json(json!({"choices":[{"message":{"role":"assistant", "content":ANSWER}}]}))
+    }
+
+    fn hint(dispatch: &str) -> Event {
+        Event::default().data(
+            json!({
+                "jsonrpc":"2.0",
+                "method":"notifications/tasks",
+                "params":{
+                    "taskId":format!("tachi-result:{dispatch}:{}", "a".repeat(32)),
+                    "status":"input_required",
+                    "statusMessage":"Worker-controlled text must not reach the resolver."
+                }
+            })
+            .to_string(),
+        )
+    }
+
+    let (tmp, mut config) = fixture_config();
+    let (event_tx, event_rx) = mpsc::channel(8);
+    let (calls_tx, mut calls) = mpsc::unbounded_channel();
+    let fixture = Arc::new(Fixture {
+        stream: parking_lot::Mutex::new(Some(event_rx)),
+        calls: calls_tx,
+        paused: AtomicBool::new(false),
+    });
+    let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let addr = listener.local_addr().unwrap();
+    let router = axum::Router::new()
+        .route(
+            "/mcp",
+            axum::routing::post(rpc)
+                .get(events)
+                .delete(|| async { StatusCode::NO_CONTENT }),
+        )
+        .route("/v1/chat/completions", axum::routing::post(model))
+        .with_state(Arc::clone(&fixture));
+    let server = ::reiclaw_log::spawn!(async move { axum::serve(listener, router).await.unwrap() });
+
+    config.config_path = tmp.path().join("config.toml");
+    config.tachi.endpoint = format!("http://{addr}/mcp");
+    config.tachi.project = Some("fixture".into());
+    let agent = config.agents.get_mut("butler").unwrap();
+    agent.model_provider = "openai.fixture".into();
+    agent.risk_profile = "source-full".into();
+    config.risk_profiles.insert(
+        "source-full".into(),
+        reiclaw_config::schema::RiskProfileConfig {
+            level: reiclaw_config::autonomy::AutonomyLevel::Full,
+            ..Default::default()
+        },
+    );
+    config.providers.models.openai.insert(
+        "fixture".into(),
+        reiclaw_config::schema::OpenAIModelProviderConfig {
+            base: reiclaw_config::schema::ModelProviderConfig {
+                model: Some("fixture-model".into()),
+                uri: Some(format!("http://{addr}/v1")),
+                api_key: Some("fixture-api-key".into()),
+                ..Default::default()
+            },
+        },
+    );
+    let store = SqliteSessionBackend::new(tmp.path()).unwrap();
+    let identity = reiclaw_memory::companion::resolve_or_mint_agent_identity(
+        &config.companion_memory.resolved_store_dir(tmp.path()),
+        "butler",
+    )
+    .unwrap();
+    let subject = "cd".repeat(32);
+    let origin = DelegationOrigin {
+        session_key: "gw_authorized".into(),
+        scope: DelegationOriginScope::SessionFacts {
+            operator_subject: subject.clone(),
+            agent_id: identity.as_str().into(),
+            memory_session_id: None,
+        },
+    };
+    let fingerprint = route_fingerprint(&config.tachi, "butler");
+    store
+        .set_session_agent_alias(&origin.session_key, "butler")
+        .unwrap();
+    store
+        .append(
+            &origin.session_key,
+            &reiclaw_api::model_provider::ChatMessage::user(ANSWER),
+        )
+        .unwrap();
+    for dispatch in ["disp-grounded", "disp-auth"] {
+        store
+            .claim_delegation_request_with_origin(
+                "butler",
+                dispatch,
+                "digest",
+                &fingerprint,
+                Some(&origin),
+            )
+            .unwrap();
+        store
+            .bind_delegation_request("butler", dispatch, "digest", &fingerprint, dispatch)
+            .unwrap();
+    }
+
+    let (shutdown_tx, shutdown_rx) = tokio::sync::watch::channel(false);
+    let task = start(
+        Arc::new(RwLock::new(config)),
+        Arc::new(reiclaw_runtime::security::pairing::PairingGuard::new(
+            true,
+            &[subject],
+        )),
+        Arc::new(reiclaw_memory::NoneMemory::new("none")),
+        shutdown_rx,
+    );
+    let mut initial = std::collections::HashSet::new();
+    for _ in 0..3 {
+        let (kind, args) = tokio::time::timeout(Duration::from_secs(5), calls.recv())
+            .await
+            .unwrap()
+            .unwrap();
+        initial.insert((kind, args["dispatch_id"].as_str().map(str::to_owned)));
+    }
+    assert_eq!(
+        initial,
+        [
+            ("sse".into(), None),
+            ("status".into(), Some("disp-grounded".into())),
+            ("status".into(), Some("disp-auth".into())),
+        ]
+        .into()
+    );
+
+    fixture.paused.store(true, Ordering::SeqCst);
+    event_tx.send(hint("disp-grounded")).await.unwrap();
+    for expected in ["status", "model", "continue"] {
+        let (kind, args) = tokio::time::timeout(Duration::from_secs(5), calls.recv())
+            .await
+            .unwrap()
+            .unwrap();
+        assert_eq!(kind, expected);
+        if kind == "continue" {
+            assert_eq!(args["dispatch_id"], "disp-grounded");
+            assert_eq!(args["expected_status_revision"], 7);
+            assert_eq!(args["task"], ANSWER);
+        }
+    }
+
+    // A later hint only wakes its own binding. The SSE status still claims
+    // input_required while canonical Staff status refuses on AUTH_REQUIRED.
+    tokio::time::sleep(Duration::from_millis(1100)).await;
+    event_tx.send(hint("disp-auth")).await.unwrap();
+    let (kind, args) = tokio::time::timeout(Duration::from_secs(5), calls.recv())
+        .await
+        .unwrap()
+        .unwrap();
+    assert_eq!(kind, "status");
+    assert_eq!(args["dispatch_id"], "disp-auth");
+    let outbox = BridgeOutbox::shared(tmp.path()).unwrap();
+    tokio::time::timeout(Duration::from_secs(5), async {
+        loop {
+            assert!(
+                calls.try_recv().is_err(),
+                "AUTH_REQUIRED reached model or mutation"
+            );
+            if outbox.pending("tg", 0, 100).unwrap().iter().any(|item| {
+                item.source_kind == DELEGATION
+                    && item.source_id == "butler\u{1f}disp-auth"
+                    && item.event_id == destination_event_id(INPUT_REQUIRED_OUTCOME, None)
+                    && item.content.contains("AUTH_REQUIRED")
+            }) {
+                break;
+            }
+            tokio::time::sleep(Duration::from_millis(10)).await;
+        }
+    })
+    .await
+    .unwrap();
+
+    store
+        .claim_delegation_request("butler", "disp-stall", "digest", &fingerprint)
+        .unwrap();
+    store
+        .bind_delegation_request("butler", "disp-stall", "digest", &fingerprint, "disp-stall")
+        .unwrap();
+    tokio::time::sleep(Duration::from_millis(1100)).await;
+    event_tx.send(hint("disp-stall")).await.unwrap();
+    let (kind, args) = tokio::time::timeout(Duration::from_secs(5), calls.recv())
+        .await
+        .unwrap()
+        .unwrap();
+    assert_eq!(kind, "status");
+    assert_eq!(args["dispatch_id"], "disp-stall");
+    shutdown_tx.send(true).unwrap();
+    tokio::time::timeout(Duration::from_secs(3), task.stop.cancelled())
+        .await
+        .unwrap();
+    tokio::time::timeout(Duration::from_secs(3), task.shutdown())
+        .await
+        .unwrap();
+    tokio::time::timeout(Duration::from_secs(3), event_tx.closed())
+        .await
+        .unwrap();
+    server.abort();
 }

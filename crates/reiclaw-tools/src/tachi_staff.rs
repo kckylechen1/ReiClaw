@@ -38,13 +38,14 @@
 pub use reiclaw_api::tachi_staff::*;
 use std::collections::HashMap;
 use std::fmt;
+use std::sync::Arc;
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::time::Duration;
 
 use crate::mcp_era::{PeerEra, PeerProtocol, attach_request_meta};
 use crate::mcp_protocol::JsonRpcRequest;
 use crate::mcp_transport::{
-    McpRequestLifecycle, McpTransportError, SharedMcpTransportConn, create_shared_transport,
+    HttpTransport, McpRequestLifecycle, McpTransportError, SharedMcpTransportConn,
 };
 use reiclaw_config::schema::{McpServerConfig, McpTransport};
 use reiclaw_config::tachi::TachiConfig;
@@ -181,6 +182,7 @@ pub struct TachiStaffClient {
     settings: TachiStaffSettings,
     session: Mutex<Option<StaffSession>>,
     next_id: AtomicU64,
+    request_guard: Option<Arc<dyn Fn() -> bool + Send + Sync>>,
 }
 
 impl fmt::Debug for TachiStaffClient {
@@ -195,6 +197,7 @@ impl fmt::Debug for TachiStaffClient {
 enum Exchange {
     Answered(Value),
     StaleSession,
+    BlockedBeforeWrite,
 }
 
 /// Negotiated wire facts belong to the transport session, never to a run.
@@ -225,7 +228,41 @@ impl TachiStaffClient {
             session: Mutex::new(None),
             // Canonical bootstrap reserves discover=0 and initialize=1.
             next_id: AtomicU64::new(2),
+            request_guard: None,
         }
+    }
+
+    /// Recheck host admission at the HTTP writer, including after MCP bootstrap.
+    #[must_use]
+    pub fn with_request_guard(mut self, guard: impl Fn() -> bool + Send + Sync + 'static) -> Self {
+        self.request_guard = Some(Arc::new(guard));
+        self
+    }
+
+    /// Listen for Staff-backed task hints on the admitted Streamable HTTP
+    /// endpoint. Callers must verify status with a separate canonical read.
+    pub async fn watch_task_events(
+        &self,
+        stop: &tokio_util::sync::CancellationToken,
+        mut wake: impl FnMut(&str) + Send,
+    ) -> anyhow::Result<()> {
+        let transport = HttpTransport::new(&self.transport_config())?
+            .with_request_guard(self.request_guard.clone());
+        let result = tokio::select! {
+            biased;
+            _ = stop.cancelled() => Ok(()),
+            result = async {
+                let peer = tokio::time::timeout(Duration::from_secs(5),
+                    crate::mcp_client::open_legacy_event_session(&transport)).await??;
+                tokio::time::timeout(Duration::from_secs(300), transport.read_server_events(&peer, |data| {
+                    if let Some(dispatch) = staff_event_dispatch(data) {
+                        wake(&dispatch);
+                    }
+                })).await?
+            } => result,
+        };
+        transport.close_event_session().await;
+        result
     }
 
     /// The configured status poll interval.
@@ -770,19 +807,20 @@ impl TachiStaffClient {
     }
 
     async fn open_session(&self) -> Result<StaffSession, TachiStaffError> {
-        let transport = create_shared_transport(&self.transport_config())
+        let transport = HttpTransport::new(&self.transport_config())
+            .map(|transport| transport.with_request_guard(self.request_guard.clone()))
             .map_err(|err| TachiStaffError::Unavailable(format!("transport: {err:#}")))?;
         // Reuse the canonical discover/legacy bootstrap. Directly sending the
         // modern revision in initialize is rejected by modern Tachi peers.
         let opened = tokio::time::timeout(
             Duration::from_secs(CALL_TIMEOUT_SECS),
-            crate::mcp_client::open_session(transport.as_ref(), "tachi", 0),
+            crate::mcp_client::open_session(&transport, "tachi", 0),
         )
         .await
         .map_err(|_| TachiStaffError::Unavailable("MCP bootstrap timed out".to_string()))?
         .map_err(|err| TachiStaffError::Unavailable(format!("{err:#}")))?;
         Ok(StaffSession {
-            transport,
+            transport: Box::new(transport),
             peer: opened.peer,
         })
     }
@@ -815,6 +853,14 @@ impl TachiStaffClient {
                 ) =>
             {
                 return Ok(Exchange::StaleSession);
+            }
+            Err(err)
+                if matches!(
+                    err.downcast_ref(),
+                    Some(McpTransportError::BlockedBeforeWrite)
+                ) =>
+            {
+                return Ok(Exchange::BlockedBeforeWrite);
             }
             Err(err) => return Err(TachiStaffError::Unavailable(format!("{err:#}"))),
         };
@@ -888,6 +934,11 @@ impl TachiStaffClient {
                     *session = Some(conn);
                     return Ok(payload);
                 }
+                Ok(Exchange::BlockedBeforeWrite) => {
+                    return Err(TachiStaffError::Unavailable(
+                        "current host policy blocked transmission".into(),
+                    ));
+                }
                 Ok(Exchange::StaleSession) if matches!(op, "status" | "result") && !reopened => {
                     reopened = true;
                 }
@@ -920,6 +971,42 @@ impl TachiStaffClient {
             }
         }
     }
+}
+
+// rmcp's SEP-2663 notification carries a flattened DetailedTask. Tachi's
+// result facade uses tachi-result:<dispatch>:<32 lowercase hex digits>.
+fn staff_event_dispatch(data: &str) -> Option<String> {
+    let message: Value = serde_json::from_str(data).ok()?;
+    if message["jsonrpc"] != "2.0"
+        || message["method"] != "notifications/tasks"
+        || message.get("id").is_some()
+    {
+        return None;
+    }
+    let task = &message["params"];
+    if !matches!(
+        task["status"].as_str()?,
+        "input_required" | "completed" | "failed" | "cancelled"
+    ) {
+        return None;
+    }
+    let (dispatch, suffix) = task["taskId"]
+        .as_str()?
+        .strip_prefix("tachi-result:")?
+        .split_once(':')?;
+    if dispatch.is_empty()
+        || dispatch.len() > 256
+        || !dispatch
+            .bytes()
+            .all(|b| b.is_ascii_alphanumeric() || matches!(b, b'-' | b'_'))
+        || suffix.len() != 32
+        || !suffix
+            .bytes()
+            .all(|b| b.is_ascii_digit() || (b'a'..=b'f').contains(&b))
+    {
+        return None;
+    }
+    Some(dispatch.to_owned())
 }
 
 fn is_mutating_op(op: &str) -> bool {

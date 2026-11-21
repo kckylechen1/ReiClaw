@@ -77,6 +77,19 @@ impl SqliteSessionBackend {
         workspace_dir.join("sessions").join("sessions.db")
     }
 
+    /// Attach to the store initialized by its existing owner without creating
+    /// a database or running migrations from a background observer.
+    pub fn open_existing(workspace_dir: &Path) -> Result<Self> {
+        let conn = Connection::open_with_flags(
+            Self::database_path(workspace_dir),
+            rusqlite::OpenFlags::SQLITE_OPEN_READ_WRITE,
+        )?;
+        conn.busy_timeout(std::time::Duration::from_millis(250))?;
+        Ok(Self {
+            conn: Mutex::new(conn),
+        })
+    }
+
     /// Open or create the sessions database.
     ///
     /// The daemon's gateway, channels and bridge intake each open this
