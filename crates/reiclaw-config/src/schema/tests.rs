@@ -7869,12 +7869,12 @@ fn tachi_vault_fixture(reference: &str, slow: bool) -> (TempDir, Vec<EnvValueGua
     let script = format!(
         r#"#!/bin/sh
 if [ "$*" = 'vault status' ]; then
-  printf '%s\n' '{{"initialized":true,"locked":true,"secure_store":{{"auto_unlock_available":true}}}}'
+  printf '%s\n' '{{"initialized":true,"locked":false,"secure_store":{{"auto_unlock_available":true}}}}'
   exit 0
 fi
-if [ "$*" = 'vault get OPENAI_OFFICIAL_API_KEY --reveal --json --keychain' ]; then
+if [ "$*" = 'vault lease OPENAI_OFFICIAL_API_KEY --env-name REI_VAULT_SECRET --stdin-password --json' ]; then
   {}
-  printf '%s\n' '{{"name":"OPENAI_OFFICIAL_API_KEY","revealed":true,"value":"synthetic-vault-secret"}}'
+  printf '%s\n' '{{"leased":true,"env":{{"REI_VAULT_SECRET":"synthetic-vault-secret"}}}}'
   exit 0
 fi
 exit 65

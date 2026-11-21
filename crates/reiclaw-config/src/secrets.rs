@@ -382,9 +382,41 @@ enum TachiVaultStatus {
     },
 }
 
-/// Run one non-interactive CLI step. Never attach stdout to an error, even
-/// when decoding fails: it can contain a complete or partial credential.
-fn run_tachi_vault(args: &[&str], reference: &str, deadline: Instant) -> Result<Vec<u8>> {
+#[derive(Debug)]
+enum TachiVaultExecError {
+    NonZero {
+        error: anyhow::Error,
+        exit_code: Option<i32>,
+        stdout: Vec<u8>,
+        stderr: Vec<u8>,
+    },
+    Other(anyhow::Error),
+}
+
+impl TachiVaultExecError {
+    fn into_error(self) -> anyhow::Error {
+        match self {
+            Self::NonZero { error, .. } | Self::Other(error) => error,
+        }
+    }
+}
+
+enum TachiVaultLeaseError {
+    /// Tachi explicitly refused leasing because the entry is a typed
+    /// non-`api_key` secret (for example `token`, `generic`, or `config`).
+    NotApiKey(anyhow::Error),
+    /// Lease was refused by policy/health/ACL/lock/missing entry or failed
+    /// with a protocol/transport/parse error. Never fall back to raw `vault get`.
+    RefusedOrProtocol(anyhow::Error),
+}
+
+/// Run one non-interactive CLI step. Never attach stdout or raw stderr to an
+/// error, even when decoding fails: either pipe can contain sensitive output.
+fn run_tachi_vault_exec(
+    args: &[&str],
+    reference: &str,
+    deadline: Instant,
+) -> std::result::Result<Vec<u8>, TachiVaultExecError> {
     use std::io::Read;
     use std::process::{Command, Stdio};
 
@@ -395,20 +427,25 @@ fn run_tachi_vault(args: &[&str], reference: &str, deadline: Instant) -> Result<
         .stderr(Stdio::piped())
         .spawn()
         .map_err(|e| {
-            if e.kind() == std::io::ErrorKind::NotFound {
-                anyhow::Error::msg("Tachi CLI (`tachi`) not found. Install it to use vault: secret references in config.")
+            let error = if e.kind() == std::io::ErrorKind::NotFound {
+                anyhow::Error::msg(
+                    "Tachi CLI (`tachi`) not found. Install it to use vault: secret references in config.",
+                )
             } else {
                 anyhow::Error::msg(format!("Failed to run Tachi CLI: {e}"))
-            }
+            };
+            TachiVaultExecError::Other(error)
         })?;
     let stdout = child
         .stdout
         .take()
-        .context("Failed to capture Tachi CLI stdout")?;
+        .context("Failed to capture Tachi CLI stdout")
+        .map_err(TachiVaultExecError::Other)?;
     let stderr = child
         .stderr
         .take()
-        .context("Failed to capture Tachi CLI stderr")?;
+        .context("Failed to capture Tachi CLI stderr")
+        .map_err(TachiVaultExecError::Other)?;
     // Drain both pipes concurrently with a fixed byte cap. Channel receives
     // share the caller deadline so inherited pipes cannot extend the timeout.
     let read_pipe = |pipe: Box<dyn Read + Send>| {
@@ -429,39 +466,54 @@ fn run_tachi_vault(args: &[&str], reference: &str, deadline: Instant) -> Result<
         let status = loop {
             if let Some(status) = child
                 .try_wait()
-                .context("Failed to poll Tachi CLI process")?
+                .context("Failed to poll Tachi CLI process")
+                .map_err(TachiVaultExecError::Other)?
             {
                 break status;
             }
-            anyhow::ensure!(
-                Instant::now() < deadline,
-                "Tachi CLI timed out resolving \"{reference}\" after 10s"
-            );
+            if Instant::now() >= deadline {
+                return Err(TachiVaultExecError::Other(anyhow::Error::msg(format!(
+                    "Tachi CLI timed out resolving \"{reference}\" after 10s"
+                ))));
+            }
             std::thread::sleep(Duration::from_millis(25));
         };
         let stdout = stdout_rx
             .recv_timeout(deadline.saturating_duration_since(Instant::now()))
-            .context("Tachi CLI stdout reader timed out or disconnected")?
-            .context("Failed to read Tachi CLI stdout")?;
+            .context("Tachi CLI stdout reader timed out or disconnected")
+            .map_err(TachiVaultExecError::Other)?
+            .context("Failed to read Tachi CLI stdout")
+            .map_err(TachiVaultExecError::Other)?;
         let stderr = stderr_rx
             .recv_timeout(deadline.saturating_duration_since(Instant::now()))
-            .context("Tachi CLI stderr reader timed out or disconnected")?
-            .context("Failed to read Tachi CLI stderr")?;
-        anyhow::ensure!(
-            stdout.len() as u64 <= MAX_TACHI_VAULT_PIPE_BYTES
-                && stderr.len() as u64 <= MAX_TACHI_VAULT_PIPE_BYTES,
-            "Tachi CLI output exceeded 64 KiB limit while resolving \"{reference}\""
-        );
+            .context("Tachi CLI stderr reader timed out or disconnected")
+            .map_err(TachiVaultExecError::Other)?
+            .context("Failed to read Tachi CLI stderr")
+            .map_err(TachiVaultExecError::Other)?;
+        if stdout.len() as u64 > MAX_TACHI_VAULT_PIPE_BYTES
+            || stderr.len() as u64 > MAX_TACHI_VAULT_PIPE_BYTES
+        {
+            return Err(TachiVaultExecError::Other(anyhow::Error::msg(format!(
+                "Tachi CLI output exceeded 64 KiB limit while resolving \"{reference}\""
+            ))));
+        }
         if !status.success() {
             let reason = classify_tachi_vault_stderr(&stderr);
-            match status.code() {
-                Some(code) => anyhow::bail!(
+            let exit_code = status.code();
+            let error = match exit_code {
+                Some(code) => anyhow::Error::msg(format!(
                     "Tachi CLI failed while resolving \"{reference}\" (exit status {code}): {reason}"
-                ),
-                None => {
-                    anyhow::bail!("Tachi CLI terminated by signal while resolving \"{reference}\"")
-                }
-            }
+                )),
+                None => anyhow::Error::msg(format!(
+                    "Tachi CLI terminated by signal while resolving \"{reference}\""
+                )),
+            };
+            return Err(TachiVaultExecError::NonZero {
+                error,
+                exit_code,
+                stdout,
+                stderr,
+            });
         }
         Ok(stdout)
     })();
@@ -472,9 +524,71 @@ fn run_tachi_vault(args: &[&str], reference: &str, deadline: Instant) -> Result<
     output
 }
 
+fn run_tachi_vault(args: &[&str], reference: &str, deadline: Instant) -> Result<Vec<u8>> {
+    run_tachi_vault_exec(args, reference, deadline).map_err(TachiVaultExecError::into_error)
+}
+
+fn is_non_api_key_lease_refusal(name: &str, stderr: &[u8]) -> bool {
+    let Ok(text) = std::str::from_utf8(stderr) else {
+        return false;
+    };
+    let lines: Vec<&str> = text
+        .lines()
+        .map(str::trim)
+        .filter(|line| !line.is_empty())
+        .collect();
+    let error_line = match lines.as_slice() {
+        [only] => *only,
+        [first, second] if first.starts_with("tachi: logging to ") => *second,
+        _ => return false,
+    };
+    let normalized = error_line.to_ascii_lowercase();
+    let body = normalized
+        .strip_prefix("fatal:")
+        .or_else(|| normalized.strip_prefix("error:"))
+        .map(str::trim_start)
+        .unwrap_or(&normalized);
+    let prefix = format!("vault name '{}' is ", name.to_ascii_lowercase());
+    let Some(rest) = body.strip_prefix(&prefix) else {
+        return false;
+    };
+    if matches!(
+        rest,
+        "lane config, not a credential; refusing secret_type=api_key"
+            | "lane config, not a credential; refusing to lease it as an api key"
+    ) {
+        return true;
+    }
+    let Some(secret_type) =
+        rest.strip_suffix(", not a credential; refusing to lease it as an api key")
+    else {
+        return false;
+    };
+    !secret_type.is_empty()
+        && secret_type != "api_key"
+        && secret_type
+            .bytes()
+            .all(|b| matches!(b, b'a'..=b'z' | b'0'..=b'9' | b'_' | b'-'))
+}
+
 fn classify_tachi_vault_stderr(stderr: &[u8]) -> &'static str {
     let lower = String::from_utf8_lossy(stderr).to_ascii_lowercase();
-    if lower.contains("not found")
+    if lower.contains("no usable api key")
+        || lower.contains("disabled")
+        || lower.contains("auth-failed")
+        || lower.contains("auth_failed")
+        || lower.contains("rate-limited")
+        || lower.contains("rate_limited")
+        || lower.contains("cooling")
+        || lower.contains("restricted")
+        || lower.contains("access denied")
+    {
+        "no usable API key is eligible for lease"
+    } else if lower.contains("not a credential; refusing to lease it as an api key")
+        || lower.contains("not a credential; refusing secret_type=api_key")
+    {
+        "entry is not a leasable API key"
+    } else if lower.contains("not found")
         || lower.contains("no secret")
         || lower.contains("missing")
         || lower.contains("does not exist")
@@ -538,35 +652,59 @@ fn parse_tachi_vault_status(raw: &[u8]) -> Result<TachiVaultStatus> {
     ))
 }
 
-fn resolve_tachi_vault_lease(name: &str, reference: &str, deadline: Instant) -> Result<String> {
-    let output = run_tachi_vault(
+fn resolve_tachi_vault_lease(
+    name: &str,
+    reference: &str,
+    auth_flag: &str,
+    deadline: Instant,
+) -> std::result::Result<String, TachiVaultLeaseError> {
+    let output = run_tachi_vault_exec(
         &[
             "vault",
             "lease",
             name,
             "--env-name",
             TACHI_VAULT_LEASE_ENV,
-            "--stdin-password",
+            auth_flag,
             "--json",
         ],
         reference,
         deadline,
-    )?;
-    let output: serde_json::Value = serde_json::from_slice(&output)
-        .map_err(|_| anyhow::Error::msg("Tachi Vault returned invalid lease JSON"))?;
-    anyhow::ensure!(
-        output.get("leased").and_then(serde_json::Value::as_bool) == Some(true),
-        "Tachi Vault did not lease the requested secret"
-    );
+    )
+    .map_err(|exec_err| match exec_err {
+        TachiVaultExecError::NonZero {
+            error,
+            exit_code: Some(1),
+            stdout,
+            stderr,
+        } if stdout.iter().all(u8::is_ascii_whitespace)
+            && is_non_api_key_lease_refusal(name, &stderr) =>
+        {
+            TachiVaultLeaseError::NotApiKey(error)
+        }
+        other => TachiVaultLeaseError::RefusedOrProtocol(other.into_error()),
+    })?;
+    let output: serde_json::Value = serde_json::from_slice(&output).map_err(|_| {
+        TachiVaultLeaseError::RefusedOrProtocol(anyhow::Error::msg(
+            "Tachi Vault returned invalid lease JSON",
+        ))
+    })?;
+    if output.get("leased").and_then(serde_json::Value::as_bool) != Some(true) {
+        return Err(TachiVaultLeaseError::RefusedOrProtocol(anyhow::Error::msg(
+            "Tachi Vault did not lease the requested secret",
+        )));
+    }
     let env_pointer = format!("/env/{TACHI_VAULT_LEASE_ENV}");
     let value = output
         .pointer(&env_pointer)
         .and_then(serde_json::Value::as_str)
-        .context("Tachi Vault lease response missing string value")?;
-    anyhow::ensure!(
-        !value.is_empty(),
-        "Tachi Vault returned an empty secret value"
-    );
+        .context("Tachi Vault lease response missing string value")
+        .map_err(TachiVaultLeaseError::RefusedOrProtocol)?;
+    if value.is_empty() {
+        return Err(TachiVaultLeaseError::RefusedOrProtocol(anyhow::Error::msg(
+            "Tachi Vault returned an empty secret value",
+        )));
+    }
     Ok(value.to_string())
 }
 
@@ -599,6 +737,41 @@ fn resolve_tachi_vault_get_keychain(
     Ok(value.to_string())
 }
 
+fn ensure_fallback_status_allowed(
+    reference: &str,
+    deadline: Instant,
+    allow_offline: bool,
+) -> Result<()> {
+    let status_raw = run_tachi_vault(&["vault", "status"], reference, deadline)?;
+    match parse_tachi_vault_status(&status_raw)? {
+        TachiVaultStatus::Daemon {
+            initialized: true,
+            locked: false,
+            auto_unlock: true,
+        } => Ok(()),
+        TachiVaultStatus::Offline { initialized: true } if allow_offline => Ok(()),
+        TachiVaultStatus::Daemon {
+            initialized: false, ..
+        }
+        | TachiVaultStatus::Offline { initialized: false } => Err(anyhow::Error::msg(format!(
+            "Tachi Vault is not initialized while resolving \"{reference}\" (hint: run `tachi vault init` first)"
+        ))),
+        TachiVaultStatus::Daemon { locked: true, .. } => Err(anyhow::Error::msg(format!(
+            "Tachi Vault daemon is locked while resolving \"{reference}\"; refusing offline Keychain bypass (hint: run `tachi vault unlock` first)"
+        ))),
+        TachiVaultStatus::Daemon {
+            locked: false,
+            auto_unlock: false,
+            ..
+        } => Err(anyhow::Error::msg(format!(
+            "Tachi Vault entry \"{reference}\" is not a leasable API key and automatic Keychain unlock is unavailable for direct store read (hint: store the vault master password in macOS Keychain under service `tachi-vault` / account `default` for non-api_key secrets)"
+        ))),
+        TachiVaultStatus::Offline { initialized: true } => Err(anyhow::Error::msg(format!(
+            "Tachi Vault daemon state changed while resolving \"{reference}\"; refusing offline Keychain bypass"
+        ))),
+    }
+}
+
 fn resolve_tachi_vault_ref(reference: &str) -> Result<String> {
     let name = validate_tachi_vault_ref(reference)?;
     let deadline = Instant::now() + TACHI_VAULT_TIMEOUT;
@@ -617,26 +790,37 @@ fn resolve_tachi_vault_ref(reference: &str) -> Result<String> {
             locked: false,
             auto_unlock,
             ..
-        } => match resolve_tachi_vault_lease(name, reference, deadline) {
+        } => match resolve_tachi_vault_lease(name, reference, "--stdin-password", deadline) {
             Ok(secret) => Ok(secret),
-            Err(_) if auto_unlock => resolve_tachi_vault_get_keychain(name, reference, deadline),
-            Err(lease_err) => Err(lease_err.context(format!(
-                "Tachi Vault daemon could not lease \"{reference}\" and automatic Keychain unlock is unavailable for direct store read (hint: store the vault master password in macOS Keychain under service `tachi-vault` / account `default` for non-api_key secrets)"
+            Err(TachiVaultLeaseError::NotApiKey(_)) if auto_unlock => {
+                // Re-verify the daemon stayed unlocked across direct Keychain
+                // store fallback because Tachi validates non-api_key types
+                // before contacting the daemon.
+                ensure_fallback_status_allowed(reference, deadline, false)?;
+                let secret = resolve_tachi_vault_get_keychain(name, reference, deadline)?;
+                ensure_fallback_status_allowed(reference, deadline, false)?;
+                Ok(secret)
+            }
+            Err(TachiVaultLeaseError::NotApiKey(lease_err)) => Err(lease_err.context(format!(
+                "Tachi Vault entry \"{reference}\" is not a leasable API key and automatic Keychain unlock is unavailable for direct store read (hint: store the vault master password in macOS Keychain under service `tachi-vault` / account `default` for non-api_key secrets)"
             ))),
+            Err(TachiVaultLeaseError::RefusedOrProtocol(lease_err)) => Err(lease_err),
         },
-        TachiVaultStatus::Daemon {
-            locked: true,
-            auto_unlock,
-            ..
-        } => {
-            anyhow::ensure!(
-                auto_unlock,
-                "Tachi Vault is locked and automatic Keychain unlock is unavailable while resolving \"{reference}\" (hint: run `tachi vault unlock` first, or store the vault master password in macOS Keychain under service `tachi-vault` / account `default`)"
-            );
-            resolve_tachi_vault_get_keychain(name, reference, deadline)
-        }
+        TachiVaultStatus::Daemon { locked: true, .. } => Err(anyhow::Error::msg(format!(
+            "Tachi Vault daemon is locked while resolving \"{reference}\"; refusing offline Keychain bypass (hint: run `tachi vault unlock` first)"
+        ))),
         TachiVaultStatus::Offline { .. } => {
-            resolve_tachi_vault_get_keychain(name, reference, deadline)
+            match resolve_tachi_vault_lease(name, reference, "--keychain", deadline) {
+                Ok(secret) => Ok(secret),
+                Err(TachiVaultLeaseError::NotApiKey(_)) => {
+                    // Re-verify no locked daemon started before or during direct Keychain read.
+                    ensure_fallback_status_allowed(reference, deadline, true)?;
+                    let secret = resolve_tachi_vault_get_keychain(name, reference, deadline)?;
+                    ensure_fallback_status_allowed(reference, deadline, true)?;
+                    Ok(secret)
+                }
+                Err(TachiVaultLeaseError::RefusedOrProtocol(lease_err)) => Err(lease_err),
+            }
         }
     }
 }
@@ -855,14 +1039,20 @@ mod tests {
 
     #[cfg(unix)]
     #[allow(clippy::too_many_arguments)]
-    fn write_fake_tachi(
+    fn write_fake_tachi_with_stderr(
         bin_dir: &Path,
         status: &str,
         lease_out: &str,
+        lease_stderr: &str,
         lease_exit: u8,
         get_out: &str,
         get_exit: u8,
     ) {
+        let sh_escape = |s: &str| s.replace('\'', "'\\''");
+        let status = sh_escape(status);
+        let lease_out = sh_escape(lease_out);
+        let lease_stderr = sh_escape(lease_stderr);
+        let get_out = sh_escape(get_out);
         let script = format!(
             r#"#!/bin/sh
 printf '%s\n' "$*" >> "$TACHI_TEST_CALLS"
@@ -874,11 +1064,11 @@ fi
 case "$*" in
   'vault lease '* )
     case "$*" in
-      *' --stdin-password'* ) ;;
+      *' --stdin-password'* | *' --keychain'* ) ;;
       * ) printf '%s\n' 'interactive lease forbidden' >&2; exit 99 ;;
     esac
     printf '%s\n' '{lease_out}'
-    if [ {lease_exit} -ne 0 ]; then printf '%s\n' 'lease refused: synthetic-stderr-secret' >&2; fi
+    if [ {lease_exit} -ne 0 ]; then printf '%s\n' '{lease_stderr}' >&2; fi
     exit {lease_exit}
     ;;
   'vault get '* )
@@ -896,6 +1086,27 @@ exit 98
 "#
         );
         write_fake_tachi_script(bin_dir, &script);
+    }
+
+    #[cfg(unix)]
+    #[allow(clippy::too_many_arguments)]
+    fn write_fake_tachi(
+        bin_dir: &Path,
+        status: &str,
+        lease_out: &str,
+        lease_exit: u8,
+        get_out: &str,
+        get_exit: u8,
+    ) {
+        write_fake_tachi_with_stderr(
+            bin_dir,
+            status,
+            lease_out,
+            "lease refused: synthetic-stderr-secret",
+            lease_exit,
+            get_out,
+            get_exit,
+        );
     }
 
     #[cfg(unix)]
@@ -929,13 +1140,15 @@ exit 98
             "vault status\nvault lease OPENAI_OFFICIAL_API_KEY --env-name REI_VAULT_SECRET --stdin-password --json\n"
         );
 
-        // 2. Unlocked daemon WITH Keychain falls back to `vault get --keychain` for non-api_key entries.
+        // 2. Unlocked daemon WITH Keychain falls back to `vault get --keychain` ONLY when
+        // `vault lease` explicitly identifies the target as a non-api_key secret.
         // Outer CLI framing newlines after JSON are ignored while inner `\r\n` bytes stay intact.
         fs::write(&calls, "").unwrap();
-        write_fake_tachi(
+        write_fake_tachi_with_stderr(
             tmp.path(),
             r#"{"initialized":true,"locked":false,"secure_store":{"auto_unlock_available":true}}"#,
             "",
+            "Error: Vault name 'BOT_TOKEN' is token, not a credential; refusing to lease it as an API key",
             1,
             r#"{"name":"BOT_TOKEN","revealed":true,"value":"synthetic-token\r\n"}"#,
             0,
@@ -946,81 +1159,504 @@ exit 98
         );
         assert_eq!(
             fs::read_to_string(&calls).unwrap(),
-            "vault status\nvault lease BOT_TOKEN --env-name REI_VAULT_SECRET --stdin-password --json\nvault get BOT_TOKEN --reveal --json --keychain\n"
+            "vault status\nvault lease BOT_TOKEN --env-name REI_VAULT_SECRET --stdin-password --json\nvault status\nvault get BOT_TOKEN --reveal --json --keychain\nvault status\n"
         );
 
-        // 3. Locked daemon WITH Keychain resolves directly via `vault get --keychain`.
+        // 2b. Real `tachi` Fatal: prefix and `lane config` refusal formats also fall back cleanly.
+        for fatal_stderr in [
+            "Fatal: Vault name 'BOT_TOKEN' is token, not a credential; refusing to lease it as an API key",
+            "Fatal: Vault name 'BOT_TOKEN' is lane config, not a credential; refusing to lease it as an API key",
+        ] {
+            fs::write(&calls, "").unwrap();
+            write_fake_tachi_with_stderr(
+                tmp.path(),
+                r#"{"initialized":true,"locked":false,"secure_store":{"auto_unlock_available":true}}"#,
+                "",
+                fatal_stderr,
+                1,
+                r#"{"name":"BOT_TOKEN","revealed":true,"value":"synthetic-fatal-token"}"#,
+                0,
+            );
+            assert_eq!(
+                store.decrypt("vault:BOT_TOKEN").unwrap(),
+                "synthetic-fatal-token"
+            );
+        }
+
+        // 3. Non-api_key secret whose name contains policy words (e.g. LOCKED_BOT_TOKEN)
+        // still falls back when Tachi explicitly reports a non-api_key secret type.
         fs::write(&calls, "").unwrap();
-        write_fake_tachi(
+        write_fake_tachi_with_stderr(
             tmp.path(),
-            r#"{"initialized":true,"locked":true,"secure_store":{"auto_unlock_available":true}}"#,
+            r#"{"initialized":true,"locked":false,"secure_store":{"auto_unlock_available":true}}"#,
             "",
+            "Error: Vault name 'LOCKED_BOT_TOKEN' is generic, not a credential; refusing to lease it as an API key",
             1,
-            r#"{"name":"OPENAI_OFFICIAL_API_KEY","revealed":true,"value":"synthetic-keychain-secret\r\n"}"#,
+            r#"{"name":"LOCKED_BOT_TOKEN","revealed":true,"value":"synthetic-named-token"}"#,
             0,
         );
         assert_eq!(
-            store.decrypt("vault:OPENAI_OFFICIAL_API_KEY").unwrap(),
-            "synthetic-keychain-secret\r\n"
-        );
-        assert_eq!(
-            fs::read_to_string(&calls).unwrap(),
-            "vault status\nvault get OPENAI_OFFICIAL_API_KEY --reveal --json --keychain\n"
+            store.decrypt("vault:LOCKED_BOT_TOKEN").unwrap(),
+            "synthetic-named-token"
         );
 
         // 4. Secrets consisting solely of CR/LF bytes are preserved verbatim rather than treated as empty.
-        write_fake_tachi(
+        write_fake_tachi_with_stderr(
             tmp.path(),
-            r#"{"initialized":true,"locked":true,"secure_store":{"auto_unlock_available":true}}"#,
+            r#"{"initialized":true,"locked":false,"secure_store":{"auto_unlock_available":true}}"#,
             "",
+            "Error: Vault name 'CRLF_ONLY' is generic, not a credential; refusing to lease it as an API key",
             1,
             r#"{"name":"CRLF_ONLY","revealed":true,"value":"\r\n"}"#,
             0,
         );
         assert_eq!(store.decrypt("vault:CRLF_ONLY").unwrap(), "\r\n");
 
-        // 5. Offline plain-text status (no daemon running) resolves via `vault get --keychain`,
-        // and outer CLI CR/LF framing does not alter values without embedded newlines.
+        // 5. Offline plain-text status (no daemon running) uses Keychain-backed `vault lease --keychain`
+        // for API keys / pools / slots so key health and rotation rules stay enforced offline.
         fs::write(&calls, "").unwrap();
         write_fake_tachi(
             tmp.path(),
             "Vault status:\n  initialized: true\n  entries: 3",
+            "{\"leased\":true,\"env\":{\"REI_VAULT_SECRET\":\"synthetic-offline-leased\"}}\r",
+            0,
             "",
             1,
-            "{\"name\":\"OPENAI_OFFICIAL_API_KEY\",\"revealed\":true,\"value\":\"synthetic-offline-secret\"}\r",
-            0,
         );
         assert_eq!(
             store.decrypt("vault:OPENAI_OFFICIAL_API_KEY").unwrap(),
-            "synthetic-offline-secret"
+            "synthetic-offline-leased"
         );
         assert_eq!(
             fs::read_to_string(&calls).unwrap(),
-            "vault status\nvault get OPENAI_OFFICIAL_API_KEY --reveal --json --keychain\n"
+            "vault status\nvault lease OPENAI_OFFICIAL_API_KEY --env-name REI_VAULT_SECRET --keychain --json\n"
         );
 
-        // 5. Truly empty JSON secret values fail closed on both lease and keychain get.
+        // 6. Offline mode falls back to `vault get --keychain` ONLY on explicit non-api_key refusal.
+        fs::write(&calls, "").unwrap();
+        write_fake_tachi_with_stderr(
+            tmp.path(),
+            "Vault status:\n  initialized: true\n  entries: 3",
+            "",
+            "Error: Vault name 'BOT_TOKEN' is token, not a credential; refusing to lease it as an API key",
+            1,
+            "{\"name\":\"BOT_TOKEN\",\"revealed\":true,\"value\":\"synthetic-offline-token\"}\r",
+            0,
+        );
+        assert_eq!(
+            store.decrypt("vault:BOT_TOKEN").unwrap(),
+            "synthetic-offline-token"
+        );
+        assert_eq!(
+            fs::read_to_string(&calls).unwrap(),
+            "vault status\nvault lease BOT_TOKEN --env-name REI_VAULT_SECRET --keychain --json\nvault status\nvault get BOT_TOKEN --reveal --json --keychain\nvault status\n"
+        );
+
+        // 7. Truly empty JSON secret values fail closed on both lease and keychain get.
         write_fake_tachi(
             tmp.path(),
-            r#"{"initialized":true,"locked":false,"secure_store":{"auto_unlock_available":false}}"#,
+            r#"{"initialized":true,"locked":false,"secure_store":{"auto_unlock_available":true}}"#,
             r#"{"leased":true,"env":{"REI_VAULT_SECRET":""}}"#,
             0,
-            "",
-            1,
-        );
-        assert!(store.decrypt("vault:OPENAI_OFFICIAL_API_KEY").is_err());
-
-        write_fake_tachi(
-            tmp.path(),
-            r#"{"initialized":true,"locked":true,"secure_store":{"auto_unlock_available":true}}"#,
-            "",
-            1,
-            r#"{"name":"OPENAI_OFFICIAL_API_KEY","revealed":true,"value":""}"#,
+            r#"{"name":"OPENAI_OFFICIAL_API_KEY","revealed":true,"value":"must-not-fallback"}"#,
             0,
         );
         assert!(store.decrypt("vault:OPENAI_OFFICIAL_API_KEY").is_err());
 
+        write_fake_tachi_with_stderr(
+            tmp.path(),
+            r#"{"initialized":true,"locked":false,"secure_store":{"auto_unlock_available":true}}"#,
+            "",
+            "Error: Vault name 'BOT_TOKEN' is token, not a credential; refusing to lease it as an API key",
+            1,
+            r#"{"name":"BOT_TOKEN","revealed":true,"value":""}"#,
+            0,
+        );
+        assert!(store.decrypt("vault:BOT_TOKEN").is_err());
+
         assert!(!tmp.path().join(".secret_key").exists());
+    }
+
+    #[cfg(unix)]
+    #[tokio::test]
+    async fn tachi_vault_keychain_fallback_never_bypasses_lease_refusal_or_protocol_errors() {
+        let _guard = crate::env_overrides::env_test_lock().await;
+        let tmp = TempDir::new().unwrap();
+        let _path = EnvValueGuard::set("PATH", tmp.path());
+        let calls = tmp.path().join("calls");
+        let _calls = EnvValueGuard::set("TACHI_TEST_CALLS", &calls);
+        let store = SecretStore::new(tmp.path(), true);
+
+        let unlocked_with_keychain =
+            r#"{"initialized":true,"locked":false,"secure_store":{"auto_unlock_available":true}}"#;
+        let locked_with_keychain =
+            r#"{"initialized":true,"locked":true,"secure_store":{"auto_unlock_available":true}}"#;
+        let offline_initialized = "Vault status:\n  initialized: true\n  entries: 3";
+        let valid_get_out = r#"{"name":"OPENAI_OFFICIAL_API_KEY","revealed":true,"value":"synthetic-bypass-secret"}"#;
+
+        let refusal_cases = [
+            // Keychain available + disabled/auth-failed/rate-limited API key -> refuses, no `vault get`.
+            (
+                unlocked_with_keychain,
+                "",
+                "Error: No usable API key available for 'OPENAI_OFFICIAL_API_KEY'. Vault may be locked, missing, restricted, or all keys are disabled/auth-failed/rate-limited.",
+                1u8,
+                "no usable API key is eligible for lease",
+                true,
+            ),
+            // Keychain available + malformed lease JSON -> refuses, no `vault get`.
+            (
+                unlocked_with_keychain,
+                "{not-valid-json-synthetic-stdout-secret",
+                "",
+                0u8,
+                "invalid lease JSON",
+                true,
+            ),
+            // Keychain available + leased:false protocol refusal -> refuses, no `vault get`.
+            (
+                unlocked_with_keychain,
+                r#"{"leased":false,"env":{"REI_VAULT_SECRET":"synthetic-stdout-secret"}}"#,
+                "",
+                0u8,
+                "did not lease",
+                true,
+            ),
+            // Keychain available + empty leased value -> refuses, no `vault get`.
+            (
+                unlocked_with_keychain,
+                r#"{"leased":true,"env":{"REI_VAULT_SECRET":""}}"#,
+                "",
+                0u8,
+                "empty secret",
+                true,
+            ),
+            // Keychain available + missing string value in lease response -> refuses, no `vault get`.
+            (
+                unlocked_with_keychain,
+                r#"{"leased":true,"env":{"REI_VAULT_SECRET":42}}"#,
+                "",
+                0u8,
+                "missing string value",
+                true,
+            ),
+            // Keychain available + generic/unknown lease CLI refusal -> refuses, no `vault get`.
+            (
+                unlocked_with_keychain,
+                "",
+                "lease refused: synthetic-stderr-secret",
+                1u8,
+                "cannot be leased",
+                true,
+            ),
+            // Keychain available + locked daemon -> refuses offline Keychain bypass completely.
+            (
+                locked_with_keychain,
+                "",
+                "",
+                1u8,
+                "refusing offline Keychain bypass",
+                false,
+            ),
+            // Offline mode + disabled key -> refuses, no `vault get`.
+            (
+                offline_initialized,
+                "",
+                "Error: No usable API key available for 'OPENAI_OFFICIAL_API_KEY'. All keys are disabled.",
+                1u8,
+                "no usable API key is eligible for lease",
+                true,
+            ),
+            // Offline mode + malformed lease JSON -> refuses, no `vault get`.
+            (
+                offline_initialized,
+                "synthetic-stdout-secret",
+                "",
+                0u8,
+                "invalid lease JSON",
+                true,
+            ),
+        ];
+
+        for (status, lease_out, lease_stderr, lease_exit, expected, lease_called) in refusal_cases {
+            fs::write(&calls, "").unwrap();
+            write_fake_tachi_with_stderr(
+                tmp.path(),
+                status,
+                lease_out,
+                lease_stderr,
+                lease_exit,
+                valid_get_out,
+                0,
+            );
+            let error = format!(
+                "{:#}",
+                store
+                    .decrypt("vault:OPENAI_OFFICIAL_API_KEY")
+                    .expect_err("must fail closed without Keychain bypass")
+            );
+            assert!(error.contains(expected), "unexpected error: {error}");
+            assert!(!error.contains("synthetic-bypass-secret"), "{error}");
+            assert!(!error.contains("synthetic-stdout-secret"), "{error}");
+            assert!(!error.contains("synthetic-stderr-secret"), "{error}");
+            let recorded = fs::read_to_string(&calls).unwrap();
+            assert_eq!(recorded.contains("vault lease"), lease_called, "{recorded}");
+            assert!(
+                !recorded.contains("vault get"),
+                "must never fall back to raw vault get: {recorded}"
+            );
+        }
+
+        // Non-1 exit code (e.g., 65) with matching non-api_key stderr must fail closed.
+        fs::write(&calls, "").unwrap();
+        write_fake_tachi_with_stderr(
+            tmp.path(),
+            unlocked_with_keychain,
+            "",
+            "Fatal: Vault name 'OPENAI_OFFICIAL_API_KEY' is token, not a credential; refusing to lease it as an API key",
+            65,
+            valid_get_out,
+            0,
+        );
+        let error = format!(
+            "{:#}",
+            store
+                .decrypt("vault:OPENAI_OFFICIAL_API_KEY")
+                .expect_err("non-1 exit code must not trigger Keychain fallback")
+        );
+        assert!(!error.contains("synthetic-bypass-secret"), "{error}");
+        let recorded = fs::read_to_string(&calls).unwrap();
+        assert!(!recorded.contains("vault get"), "{recorded}");
+
+        // Multi-line conflicting stderr (e.g., Access denied + type refusal) must fail closed.
+        for conflicting in [
+            "Access denied\nVault name 'OPENAI_OFFICIAL_API_KEY' is token, not a credential; refusing to lease it as an API key",
+            "Warning: something\nError: Vault name 'OPENAI_OFFICIAL_API_KEY' is token, not a credential; refusing to lease it as an API key",
+            "Fatal: Vault name 'OPENAI_OFFICIAL_API_KEY' is token, not a credential; refusing to lease it as an API key\nAccess denied",
+        ] {
+            fs::write(&calls, "").unwrap();
+            write_fake_tachi_with_stderr(
+                tmp.path(),
+                unlocked_with_keychain,
+                "",
+                conflicting,
+                1,
+                valid_get_out,
+                0,
+            );
+            let error = format!(
+                "{:#}",
+                store
+                    .decrypt("vault:OPENAI_OFFICIAL_API_KEY")
+                    .expect_err("conflicting multi-line stderr must not trigger Keychain fallback")
+            );
+            assert!(!error.contains("synthetic-bypass-secret"), "{error}");
+            let recorded = fs::read_to_string(&calls).unwrap();
+            assert!(!recorded.contains("vault get"), "{recorded}");
+        }
+
+        // Non-empty stdout alongside exit 1 + type refusal must fail closed.
+        fs::write(&calls, "").unwrap();
+        write_fake_tachi_with_stderr(
+            tmp.path(),
+            unlocked_with_keychain,
+            "synthetic-stdout-secret",
+            "Fatal: Vault name 'OPENAI_OFFICIAL_API_KEY' is token, not a credential; refusing to lease it as an API key",
+            1,
+            valid_get_out,
+            0,
+        );
+        assert!(store.decrypt("vault:OPENAI_OFFICIAL_API_KEY").is_err());
+        assert!(!fs::read_to_string(&calls).unwrap().contains("vault get"));
+
+        // Signal termination after printing type refusal must fail closed.
+        fs::write(&calls, "").unwrap();
+        write_fake_tachi_script(
+            tmp.path(),
+            r#"#!/bin/sh
+printf '%s\n' "$*" >> "$TACHI_TEST_CALLS"
+if [ "$*" = 'vault status' ]; then
+  printf '%s\n' '{"initialized":true,"locked":false,"secure_store":{"auto_unlock_available":true}}'
+  exit 0
+fi
+case "$*" in
+  'vault lease '* )
+    printf '%s\n' 'tachi: logging to synthetic-private-log-path' >&2
+    printf '%s\n' "Fatal: Vault name 'OPENAI_OFFICIAL_API_KEY' is token, not a credential; refusing to lease it as an API key" >&2
+    kill -9 $$
+    ;;
+esac
+printf '%s\n' '{"name":"OPENAI_OFFICIAL_API_KEY","revealed":true,"value":"synthetic-bypass-secret"}'
+"#,
+        );
+        let err = store
+            .decrypt("vault:OPENAI_OFFICIAL_API_KEY")
+            .expect_err("signal termination must fail closed");
+        assert!(
+            format!("{err:#}").contains("terminated by signal"),
+            "{err:#}"
+        );
+        assert!(!fs::read_to_string(&calls).unwrap().contains("vault get"));
+
+        // TOCTOU race 1: daemon locks between initial status/lease refusal and fallback `vault get`.
+        let status_counter = tmp.path().join("status_count_pre");
+        fs::write(&status_counter, "0").unwrap();
+        fs::write(&calls, "").unwrap();
+        let pre_script = format!(
+            r#"#!/bin/sh
+printf '%s\n' "$*" >> "$TACHI_TEST_CALLS"
+printf '%s\n' 'tachi: logging to synthetic-private-log-path' >&2
+if [ "$*" = 'vault status' ]; then
+  IFS= read -r n < '{counter}' || n=0
+  n=$((n + 1))
+  printf '%s\n' "$n" > '{counter}'
+  if [ "$n" -eq 1 ]; then
+    printf '%s\n' '{unlocked}'
+  else
+    printf '%s\n' '{locked}'
+  fi
+  exit 0
+fi
+case "$*" in
+  'vault lease '* )
+    printf '%s\n' "Fatal: Vault name 'BOT_TOKEN' is token, not a credential; refusing to lease it as an API key" >&2
+    exit 1
+    ;;
+  'vault get '* )
+    printf '%s\n' '{{"name":"BOT_TOKEN","revealed":true,"value":"synthetic-bypass-secret"}}'
+    exit 0
+    ;;
+esac
+exit 98
+"#,
+            counter = status_counter.display(),
+            unlocked = unlocked_with_keychain,
+            locked = locked_with_keychain,
+        );
+        write_fake_tachi_script(tmp.path(), &pre_script);
+        let err = format!(
+            "{:#}",
+            store
+                .decrypt("vault:BOT_TOKEN")
+                .expect_err("daemon locked before get must fail closed")
+        );
+        assert!(err.contains("refusing offline Keychain bypass"), "{err}");
+        assert!(!err.contains("synthetic-bypass-secret"), "{err}");
+        assert!(!fs::read_to_string(&calls).unwrap().contains("vault get"));
+
+        // TOCTOU race 2: daemon locks during `vault get`; post-get re-check refuses plaintext.
+        let status_counter_post = tmp.path().join("status_count_post");
+        fs::write(&status_counter_post, "0").unwrap();
+        fs::write(&calls, "").unwrap();
+        let post_script = format!(
+            r#"#!/bin/sh
+printf '%s\n' "$*" >> "$TACHI_TEST_CALLS"
+printf '%s\n' 'tachi: logging to synthetic-private-log-path' >&2
+if [ "$*" = 'vault status' ]; then
+  IFS= read -r n < '{counter}' || n=0
+  n=$((n + 1))
+  printf '%s\n' "$n" > '{counter}'
+  if [ "$n" -le 2 ]; then
+    printf '%s\n' '{unlocked}'
+  else
+    printf '%s\n' '{locked}'
+  fi
+  exit 0
+fi
+case "$*" in
+  'vault lease '* )
+    printf '%s\n' "Fatal: Vault name 'BOT_TOKEN' is token, not a credential; refusing to lease it as an API key" >&2
+    exit 1
+    ;;
+  'vault get '* )
+    printf '%s\n' '{{"name":"BOT_TOKEN","revealed":true,"value":"synthetic-bypass-secret"}}'
+    exit 0
+    ;;
+esac
+exit 98
+"#,
+            counter = status_counter_post.display(),
+            unlocked = unlocked_with_keychain,
+            locked = locked_with_keychain,
+        );
+        write_fake_tachi_script(tmp.path(), &post_script);
+        let err = format!(
+            "{:#}",
+            store
+                .decrypt("vault:BOT_TOKEN")
+                .expect_err("daemon locked during get must fail closed")
+        );
+        assert!(err.contains("refusing offline Keychain bypass"), "{err}");
+        assert!(!err.contains("synthetic-bypass-secret"), "{err}");
+
+        // TOCTOU race 3 & 4: offline initial status transitions to locked daemon before or during `vault get`.
+        let write_toctou_script = |counter: &Path, first_status: &str, switch_after: u8| {
+            let sh_escape = |s: &str| s.replace('\'', "'\\''");
+            let first_esc = sh_escape(first_status);
+            let locked_esc = sh_escape(locked_with_keychain);
+            format!(
+                r#"#!/bin/sh
+printf '%s\n' "$*" >> "$TACHI_TEST_CALLS"
+printf '%s\n' 'tachi: logging to synthetic-private-log-path' >&2
+if [ "$*" = 'vault status' ]; then
+  IFS= read -r n < '{counter}' || n=0
+  n=$((n + 1))
+  printf '%s\n' "$n" > '{counter}'
+  if [ "$n" -le {switch_after} ]; then
+    printf '%s\n' '{first}'
+  else
+    printf '%s\n' '{locked}'
+  fi
+  exit 0
+fi
+case "$*" in
+  'vault lease '* )
+    printf '%s\n' "Fatal: Vault name 'BOT_TOKEN' is token, not a credential; refusing to lease it as an API key" >&2
+    exit 1
+    ;;
+  'vault get '* )
+    printf '%s\n' '{{"name":"BOT_TOKEN","revealed":true,"value":"synthetic-bypass-secret"}}'
+    exit 0
+    ;;
+esac
+exit 98
+"#,
+                counter = counter.display(),
+                switch_after = switch_after,
+                first = first_esc,
+                locked = locked_esc,
+            )
+        };
+
+        for (label, switch_after, expect_get_called) in [
+            (
+                "offline->locked daemon before get must fail closed",
+                1u8,
+                false,
+            ),
+            (
+                "offline->locked daemon during get must fail closed",
+                2u8,
+                true,
+            ),
+        ] {
+            let counter = tmp
+                .path()
+                .join(format!("status_count_offline_{switch_after}"));
+            fs::write(&counter, "0").unwrap();
+            fs::write(&calls, "").unwrap();
+            write_fake_tachi_script(
+                tmp.path(),
+                &write_toctou_script(&counter, offline_initialized, switch_after),
+            );
+            let err = format!("{:#}", store.decrypt("vault:BOT_TOKEN").expect_err(label));
+            assert!(err.contains("refusing offline Keychain bypass"), "{err}");
+            assert!(!err.contains("synthetic-bypass-secret"), "{err}");
+            assert_eq!(
+                fs::read_to_string(&calls).unwrap().contains("vault get"),
+                expect_get_called
+            );
+        }
     }
 
     #[cfg(unix)]
@@ -1032,14 +1668,16 @@ exit 98
         let calls = tmp.path().join("calls");
         let _calls = EnvValueGuard::set("TACHI_TEST_CALLS", &calls);
         let store = SecretStore::new(tmp.path(), true);
-        let locked_keychain =
-            r#"{"initialized":true,"locked":true,"secure_store":{"auto_unlock_available":true}}"#;
+        let unlocked_with_keychain =
+            r#"{"initialized":true,"locked":false,"secure_store":{"auto_unlock_available":true}}"#;
         let unlocked_no_keychain =
             r#"{"initialized":true,"locked":false,"secure_store":{"auto_unlock_available":false}}"#;
+        let non_api_key_stderr = "Error: Vault name 'TEST_KEY' is token, not a credential; refusing to lease it as an API key";
         let cases = [
             (
                 r#"{"initialized":false,"locked":true}"#,
                 "synthetic-stdout-secret",
+                "lease refused: synthetic-stderr-secret",
                 0,
                 "synthetic-stdout-secret",
                 0,
@@ -1050,6 +1688,7 @@ exit 98
             (
                 "Vault status:\n  initialized: false\n  entries: 0",
                 "synthetic-stdout-secret",
+                "lease refused: synthetic-stderr-secret",
                 0,
                 "synthetic-stdout-secret",
                 0,
@@ -1060,6 +1699,7 @@ exit 98
             (
                 r#"{"initialized":true,"locked":true}"#,
                 "synthetic-stdout-secret",
+                "lease refused: synthetic-stderr-secret",
                 0,
                 "synthetic-stdout-secret",
                 0,
@@ -1070,6 +1710,18 @@ exit 98
             (
                 r#"{"initialized":true,"locked":true,"secure_store":{"auto_unlock_available":false}}"#,
                 "synthetic-stdout-secret",
+                "lease refused: synthetic-stderr-secret",
+                0,
+                "synthetic-stdout-secret",
+                0,
+                "locked",
+                false,
+                false,
+            ),
+            (
+                r#"{"initialized":true,"locked":true,"secure_store":{"auto_unlock_available":true}}"#,
+                "synthetic-stdout-secret",
+                "lease refused: synthetic-stderr-secret",
                 0,
                 "synthetic-stdout-secret",
                 0,
@@ -1079,6 +1731,7 @@ exit 98
             ),
             (
                 "synthetic-stdout-secret",
+                "",
                 "",
                 0,
                 "",
@@ -1090,6 +1743,7 @@ exit 98
             (
                 "{synthetic-stdout-secret",
                 "",
+                "",
                 0,
                 "",
                 0,
@@ -1100,6 +1754,7 @@ exit 98
             (
                 r#"{"initialized":true,"locked":"synthetic-stdout-secret"}"#,
                 "",
+                "",
                 0,
                 "",
                 0,
@@ -1109,7 +1764,8 @@ exit 98
             ),
             (
                 unlocked_no_keychain,
-                "synthetic-stdout-secret",
+                "",
+                non_api_key_stderr,
                 1,
                 "synthetic-stdout-secret",
                 0,
@@ -1118,8 +1774,20 @@ exit 98
                 false,
             ),
             (
+                unlocked_with_keychain,
+                "synthetic-stdout-secret",
+                non_api_key_stderr,
+                1,
+                "synthetic-stdout-secret",
+                0,
+                "entry is not a leasable API key",
+                true,
+                false,
+            ),
+            (
                 unlocked_no_keychain,
                 "synthetic-stdout-secret",
+                "",
                 0,
                 "",
                 0,
@@ -1128,48 +1796,64 @@ exit 98
                 false,
             ),
             (
-                locked_keychain,
+                unlocked_with_keychain,
+                "synthetic-stdout-secret",
                 "",
+                0,
+                r#"{"name":"TEST_KEY","revealed":true,"value":"synthetic-stdout-secret"}"#,
+                0,
+                "invalid lease JSON",
+                true,
+                false,
+            ),
+            (
+                unlocked_with_keychain,
+                "",
+                non_api_key_stderr,
                 1,
                 "synthetic-stdout-secret",
                 1,
                 "not found in Tachi Vault",
-                false,
+                true,
                 true,
             ),
             (
-                locked_keychain,
+                unlocked_with_keychain,
                 "",
+                non_api_key_stderr,
                 1,
                 "synthetic-stdout-secret",
                 0,
                 "invalid secret JSON",
-                false,
+                true,
                 true,
             ),
             (
-                locked_keychain,
+                unlocked_with_keychain,
                 "",
+                non_api_key_stderr,
                 1,
                 r#"{"revealed":false,"value":"synthetic-stdout-secret"}"#,
                 0,
                 "did not reveal",
-                false,
+                true,
                 true,
             ),
             (
-                locked_keychain,
+                unlocked_with_keychain,
                 "",
+                non_api_key_stderr,
                 1,
                 r#"{"revealed":true,"value":""}"#,
                 0,
                 "empty secret",
-                false,
+                true,
                 true,
             ),
             (
                 unlocked_no_keychain,
                 r#"{"leased":true,"env":{"REI_VAULT_SECRET":""}}"#,
+                "",
                 0,
                 "",
                 1,
@@ -1178,19 +1862,21 @@ exit 98
                 false,
             ),
             (
-                locked_keychain,
+                unlocked_with_keychain,
                 "",
+                non_api_key_stderr,
                 1,
                 r#"{"revealed":true,"value":42}"#,
                 0,
                 "missing string value",
-                false,
+                true,
                 true,
             ),
         ];
         for (
             status,
             lease_out,
+            lease_stderr,
             lease_exit,
             get_out,
             get_exit,
@@ -1200,7 +1886,15 @@ exit 98
         ) in cases
         {
             fs::write(&calls, "").unwrap();
-            write_fake_tachi(tmp.path(), status, lease_out, lease_exit, get_out, get_exit);
+            write_fake_tachi_with_stderr(
+                tmp.path(),
+                status,
+                lease_out,
+                lease_stderr,
+                lease_exit,
+                get_out,
+                get_exit,
+            );
             let error = format!("{:#}", store.decrypt("vault:TEST_KEY").unwrap_err());
             assert!(error.contains(expected), "{error}");
             assert!(!error.contains("synthetic-stdout-secret"), "{error}");
