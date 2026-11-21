@@ -400,6 +400,65 @@ async fn receipts_deduplication_result_trust_and_next_window_recovery_share_one_
 }
 
 #[tokio::test]
+async fn device_start_persists_its_host_source_without_borrowing_or_replacing_fact_authority() {
+    use reiclaw_api::delegation_request::{
+        DELEGATION_ORIGIN_CONTEXT, DelegationOrigin, DelegationOriginResolver,
+        DelegationOriginScope,
+    };
+
+    let fixture = Fixture::new().await;
+    let borrowed: DelegationOriginResolver = Arc::new(|_| {
+        Some(DelegationOrigin {
+            session_key: "gw_unrelated-owner-session".into(),
+            scope: DelegationOriginScope::SessionFacts {
+                operator_subject: reiclaw_config::tokens::hash_token("synthetic-other-owner"),
+                agent_id: "11111111-1111-4111-8111-111111111111".into(),
+                memory_session_id: Some("unrelated-owner-session".into()),
+            },
+        })
+    });
+    let (status, first) = DELEGATION_ORIGIN_CONTEXT
+        .scope(
+            borrowed,
+            fixture.call("start", fixture.start("source-request")),
+        )
+        .await;
+    assert_eq!(status, StatusCode::OK, "{first}");
+    let origin = fixture
+        .db()
+        .read_delegation_request(AGENT, "source-request")
+        .unwrap()
+        .unwrap()
+        .origin
+        .unwrap();
+    assert_eq!(origin.session_key, "gw_voice");
+    assert_eq!(origin.scope, DelegationOriginScope::SourceOnly);
+
+    let mut replay = fixture.start("source-request");
+    replay["session_id"] = json!("voice-next");
+    let (status, replayed) = fixture.call("start", replay).await;
+    assert_eq!(status, StatusCode::CONFLICT);
+    assert_eq!(replayed["output"]["code"], "request_conflict");
+    assert_eq!(
+        fixture
+            .db()
+            .read_delegation_request(AGENT, "source-request")
+            .unwrap()
+            .unwrap()
+            .origin,
+        Some(origin)
+    );
+
+    let mut forged = fixture.start("forged-source-request");
+    forged["origin"] = json!({"session_key":"gw_owner-session", "scope":{"kind":"session_facts"}});
+    assert_eq!(
+        fixture.call("start", forged).await.0,
+        StatusCode::BAD_REQUEST
+    );
+    assert_eq!(fixture.fake.count("start"), 1);
+}
+
+#[tokio::test]
 async fn malformed_start_receipt_remains_unresolved_and_never_resubmits() {
     let fixture = Fixture::new().await;
     fixture.fake.malformed_start.store(true, Ordering::SeqCst);

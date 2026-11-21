@@ -970,6 +970,9 @@ async fn handle_socket(
 /// The agent state one shared WS conversation holds.
 pub struct WsSession {
     agent: reiclaw_runtime::agent::Agent,
+    /// The identity present when this conversation was built. Reusing an alias
+    /// later cannot grant an old conversation the new agent's source authority.
+    delegation_agent_id: Option<reiclaw_api::companion::AgentIdentityId>,
     /// Per-agent memory for turn-end consolidation; `None` disables it.
     ws_memory: Option<Arc<dyn reiclaw_memory::Memory>>,
     /// Watermark of the canonical checkpoint currently projected into `agent`.
@@ -1002,6 +1005,115 @@ struct WsTurnScope {
     auth_subject: Option<String>,
     surface: Option<ChatSurface>,
     bridge: Option<device::Binding>,
+}
+
+/// An old operator grant must still belong to a current operator namespace.
+/// Reuse ingress policy, including its check of the normalized memory identity.
+pub(crate) fn operator_source_namespace_allowed(
+    config: &reiclaw_config::schema::Config,
+    session_key: &str,
+) -> bool {
+    session_key
+        .strip_prefix("gw_")
+        .filter(|session| !session.is_empty())
+        .is_some_and(|session| device::namespace_allowed(config, None, session))
+}
+
+/// Source authority comes from the admitted socket and active turn, never tool
+/// arguments. This resolver captures no transcript and rechecks live reductions.
+fn delegation_origin_resolver(
+    state: &AppState,
+    scope: &WsTurnScope,
+    agent_alias: &str,
+    agent_id: Option<&reiclaw_api::companion::AgentIdentityId>,
+    owner_input: bool,
+    invalidated: Option<Arc<std::sync::atomic::AtomicBool>>,
+    cancel: tokio_util::sync::CancellationToken,
+) -> reiclaw_api::delegation_request::DelegationOriginResolver {
+    use reiclaw_api::delegation_request::{DelegationOrigin, DelegationOriginScope};
+
+    let live = Arc::clone(&state.config);
+    let pairing = Arc::clone(&state.pairing);
+    let scope = scope.clone();
+    let agent_alias = agent_alias.to_string();
+    let agent_id = agent_id.cloned();
+    let (data_dir, store_dir) = {
+        let config = live.read();
+        (
+            config.data_dir.clone(),
+            config.companion_memory.resolved_store_dir(&config.data_dir),
+        )
+    };
+    Arc::new(move |requested_alias| {
+        if requested_alias != agent_alias
+            || cancel.is_cancelled()
+            || invalidated.is_none()
+            || !reiclaw_api::TOOL_LOOP_SESSION_KEY
+                .try_with(|key| key.as_deref() == Some(scope.session_key.as_str()))
+                .unwrap_or(false)
+        {
+            return None;
+        }
+        if let Some(identity) = &agent_id
+            && reiclaw_memory::companion::peek_agent_identity(&store_dir, &agent_alias).as_ref()
+                != Some(identity)
+        {
+            return None;
+        }
+        let config = live.read();
+        if config.data_dir != data_dir
+            || config.companion_memory.resolved_store_dir(&config.data_dir) != store_dir
+            || !config
+                .agents
+                .get(&agent_alias)
+                .is_some_and(|agent| agent.enabled)
+            || !device::namespace_allowed(&config, scope.bridge.as_ref(), &scope.session_id)
+        {
+            return None;
+        }
+        let paired = scope
+            .auth_subject
+            .as_ref()
+            .is_some_and(|subject| pairing.tokens().contains(subject));
+        let mut origin = DelegationOrigin {
+            session_key: scope.session_key.clone(),
+            scope: DelegationOriginScope::SourceOnly,
+        };
+        if let Some(binding) = &scope.bridge {
+            return binding
+                .allows(&config, &agent_alias, &scope.session_id, "chat")
+                .then_some(origin);
+        }
+        if !paired {
+            return None;
+        }
+        let canonical_memory_session =
+            reiclaw_api::session_keys::sanitize_session_key(&scope.session_id);
+        let session_facts = owner_input
+            && scope.surface != Some(ChatSurface::Voice)
+            && invalidated
+                .as_ref()
+                .is_some_and(|flag| !flag.load(std::sync::atomic::Ordering::Acquire))
+            && reiclaw_api::TOOL_LOOP_MEMORY_READ_POLICY
+                .try_with(|policy| {
+                    *policy == reiclaw_api::memory_traits::MemoryReadPolicy::SessionScoped
+                })
+                .unwrap_or(false)
+            && reiclaw_api::TOOL_LOOP_MEMORY_SESSIONS
+                .try_with(|sessions| sessions.len() == 1 && sessions[0] == canonical_memory_session)
+                .unwrap_or(false);
+        if session_facts && let Some(identity) = &agent_id {
+            origin.scope = DelegationOriginScope::SessionFacts {
+                operator_subject: scope.auth_subject.clone()?,
+                agent_id: identity.as_str().to_string(),
+                // Normalization is lossy: distinct raw WS sessions may share a
+                // Memory ID. Grant exact transcript facts until memory lineage
+                // can prove it belongs to this originating history session.
+                memory_session_id: None,
+            };
+        }
+        Some(origin)
+    })
 }
 
 /// Build the agent for a new shared conversation and wire its approval
@@ -1147,6 +1259,10 @@ async fn build_ws_session(
     Ok((
         WsSession {
             agent,
+            delegation_agent_id: reiclaw_memory::companion::peek_agent_identity(
+                &config.companion_memory.resolved_store_dir(&config.data_dir),
+                agent_alias,
+            ),
             ws_memory,
             checkpoint_watermark,
             history_persisted: true,
@@ -2462,6 +2578,7 @@ async fn process_chat_message(
     let checkpoint_trim_event = checkpoint_history::refresh(state, session, scope).await;
     let WsSession {
         agent,
+        delegation_agent_id,
         ws_memory,
         history_persisted,
         ..
@@ -2566,6 +2683,15 @@ async fn process_chat_message(
             },
         });
     let correction_invalidated = conversation.correction_invalidation(generation);
+    let delegation_resolver = delegation_origin_resolver(
+        state,
+        scope,
+        &turn_alias,
+        delegation_agent_id.as_ref(),
+        initial_operator_input && original_input.is_some(),
+        correction_invalidated.clone(),
+        cancel_token.clone(),
+    );
     let correction_resolver: reiclaw_api::review::OwnerCorrectionResolver = Arc::new(move || {
         (initial_operator_input
             && correction_invalidated
@@ -2612,7 +2738,10 @@ async fn process_chat_message(
     };
 
     let turn_fut: std::pin::Pin<Box<dyn std::future::Future<Output = _> + Send + '_>> = Box::pin(
-        reiclaw_api::review::OWNER_CORRECTION_CONTEXT.scope(correction_resolver, turn_fut),
+        reiclaw_api::delegation_request::DELEGATION_ORIGIN_CONTEXT.scope(
+            delegation_resolver,
+            reiclaw_api::review::OWNER_CORRECTION_CONTEXT.scope(correction_resolver, turn_fut),
+        ),
     );
 
     // Drive both futures concurrently: the agent turn produces events
@@ -3741,6 +3870,10 @@ mod tests {
         include!("ws/review_source_tests.rs");
     }
 
+    mod delegation_source_tests {
+        include!("ws/delegation_source_tests.rs");
+    }
+
     mod cancel_tests {
         include!("ws/cancel_tests.rs");
     }
@@ -3889,6 +4022,7 @@ mod tests {
                         Ok::<_, anyhow::Error>((
                             WsSession {
                                 agent,
+                                delegation_agent_id: None,
                                 ws_memory: None,
                                 checkpoint_watermark: 0,
                                 history_persisted: true,

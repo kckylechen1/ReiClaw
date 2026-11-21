@@ -14,10 +14,14 @@ pub mod agent_tasks;
 mod bridge_intake;
 mod checkpoints;
 mod delegation;
+mod delegation_origin;
+#[cfg(test)]
+mod delegation_origin_tests;
 pub use delegation::{
     DispatchBindingRow, ProxyContinuationAdmission, ProxyContinuationReservation,
     ProxyContinuationState,
 };
+pub use delegation_origin::DelegationSessionFacts;
 mod jsonl_import;
 pub mod reminder_occurrences;
 #[cfg(test)]
@@ -634,6 +638,8 @@ impl SessionBackend for SqliteSessionBackend {
         let tx = conn
             .transaction_with_behavior(rusqlite::TransactionBehavior::Immediate)
             .map_err(std::io::Error::other)?;
+
+        delegation_origin::revoke_for_session(&tx, session_key).map_err(std::io::Error::other)?;
 
         tx.execute(
             "DELETE FROM sessions WHERE session_key = ?1",

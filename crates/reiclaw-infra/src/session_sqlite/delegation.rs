@@ -5,7 +5,9 @@
 
 use super::SqliteSessionBackend;
 use anyhow::{Context, Result, bail, ensure};
-use reiclaw_api::delegation_request::{DelegationRequestBinding, DelegationRequestClaim};
+use reiclaw_api::delegation_request::{
+    DelegationOrigin, DelegationRequestBinding, DelegationRequestClaim,
+};
 use rusqlite::{Connection, TransactionBehavior, params};
 
 // Existing scoped rows stay untouched. Schema discovery and migration share
@@ -92,6 +94,7 @@ pub(super) fn migrate_route_provenance(conn: &mut Connection) -> Result<()> {
         "CREATE INDEX IF NOT EXISTS idx_session_delegations_dispatch ON session_delegations(dispatch_id)",
         [],
     ).context("indexing canonical delegation dispatch lookup")?;
+    super::delegation_origin::migrate(&tx)?;
     tx.commit()
         .context("committing delegation route provenance schema")
 }
@@ -110,6 +113,7 @@ pub struct DispatchBindingRow {
     pub proxy_continuations: u8,
     pub last_proxy_revision: Option<u64>,
     pub proxy_continuation_state: ProxyContinuationState,
+    pub origin: Option<DelegationOrigin>,
 }
 
 /// Durable disposition of the latest automatic continuation attempt.
@@ -130,6 +134,7 @@ pub enum ProxyContinuationAdmission {
     CapExceeded { prior: u64, max: u8 },
     AlreadyRecorded { last_revision: u64 },
     StaleRevision { last_revision: u64 },
+    SourceUnavailable,
 }
 
 /// Opaque local ownership of one reservation; never an external request ID.
@@ -312,7 +317,7 @@ fn find_binding(
     request_id: &str,
 ) -> Result<Option<DelegationRequestBinding>> {
     let mut query = conn.prepare(
-        "SELECT agent_alias, request_digest, dispatch_id, route_digest
+        "SELECT agent_alias, request_digest, dispatch_id, route_digest, origin_context
          FROM session_delegations WHERE request_id = ?1",
     )?;
     let rows = query.query_map([request_id], |row| {
@@ -321,11 +326,12 @@ fn find_binding(
             row.get::<_, String>(1)?,
             row.get::<_, Option<String>>(2)?,
             row.get::<_, Option<String>>(3)?,
+            row.get::<_, Option<String>>(4)?,
         ))
     })?;
     let mut binding = None;
     for row in rows {
-        let (scope, request_digest, dispatch_id, route_digest) = row?;
+        let (scope, request_digest, dispatch_id, route_digest, origin) = row?;
         let route_digest = if scope == agent_alias {
             route_digest
         } else if route_digest.is_none() {
@@ -345,6 +351,7 @@ fn find_binding(
             request_digest,
             route_digest,
             dispatch_id,
+            origin: origin.as_deref().map(serde_json::from_str).transpose()?,
         });
     }
     Ok(binding)
@@ -386,6 +393,25 @@ impl SqliteSessionBackend {
         request_digest: &str,
         route_digest: &str,
     ) -> Result<DelegationRequestClaim> {
+        self.claim_delegation_request_with_origin(
+            agent_alias,
+            request_id,
+            request_digest,
+            route_digest,
+            None,
+        )
+    }
+
+    /// Persist host-admitted origin with the initial claim, before any start
+    /// can be sent. A replay cannot acquire, replace or revive a fact grant.
+    pub fn claim_delegation_request_with_origin(
+        &self,
+        agent_alias: &str,
+        request_id: &str,
+        request_digest: &str,
+        route_digest: &str,
+        origin: Option<&DelegationOrigin>,
+    ) -> Result<DelegationRequestClaim> {
         if route_digest.is_empty() {
             bail!("delegation route provenance must not be empty");
         }
@@ -394,6 +420,7 @@ impl SqliteSessionBackend {
         let claim = if let Some(binding) = find_binding(&tx, agent_alias, request_id)? {
             if binding.request_digest != request_digest
                 || binding.route_digest.as_deref() != Some(route_digest)
+                || binding.origin.as_ref() != origin
             {
                 DelegationRequestClaim::Conflict
             } else {
@@ -402,11 +429,15 @@ impl SqliteSessionBackend {
                 }
             }
         } else {
+            if let Some(origin) = origin {
+                super::delegation_origin::validate_admission(&tx, agent_alias, origin)?;
+            }
+            let origin = origin.map(serde_json::to_string).transpose()?;
             tx.execute(
                 "INSERT INTO session_delegations
-                    (agent_alias, request_id, request_digest, route_digest, dispatch_id)
-                 VALUES (?1, ?2, ?3, ?4, NULL)",
-                params![agent_alias, request_id, request_digest, route_digest],
+                    (agent_alias, request_id, request_digest, route_digest, dispatch_id, origin_context)
+                 VALUES (?1, ?2, ?3, ?4, NULL, ?5)",
+                params![agent_alias, request_id, request_digest, route_digest, origin],
             )
             .context("claiming a delegation request")?;
             DelegationRequestClaim::Created
@@ -507,7 +538,7 @@ impl SqliteSessionBackend {
         let conn = self.conn.lock();
         let mut query = conn.prepare(
             "SELECT rowid, agent_alias, request_id, dispatch_id, route_digest, notified_outcome,
-                    proxy_continuations, last_proxy_revision, proxy_continuation_state
+                    proxy_continuations, last_proxy_revision, proxy_continuation_state, origin_context
              FROM session_delegations
              WHERE dispatch_id IS NOT NULL AND rowid > ?1
              ORDER BY rowid LIMIT ?2",
@@ -584,6 +615,18 @@ impl SqliteSessionBackend {
                     proxy_continuations,
                     last_proxy_revision,
                     proxy_continuation_state,
+                    origin: row
+                        .get::<_, Option<String>>(9)?
+                        .as_deref()
+                        .map(serde_json::from_str)
+                        .transpose()
+                        .map_err(|error| {
+                            rusqlite::Error::FromSqlConversionFailure(
+                                9,
+                                rusqlite::types::Type::Text,
+                                Box::new(error),
+                            )
+                        })?,
                 })
             })
             .context("listing delegation dispatch bindings")?
@@ -687,6 +730,9 @@ impl SqliteSessionBackend {
             {
                 return Ok(ProxyContinuationAdmission::AlreadyRecorded { last_revision });
             }
+        }
+        if !super::delegation_origin::is_current(&tx, binding)? {
+            return Ok(ProxyContinuationAdmission::SourceUnavailable);
         }
         // Claims are permanent. The first row remains the local write owner;
         // all rows still participate in the aggregate above, including later
@@ -992,7 +1038,9 @@ mod tests {
         {
             let conn = store.conn.lock();
             conn.execute_batch(
-                "DROP TABLE session_delegations;
+                "DROP TRIGGER delegation_origin_session_deleted;
+                 DROP TRIGGER delegation_origin_owner_changed;
+                 DROP TABLE session_delegations;
                 CREATE TABLE session_delegations (
                     agent_alias TEXT NOT NULL, request_id TEXT NOT NULL,
                     request_digest TEXT NOT NULL, dispatch_id TEXT,
@@ -1169,6 +1217,7 @@ mod tests {
                 request_digest: "digest".into(),
                 route_digest: Some("route".into()),
                 dispatch_id: None,
+                origin: None,
             })
         );
     }
@@ -1213,6 +1262,7 @@ mod tests {
                 request_digest: "digest".into(),
                 route_digest: Some("route".into()),
                 dispatch_id: Some("d1".into()),
+                origin: None,
             })
         );
         assert_eq!(
@@ -1246,6 +1296,7 @@ mod tests {
                 request_digest: "digest-b".into(),
                 route_digest: Some("route".into()),
                 dispatch_id: None,
+                origin: None,
             })
         );
     }
@@ -1447,7 +1498,11 @@ mod tests {
             store
                 .conn
                 .lock()
-                .execute("DROP TABLE session_delegations", [])
+                .execute_batch(
+                    "DROP TRIGGER delegation_origin_session_deleted;
+                                DROP TRIGGER delegation_origin_owner_changed;
+                                DROP TABLE session_delegations;",
+                )
                 .unwrap();
         }
         let reopened = SqliteSessionBackend::new(tmp.path()).unwrap();
@@ -1521,7 +1576,9 @@ mod tests {
         {
             let conn = store.conn.lock();
             conn.execute_batch(
-                "DROP TABLE session_delegations;
+                "DROP TRIGGER delegation_origin_session_deleted;
+                 DROP TRIGGER delegation_origin_owner_changed;
+                 DROP TABLE session_delegations;
                 CREATE TABLE session_delegations (
                     agent_alias TEXT NOT NULL,
                     request_id TEXT NOT NULL,
@@ -1568,8 +1625,19 @@ mod tests {
         route: &str,
         dispatch: &str,
     ) -> DispatchBindingRow {
+        use reiclaw_api::delegation_request::DelegationOriginScope;
+        let session_key = format!("source:{alias}:{request}");
+        store.set_session_agent_alias(&session_key, alias).unwrap();
+        let origin = DelegationOrigin {
+            session_key,
+            scope: DelegationOriginScope::SessionFacts {
+                operator_subject: "ab".repeat(32),
+                agent_id: format!("identity:{alias}"),
+                memory_session_id: None,
+            },
+        };
         store
-            .claim_delegation_request(alias, request, "digest", route)
+            .claim_delegation_request_with_origin(alias, request, "digest", route, Some(&origin))
             .unwrap();
         store
             .bind_delegation_request(alias, request, "digest", route, dispatch)
@@ -1604,7 +1672,9 @@ mod tests {
             .conn
             .lock()
             .execute_batch(
-                "DROP TABLE session_delegations;
+                "DROP TRIGGER delegation_origin_session_deleted;
+                 DROP TRIGGER delegation_origin_owner_changed;
+                 DROP TABLE session_delegations;
              CREATE TABLE session_delegations (
                 agent_alias TEXT NOT NULL, request_id TEXT NOT NULL,
                 request_digest TEXT NOT NULL, dispatch_id TEXT, route_digest TEXT,

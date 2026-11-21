@@ -349,26 +349,51 @@ pub(crate) async fn run_tool_call_loop_with_guard(
         p.ingress.origin,
         !memory_sessions.is_empty(),
     );
+    // A nested/scheduled invocation cannot reuse an outer socket's task source.
+    // Keep an absent context absent for existing non-Gateway callers; a present
+    // but denied resolver explicitly prevents admission with borrowed authority.
+    let delegation_origin = reiclaw_api::delegation_request::DELEGATION_ORIGIN_CONTEXT
+        .try_with(Clone::clone)
+        .ok()
+        .map(
+            |origin| -> reiclaw_api::delegation_request::DelegationOriginResolver {
+                use reiclaw_api::ingress::TurnOrigin;
+                match p.ingress.origin {
+                    TurnOrigin::Interactive | TurnOrigin::Channel | TurnOrigin::AgentDirect => {
+                        origin
+                    }
+                    TurnOrigin::SubTurn | TurnOrigin::Cron | TurnOrigin::Daemon => {
+                        Arc::new(|_| None)
+                    }
+                }
+            },
+        );
     let estop_handle = security.and_then(|s| s.estop_handle().cloned());
-    execution::CURRENT_TURN_ESTOP
-        .scope(
-            estop_handle,
-            reiclaw_api::TOOL_LOOP_MEMORY_SESSIONS.scope(
-                memory_sessions,
-                reiclaw_api::TOOL_LOOP_MEMORY_READ_POLICY.scope(
-                    read_policy,
-                    crate::subagent_v1::scope_advisor_turn(run_tool_call_loop_turn(
-                        p,
-                        repetition_guard,
-                        yield_to_steering,
-                        side_query,
-                        dispatched_route,
-                        security,
-                    )),
-                ),
+    let turn = execution::CURRENT_TURN_ESTOP.scope(
+        estop_handle,
+        reiclaw_api::TOOL_LOOP_MEMORY_SESSIONS.scope(
+            memory_sessions,
+            reiclaw_api::TOOL_LOOP_MEMORY_READ_POLICY.scope(
+                read_policy,
+                crate::subagent_v1::scope_advisor_turn(run_tool_call_loop_turn(
+                    p,
+                    repetition_guard,
+                    yield_to_steering,
+                    side_query,
+                    dispatched_route,
+                    security,
+                )),
             ),
-        )
-        .await
+        ),
+    );
+    match delegation_origin {
+        Some(origin) => {
+            reiclaw_api::delegation_request::DELEGATION_ORIGIN_CONTEXT
+                .scope(origin, turn)
+                .await
+        }
+        None => turn.await,
+    }
 }
 
 async fn run_tool_call_loop_turn(
