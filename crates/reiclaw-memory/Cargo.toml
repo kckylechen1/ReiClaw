@@ -25,8 +25,8 @@ serde_json = { version = "1.0", default-features = false, features = ["std"] }
 sha2 = "0.10"
 tokio = { version = "1.50", default-features = false, features = ["fs", "io-util", "macros", "process", "sync", "time"] }
 uuid = { version = "1.22", default-features = false, features = ["v4", "std"] }
-# Jiff time migration on the existing SQLite 3.54.1 / portable-kernel 1.9.0 baseline.
-portable_kernel = { package = "portable-kernel", version = "1.9.0", git = "https://github.com/kckylechen1/Tachi.git", rev = "fe6ab1d215a31b72777dc7c9c314846bd37a7dcf", default-features = false, optional = true }
+# Typed records / v44 schema adoption on SQLite 3.54.1 / portable-kernel 1.9.0 baseline.
+portable_kernel = { package = "portable-kernel", version = "1.9.0", git = "https://github.com/kckylechen1/Tachi.git", rev = "b1428b4d65e3cb21bb8af0d6e5dee4640ab95dea", default-features = false, optional = true }
 
 [features]
 voice-surface = ["reiclaw-api/voice-surface"]
