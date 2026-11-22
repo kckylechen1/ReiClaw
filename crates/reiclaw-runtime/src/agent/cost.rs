@@ -2,7 +2,12 @@ use crate::cost::CostTracker;
 use parking_lot::Mutex;
 use reiclaw_api::cost::BudgetCheck;
 use reiclaw_config::schema::Config;
-use reiclaw_providers::pricing::ModelRates;
+#[derive(Clone, Copy, Debug, Default)]
+struct ModelRates {
+    input_per_mtok: Option<f64>,
+    output_per_mtok: Option<f64>,
+    cached_input_per_mtok: Option<f64>,
+}
 use std::collections::{HashMap, HashSet};
 use std::sync::{Arc, OnceLock};
 
@@ -205,30 +210,10 @@ fn resolve_rates_opt(pricing: &HashMap<String, f64>, model: &str) -> ModelRates 
         }
     };
 
-    reiclaw_providers::pricing::model_id_candidates(model)
+    std::iter::once(model)
+        .chain(model.rsplit_once('/').map(|(_, suffix)| suffix))
         .find_map(try_lookup)
         .unwrap_or_default()
-}
-
-fn live_pricing_for(model_provider_name: &str, model: &str) -> Option<ModelRates> {
-    let snapshot = reiclaw_providers::pricing::current_snapshot();
-    reiclaw_providers::pricing::lookup(&snapshot, model_provider_name, model).copied()
-}
-
-/// Flatten config rates merged with the live-price fallback into the
-/// `(input, output, cached)` tuple used for cost math. Config wins per
-/// dimension ([`ModelRates::or`]); live only fills dimensions config left
-/// unset; any dimension still unset bills at `0.0`.
-fn merge_config_and_live_rates(
-    config_rates: ModelRates,
-    live: Option<ModelRates>,
-) -> (f64, f64, f64) {
-    let merged = config_rates.or(live.unwrap_or_default());
-    (
-        merged.input_per_mtok.unwrap_or(0.0),
-        merged.output_per_mtok.unwrap_or(0.0),
-        merged.cached_input_per_mtok.unwrap_or(0.0),
-    )
 }
 
 /// Record token usage from an LLM response via the task-local cost tracker.
@@ -255,16 +240,9 @@ pub fn record_tool_loop_cost_usage(
         .map(|map| resolve_rates_opt(map, model))
         .unwrap_or_default();
 
-    // Live-price FALLBACK fills only the dimensions config left unset; never
-    // fetches on this path (reads a cached snapshot, empty unless a provider
-    // opted into `live_pricing`).
-    let live = (!config_rates.is_complete())
-        .then(|| live_pricing_for(model_provider_name, model))
-        .flatten();
-    // `mut` so the global-catalog fallback below can still fill rates config and
-    // the live snapshot both left unset.
-    let (mut input_rate, mut output_rate, mut cached_rate) =
-        merge_config_and_live_rates(config_rates, live);
+    let mut input_rate = config_rates.input_per_mtok.unwrap_or(0.0);
+    let mut output_rate = config_rates.output_per_mtok.unwrap_or(0.0);
+    let mut cached_rate = config_rates.cached_input_per_mtok.unwrap_or(0.0);
 
     let priced_from_catalog = if input_rate == 0.0 && output_rate == 0.0 {
         if let Some((cat_in, cat_out, cat_cached)) =
@@ -397,52 +375,10 @@ pub fn check_tool_loop_budget() -> Option<BudgetCheck> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use reiclaw_config::schema::{Config, GroqModelProviderConfig, ModelProviderConfig};
+    use reiclaw_config::schema::{Config, ModelProviderConfig, OpenAIModelProviderConfig};
 
     fn fresh_seen() -> Mutex<HashSet<(String, String)>> {
         Mutex::new(HashSet::new())
-    }
-
-    #[test]
-    fn config_rate_wins_live_fills_only_gaps() {
-        // Config priced ONLY input; live prices all three. Input must stay the
-        // configured value; output/cached come from live.
-        let config = ModelRates {
-            input_per_mtok: Some(5.0),
-            ..ModelRates::default()
-        };
-        let live = Some(ModelRates {
-            input_per_mtok: Some(99.0),
-            output_per_mtok: Some(15.0),
-            cached_input_per_mtok: Some(1.5),
-        });
-        assert_eq!(merge_config_and_live_rates(config, live), (5.0, 15.0, 1.5));
-    }
-
-    #[test]
-    fn no_live_leaves_unconfigured_dimensions_zero() {
-        // Empty config + no live snapshot must reproduce today's behavior
-        // exactly: all rates zero.
-        assert_eq!(
-            merge_config_and_live_rates(ModelRates::default(), None),
-            (0.0, 0.0, 0.0)
-        );
-        // A configured zero (genuinely free) is preserved, not "filled".
-        assert_eq!(
-            merge_config_and_live_rates(
-                ModelRates {
-                    input_per_mtok: Some(0.0),
-                    output_per_mtok: Some(0.0),
-                    cached_input_per_mtok: None,
-                },
-                Some(ModelRates {
-                    input_per_mtok: Some(3.0),
-                    output_per_mtok: Some(9.0),
-                    cached_input_per_mtok: Some(0.3),
-                })
-            ),
-            (0.0, 0.0, 0.3)
-        );
     }
 
     #[test]
@@ -490,24 +426,24 @@ mod tests {
 
         // CLI / agent-loop builder keys by the composite `<type>.<alias>`.
         let mut composite_keyed: ModelProviderPricing = HashMap::new();
-        composite_keyed.insert("groq.default".to_string(), model_rates.clone());
+        composite_keyed.insert("openai.default".to_string(), model_rates.clone());
         assert!(
-            provider_pricing(&composite_keyed, "groq.default").is_some(),
+            provider_pricing(&composite_keyed, "openai.default").is_some(),
             "composite-keyed map must resolve via the verbatim composite lookup"
         );
 
         // Channel orchestrator builder keys by the bare provider `<type>`, yet
         // the lookup still arrives as the composite alias — must fall back.
         let mut type_keyed: ModelProviderPricing = HashMap::new();
-        type_keyed.insert("groq".to_string(), model_rates.clone());
+        type_keyed.insert("openai".to_string(), model_rates);
         assert!(
-            provider_pricing(&type_keyed, "groq.default").is_some(),
+            provider_pricing(&type_keyed, "openai.default").is_some(),
             "type-keyed map must resolve the composite alias via the bare-type fallback"
         );
 
         // An unrelated provider must not accidentally match.
         assert!(
-            provider_pricing(&type_keyed, "openai.default").is_none(),
+            provider_pricing(&type_keyed, "unconfigured.default").is_none(),
             "fallback must not resolve a provider type absent from the map"
         );
     }
@@ -554,9 +490,9 @@ mod tests {
     #[test]
     fn build_model_provider_pricing_prefers_rate_sheet_over_legacy_alias_pricing() {
         let mut config = Config::default();
-        config.providers.models.groq.insert(
+        config.providers.models.openai.insert(
             "default".to_string(),
-            GroqModelProviderConfig {
+            OpenAIModelProviderConfig {
                 base: ModelProviderConfig {
                     model: Some("model-flash".into()),
                     pricing: HashMap::from([("model-flash.output".into(), 0.77)]),
@@ -564,7 +500,7 @@ mod tests {
                 },
             },
         );
-        config.cost.rates.providers.models.groq.insert(
+        config.cost.rates.providers.models.openai.insert(
             "model-flash".to_string(),
             reiclaw_config::schema::ModelCostRates {
                 input_per_mtok: Some(0.14),
@@ -574,11 +510,16 @@ mod tests {
         );
 
         let alias_map = build_model_provider_pricing(&config);
-        let groq = alias_map.get("groq.default").expect("groq alias pricing");
-        assert_eq!(groq.get("model-flash.input").copied(), Some(0.14));
-        assert_eq!(groq.get("model-flash.cached_input").copied(), Some(0.0028));
+        let openai = alias_map
+            .get("openai.default")
+            .expect("OpenAI alias pricing");
+        assert_eq!(openai.get("model-flash.input").copied(), Some(0.14));
         assert_eq!(
-            groq.get("model-flash.output").copied(),
+            openai.get("model-flash.cached_input").copied(),
+            Some(0.0028)
+        );
+        assert_eq!(
+            openai.get("model-flash.output").copied(),
             Some(0.28),
             "cost.rates must remain the canonical pricing source"
         );
@@ -587,18 +528,18 @@ mod tests {
     #[test]
     fn build_model_provider_pricing_keeps_alias_legacy_pricing_isolated() {
         let mut config = Config::default();
-        config.providers.models.groq.insert(
+        config.providers.models.openai.insert(
             "work".to_string(),
-            GroqModelProviderConfig {
+            OpenAIModelProviderConfig {
                 base: ModelProviderConfig {
                     pricing: HashMap::from([("model-flash.output".into(), 0.77)]),
                     ..Default::default()
                 },
             },
         );
-        config.providers.models.groq.insert(
+        config.providers.models.openai.insert(
             "personal".to_string(),
-            GroqModelProviderConfig {
+            OpenAIModelProviderConfig {
                 base: ModelProviderConfig {
                     pricing: HashMap::from([("model-flash.output".into(), 0.91)]),
                     ..Default::default()
@@ -607,9 +548,9 @@ mod tests {
         );
 
         let alias_map = build_model_provider_pricing(&config);
-        let work = alias_map.get("groq.work").expect("work alias pricing");
+        let work = alias_map.get("openai.work").expect("work alias pricing");
         let personal = alias_map
-            .get("groq.personal")
+            .get("openai.personal")
             .expect("personal alias pricing");
 
         assert_eq!(work.get("model-flash.output").copied(), Some(0.77));
@@ -619,9 +560,9 @@ mod tests {
     #[test]
     fn build_type_level_model_provider_pricing_merges_aliases_and_rate_sheet() {
         let mut config = Config::default();
-        config.providers.models.groq.insert(
+        config.providers.models.openai.insert(
             "work".to_string(),
-            GroqModelProviderConfig {
+            OpenAIModelProviderConfig {
                 base: ModelProviderConfig {
                     pricing: HashMap::from([
                         ("model-flash.input".into(), 0.33),
@@ -631,16 +572,16 @@ mod tests {
                 },
             },
         );
-        config.providers.models.groq.insert(
+        config.providers.models.openai.insert(
             "personal".to_string(),
-            GroqModelProviderConfig {
+            OpenAIModelProviderConfig {
                 base: ModelProviderConfig {
                     pricing: HashMap::from([("model-flash.output".into(), 0.91)]),
                     ..Default::default()
                 },
             },
         );
-        config.cost.rates.providers.models.groq.insert(
+        config.cost.rates.providers.models.openai.insert(
             "model-flash".to_string(),
             reiclaw_config::schema::ModelCostRates {
                 input_per_mtok: Some(0.14),
@@ -650,27 +591,30 @@ mod tests {
         );
 
         let by_type = build_type_level_model_provider_pricing(&config);
-        let groq = by_type.get("groq").expect("groq type pricing");
-        assert_eq!(groq.get("model-flash.input").copied(), Some(0.14));
-        assert_eq!(groq.get("model-flash.output").copied(), Some(0.28));
-        assert_eq!(groq.get("model-flash.cached_input").copied(), Some(0.0028));
+        let openai = by_type.get("openai").expect("OpenAI type pricing");
+        assert_eq!(openai.get("model-flash.input").copied(), Some(0.14));
+        assert_eq!(openai.get("model-flash.output").copied(), Some(0.28));
+        assert_eq!(
+            openai.get("model-flash.cached_input").copied(),
+            Some(0.0028)
+        );
     }
 
     #[test]
     fn build_type_level_model_provider_pricing_keeps_legacy_last_alias_wins_behavior() {
         let mut config = Config::default();
-        config.providers.models.groq.insert(
+        config.providers.models.openai.insert(
             "work".to_string(),
-            GroqModelProviderConfig {
+            OpenAIModelProviderConfig {
                 base: ModelProviderConfig {
                     pricing: HashMap::from([("model-flash.output".into(), 0.77)]),
                     ..Default::default()
                 },
             },
         );
-        config.providers.models.groq.insert(
+        config.providers.models.openai.insert(
             "personal".to_string(),
-            GroqModelProviderConfig {
+            OpenAIModelProviderConfig {
                 base: ModelProviderConfig {
                     pricing: HashMap::from([("model-flash.output".into(), 0.91)]),
                     ..Default::default()
@@ -692,9 +636,9 @@ mod tests {
         }
 
         let by_type = build_type_level_model_provider_pricing(&config);
-        let groq = by_type.get("groq").expect("groq type pricing");
-        let expected_groq = expected.get("groq").expect("expected groq pricing");
-        assert_eq!(groq, expected_groq);
+        let openai = by_type.get("openai").expect("OpenAI type pricing");
+        let expected_openai = expected.get("openai").expect("expected OpenAI pricing");
+        assert_eq!(openai, expected_openai);
     }
 
     #[test]

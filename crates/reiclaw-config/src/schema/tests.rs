@@ -6,13 +6,13 @@ fn configured_context_window_reports_unset_distinctly_from_the_fallback() {
     let mut cfg = super::Config::default();
     cfg.providers
         .models
-        .ensure("ollama", "local")
+        .ensure("openai", "local")
         .expect("known model provider type")
         .model = Some("qwen3".to_string());
     cfg.agents.insert(
         "coder".to_string(),
         super::AliasedAgentConfig {
-            model_provider: "ollama.local".into(),
+            model_provider: "openai.local".into(),
             ..Default::default()
         },
     );
@@ -30,7 +30,7 @@ fn configured_context_window_reports_unset_distinctly_from_the_fallback() {
     // from the fallback.
     cfg.providers
         .models
-        .ensure("ollama", "local")
+        .ensure("openai", "local")
         .expect("known model provider type")
         .context_window = Some(super::UNCONFIGURED_CONTEXT_WINDOW_FALLBACK);
     assert_eq!(
@@ -1493,91 +1493,6 @@ async fn search_mode_serde_roundtrip() {
 }
 
 #[test]
-#[allow(clippy::large_futures)]
-async fn load_or_init_warns_on_retired_ollama_options_and_keeps_live_fields() {
-    let _env_guard = env_override_lock().await;
-    let home = TempDir::new().unwrap();
-    let workspace = home.path().join("profile-a");
-    fs::create_dir_all(&workspace).await.unwrap();
-    let config_path = workspace.join("config.toml");
-    let contents = r#"schema_version = 3
-
-[providers.models.ollama.local]
-model = "qwen3"
-uri = "http://localhost:11434"
-api_key = "ollama-fixture-key"
-max_tokens = 2048
-temperature = 0.7
-num_ctx = 16384
-num_predict = 4096
-temperature_override = 0.5
-
-# A live alias may have the same spelling as a retired leaf.
-[providers.models.ollama.num_ctx]
-model = "llama3.1"
-
-[risk_profiles.shared]
-[runtime_profiles.default]
-[agents.assistant]
-model_provider = "ollama.local"
-risk_profile = "shared"
-runtime_profile = "default"
-"#;
-    fs::write(&config_path, contents).await.unwrap();
-    let _home = EnvValueGuard::set("HOME", home.path());
-    let _workspace = EnvValueGuard::set("REI_WORKSPACE", &workspace);
-    let _config_dir = EnvValueGuard::remove("REI_CONFIG_DIR");
-
-    let mut config = Box::pin(Config::load_or_init()).await.unwrap();
-    assert!(config.degraded_sections.is_empty());
-    assert!(config.degraded_security.is_empty());
-    let local = config.providers.models.find("ollama", "local").unwrap();
-    assert_eq!(local.model.as_deref(), Some("qwen3"));
-    assert_eq!(local.uri.as_deref(), Some("http://localhost:11434"));
-    assert_eq!(local.api_key.as_deref(), Some("ollama-fixture-key"));
-    assert_eq!(local.max_tokens, Some(2048));
-    assert_eq!(local.temperature, Some(0.7));
-    assert!(config.providers.models.find("ollama", "num_ctx").is_some());
-
-    let warnings = config.collect_warnings();
-    let retired: Vec<_> = warnings
-        .iter()
-        .filter(|warning| warning.code == "ollama_native_options_removed")
-        .collect();
-    assert_eq!(retired.len(), 3);
-    let fields = config.prop_fields();
-    let serialized = toml::to_string(&config.providers.models.ollama["local"]).unwrap();
-    let alias: toml::Value = toml::from_str(&serialized).unwrap();
-    for key in ["num_ctx", "num_predict", "temperature_override"] {
-        let path = format!("providers.models.ollama.local.{key}");
-        assert!(retired.iter().any(|warning| {
-            warning.path == format!("providers.models.ollama.*.{key}")
-                && warning.message.contains("No automatic mapping")
-        }));
-        assert!(!fields.iter().any(|field| field.name == path));
-        assert!(config.set_prop(&path, "1").is_err());
-        assert!(alias.get(key).is_none());
-    }
-    assert_eq!(fs::read_to_string(config_path).await.unwrap(), contents);
-}
-
-#[cfg(feature = "schema-export")]
-#[test]
-async fn ollama_schema_exposes_live_options_without_native_tuning() {
-    let schema = serde_json::to_value(schemars::schema_for!(OllamaModelProviderConfig)).unwrap();
-    let properties = schema["properties"].as_object().unwrap();
-    for key in ["model", "uri", "api_key", "max_tokens", "temperature"] {
-        assert!(properties.contains_key(key), "missing live field {key}");
-    }
-    for key in ["num_ctx", "num_predict", "temperature_override"] {
-        assert!(
-            !properties.contains_key(key),
-            "retired field {key} advertised"
-        );
-    }
-}
-
-#[test]
 async fn channels_default() {
     let c = ChannelsConfig::default();
     assert!(c.telegram.is_empty());
@@ -2060,7 +1975,7 @@ async fn agent_config_defaults() {
 async fn agent_precheck_config_parses_from_agent_block() {
     let raw = r#"
 [agents.default]
-model_provider = "custom.default"
+model_provider = "openai.default"
 risk_profile = "default"
 runtime_profile = "default"
 
@@ -2081,7 +1996,7 @@ timeout_secs = 12
 async fn validate_rejects_zero_agent_precheck_timeout() {
     let raw = r#"
 [agents.default]
-model_provider = "custom.default"
+model_provider = "openai.default"
 risk_profile = "default"
 runtime_profile = "default"
 
@@ -2345,9 +2260,9 @@ async fn config_save_keeps_operator_set_non_default_fields() {
     };
     // Operator picked a non-default gateway port + provider entry.
     config.gateway.port = 42618;
-    config.providers.models.anthropic.insert(
+    config.providers.models.openai.insert(
         "claude_default".into(),
-        AnthropicModelProviderConfig {
+        OpenAIModelProviderConfig {
             base: ModelProviderConfig {
                 model: Some("claude-sonnet-4".into()),
                 ..Default::default()
@@ -2500,9 +2415,9 @@ async fn config_save_encrypts_nested_credentials() {
         config_path: dir.join("config.toml"),
         ..Default::default()
     };
-    config.providers.models.anthropic.insert(
+    config.providers.models.openai.insert(
         "default".to_string(),
-        AnthropicModelProviderConfig {
+        OpenAIModelProviderConfig {
             base: ModelProviderConfig {
                 api_key: Some("root-credential".into()),
                 extra_headers: HashMap::from([(
@@ -2610,7 +2525,7 @@ async fn config_save_encrypts_nested_credentials() {
     let root_encrypted = stored
         .providers
         .models
-        .find("anthropic", "default")
+        .find("openai", "default")
         .and_then(|e| e.api_key.as_deref())
         .unwrap();
     assert!(crate::secrets::SecretStore::is_encrypted(root_encrypted));
@@ -2619,7 +2534,7 @@ async fn config_save_encrypts_nested_credentials() {
     let provider_header = stored
         .providers
         .models
-        .find("anthropic", "default")
+        .find("openai", "default")
         .and_then(|e| e.extra_headers.get("Authorization"))
         .unwrap();
     assert!(crate::secrets::SecretStore::is_encrypted(provider_header));
@@ -3152,9 +3067,8 @@ schema_version = 3
 temperature = 0.7
 model = "gpt-5.3-codex"
 api_key = "sk-test"
-uri = "https://api.openai.com/v1"
+base_url = "https://api.openai.com/v1"
 wire_api = "responses"
-requires_openai_auth = true
 "#;
 
     let parsed = crate::current::parse_current(raw).expect("current config parses");
@@ -3174,16 +3088,15 @@ requires_openai_auth = true
     assert_eq!(profile.uri.as_deref(), Some("https://api.openai.com/v1"));
     assert_eq!(profile.model.as_deref(), Some("gpt-5.3-codex"));
     assert_eq!(profile.wire_api, Some(WireApi::Responses));
-    assert!(profile.requires_openai_auth);
 }
 
 #[test]
 async fn typed_custom_slot_routes_uri_through_find() {
     let _env_guard = env_override_lock().await;
     let mut config = Config::default();
-    config.providers.models.custom.insert(
+    config.providers.models.openai.insert(
         "default".to_string(),
-        CustomModelProviderConfig {
+        OpenAIModelProviderConfig {
             base: ModelProviderConfig {
                 uri: Some("https://api.tonsof.blue/v1".to_string()),
                 ..Default::default()
@@ -3195,37 +3108,11 @@ async fn typed_custom_slot_routes_uri_through_find() {
         config
             .providers
             .models
-            .find("custom", "default")
+            .find("openai", "default")
             .and_then(|e| e.uri.as_deref()),
         Some("https://api.tonsof.blue/v1")
     );
-    assert!(config.providers.models.find("custom", "default").is_some());
-}
-
-#[test]
-async fn openai_codex_alias_carries_responses_wire_api_and_requires_openai_auth() {
-    let _env_guard = env_override_lock().await;
-    let mut config = Config::default();
-    config.providers.models.openai.insert(
-        "codex".to_string(),
-        OpenAIModelProviderConfig {
-            base: ModelProviderConfig {
-                uri: Some("https://api.tonsof.blue".to_string()),
-                wire_api: Some(WireApi::Responses),
-                requires_openai_auth: true,
-                ..Default::default()
-            },
-        },
-    );
-
-    let entry = config
-        .providers
-        .models
-        .find("openai", "codex")
-        .expect("openai.codex entry");
-    assert_eq!(entry.uri.as_deref(), Some("https://api.tonsof.blue"));
-    assert_eq!(entry.wire_api, Some(WireApi::Responses));
-    assert!(entry.requires_openai_auth);
+    assert!(config.providers.models.find("openai", "default").is_some());
 }
 
 /// Round-trip test for the config CLI: a TOML file with a typed-family
@@ -3276,14 +3163,14 @@ async fn resolve_default_model_picks_first_available() {
     config
         .providers
         .models
-        .anthropic
-        .insert("default".into(), AnthropicModelProviderConfig::default());
+        .openai
+        .insert("default".into(), OpenAIModelProviderConfig::default());
     assert_eq!(config.resolve_default_model(), None);
 
     // Add an entry with a model -> first-available wins.
-    config.providers.models.ollama.insert(
-        "default".to_string(),
-        OllamaModelProviderConfig {
+    config.providers.models.openai.insert(
+        "backup".to_string(),
+        OpenAIModelProviderConfig {
             base: ModelProviderConfig {
                 model: Some("tertiary-model".to_string()),
                 ..Default::default()
@@ -3328,9 +3215,9 @@ async fn save_repairs_bare_config_filename_using_runtime_resolution() {
         config_path: PathBuf::from("config.toml"),
         ..Default::default()
     };
-    config.providers.models.anthropic.insert(
+    config.providers.models.openai.insert(
         "default".to_string(),
-        AnthropicModelProviderConfig {
+        OpenAIModelProviderConfig {
             base: ModelProviderConfig {
                 temperature: Some(0.5),
                 ..Default::default()
@@ -3349,7 +3236,7 @@ async fn save_repairs_bare_config_filename_using_runtime_resolution() {
         (parsed
             .providers
             .models
-            .find("anthropic", "default")
+            .find("openai", "default")
             .and_then(|e| e.temperature)
             .unwrap_or(0.7)
             - 0.5)
@@ -3367,124 +3254,6 @@ async fn save_repairs_bare_config_filename_using_runtime_resolution() {
         unsafe { std::env::remove_var("HOME") };
     }
     let _ = tokio::fs::remove_dir_all(temp_home).await;
-}
-
-#[test]
-async fn validate_ollama_cloud_model_requires_remote_api_url() {
-    let _env_guard = env_override_lock().await;
-    let mut config = Config::default();
-    config.providers.models.ollama.insert(
-        "default".to_string(),
-        OllamaModelProviderConfig {
-            base: ModelProviderConfig {
-                model: Some("glm-5:cloud".to_string()),
-                uri: None,
-                api_key: Some("ollama-key".to_string()),
-                ..Default::default()
-            },
-        },
-    );
-
-    let error = config.validate().expect_err("expected validation to fail");
-    assert!(error.to_string().contains(
-        "providers.models.ollama.default.model uses ':cloud', but uri is local or unset"
-    ));
-}
-
-#[test]
-async fn validate_ollama_cloud_model_accepts_private_remote_without_api_key() {
-    let _env_guard = env_override_lock().await;
-    let mut config = Config::default();
-    config.providers.models.ollama.insert(
-        "default".to_string(),
-        OllamaModelProviderConfig {
-            base: ModelProviderConfig {
-                model: Some("glm-5:cloud".to_string()),
-                uri: Some("http://192.168.1.100:11434".to_string()),
-                api_key: None,
-                ..Default::default()
-            },
-        },
-    );
-
-    let result = config.validate();
-    assert!(result.is_ok(), "expected validation to pass: {result:?}");
-}
-
-#[test]
-async fn validate_ollama_cloud_model_requires_api_key_for_official_endpoint() {
-    let _env_guard = env_override_lock().await;
-    let mut config = Config::default();
-    config.providers.models.ollama.insert(
-        "default".to_string(),
-        OllamaModelProviderConfig {
-            base: ModelProviderConfig {
-                model: Some("glm-5:cloud".to_string()),
-                uri: Some("https://ollama.com/api".to_string()),
-                api_key: None,
-                ..Default::default()
-            },
-        },
-    );
-
-    let error = config.validate().expect_err("expected validation to fail");
-    assert!(error.to_string().contains(
-        "providers.models.ollama.default.model uses ':cloud', but no API key is configured"
-    ));
-}
-
-#[test]
-async fn validate_ollama_cloud_model_accepts_remote_endpoint_with_typed_api_key() {
-    // V0.8.0: env-var fallback (`OLLAMA_API_KEY`) eradicated.
-    // Operators set the credential on the typed alias.
-    let _env_guard = env_override_lock().await;
-    let mut config = Config::default();
-    config.providers.models.ollama.insert(
-        "default".to_string(),
-        OllamaModelProviderConfig {
-            base: ModelProviderConfig {
-                model: Some("glm-5:cloud".to_string()),
-                uri: Some("https://ollama.com/api".to_string()),
-                api_key: Some("ollama-typed-key".to_string()),
-                ..Default::default()
-            },
-        },
-    );
-
-    let result = config.validate();
-    assert!(result.is_ok(), "expected validation to pass: {result:?}");
-}
-
-#[test]
-async fn validate_ollama_cloud_model_checks_each_alias_for_official_key() {
-    let _env_guard = env_override_lock().await;
-    let mut config = Config::default();
-    config.providers.models.ollama.insert(
-        "local".to_string(),
-        OllamaModelProviderConfig {
-            base: ModelProviderConfig {
-                model: Some("llama3".to_string()),
-                uri: Some("http://192.168.1.100:11434".to_string()),
-                ..Default::default()
-            },
-        },
-    );
-    config.providers.models.ollama.insert(
-        "cloud".to_string(),
-        OllamaModelProviderConfig {
-            base: ModelProviderConfig {
-                model: Some("glm-5:cloud".to_string()),
-                uri: Some("https://ollama.com/api".to_string()),
-                api_key: None,
-                ..Default::default()
-            },
-        },
-    );
-
-    let error = config.validate().expect_err("expected validation to fail");
-    assert!(error.to_string().contains(
-        "providers.models.ollama.cloud.model uses ':cloud', but no API key is configured"
-    ));
 }
 
 #[test]
@@ -4765,14 +4534,14 @@ async fn load_or_init_warns_on_retired_delegate_roster() {
         &config_path,
         r#"schema_version = 3
 
-[providers.models.ollama.default]
+[providers.models.openai.default]
 
 [risk_profiles.shared]
 
 [runtime_profiles.default]
 
 [agents.task_orchestrator]
-model_provider = "ollama.default"
+model_provider = "openai.default"
 risk_profile = "shared"
 runtime_profile = "default"
 delegates = [
@@ -4781,12 +4550,12 @@ delegates = [
 ]
 
 [agents.reviewer]
-model_provider = "ollama.default"
+model_provider = "openai.default"
 risk_profile = "shared"
 runtime_profile = "default"
 
 [agents.sysadmin]
-model_provider = "ollama.default"
+model_provider = "openai.default"
 risk_profile = "shared"
 runtime_profile = "default"
 "#,
@@ -5170,6 +4939,33 @@ async fn save_dirty_retains_current_schema_version_and_explicit_values() {
     );
     assert_eq!(reloaded.observability.backend, ObservabilityBackend::Log);
     assert!(written.trim_start().starts_with("schema_version ="));
+}
+
+#[test]
+async fn save_dirty_can_edit_responses_url_aliases_without_duplicate_keys() {
+    for field in ["base_url", "api_url"] {
+        let tmp = tempfile::TempDir::new().unwrap();
+        let config_path = tmp.path().join("config.toml");
+        let seed = format!(
+            "schema_version = 3\n[providers.models.openai.proxy]\n{field} = \"https://before.example/v1\"\nwire_api = \"responses\"\n"
+        );
+        std::fs::write(&config_path, &seed).unwrap();
+        let mut config = crate::current::parse_current(&seed).unwrap();
+        config.config_path = config_path.clone();
+        let path = "providers.models.openai.proxy.uri";
+        assert_eq!(config.get_prop(path).unwrap(), "https://before.example/v1");
+        config
+            .set_prop_persistent(path, "https://after.example/v1/responses")
+            .unwrap();
+        config.save_dirty().await.unwrap();
+        let written = std::fs::read_to_string(&config_path).unwrap();
+        assert!(!written.contains(field), "{written}");
+        let reloaded = crate::current::parse_current(&written).unwrap();
+        assert_eq!(
+            reloaded.get_prop(path).unwrap(),
+            "https://after.example/v1/responses"
+        );
+    }
 }
 
 #[test]
@@ -5866,8 +5662,8 @@ async fn map_key_sections_exposes_natural_key_for_mcp_servers() {
     // for these.
     let anthropic = sections
         .iter()
-        .find(|s| s.path == "providers.models.anthropic")
-        .expect("providers.models.anthropic must surface as a HashMap-backed map-keyed section");
+        .find(|s| s.path == "providers.models.openai")
+        .expect("providers.models.openai must surface as a HashMap-backed map-keyed section");
     assert_eq!(anthropic.kind, crate::traits::MapKeyKind::Map);
     assert_eq!(anthropic.natural_key, None);
 }
@@ -6120,36 +5916,6 @@ async fn save_dirty_refuses_to_clobber_wrong_kind_mcp_servers_node() {
         !written.contains("/usr/bin/mcp-fs"),
         "in-memory command must not leak past a wrong-kind bail; \
          got:\n{written}"
-    );
-}
-
-#[test]
-async fn collect_warnings_flags_wire_api_on_fixed_protocol_family() {
-    let mut config = Config::default();
-    suppress_semantic_memory_warning(&mut config);
-    // anthropic has a fixed wire protocol and ignores wire_api.
-    config
-        .providers
-        .models
-        .ensure("anthropic", "primary")
-        .unwrap()
-        .wire_api = Some(WireApi::Responses);
-    // custom honors wire_api — must NOT warn.
-    config
-        .providers
-        .models
-        .ensure("custom", "vllm")
-        .unwrap()
-        .wire_api = Some(WireApi::Responses);
-
-    let warnings = config.collect_warnings();
-    assert_eq!(warnings.len(), 1, "exactly the anthropic entry should warn");
-    let w = &warnings[0];
-    assert_eq!(w.code, "wire_api_not_supported_for_family");
-    assert_eq!(w.path, "providers.models.anthropic.primary.wire_api");
-    assert!(
-        !warnings.iter().any(|w| w.path.contains("custom.vllm")),
-        "custom honors wire_api and must not warn",
     );
 }
 
@@ -7112,7 +6878,7 @@ async fn config_tree_traversal_discovers_nested_secrets() {
     config
         .providers
         .models
-        .ensure("anthropic", "default")
+        .ensure("openai", "default")
         .expect("anthropic typed slot")
         .api_key = Some("test-key".into());
     config.channels.telegram.insert(
@@ -7645,7 +7411,7 @@ async fn prop_is_secret_routes_through_hashmap_keyed_paths() {
         "providers.models.openai.default.api_key"
     ));
     assert!(Config::prop_is_secret(
-        "providers.models.anthropic.default.api_key"
+        "providers.models.openai.default.api_key"
     ));
     assert!(!Config::prop_is_secret(
         "providers.models.openai.default.endpoint"
@@ -7681,10 +7447,10 @@ async fn typed_custom_slot_round_trips_uri_through_save_and_load() {
     config
         .providers
         .models
-        .ensure("custom", alias)
+        .ensure("openai", alias)
         .expect("custom typed slot");
 
-    let prefix = format!("providers.models.custom.{alias}");
+    let prefix = format!("providers.models.openai.{alias}");
     let api_key_path = format!("{prefix}.api_key");
     let uri_path = format!("{prefix}.uri");
     let model_path = format!("{prefix}.model");
@@ -7705,7 +7471,7 @@ async fn typed_custom_slot_round_trips_uri_through_save_and_load() {
     let provider = config
         .providers
         .models
-        .find("custom", alias)
+        .find("openai", alias)
         .expect("custom typed slot entry must be present");
     assert_eq!(provider.api_key.as_deref(), Some("sk-test-custom"));
     assert_eq!(
@@ -7726,7 +7492,7 @@ async fn typed_custom_slot_round_trips_uri_through_save_and_load() {
         .await
         .unwrap();
     assert!(
-        raw_toml.contains("[providers.models.custom.default]"),
+        raw_toml.contains("[providers.models.openai.default]"),
         "saved TOML should write under the typed custom slot",
     );
     assert!(
@@ -7742,7 +7508,7 @@ async fn typed_custom_slot_round_trips_uri_through_save_and_load() {
     let loaded_provider = loaded
         .providers
         .models
-        .find("custom", alias)
+        .find("openai", alias)
         .expect("typed custom slot entry must round-trip through save/load");
     assert_eq!(loaded_provider.api_key.as_deref(), Some("sk-test-custom"));
     assert_eq!(
@@ -7778,11 +7544,11 @@ async fn env_override_save_cycle_preserves_on_disk_secret() {
         ..Default::default()
     };
     let original_secret = "sk-ant-real-on-disk-credential";
-    let api_key_path = "providers.models.anthropic.default.api_key";
+    let api_key_path = "providers.models.openai.default.api_key";
     config
         .providers
         .models
-        .ensure("anthropic", "default")
+        .ensure("openai", "default")
         .expect("typed slot");
     config.set_prop(api_key_path, original_secret).unwrap();
 
@@ -7805,7 +7571,7 @@ async fn env_override_save_cycle_preserves_on_disk_secret() {
         reloaded
             .providers
             .models
-            .anthropic
+            .openai
             .get("default")
             .and_then(|c| c.base.api_key.as_deref()),
         Some(original_secret),
@@ -7853,7 +7619,7 @@ async fn env_override_save_cycle_preserves_on_disk_secret() {
         after
             .providers
             .models
-            .anthropic
+            .openai
             .get("default")
             .and_then(|c| c.base.api_key.as_deref()),
         Some(original_secret),
@@ -10064,10 +9830,10 @@ async fn map_key_sections_discovers_per_family_provider_slots() {
     let sections = Config::map_key_sections();
     let anthropic = sections
         .iter()
-        .find(|s| s.path == "providers.models.anthropic")
-        .expect("providers.models.anthropic must be discoverable as a map-keyed section");
+        .find(|s| s.path == "providers.models.openai")
+        .expect("providers.models.openai must be discoverable as a map-keyed section");
     assert_eq!(anthropic.kind, crate::traits::MapKeyKind::Map);
-    assert_eq!(anthropic.value_type, "AnthropicModelProviderConfig");
+    assert_eq!(anthropic.value_type, "OpenAIModelProviderConfig");
 
     // agents is also #[nested] HashMap on root Config.
     assert!(
@@ -10117,25 +9883,21 @@ async fn create_map_key_inserts_default_alias_under_typed_family() {
         !config
             .providers
             .models
-            .contains_model_provider_type("anthropic")
+            .contains_model_provider_type("openai")
     );
 
     let created = config
-        .create_map_key("providers.models.anthropic", "default")
+        .create_map_key("providers.models.openai", "default")
         .expect("typed family slot should accept a new alias");
     assert!(created, "first add should report created=true");
     assert!(
-        config
-            .providers
-            .models
-            .find("anthropic", "default")
-            .is_some(),
+        config.providers.models.find("openai", "default").is_some(),
         "the new alias must show up under the typed family slot",
     );
 
     // Idempotent: second add returns false, doesn't error.
     let again = config
-        .create_map_key("providers.models.anthropic", "default")
+        .create_map_key("providers.models.openai", "default")
         .expect("second add still resolves the section");
     assert!(!again, "duplicate add should report created=false");
 }
@@ -10388,39 +10150,43 @@ async fn set_prop_flatten_alias_unknown_leaf_still_unknown_property() {
 
 #[test]
 async fn set_prop_flatten_own_field_still_resolves_after_base_unknown_property() {
-    // GeminiModelProviderConfig has BOTH a flattened base and its own
+    // OpenAIModelProviderConfig has BOTH a flattened base and its own
     // direct fields (oauth_project / oauth_client_id). Setting an
     // own-field goes through the flatten site first, which returns
     // "Unknown property" — that must keep falling through so the own
     // field still resolves (the no-over-propagation guarantee).
     let mut config = Config::default();
     config
-        .create_map_key("providers.models.gemini", "k8")
+        .create_map_key("providers.models.openai", "k8")
         .expect("typed family slot accepts a new alias");
     config
-        .set_prop("providers.models.gemini.k8.oauth_project", "myres")
+        .set_prop(
+            "providers.models.openai.k8.tls_ca_cert_path",
+            "/tmp/test-ca.pem",
+        )
         .unwrap();
     assert_eq!(
         config
             .providers
             .models
-            .gemini
+            .openai
             .get("k8")
             .expect("alias created above")
-            .oauth_project
+            .base
+            .tls_ca_cert_path
             .as_deref(),
-        Some("myres")
+        Some("/tmp/test-ca.pem")
     );
 }
 
 #[test]
-async fn set_prop_flatten_base_field_via_gemini_alias_propagates_value_error() {
+async fn set_prop_flatten_base_field_via_openai_alias_propagates_value_error() {
     let mut config = Config::default();
     config
-        .create_map_key("providers.models.gemini", "k8")
+        .create_map_key("providers.models.openai", "k8")
         .expect("typed family slot accepts a new alias");
     let err = config
-        .set_prop("providers.models.gemini.k8.temperature", "abc")
+        .set_prop("providers.models.openai.k8.temperature", "abc")
         .unwrap_err()
         .to_string();
     assert_value_error(&err);
@@ -10634,7 +10400,7 @@ async fn extra_nested_model_provider_tables_flags_dropped_provider_fields() {
         nested: nested.to_string(),
     };
 
-    // serde accepts `[providers.models.groq.default.default]` by treating
+    // serde accepts `[providers.models.openai.default.default]` by treating
     // the first `default` as the provider alias and erasing the second
     // child table. The typed Config therefore looks like an empty
     // `groq.default` provider and `validate()` accepts it as an
@@ -10643,7 +10409,7 @@ async fn extra_nested_model_provider_tables_flags_dropped_provider_fields() {
     let raw = r#"
 schema_version = 3
 
-[providers.models.groq.default.default]
+[providers.models.openai.default.default]
 model = "model-x"
 api_key = "sk-test"
 
@@ -10652,14 +10418,14 @@ level = "supervised"
 
 [agents.default]
 enabled = true
-model_provider = "groq.default"
+model_provider = "openai.default"
 risk_profile = "default"
 "#;
     let parsed: Config = toml::from_str(raw).expect("extra nesting must not fail parse");
     let provider = parsed
         .providers
         .models
-        .find("groq", "default")
+        .find("openai", "default")
         .expect("outer alias is still present");
     assert!(
         provider.model.is_none() && provider.api_key.is_none(),
@@ -10670,13 +10436,13 @@ risk_profile = "default"
         .expect("typed validation cannot see the raw extra nesting");
     assert_eq!(
         Config::extra_nested_model_provider_tables(raw),
-        vec![finding("groq", "default", "default")]
+        vec![finding("openai", "default", "default")]
     );
 
     let valid = r#"
 schema_version = 3
 
-[providers.models.groq.default]
+[providers.models.openai.default]
 model = "model-x"
 api_key = "sk-test"
 "#;
@@ -10694,10 +10460,6 @@ model = "gpt-4o"
 [providers.models.openai.default.extra_headers]
 model = "header-value"
 api_key = "header-value"
-
-[providers.models.openai.default.provider_extra]
-model = "router-model"
-api_key = "provider-extra-value"
 
 [providers.models.openai.default.chat_template_kwargs]
 model = "template-model"
@@ -10727,17 +10489,17 @@ pricing = { "gpt-4o.input" = 5.0, "gpt-4o.output" = 15.0 }
     let typed_provider_fields = r#"
 schema_version = 3
 
-[providers.models.gemini.default.default]
-oauth_project = "example-project"
+[providers.models.openai.default.default]
+timeout_secs = 10
 
-[providers.models.ollama.local.default]
+[providers.models.openai.local.default]
 model = "llama3.1"
 "#;
     assert_eq!(
         Config::extra_nested_model_provider_tables(typed_provider_fields),
         vec![
-            finding("gemini", "default", "default"),
-            finding("ollama", "local", "default")
+            finding("openai", "default", "default"),
+            finding("openai", "local", "default")
         ],
         "typed provider fields must still be flagged when extra-nested"
     );
@@ -11452,8 +11214,8 @@ async fn credential_shaped_prop_fields_have_explicit_classification() {
     config
         .providers
         .models
-        .anthropic
-        .insert("default".into(), AnthropicModelProviderConfig::default());
+        .openai
+        .insert("default".into(), OpenAIModelProviderConfig::default());
     config
         .providers
         .tts
@@ -11508,7 +11270,7 @@ async fn prop_fields_carry_credential_classification_from_schema_fields() {
         "codex".into(),
         OpenAIModelProviderConfig {
             base: ModelProviderConfig {
-                requires_openai_auth: true,
+                api_key: Some("sk-test".into()),
                 ..ModelProviderConfig::default()
             },
         },
@@ -11536,8 +11298,8 @@ async fn prop_fields_carry_credential_classification_from_schema_fields() {
     };
 
     assert_eq!(
-        class_for("providers.models.openai.codex.requires_openai_auth"),
-        Some(crate::config::CredentialSurfaceClass::ExternalAuthStore)
+        class_for("providers.models.openai.codex.api_key"),
+        Some(crate::config::CredentialSurfaceClass::EncryptedSecret)
     );
     assert_eq!(
         class_for("providers.tts.openai.default.api_key"),
@@ -11738,7 +11500,7 @@ async fn load_or_init_warns_on_retired_cost_selector_and_keeps_complexity_hints(
     let config_path = workspace.join("config.toml");
     let contents = r#"schema_version = 3
 
-[providers.models.ollama.local]
+[providers.models.openai.local]
 model = "qwen3"
 pricing = { "qwen3.input" = 0.1, "qwen3.output" = 0.2 }
 
@@ -11750,7 +11512,7 @@ complex_hint = "cheapest"
 cost_optimized_hint = "legacy-cost-selector"
 
 [agents.assistant]
-model_provider = "ollama.local"
+model_provider = "openai.local"
 risk_profile = "shared"
 runtime_profile = "fast"
 "#;
@@ -11767,7 +11529,7 @@ runtime_profile = "fast"
     assert_eq!(hints.simple_hint.as_deref(), Some("cost-optimized"));
     assert_eq!(hints.standard_hint.as_deref(), Some("regular"));
     assert_eq!(hints.complex_hint.as_deref(), Some("cheapest"));
-    let pricing = &config.providers.models.ollama["local"].base.pricing;
+    let pricing = &config.providers.models.openai["local"].base.pricing;
     assert_eq!(pricing.get("qwen3.input"), Some(&0.1));
     assert_eq!(pricing.get("qwen3.output"), Some(&0.2));
 
@@ -11946,10 +11708,11 @@ fn multi_agent_test_config() -> Config {
         .insert("default".to_string(), RiskProfileConfig::default());
 
     // Anthropic model provider (mandatory for the agent).
-    config.providers.models.anthropic.insert(
-        "default".to_string(),
-        AnthropicModelProviderConfig::default(),
-    );
+    config
+        .providers
+        .models
+        .openai
+        .insert("default".to_string(), OpenAIModelProviderConfig::default());
 
     // A configured Telegram channel the agent can reference. Just
     // having the entry in the map is enough for the dotted-alias
@@ -11963,7 +11726,7 @@ fn multi_agent_test_config() -> Config {
     // channel. Default workspace is jailed.
     let agent = AliasedAgentConfig {
         channels: vec![ChannelRef::new("telegram.draft")],
-        model_provider: crate::providers::ModelProviderRef::new("anthropic.default"),
+        model_provider: crate::providers::ModelProviderRef::new("openai.default"),
         risk_profile: "default".into(),
         ..AliasedAgentConfig::default()
     };
@@ -12036,7 +11799,7 @@ async fn validate_rejects_read_memory_from_cross_backend() {
     // Add a second agent on Markdown.
     let beta = AliasedAgentConfig {
         channels: vec![crate::providers::ChannelRef::new("telegram.draft")],
-        model_provider: crate::providers::ModelProviderRef::new("anthropic.default"),
+        model_provider: crate::providers::ModelProviderRef::new("openai.default"),
         risk_profile: "default".into(),
         memory: crate::multi_agent::AgentMemoryConfig {
             backend: crate::multi_agent::MemoryBackendKind::Markdown,
@@ -12085,7 +11848,7 @@ async fn validate_rejects_typed_memory_flags_on_non_memorycore_agent_backend() {
 
     let beta = AliasedAgentConfig {
         channels: vec![crate::providers::ChannelRef::new("telegram.draft")],
-        model_provider: crate::providers::ModelProviderRef::new("anthropic.default"),
+        model_provider: crate::providers::ModelProviderRef::new("openai.default"),
         risk_profile: "default".into(),
         memory: crate::multi_agent::AgentMemoryConfig {
             backend: crate::multi_agent::MemoryBackendKind::Markdown,
@@ -12194,7 +11957,7 @@ async fn validate_rejects_peer_group_member_without_channel() {
         .insert("ops".to_string(), WebhookConfig::default());
     let beta = AliasedAgentConfig {
         channels: vec![crate::providers::ChannelRef::new("webhook.ops")],
-        model_provider: crate::providers::ModelProviderRef::new("anthropic.default"),
+        model_provider: crate::providers::ModelProviderRef::new("openai.default"),
         risk_profile: "default".into(),
         ..AliasedAgentConfig::default()
     };
@@ -12228,7 +11991,7 @@ async fn validate_accepts_valid_peer_group_with_two_compatible_members() {
     // Beta on the same telegram channel.
     let beta = AliasedAgentConfig {
         channels: vec![crate::providers::ChannelRef::new("telegram.draft")],
-        model_provider: crate::providers::ModelProviderRef::new("anthropic.default"),
+        model_provider: crate::providers::ModelProviderRef::new("openai.default"),
         risk_profile: "default".into(),
         ..AliasedAgentConfig::default()
     };
@@ -12255,20 +12018,20 @@ async fn config_validate_rejects_classifier_provider_pointing_at_missing_alias()
     // Use the SHARED `typed_provider_refs` validation loop — same error
     // surface as tts_provider / transcription_provider.
     let toml = r#"
-        [providers.models.custom.default]
+        [providers.models.openai.default]
         api_key = "k"
         model = "qwen3.6-plus"
         uri = "https://example.com/v1"
-        wire_api = "chat_completions"
+        wire_api = "responses"
 
         [risk_profiles.default]
         level = "supervised"
 
         [agents.default]
         enabled = true
-        model_provider = "custom.default"
+        model_provider = "openai.default"
         risk_profile = "default"
-        classifier_provider = "custom.does-not-exist"
+        classifier_provider = "openai.does-not-exist"
     "#;
     let cfg: Config = toml::from_str(toml).unwrap();
     let err = cfg
@@ -12278,7 +12041,7 @@ async fn config_validate_rejects_classifier_provider_pointing_at_missing_alias()
     assert!(
         msg.contains("classifier_provider")
             && msg.contains("does-not-exist")
-            && msg.contains("providers.models.custom.does-not-exist is not configured"),
+            && msg.contains("providers.models.openai.does-not-exist is not configured"),
         "expected DanglingReference error mentioning field + alias + section, got: {msg}"
     );
 }
@@ -12287,26 +12050,26 @@ async fn config_validate_rejects_classifier_provider_pointing_at_missing_alias()
 #[tokio::test]
 async fn config_validate_rejects_agent_summary_provider_missing_alias() {
     let toml = r#"
-        [providers.models.custom.default]
+        [providers.models.openai.default]
         api_key = "k"
         model = "qwen3.6-plus"
         uri = "https://example.com/v1"
-        wire_api = "chat_completions"
+        wire_api = "responses"
 
         [risk_profiles.default]
         level = "supervised"
 
         [agents.default]
         enabled = true
-        model_provider = "custom.default"
+        model_provider = "openai.default"
         risk_profile = "default"
-        summary_provider = "custom.does-not-exist"
+        summary_provider = "openai.does-not-exist"
     "#;
     let cfg: Config = toml::from_str(toml).unwrap();
     let msg = format!("{:#}", cfg.validate().expect_err("missing alias must fail"));
     assert!(
         msg.contains("summary_provider")
-            && msg.contains("providers.models.custom.does-not-exist is not configured"),
+            && msg.contains("providers.models.openai.does-not-exist is not configured"),
         "expected DanglingReference for agent summary_provider, got: {msg}"
     );
 }
@@ -12316,24 +12079,24 @@ async fn config_validate_rejects_agent_summary_provider_missing_alias() {
 fn advisor_config(agent_extra: &str) -> String {
     format!(
         r#"
-        [providers.models.custom.default]
+        [providers.models.openai.default]
         api_key = "k"
         model = "qwen3.6-plus"
         uri = "https://example.com/v1"
-        wire_api = "chat_completions"
+        wire_api = "responses"
 
-        [providers.models.custom.big]
+        [providers.models.openai.big]
         api_key = "k"
         model = "big-model"
         uri = "https://example.com/v1"
-        wire_api = "chat_completions"
+        wire_api = "responses"
 
         [risk_profiles.default]
         level = "supervised"
 
         [agents.default]
         enabled = true
-        model_provider = "custom.default"
+        model_provider = "openai.default"
         risk_profile = "default"
         {agent_extra}
     "#
@@ -12343,7 +12106,7 @@ fn advisor_config(agent_extra: &str) -> String {
 #[test]
 async fn advisor_model_target_parses_validates_and_round_trips() {
     let toml = advisor_config(
-        r#"advisor = "model:custom.big"
+        r#"advisor = "model:openai.big"
         advisor_max_calls_per_turn = 3"#,
     );
     let cfg: Config = toml::from_str(&toml).unwrap();
@@ -12352,14 +12115,14 @@ async fn advisor_model_target_parses_validates_and_round_trips() {
     let agent = &cfg.agents["default"];
     assert_eq!(
         agent.advisor,
-        Some(crate::advisor::AdvisorTarget::Model("custom.big".into()))
+        Some(crate::advisor::AdvisorTarget::Model("openai.big".into()))
     );
     assert_eq!(agent.advisor_max_calls_per_turn, Some(3));
 
     // Serialized back as the same prefixed string, and re-parses equal.
     let rendered = toml::to_string(agent).unwrap();
     assert!(
-        rendered.contains(r#"advisor = "model:custom.big""#),
+        rendered.contains(r#"advisor = "model:openai.big""#),
         "{rendered}"
     );
     let reparsed: AliasedAgentConfig = toml::from_str(&rendered).unwrap();
@@ -12374,14 +12137,14 @@ async fn advisor_model_target_parses_validates_and_round_trips() {
 
 #[test]
 async fn advisor_untyped_target_fails_to_parse() {
-    let toml = advisor_config(r#"advisor = "custom.big""#);
+    let toml = advisor_config(r#"advisor = "openai.big""#);
     let err = toml::from_str::<Config>(&toml).expect_err("untyped advisor must not parse");
     assert!(err.to_string().contains("model:<type>.<alias>"), "{err}");
 }
 
 #[test]
 async fn advisor_dangling_model_ref_fails_validation() {
-    let toml = advisor_config(r#"advisor = "model:custom.does-not-exist""#);
+    let toml = advisor_config(r#"advisor = "model:openai.does-not-exist""#);
     let cfg: Config = toml::from_str(&toml).unwrap();
     let msg = format!(
         "{:#}",
@@ -12389,7 +12152,7 @@ async fn advisor_dangling_model_ref_fails_validation() {
     );
     assert!(
         msg.contains("agents.default.advisor")
-            && msg.contains("providers.models.custom.does-not-exist is not configured"),
+            && msg.contains("providers.models.openai.does-not-exist is not configured"),
         "expected DanglingReference for advisor, got: {msg}"
     );
 }
@@ -12416,7 +12179,7 @@ async fn advisor_harness_target_parses_but_is_refused() {
 #[test]
 async fn advisor_zero_calls_per_turn_is_refused() {
     let toml = advisor_config(
-        r#"advisor = "model:custom.big"
+        r#"advisor = "model:openai.big"
         advisor_max_calls_per_turn = 0"#,
     );
     let cfg: Config = toml::from_str(&toml).unwrap();
@@ -12430,11 +12193,11 @@ async fn advisor_is_settable_through_the_prop_surface() {
     let mut cfg: Config = toml::from_str(&toml).unwrap();
     assert_eq!(cfg.get_prop("agents.default.advisor").unwrap(), "<unset>");
 
-    cfg.set_prop("agents.default.advisor", "model:custom.big")
+    cfg.set_prop("agents.default.advisor", "model:openai.big")
         .unwrap();
     assert_eq!(
         cfg.get_prop("agents.default.advisor").unwrap(),
-        "model:custom.big"
+        "model:openai.big"
     );
     cfg.validate().unwrap();
 
@@ -12443,7 +12206,7 @@ async fn advisor_is_settable_through_the_prop_surface() {
     assert_eq!(cfg.agents["default"].advisor_max_calls_per_turn, Some(4));
 
     assert!(
-        cfg.set_prop("agents.default.advisor", "custom.big")
+        cfg.set_prop("agents.default.advisor", "openai.big")
             .is_err(),
         "an untyped target must be rejected at the prop surface"
     );
@@ -12457,11 +12220,11 @@ async fn advisor_is_settable_through_the_prop_surface() {
 fn card_config(agent_body: &str, extra: &str) -> String {
     format!(
         r#"
-        [providers.models.custom.default]
+        [providers.models.openai.default]
         api_key = "k"
         model = "qwen3.6-plus"
         uri = "https://example.com/v1"
-        wire_api = "chat_completions"
+        wire_api = "responses"
 
         [risk_profiles.default]
         level = "supervised"
@@ -12480,7 +12243,7 @@ fn card_config(agent_body: &str, extra: &str) -> String {
 
         [agents.default]
         enabled = true
-        model_provider = "custom.default"
+        model_provider = "openai.default"
         {agent_body}
     "#
     )
@@ -12738,11 +12501,11 @@ async fn resolved_agent_config_mcp_bundles_come_from_the_card() {
     // pointer the card supersedes. It must be ignored, not unioned in:
     // reading the card alone must tell you the agent's whole MCP reach.
     let toml = r#"
-        [providers.models.custom.default]
+        [providers.models.openai.default]
         api_key = "k"
         model = "qwen3.6-plus"
         uri = "https://example.com/v1"
-        wire_api = "chat_completions"
+        wire_api = "responses"
 
         [risk_profiles.default]
         level = "supervised"
@@ -12776,7 +12539,7 @@ async fn resolved_agent_config_mcp_bundles_come_from_the_card() {
 
         [agents.default]
         enabled = true
-        model_provider = "custom.default"
+        model_provider = "openai.default"
         card = "analyst"
         mcp_bundles = ["stale_bundle"]
     "#;
@@ -12798,11 +12561,11 @@ async fn resolved_agent_config_mcp_bundles_come_from_the_card() {
 #[tokio::test]
 async fn resolved_agent_config_carded_agent_with_no_card_bundles_gets_no_servers() {
     let toml = r#"
-        [providers.models.custom.default]
+        [providers.models.openai.default]
         api_key = "k"
         model = "qwen3.6-plus"
         uri = "https://example.com/v1"
-        wire_api = "chat_completions"
+        wire_api = "responses"
 
         [risk_profiles.default]
         level = "supervised"
@@ -12823,7 +12586,7 @@ async fn resolved_agent_config_carded_agent_with_no_card_bundles_gets_no_servers
 
         [agents.default]
         enabled = true
-        model_provider = "custom.default"
+        model_provider = "openai.default"
         card = "bare"
     "#;
     let cfg: Config = toml::from_str(toml).unwrap();
@@ -12837,21 +12600,21 @@ async fn resolved_agent_config_carded_agent_with_no_card_bundles_gets_no_servers
 #[tokio::test]
 async fn config_validate_rejects_profile_summary_provider_missing_alias() {
     let toml = r#"
-        [providers.models.custom.default]
+        [providers.models.openai.default]
         api_key = "k"
         model = "qwen3.6-plus"
         uri = "https://example.com/v1"
-        wire_api = "chat_completions"
+        wire_api = "responses"
 
         [risk_profiles.default]
         level = "supervised"
 
         [runtime_profiles.fast.context_compression]
-        summary_provider = "custom.nope"
+        summary_provider = "openai.nope"
 
         [agents.default]
         enabled = true
-        model_provider = "custom.default"
+        model_provider = "openai.default"
         risk_profile = "default"
         runtime_profile = "fast"
     "#;
@@ -12862,7 +12625,7 @@ async fn config_validate_rejects_profile_summary_provider_missing_alias() {
     );
     assert!(
         msg.contains("runtime_profiles.fast.context_compression.summary_provider")
-            && msg.contains("providers.models.custom.nope is not configured"),
+            && msg.contains("providers.models.openai.nope is not configured"),
         "expected DanglingReference for profile summary_provider, got: {msg}"
     );
 }
@@ -12871,56 +12634,56 @@ async fn config_validate_rejects_profile_summary_provider_missing_alias() {
 #[tokio::test]
 async fn effective_summary_provider_precedence() {
     let toml = r#"
-        [providers.models.custom.main]
+        [providers.models.openai.main]
         api_key = "k"
         model = "m-main"
         uri = "https://example.com/v1"
-        wire_api = "chat_completions"
-        [providers.models.custom.cheap]
+        wire_api = "responses"
+        [providers.models.openai.cheap]
         api_key = "k"
         model = "m-cheap"
         uri = "https://example.com/v1"
-        wire_api = "chat_completions"
-        [providers.models.custom.profilesum]
+        wire_api = "responses"
+        [providers.models.openai.profilesum]
         api_key = "k"
         model = "m-profile"
         uri = "https://example.com/v1"
-        wire_api = "chat_completions"
+        wire_api = "responses"
 
         [risk_profiles.default]
         level = "supervised"
 
         [runtime_profiles.fast.context_compression]
-        summary_provider = "custom.profilesum"
+        summary_provider = "openai.profilesum"
 
         [agents.a]
         enabled = true
-        model_provider = "custom.main"
+        model_provider = "openai.main"
         risk_profile = "default"
         runtime_profile = "fast"
-        summary_provider = "custom.cheap"
+        summary_provider = "openai.cheap"
 
         [agents.b]
         enabled = true
-        model_provider = "custom.main"
+        model_provider = "openai.main"
         risk_profile = "default"
         runtime_profile = "fast"
 
         [agents.c]
         enabled = true
-        model_provider = "custom.main"
+        model_provider = "openai.main"
         risk_profile = "default"
     "#;
     let cfg: Config = toml::from_str(toml).unwrap();
     // agent override wins over the profile
     assert_eq!(
         cfg.effective_summary_provider("a").as_deref(),
-        Some("custom.cheap")
+        Some("openai.cheap")
     );
     // agent empty → profile value
     assert_eq!(
         cfg.effective_summary_provider("b").as_deref(),
-        Some("custom.profilesum")
+        Some("openai.profilesum")
     );
     // no agent override + no runtime profile → None (caller uses agent's own)
     assert_eq!(cfg.effective_summary_provider("c"), None);
@@ -12933,16 +12696,16 @@ async fn effective_summary_provider_precedence() {
 #[tokio::test]
 async fn collect_warnings_flags_cross_provider_summary_model() {
     let toml = r#"
-        [providers.models.custom.p1]
+        [providers.models.openai.p1]
         api_key = "k"
         model = "m1"
         uri = "https://example.com/v1"
-        wire_api = "chat_completions"
-        [providers.models.custom.p2]
+        wire_api = "responses"
+        [providers.models.openai.p2]
         api_key = "k"
         model = "m2"
         uri = "https://example.com/v1"
-        wire_api = "chat_completions"
+        wire_api = "responses"
 
         [risk_profiles.default]
         level = "supervised"
@@ -12952,13 +12715,13 @@ async fn collect_warnings_flags_cross_provider_summary_model() {
 
         [agents.alpha]
         enabled = true
-        model_provider = "custom.p1"
+        model_provider = "openai.p1"
         risk_profile = "default"
         runtime_profile = "shared"
 
         [agents.beta]
         enabled = true
-        model_provider = "custom.p2"
+        model_provider = "openai.p2"
         risk_profile = "default"
         runtime_profile = "shared"
     "#;
@@ -12978,12 +12741,12 @@ async fn collect_warnings_flags_cross_provider_summary_model() {
         w.message
     );
     assert!(
-        w.message.contains("alpha -> custom.p1"),
+        w.message.contains("alpha -> openai.p1"),
         "message names alpha + provider: {}",
         w.message
     );
     assert!(
-        w.message.contains("beta -> custom.p2"),
+        w.message.contains("beta -> openai.p2"),
         "message names beta + provider: {}",
         w.message
     );
@@ -12999,16 +12762,16 @@ async fn collect_warnings_flags_cross_provider_summary_model() {
 #[tokio::test]
 async fn collect_warnings_cross_provider_summary_model_reports_inert_not_dispatch() {
     let toml = r#"
-        [providers.models.custom.p1]
+        [providers.models.openai.p1]
         api_key = "k"
         model = "m1"
         uri = "https://example.com/v1"
-        wire_api = "chat_completions"
-        [providers.models.custom.p2]
+        wire_api = "responses"
+        [providers.models.openai.p2]
         api_key = "k"
         model = "m2"
         uri = "https://example.com/v1"
-        wire_api = "chat_completions"
+        wire_api = "responses"
 
         [risk_profiles.default]
         level = "supervised"
@@ -13018,13 +12781,13 @@ async fn collect_warnings_cross_provider_summary_model_reports_inert_not_dispatc
 
         [agents.alpha]
         enabled = true
-        model_provider = "custom.p1"
+        model_provider = "openai.p1"
         risk_profile = "default"
         runtime_profile = "shared"
 
         [agents.beta]
         enabled = true
-        model_provider = "custom.p2"
+        model_provider = "openai.p2"
         risk_profile = "default"
         runtime_profile = "shared"
     "#;
@@ -13052,7 +12815,7 @@ async fn collect_warnings_cross_provider_summary_model_reports_inert_not_dispatc
     // Cross-provider specificity must survive the rewrite — it is still
     // useful detail even though the setting is inert.
     assert!(
-        w.message.contains("alpha -> custom.p1") && w.message.contains("beta -> custom.p2"),
+        w.message.contains("alpha -> openai.p1") && w.message.contains("beta -> openai.p2"),
         "message must keep naming the affected agents and providers: {}",
         w.message
     );
@@ -13220,16 +12983,16 @@ async fn collect_warnings_silent_for_context_compression_default_values_written_
 #[tokio::test]
 async fn collect_warnings_context_compression_defers_to_cross_provider_summary_model() {
     let toml = r#"
-        [providers.models.custom.p1]
+        [providers.models.openai.p1]
         api_key = "k"
         model = "m1"
         uri = "https://example.com/v1"
-        wire_api = "chat_completions"
-        [providers.models.custom.p2]
+        wire_api = "responses"
+        [providers.models.openai.p2]
         api_key = "k"
         model = "m2"
         uri = "https://example.com/v1"
-        wire_api = "chat_completions"
+        wire_api = "responses"
 
         [risk_profiles.default]
         level = "supervised"
@@ -13239,13 +13002,13 @@ async fn collect_warnings_context_compression_defers_to_cross_provider_summary_m
 
         [agents.alpha]
         enabled = true
-        model_provider = "custom.p1"
+        model_provider = "openai.p1"
         risk_profile = "default"
         runtime_profile = "shared"
 
         [agents.beta]
         enabled = true
-        model_provider = "custom.p2"
+        model_provider = "openai.p2"
         risk_profile = "default"
         runtime_profile = "shared"
     "#;
@@ -13272,11 +13035,11 @@ async fn collect_warnings_context_compression_defers_to_cross_provider_summary_m
 #[tokio::test]
 async fn collect_warnings_context_compression_flags_same_provider_summary_model() {
     let toml = r#"
-        [providers.models.custom.p1]
+        [providers.models.openai.p1]
         api_key = "k"
         model = "m1"
         uri = "https://example.com/v1"
-        wire_api = "chat_completions"
+        wire_api = "responses"
 
         [risk_profiles.default]
         level = "supervised"
@@ -13286,13 +13049,13 @@ async fn collect_warnings_context_compression_flags_same_provider_summary_model(
 
         [agents.alpha]
         enabled = true
-        model_provider = "custom.p1"
+        model_provider = "openai.p1"
         risk_profile = "default"
         runtime_profile = "shared"
 
         [agents.beta]
         enabled = true
-        model_provider = "custom.p1"
+        model_provider = "openai.p1"
         risk_profile = "default"
         runtime_profile = "shared"
     "#;
@@ -13320,11 +13083,11 @@ async fn collect_warnings_context_compression_flags_same_provider_summary_model(
 #[tokio::test]
 async fn collect_warnings_silent_for_same_provider_summary_model() {
     let toml = r#"
-        [providers.models.custom.p1]
+        [providers.models.openai.p1]
         api_key = "k"
         model = "m1"
         uri = "https://example.com/v1"
-        wire_api = "chat_completions"
+        wire_api = "responses"
 
         [risk_profiles.default]
         level = "supervised"
@@ -13334,13 +13097,13 @@ async fn collect_warnings_silent_for_same_provider_summary_model() {
 
         [agents.alpha]
         enabled = true
-        model_provider = "custom.p1"
+        model_provider = "openai.p1"
         risk_profile = "default"
         runtime_profile = "shared"
 
         [agents.beta]
         enabled = true
-        model_provider = "custom.p1"
+        model_provider = "openai.p1"
         risk_profile = "default"
         runtime_profile = "shared"
     "#;
@@ -13359,21 +13122,21 @@ async fn collect_warnings_silent_for_same_provider_summary_model() {
 #[tokio::test]
 async fn collect_warnings_silent_when_summary_provider_override_present() {
     let toml = r#"
-        [providers.models.custom.p1]
+        [providers.models.openai.p1]
         api_key = "k"
         model = "m1"
         uri = "https://example.com/v1"
-        wire_api = "chat_completions"
-        [providers.models.custom.p2]
+        wire_api = "responses"
+        [providers.models.openai.p2]
         api_key = "k"
         model = "m2"
         uri = "https://example.com/v1"
-        wire_api = "chat_completions"
-        [providers.models.custom.sum]
+        wire_api = "responses"
+        [providers.models.openai.sum]
         api_key = "k"
         model = "ms"
         uri = "https://example.com/v1"
-        wire_api = "chat_completions"
+        wire_api = "responses"
 
         [risk_profiles.default]
         level = "supervised"
@@ -13383,17 +13146,17 @@ async fn collect_warnings_silent_when_summary_provider_override_present() {
 
         [agents.alpha]
         enabled = true
-        model_provider = "custom.p1"
+        model_provider = "openai.p1"
         risk_profile = "default"
         runtime_profile = "shared"
-        summary_provider = "custom.sum"
+        summary_provider = "openai.sum"
 
         [agents.beta]
         enabled = true
-        model_provider = "custom.p2"
+        model_provider = "openai.p2"
         risk_profile = "default"
         runtime_profile = "shared"
-        summary_provider = "custom.sum"
+        summary_provider = "openai.sum"
     "#;
     let cfg: Config = toml::from_str(toml).unwrap();
     assert!(
@@ -13598,26 +13361,26 @@ async fn validate_memory_semantics_reports_each_set_knob() {
 #[test]
 async fn config_validate_accepts_classifier_provider_pointing_at_existing_alias() {
     let toml = r#"
-        [providers.models.custom.default]
+        [providers.models.openai.default]
         api_key = "k1"
         model = "qwen3.6-plus"
         uri = "https://example.com/v1"
-        wire_api = "chat_completions"
+        wire_api = "responses"
 
-        [providers.models.custom.kimi-k2-5]
+        [providers.models.openai.kimi-k2-5]
         api_key = "k2"
         model = "kimi-k2.5"
         uri = "https://example.com/v1"
-        wire_api = "chat_completions"
+        wire_api = "responses"
 
         [risk_profiles.default]
         level = "supervised"
 
         [agents.default]
         enabled = true
-        model_provider = "custom.default"
+        model_provider = "openai.default"
         risk_profile = "default"
-        classifier_provider = "custom.kimi-k2-5"
+        classifier_provider = "openai.kimi-k2-5"
     "#;
     let cfg: Config = toml::from_str(toml).unwrap();
     cfg.validate()
@@ -13628,7 +13391,7 @@ async fn config_validate_accepts_classifier_provider_pointing_at_existing_alias(
             .unwrap()
             .classifier_provider
             .as_str(),
-        "custom.kimi-k2-5"
+        "openai.kimi-k2-5"
     );
 }
 
@@ -13637,18 +13400,18 @@ async fn config_validate_accepts_empty_classifier_provider_as_inheritance_signal
     // No classifier_provider field at all → must validate, must remain
     // the empty default. This pins backward compatibility.
     let toml = r#"
-        [providers.models.custom.default]
+        [providers.models.openai.default]
         api_key = "k"
         model = "qwen3.6-plus"
         uri = "https://example.com/v1"
-        wire_api = "chat_completions"
+        wire_api = "responses"
 
         [risk_profiles.default]
         level = "supervised"
 
         [agents.default]
         enabled = true
-        model_provider = "custom.default"
+        model_provider = "openai.default"
         risk_profile = "default"
     "#;
     let cfg: Config = toml::from_str(toml).unwrap();

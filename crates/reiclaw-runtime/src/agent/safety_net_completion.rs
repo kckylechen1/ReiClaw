@@ -68,16 +68,16 @@ async fn completion_route_classification_cache_and_next_turn() {
     let fast_models = Models::default();
     let route = ModelRouteConfig {
         hint: "fast".into(),
-        model_provider: "custom.fast".into(),
+        model_provider: "openai.fast".into(),
         model: "fast-model".into(),
         ..Default::default()
     };
     let provider = reiclaw_providers::router::RouterModelProvider::new(
-        "custom.text",
+        "openai.text",
         vec![
-            ("custom.text".into(), capture(&base_models, vec![])),
+            ("openai.text".into(), capture(&base_models, vec![])),
             (
-                "custom.fast".into(),
+                "openai.fast".into(),
                 capture(&fast_models, vec![text_response("fast reply")]),
             ),
         ],
@@ -90,7 +90,7 @@ async fn completion_route_classification_cache_and_next_turn() {
         )],
     );
     let mut agent = build_agent(Box::new(provider), vec![]);
-    agent.model_provider_name = "custom.text".into();
+    agent.model_provider_name = "openai.text".into();
     agent.model_name = "text-model".into();
     agent.temperature = Some(0.0);
     agent.available_hints = vec!["fast".into()];
@@ -125,7 +125,7 @@ async fn completion_route_classification_cache_and_next_turn() {
         agent.clear_history();
         let outcome = complete(&mut agent, "quick question").await;
         assert_eq!(outcome.response, "fast reply");
-        assert_eq!(outcome.provider_name, "custom.fast");
+        assert_eq!(outcome.provider_name, "openai.fast");
         assert_eq!(outcome.model, "fast-model");
     }
     assert_eq!(fast_models.lock().as_slice(), ["fast-model"]);
@@ -136,7 +136,7 @@ async fn completion_route_classification_cache_and_next_turn() {
 
     agent.clear_history();
     let outcome = complete(&mut agent, "ordinary question").await;
-    assert_eq!(outcome.provider_name, "custom.text");
+    assert_eq!(outcome.provider_name, "openai.text");
     assert_eq!(outcome.model, "text-model");
     assert_eq!(base_models.lock().as_slice(), ["text-model"]);
     assert_eq!(agent.side_query.snapshot().model, "text-model");
@@ -146,26 +146,27 @@ async fn completion_route_classification_cache_and_next_turn() {
 async fn endpoint(message: serde_json::Value) -> (String, Models, tokio::task::JoinHandle<()>) {
     let models = Models::default();
     let captured = Arc::clone(&models);
-    let app = Router::new().route("/chat/completions", post(move |Json(body): Json<serde_json::Value>| {
-        let captured = Arc::clone(&captured);
-        let mut message = message.clone();
-        async move {
-            captured.lock().push(body["model"].as_str().unwrap().into());
-            if body["stream"] == true {
-                if let Some(calls) = message["tool_calls"].as_array_mut() {
-                    for (index, call) in calls.iter_mut().enumerate() {
-                        call["index"] = index.into();
-                    }
+    let app = Router::new().route(
+        "/responses",
+        post(move |Json(body): Json<serde_json::Value>| {
+            let captured = Arc::clone(&captured);
+            let response = message.clone();
+            async move {
+                captured.lock().push(body["model"].as_str().unwrap().into());
+                if body["stream"] == true {
+                    let completed =
+                        serde_json::json!({"type":"response.completed","response":response});
+                    (
+                        [("content-type", "text/event-stream")],
+                        format!("data: {completed}\n\n"),
+                    )
+                        .into_response()
+                } else {
+                    Json(response).into_response()
                 }
-                let reason = if message.get("tool_calls").is_some() { "tool_calls" } else { "stop" };
-                let delta = serde_json::json!({"choices":[{"index":0,"delta":message,"finish_reason":null}]});
-                let end = serde_json::json!({"choices":[{"index":0,"delta":{},"finish_reason":reason}]});
-                ([("content-type", "text/event-stream")], format!("data: {delta}\n\ndata: {end}\n\ndata: [DONE]\n\n")).into_response()
-            } else {
-                Json(serde_json::json!({"choices":[{"message":message,"finish_reason":"stop"}]})).into_response()
             }
-        }
-    }));
+        }),
+    );
     let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
     let url = format!("http://{}", listener.local_addr().unwrap());
     let server = reiclaw_log::spawn!(async move { axum::serve(listener, app).await.unwrap() });
@@ -178,7 +179,7 @@ fn endpoint_config(workspace: &Path, alias: &str, url: String, model: &str) -> C
         ..Default::default()
     };
     config.reliability.provider_retries = 0;
-    let entry = config.providers.models.ensure("custom", alias).unwrap();
+    let entry = config.providers.models.ensure("openai", alias).unwrap();
     entry.uri = Some(url);
     entry.model = Some(model.into());
     entry.api_key = Some("completion-fixture".into());
@@ -222,16 +223,16 @@ async fn completion_route_survives_steering_rounds() {
     let (steering_tx, mut steering_rx) = mpsc::channel(4);
     let route = ModelRouteConfig {
         hint: "fast".into(),
-        model_provider: "custom.fast".into(),
+        model_provider: "openai.fast".into(),
         model: "fast-model".into(),
         ..Default::default()
     };
     let provider = reiclaw_providers::router::RouterModelProvider::new(
-        "custom.text",
+        "openai.text",
         vec![
-            ("custom.text".into(), capture(&base_models, vec![])),
+            ("openai.text".into(), capture(&base_models, vec![])),
             (
-                "custom.fast".into(),
+                "openai.fast".into(),
                 capture(
                     &fast_models,
                     vec![
@@ -255,7 +256,7 @@ async fn completion_route_survives_steering_rounds() {
             steering: steering_tx,
         })],
     );
-    agent.model_provider_name = "custom.text".into();
+    agent.model_provider_name = "openai.text".into();
     agent.model_name = "text-model".into();
     agent.available_hints = vec!["fast".into()];
     agent
@@ -282,7 +283,7 @@ async fn completion_route_survives_steering_rounds() {
         .await
         .unwrap();
     assert_eq!(outcome.response, "corrected reply");
-    assert_eq!(outcome.provider_name, "custom.fast");
+    assert_eq!(outcome.provider_name, "openai.fast");
     assert_eq!(outcome.model, "fast-model");
     assert_eq!(fast_models.lock().as_slice(), ["fast-model", "fast-model"]);
     assert!(base_models.lock().is_empty());
@@ -293,7 +294,7 @@ async fn completion_route_survives_steering_rounds() {
 async fn completion_route_summary_overrides_previous_vision_call() {
     let (url, vision_models, server) = endpoint(serde_json::json!({
         "role":"assistant", "content":null,
-        "tool_calls":[{"id":"echo-1","type":"function","function":{"name":"echo","arguments":"{}"}}]
+        "output":[{"call_id":"echo-1","type":"function_call","name":"echo","arguments":"{}"}]
     }))
     .await;
     let base_models = Models::default();
@@ -308,10 +309,10 @@ async fn completion_route_summary_overrides_previous_vision_call() {
             ..Default::default()
         },
     );
-    agent.model_provider_name = "custom.text".into();
+    agent.model_provider_name = "openai.text".into();
     agent.model_name = "text-model".into();
     let config = endpoint_config(agent._workspace.path(), "vision", url, "vision-model");
-    agent.multimodal_config.vision_model_provider = Some("custom.vision".into());
+    agent.multimodal_config.vision_model_provider = Some("openai.vision".into());
     agent.provider_switch_config = Some(ProviderSwitchConfig {
         config: Some(Arc::new(config)),
     });
@@ -323,7 +324,7 @@ async fn completion_route_summary_overrides_previous_vision_call() {
     assert!(outcome.response.starts_with("base summary"));
     assert_eq!(vision_models.lock().as_slice(), ["vision-model"]);
     assert_eq!(base_models.lock().as_slice(), ["text-model"]);
-    assert_eq!(outcome.provider_name, "custom.text");
+    assert_eq!(outcome.provider_name, "openai.text");
     assert_eq!(outcome.model, "text-model");
     server.abort();
 }

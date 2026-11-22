@@ -262,7 +262,7 @@ mod tests {
     async fn mcp_discovery_and_activation_order_keep_provider_payload_bytes_stable() {
         use crate::tools::{DeferredMcpToolSet, McpRegistry, ToolSearchTool};
         use reiclaw_config::schema::{McpServerConfig, McpTransport};
-        use reiclaw_providers::compatible::{AuthStyle, OpenAiCompatibleModelProvider};
+        use reiclaw_providers::openai::OpenAiResponsesModelProvider;
         use reiclaw_providers::{ChatMessage, ChatRequest, ProviderDispatch};
         use reiclaw_tools::mcp_deferred::build_deferred_tools_section_filtered;
         use reiclaw_tools::tool_search::ToolAccessPolicy;
@@ -300,18 +300,16 @@ mod tests {
 
         let endpoint = MockServer::start().await;
         Mock::given(method("POST"))
-            .and(path("/v1/chat/completions"))
+            .and(path("/v1/responses"))
             .respond_with(ResponseTemplate::new(200).set_body_json(json!({
-                "choices": [{"message": {"role": "assistant", "content": "done"}}]
+                "output_text": "done"
             })))
             .expect(2)
             .mount(&endpoint)
             .await;
-        let provider = OpenAiCompatibleModelProvider::builder("ordering-fixture")
-            .display_name("Ordering fixture")
-            .base_url(&format!("{}/v1", endpoint.uri()))
+        let provider = OpenAiResponsesModelProvider::builder("ordering-fixture")
+            .api_url(&format!("{}/v1", endpoint.uri()))
             .credential(Some("fixture-key"))
-            .auth_style(AuthStyle::Bearer)
             .build();
         let policy = ToolAccessPolicy {
             denied: Some(vec!["zeta__write".into()]),
@@ -380,7 +378,7 @@ mod tests {
             .as_array()
             .unwrap()
             .iter()
-            .map(|tool| tool["function"]["name"].as_str().unwrap())
+            .map(|tool| tool["name"].as_str().unwrap())
             .collect();
         assert_eq!(
             sent_names,

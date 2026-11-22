@@ -1887,44 +1887,22 @@ pub async fn handle_refresh_context_window(
 
     let path = format!("providers.models.{provider_type}.{alias}");
 
-    // Build the minimal provider config the fetch below needs from a brief,
-    // un-witnessed read that clones what it needs out immediately (the
-    // `parking_lot` guard never survives past this block, well before the
-    // network `.await`). Deliberately NOT under `config_write_lock`: the
-    // outbound provider fetch can be slow or hang, and holding the witness
-    // across it would block every other gateway config write process-wide
-    // for the duration -- a self-inflicted availability bottleneck.
-    let provider_config = {
-        let snapshot = state.config.read();
-        if snapshot.get_prop(&format!("{path}.model")).is_err() {
-            return error_response(
-                ConfigApiError::new(
-                    ConfigApiCode::PathNotFound,
-                    format!("model provider '{provider_type}.{alias}' not found"),
-                )
-                .with_path(&path),
-            );
-        }
-        let model = snapshot
-            .get_prop(&format!("{path}.model"))
-            .ok()
-            .unwrap_or_default();
-        let uri = snapshot.get_prop(&format!("{path}.uri")).ok();
-        // Read api_key via JSON serialization to bypass #[secret] masking in get_prop.
-        let api_key = serde_json::to_value(&snapshot.providers)
-            .ok()
-            .and_then(|v| {
-                v.pointer(&format!("/models/{provider_type}/{alias}/api_key"))
-                    .and_then(|v| v.as_str())
-                    .filter(|s| !s.is_empty() && *s != "<unset>")
-                    .map(String::from)
-            });
-        reiclaw_config::schema::ModelProviderConfig {
-            model: Some(model),
-            uri,
-            api_key,
-            ..Default::default()
-        }
+    // Snapshot the alias before network I/O, including its TLS and header policy.
+    let provider_config = state
+        .config
+        .read()
+        .providers
+        .models
+        .find(&provider_type, &alias)
+        .cloned();
+    let Some(provider_config) = provider_config else {
+        return error_response(
+            ConfigApiError::new(
+                ConfigApiCode::PathNotFound,
+                format!("model provider '{provider_type}.{alias}' not found"),
+            )
+            .with_path(&path),
+        );
     };
 
     // Fetch context window from provider. No lock -- neither `config` nor
@@ -3421,21 +3399,17 @@ mod tests {
     async fn delete_map_key_handler_cascades_model_provider_and_persists() {
         let tmp = tempfile::tempdir().unwrap();
         let mut config = temp_config(&tmp);
-        config
-            .providers
-            .models
-            .ensure("anthropic", "default")
-            .unwrap();
+        config.providers.models.ensure("openai", "default").unwrap();
         config
             .providers
             .models
             .ensure("openai", "main")
             .unwrap()
-            .fallback = vec!["anthropic.default".into()];
+            .fallback = vec!["openai.default".into()];
         config.agents.insert(
             "triage".to_string(),
             reiclaw_config::schema::AliasedAgentConfig {
-                classifier_provider: "anthropic.default".into(),
+                classifier_provider: "openai.default".into(),
                 ..Default::default()
             },
         );
@@ -3448,7 +3422,7 @@ mod tests {
                 axum::extract::State(state.clone()),
                 axum::http::HeaderMap::new(),
                 axum::extract::Query(MapKeyQuery {
-                    path: "providers.models.anthropic".to_string(),
+                    path: "providers.models.openai".to_string(),
                     key: "default".to_string(),
                 }),
             )
@@ -3457,10 +3431,10 @@ mod tests {
         .await;
 
         assert_eq!(status, StatusCode::OK);
-        assert_eq!(json["path"], "providers.models.anthropic");
+        assert_eq!(json["path"], "providers.models.openai");
         assert_eq!(json["key"], "default");
         let cfg = state.config.read();
-        assert!(cfg.providers.models.find("anthropic", "default").is_none());
+        assert!(cfg.providers.models.find("openai", "default").is_none());
         assert!(cfg.agents["triage"].classifier_provider.is_empty());
         assert!(
             cfg.providers
@@ -3472,22 +3446,18 @@ mod tests {
         );
         drop(cfg);
         let written = std::fs::read_to_string(tmp.path().join("config.toml")).unwrap();
-        assert!(!written.contains("anthropic.default"));
+        assert!(!written.contains("openai.default"));
     }
 
     #[tokio::test]
     async fn delete_map_key_handler_refuses_model_provider_hard_ref_without_mutation() {
         let tmp = tempfile::tempdir().unwrap();
         let mut config = temp_config(&tmp);
-        config
-            .providers
-            .models
-            .ensure("anthropic", "default")
-            .unwrap();
+        config.providers.models.ensure("openai", "default").unwrap();
         config.agents.insert(
             "researcher".to_string(),
             reiclaw_config::schema::AliasedAgentConfig {
-                model_provider: "anthropic.default".into(),
+                model_provider: "openai.default".into(),
                 ..Default::default()
             },
         );
@@ -3500,7 +3470,7 @@ mod tests {
                 axum::extract::State(state.clone()),
                 axum::http::HeaderMap::new(),
                 axum::extract::Query(MapKeyQuery {
-                    path: "providers.models.anthropic".to_string(),
+                    path: "providers.models.openai".to_string(),
                     key: "default".to_string(),
                 }),
             )
@@ -3511,10 +3481,10 @@ mod tests {
         assert_eq!(status, StatusCode::BAD_REQUEST);
         assert_eq!(json["code"], "validation_failed");
         let cfg = state.config.read();
-        assert!(cfg.providers.models.find("anthropic", "default").is_some());
+        assert!(cfg.providers.models.find("openai", "default").is_some());
         assert_eq!(
             cfg.agents["researcher"].model_provider.as_str(),
-            "anthropic.default"
+            "openai.default"
         );
     }
 
@@ -4226,16 +4196,16 @@ mod tests {
     #[test]
     fn json_pointer_to_dotted_handles_pointer_form() {
         assert_eq!(
-            json_pointer_to_dotted("/providers/models/anthropic/api-key"),
-            "providers.models.anthropic.api-key"
+            json_pointer_to_dotted("/providers/models/openai/api-key"),
+            "providers.models.openai.api-key"
         );
     }
 
     #[test]
     fn json_pointer_to_dotted_passes_dotted_through() {
         assert_eq!(
-            json_pointer_to_dotted("providers.models.anthropic.api-key"),
-            "providers.models.anthropic.api-key"
+            json_pointer_to_dotted("providers.models.openai.api-key"),
+            "providers.models.openai.api-key"
         );
         assert_eq!(
             json_pointer_to_dotted("scheduler.max_concurrent"),
@@ -4564,7 +4534,7 @@ mod tests {
         // shape carries neither a `value` field nor a length-leaking string.
         // If anyone ever adds a field to SecretResponse, this test fires.
         let r = SecretResponse {
-            path: "providers.models.ollama.api-key".into(),
+            path: "providers.models.openai.api-key".into(),
             populated: true,
         };
         let json = serde_json::to_value(&r).expect("serialize");
@@ -4603,7 +4573,7 @@ mod tests {
     #[test]
     fn list_entry_for_secret_omits_value_field() {
         let entry = ListEntry {
-            path: "providers.models.ollama.api-key".into(),
+            path: "providers.models.openai.api-key".into(),
             category: "providers.models".into(),
             kind: "string",
             type_hint: "Option<String>",
@@ -4681,20 +4651,20 @@ mod tests {
         };
         cfg.save().await.expect("initial save");
 
-        cfg.providers.models.anthropic.insert(
+        cfg.providers.models.openai.insert(
             "default".to_string(),
-            reiclaw_config::schema::AnthropicModelProviderConfig::default(),
+            reiclaw_config::schema::OpenAIModelProviderConfig::default(),
         );
         cfg.providers
             .models
-            .anthropic
+            .openai
             .get_mut("default")
             .unwrap()
             .base
             .api_key = Some("injected-via-env".into());
         cfg.env_overridden_paths =
             reiclaw_config::schema::EnvOverriddenPaths::from_set(std::collections::HashSet::from(
-                ["providers.models.anthropic.default.api_key".to_string()],
+                ["providers.models.openai.default.api_key".to_string()],
             ));
 
         let drift = compute_drift(&cfg).await;
@@ -4735,7 +4705,7 @@ mod tests {
     #[test]
     fn drift_entry_for_secret_omits_both_values() {
         let entry = DriftEntry {
-            path: "providers.models.ollama.api-key".into(),
+            path: "providers.models.openai.api-key".into(),
             secret: true,
             drifted: true,
             in_memory_value: None,
@@ -5145,9 +5115,9 @@ mod tests {
             config_path: path.clone(),
             ..Default::default()
         };
-        cfg.providers.models.groq.insert(
+        cfg.providers.models.openai.insert(
             "test".to_string(),
-            reiclaw_config::schema::GroqModelProviderConfig {
+            reiclaw_config::schema::OpenAIModelProviderConfig {
                 base: reiclaw_config::schema::ModelProviderConfig {
                     model: Some("llama-3.1-70b".into()),
                     api_key: Some("test-api-key-123".into()),
@@ -5171,7 +5141,7 @@ mod tests {
             .oneshot(
                 axum::http::Request::builder()
                     .method("POST")
-                    .uri("/api/config/model-providers/groq/test/refresh-context-window")
+                    .uri("/api/config/model-providers/openai/test/refresh-context-window")
                     .extension(ConnectInfo(
                         "127.0.0.1:12345".parse::<SocketAddr>().unwrap(),
                     ))
@@ -5196,7 +5166,7 @@ mod tests {
         let body_str = String::from_utf8(body.to_vec()).unwrap();
         let json: serde_json::Value = serde_json::from_str(&body_str).unwrap();
 
-        assert_eq!(json["path"], "providers.models.groq.test");
+        assert_eq!(json["path"], "providers.models.openai.test");
         assert_eq!(json["context_window"], 4096);
         assert!(
             !body_str.contains("test-api-key-123"),

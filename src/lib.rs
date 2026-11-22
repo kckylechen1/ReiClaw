@@ -40,7 +40,6 @@ use serde::{Deserialize, Serialize};
 #[cfg(feature = "agent-runtime")]
 pub mod agent;
 #[cfg(feature = "agent-runtime")]
-pub mod auth;
 #[cfg(feature = "agent-runtime")]
 pub mod channels;
 /// Library surface of `src/commands`. CLI handler slices live in

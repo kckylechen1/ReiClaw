@@ -152,6 +152,9 @@ pub async fn run_quickstart_cli(
 
     // ── Load config + canonical registries ──────────────────────
     let _dirs = crate::config::schema::resolve_runtime_dirs().await?;
+    if let Some(provider) = model_provider.as_deref() {
+        reiclaw_config::providers::require_openai_model_provider(provider.trim())?;
+    }
     let mut cfg = Box::pin(Config::load_or_init()).await?;
     let state = snapshot_state(&cfg);
     let providers: &[QuickstartTypeOption] = &state.model_provider_types;
@@ -166,19 +169,16 @@ pub async fn run_quickstart_cli(
     let mut form = Form::default();
 
     if let (Some(mp), Some(m)) = (model_provider.as_deref(), model.as_deref())
-        && let Some((canonical_provider, codex_auth)) =
+        && let Some(canonical_provider) =
             reiclaw_runtime::quickstart::resolve_model_provider_type(mp)
         && let Some(found) = providers
             .iter()
             .find(|p| p.kind.eq_ignore_ascii_case(canonical_provider))
     {
-        let needs_key = !found.local && api_key.is_none() && !codex_auth;
+        let needs_key = !found.local && api_key.is_none();
         if !needs_key {
             let mut fields: std::collections::HashMap<String, String> =
                 std::collections::HashMap::new();
-            if codex_auth {
-                fields.insert("auth_mode".to_string(), "codex".to_string());
-            }
             if let Some(key) = api_key.as_deref().filter(|s| !s.is_empty()) {
                 // Submission field keys are snake_case (`api_key`) — the apply
                 // path round-trips them verbatim into `set_prop_persistent`,
@@ -430,29 +430,27 @@ pub async fn run_quickstart_cli(
                     std::collections::HashMap::new();
                 let mut aborted = false;
                 for d in &descriptors {
-                    if d.key == "api_key" {
-                        let skips_api_key = crate::commands::auth::quickstart_field_value_eq(
-                            &field_buf,
-                            "auth_mode",
-                            "codex",
-                        ) || (chosen.kind == "anthropic"
-                            && crate::commands::auth::quickstart_field_value_eq(
-                                &field_buf,
-                                "auth_mode",
-                                "setup_token",
-                            ));
-                        if skips_api_key {
-                            continue;
-                        }
-                    }
                     // For the model field, upgrade the descriptor with a
                     // live catalog so `prompt_for_field` renders a picker
                     // instead of a free-text input. Empty catalog (live=false)
                     // leaves the descriptor unchanged → free-text fallback.
                     let upgraded;
                     let d_used = if d.key.eq_ignore_ascii_case("model") {
+                        let mut discovery_config = Config::default();
+                        let entry = discovery_config
+                            .providers
+                            .models
+                            .ensure("openai", "catalog");
+                        if let Some(entry) = entry {
+                            entry.uri = field_buf.get("uri").cloned();
+                            entry.api_key = field_buf.get("api_key").cloned();
+                        }
                         let (models, _pricing, live) =
-                            reiclaw_runtime::quickstart::model_catalog(&chosen.kind).await;
+                            reiclaw_runtime::quickstart::model_catalog_with_config(
+                                Some(&discovery_config),
+                                "openai.catalog",
+                            )
+                            .await;
                         if live && !models.is_empty() {
                             upgraded = reiclaw_runtime::quickstart::FieldDescriptor {
                                 kind: reiclaw_api::config_metadata::PropKind::Enum,
@@ -992,16 +990,6 @@ pub async fn run_quickstart_cli(
     }
 
     // ── Assemble submission ─────────────────────────────────────
-    let inline_auth = match form.provider.as_ref() {
-        Some(ProviderChoice::Fresh {
-            kind,
-            alias,
-            fields,
-            ..
-        }) => crate::commands::auth::quickstart_inline_auth(kind, alias, fields),
-        _ => None,
-    };
-
     let provider = form.provider.expect("provider satisfied");
     let provider_type = match &provider {
         ProviderChoice::Fresh { kind, .. } => kind.as_str(),
@@ -1075,12 +1063,6 @@ pub async fn run_quickstart_cli(
                 "Quickstart complete. Created agent `{alias}`.",
                 alias = applied.alias
             );
-            if let Some(auth) = inline_auth {
-                Box::pin(crate::commands::auth::run_inline_provider_auth(
-                    auth, &mut cfg,
-                ))
-                .await;
-            }
             println!();
             println!("Next steps:");
             println!(

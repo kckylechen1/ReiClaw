@@ -375,13 +375,13 @@ mod confinement_tests {
         config
             .providers
             .models
-            .ensure("ollama", "local")
+            .ensure("openai", "local")
             .unwrap()
             .model = Some("fixture".into());
         config.agents.insert(
             "edge".into(),
             crate::schema::AliasedAgentConfig {
-                model_provider: "ollama.local".into(),
+                model_provider: "openai.local".into(),
                 risk_profile: "public".into(),
                 ..Default::default()
             },

@@ -314,7 +314,7 @@ async fn parity_l2_builtin_filter_semantic_parity() {
 async fn parity_l2_sop_live_step_agent_isolation() {
     use reiclaw_config::multi_agent::{AgentMemoryConfig, MemoryBackendKind};
     use reiclaw_config::schema::{
-        AliasedAgentConfig, ModelProviderConfig, OllamaModelProviderConfig, RiskProfileConfig,
+        AliasedAgentConfig, ModelProviderConfig, OpenAIModelProviderConfig, RiskProfileConfig,
     };
 
     // A restricted step agent whose per-agent policy allowlists exactly one real
@@ -336,9 +336,9 @@ async fn parity_l2_sop_live_step_agent_isolation() {
     // A local provider constructs offline (no key, no network) so the helper's
     // provider binding resolves; a Markdown memory backend keeps the memory build
     // off SQLite/embedders.
-    config.providers.models.ollama.insert(
+    config.providers.models.openai.insert(
         "restricted-provider".to_string(),
-        OllamaModelProviderConfig {
+        OpenAIModelProviderConfig {
             base: ModelProviderConfig {
                 model: Some("test-model".to_string()),
                 ..ModelProviderConfig::default()
@@ -349,7 +349,7 @@ async fn parity_l2_sop_live_step_agent_isolation() {
         "restricted".to_string(),
         AliasedAgentConfig {
             enabled: true,
-            model_provider: "ollama.restricted-provider".into(),
+            model_provider: "openai.restricted-provider".into(),
             risk_profile: "restricted".into(),
             memory: AgentMemoryConfig {
                 backend: MemoryBackendKind::Markdown,

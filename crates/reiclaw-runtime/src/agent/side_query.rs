@@ -594,7 +594,7 @@ mod tests {
         }
 
         async fn capture(State(endpoint): State<Endpoint>, Json(body): Json<Value>) -> Json<Value> {
-            let side_query = body["messages"]
+            let side_query = body["input"]
                 .as_array()
                 .and_then(|messages| messages.last())
                 .is_some_and(|message| match &message["content"] {
@@ -610,26 +610,13 @@ mod tests {
             if endpoint.name == "vision" && !side_query {
                 if endpoint.main_calls.fetch_add(1, Ordering::SeqCst) == 0 {
                     return Json(json!({
-                        "choices": [{"message": {
-                            "role": "assistant",
-                            "tool_calls": [{
-                                "id": "vision-echo",
-                                "type": "function",
-                                "function": {
-                                    "name": "echo_tool",
-                                    "arguments": "{\"value\":\"vision-context\"}"
-                                }
-                            }]
-                        }}]
+                        "output": [{ "type": "function_call", "call_id": "vision-echo", "name": "echo_tool", "arguments": "{\"value\":\"vision-context\"}" }]
                     }));
                 }
                 endpoint.main_gate.acquire().await.unwrap().forget();
             }
             Json(json!({
-                "choices": [{"message": {
-                    "role": "assistant",
-                    "content": format!("answer from {}", endpoint.name)
-                }}]
+                "output_text": format!("answer from {}", endpoint.name)
             }))
         }
 
@@ -637,7 +624,7 @@ mod tests {
             let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
             let address = listener.local_addr().unwrap();
             let app = Router::new()
-                .route("/v1/chat/completions", post(capture))
+                .route("/v1/responses", post(capture))
                 .with_state(endpoint);
             let server = ::reiclaw_log::spawn!(async move {
                 axum::serve(listener, app).await.unwrap();
@@ -664,35 +651,33 @@ mod tests {
         let config: reiclaw_config::schema::Config = toml::from_str(&format!(
             r#"
 schema_version = 3
-[providers.models.custom.text]
+[providers.models.openai.text]
 uri = "{text_url}"
 model = "text-model"
 vision = false
-native_tools = true
-[providers.models.custom.vision]
+[providers.models.openai.vision]
 uri = "{vision_url}"
 model = "vision-model"
 vision = true
-native_tools = true
 [multimodal]
-vision_model_provider = "custom.vision"
+vision_model_provider = "openai.vision"
 "#
         ))
         .unwrap();
         let primary = reiclaw_providers::create_routed_model_provider_with_options(
             &config,
-            "custom.text",
+            "openai.text",
             None,
             None,
             &config.reliability,
             &[],
             "text-model",
-            &reiclaw_providers::provider_runtime_options_for_alias(&config, "custom", "text"),
+            &reiclaw_providers::provider_runtime_options_for_alias(&config, "openai", "text"),
         )
         .unwrap();
         let mut agent = Agent::builder()
             .model_provider(primary)
-            .model_provider_name("custom.text".into())
+            .model_provider_name("openai.text".into())
             .model_name("text-model".into())
             .multimodal_config(config.multimodal.clone())
             .provider_switch_config(crate::agent::agent::ProviderSwitchConfig {
@@ -734,7 +719,7 @@ vision_model_provider = "custom.vision"
         .unwrap()
         .unwrap();
         assert_eq!(response.answer, "answer from vision");
-        assert_eq!(response.provider_name, "custom.vision");
+        assert_eq!(response.provider_name, "openai.vision");
         assert_eq!(response.model, "vision-model");
         assert!(response.active_turn_id.is_some());
         let (endpoint, body) = received.try_recv().unwrap();
@@ -745,7 +730,7 @@ vision_model_provider = "custom.vision"
         assert_eq!(body["model"], "vision-model");
         assert!(body.get("tools").is_none_or(Value::is_null));
         assert!(
-            body["messages"]
+            body["input"]
                 .to_string()
                 .contains("tool-output:vision-context")
         );
@@ -760,7 +745,7 @@ vision_model_provider = "custom.vision"
         agent.clear_history();
         let response = side_query.ask("a new text question", None).await.unwrap();
         assert_eq!(response.answer, "answer from text");
-        assert_eq!(response.provider_name, "custom.text");
+        assert_eq!(response.provider_name, "openai.text");
         assert_eq!(response.model, "text-model");
         let (endpoint, body) = received.try_recv().unwrap();
         assert_eq!(endpoint, "text");
@@ -807,10 +792,7 @@ vision_model_provider = "custom.vision"
             state.entered.notify_waiters();
             state.hold_gate.acquire().await.unwrap().forget();
             Json(json!({
-                "choices": [{"message": {
-                    "role": "assistant",
-                    "content": "side answer"
-                }}]
+                "output_text": "side answer"
             }))
         }
 
@@ -820,7 +802,7 @@ vision_model_provider = "custom.vision"
         let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
         let addr = listener.local_addr().unwrap();
         let app = Router::new()
-            .route("/v1/chat/completions", post(handler))
+            .route("/v1/responses", post(handler))
             .with_state(ServerState {
                 hits: Arc::clone(&hits),
                 hold_gate: Arc::clone(&hold_gate),
@@ -853,27 +835,26 @@ vision_model_provider = "custom.vision"
         let config: reiclaw_config::schema::Config = toml::from_str(&format!(
             r#"
 schema_version = 3
-[providers.models.custom.side]
+[providers.models.openai.side]
 uri = "http://{addr}/v1"
 model = "side-model"
-native_tools = true
 "#
         ))
         .unwrap();
         let provider = reiclaw_providers::create_routed_model_provider_with_options(
             &config,
-            "custom.side",
+            "openai.side",
             None,
             None,
             &config.reliability,
             &[],
             "side-model",
-            &reiclaw_providers::provider_runtime_options_for_alias(&config, "custom", "side"),
+            &reiclaw_providers::provider_runtime_options_for_alias(&config, "openai", "side"),
         )
         .unwrap();
         let agent = Agent::builder()
             .model_provider(provider)
-            .model_provider_name("custom.side".into())
+            .model_provider_name("openai.side".into())
             .model_name("side-model".into())
             .tools(vec![])
             .memory(Arc::new(NoneMemory::new("none")))

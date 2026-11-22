@@ -3570,9 +3570,13 @@ async fn production_start_uses_sse_hints_then_canonical_status_and_stops_both_wo
 
     async fn model(State(fixture): State<Arc<Fixture>>, Json(body): Json<Value>) -> Json<Value> {
         assert_eq!(body["model"], "fixture-model");
-        let messages = body["messages"].as_array().unwrap();
-        let prompt: Value =
-            serde_json::from_str(messages.last().unwrap()["content"].as_str().unwrap()).unwrap();
+        let input = body["input"].as_array().unwrap();
+        let last_content = &input.last().unwrap()["content"];
+        let raw_prompt = last_content
+            .as_str()
+            .or_else(|| last_content.as_array()?.last()?["text"].as_str())
+            .unwrap();
+        let prompt: Value = serde_json::from_str(raw_prompt).unwrap();
         assert_eq!(prompt["worker_question"], "Which SQLite journal mode?");
         assert!(
             prompt["grounded_facts"]
@@ -3581,7 +3585,7 @@ async fn production_start_uses_sse_hints_then_canonical_status_and_stops_both_wo
                 .contains(&json!(ANSWER))
         );
         fixture.calls.send(("model".into(), Value::Null)).unwrap();
-        Json(json!({"choices":[{"message":{"role":"assistant", "content":ANSWER}}]}))
+        Json(json!({"output_text": ANSWER}))
     }
 
     fn hint(dispatch: &str) -> Event {
@@ -3616,7 +3620,7 @@ async fn production_start_uses_sse_hints_then_canonical_status_and_stops_both_wo
                 .get(events)
                 .delete(|| async { StatusCode::NO_CONTENT }),
         )
-        .route("/v1/chat/completions", axum::routing::post(model))
+        .route("/v1/responses", axum::routing::post(model))
         .with_state(Arc::clone(&fixture));
     let server = ::reiclaw_log::spawn!(async move { axum::serve(listener, router).await.unwrap() });
 

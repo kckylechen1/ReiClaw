@@ -241,7 +241,7 @@ function humanizeFieldLabel(path: string): string {
 function setupFieldPriority(entry: ListResponseEntry): number {
   const leaf = entry.path.split(".").pop() ?? "";
   if (/^providers\.models\.[^.]+\.[^.]+\./.test(entry.path)) {
-    const order = ["model", "api_key", "requires_openai_auth", "uri"];
+    const order = ["model", "api_key", "uri"];
     const idx = order.indexOf(leaf);
     if (idx >= 0) return idx;
   }
@@ -289,8 +289,6 @@ function setupRequirement(
         ? { label: t("fieldform.badge_optional_for_remote_auth"), tone: "optional" }
         : { label: t("fieldform.badge_required_for_api_key_auth"), tone: "required" };
     }
-    if (leaf === "requires_openai_auth")
-      return { label: t("fieldform.badge_auth_option"), tone: "choice" };
     if (leaf === "uri") return { label: t("fieldform.badge_endpoint_option"), tone: "choice" };
     return { label: t("fieldform.badge_optional"), tone: "optional" };
   }
@@ -1774,7 +1772,7 @@ function FieldRow({
       setModelsFetchFailed(!cached.live && cached.models.length === 0);
       return;
     }
-    void getCatalogModels(provider)
+    void getCatalogModels(cacheKey)
       .then((r) => {
         modelsCache[cacheKey] = { models: r.models, live: r.live, local: r.local };
         setProviderModels(r.models);

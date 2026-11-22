@@ -4,7 +4,7 @@ schema_version = 3
 channels = [
     "telegram.default",
 ]
-model_provider = "anthropic.agent_complex_agent"
+model_provider = "openai.agent_complex_agent"
 risk_profile = "agent_complex_agent"
 runtime_profile = "agent_complex_agent"
 skill_bundles = ["agent_complex_agent"]
@@ -185,7 +185,7 @@ model_provider = "openai.default"
 [[model_routes]]
 hint = "deep"
 model = "claude-sonnet-4-6"
-model_provider = "anthropic.default"
+model_provider = "openai.secondary"
 
 [multimodal]
 allow_remote_fetch = false
@@ -222,25 +222,21 @@ external_peers = [
     "12345678",
 ]
 
-[providers.models.anthropic.agent_complex_agent]
+[providers.models.openai.agent_complex_agent]
 api_key = "sk-ant-complex"
 model = "claude-sonnet-4-5"
 temperature = 0.3
 timeout_secs = 180
 
-[providers.models.anthropic.custom]
+[providers.models.openai.router]
 max_tokens = 8192
-name = "anthropic-custom"
-uri = "https://api.z.ai/api/anthropic"
+uri = "https://router.example.test/v1"
 
-[providers.models.anthropic.default]
-name = "anthropic"
-uri = "https://api.anthropic.com"
+[providers.models.openai.secondary]
+uri = "https://secondary.example.test/v1"
 
-[providers.models.ollama.default]
-merge_system_into_user = true
-name = "ollama"
-uri = "http://127.0.0.1:11434"
+[providers.models.openai.local]
+uri = "http://127.0.0.1:8080/v1"
 
 [providers.models.openai.agent_simple_agent]
 model = "gpt-4o-mini"
@@ -252,8 +248,8 @@ model = "gpt-4o-mini"
 name = "openai"
 temperature = 0.5
 timeout_secs = 90
-uri = "https://api.openai.com/v1/chat/completions"
-wire_api = "chat_completions"
+uri = "https://api.openai.com/v1"
+wire_api = "responses"
 
 [providers.models.openai.default.extra_headers]
 HTTP-Referer = "https://zeroclaw.test"

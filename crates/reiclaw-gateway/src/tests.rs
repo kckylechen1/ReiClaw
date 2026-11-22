@@ -942,9 +942,9 @@ async fn run_gateway_starts_with_mismatched_provider_api_key() {
         config_path: tmp.path().join("config.toml"),
         ..Config::default()
     };
-    config.providers.models.anthropic.insert(
+    config.providers.models.openai.insert(
         "default".to_string(),
-        reiclaw_config::schema::AnthropicModelProviderConfig {
+        reiclaw_config::schema::OpenAIModelProviderConfig {
             base: reiclaw_config::schema::ModelProviderConfig {
                 model: Some("anthropic/claude-sonnet-4-6".to_string()),
                 api_key: Some("sk-test-openai-shaped-key".to_string()),
@@ -1874,16 +1874,16 @@ async fn webhook_explicit_agent_reports_model_without_owning_lifecycle() {
     let observer: Arc<dyn reiclaw_runtime::observability::Observer> = observer_impl.clone();
 
     let mut config = Config::default();
-    config.providers.models.anthropic.insert(
+    config.providers.models.openai.insert(
         "default".into(),
-        reiclaw_config::schema::AnthropicModelProviderConfig {
+        reiclaw_config::schema::OpenAIModelProviderConfig {
             base: reiclaw_config::schema::ModelProviderConfig {
                 model: Some("agent-model".into()),
                 ..Default::default()
             },
         },
     );
-    let expected_provider = "anthropic.default".to_string();
+    let expected_provider = "openai.default".to_string();
     config.agents.insert(
         "nova".to_string(),
         reiclaw_config::schema::AliasedAgentConfig {
@@ -3517,7 +3517,7 @@ async fn gateway_shutdown_observes_a_signal_sent_before_subscription() {
 async fn gateway_chat_dispatch_threads_configured_hooks_on_completed_tool_call() {
     use reiclaw_api::tool::ToolResult;
     use reiclaw_config::schema::{
-        AliasedAgentConfig, CustomModelProviderConfig, ModelProviderConfig, RiskProfileConfig,
+        AliasedAgentConfig, ModelProviderConfig, OpenAIModelProviderConfig, RiskProfileConfig,
         RuntimeProfileConfig,
     };
     use reiclaw_runtime::hooks::HookHandler;
@@ -3565,42 +3565,17 @@ async fn gateway_chat_dispatch_threads_configured_hooks_on_completed_tool_call()
     let call_counter = Arc::new(AtomicUsize::new(0));
     let server_calls = Arc::clone(&call_counter);
     wiremock::Mock::given(wiremock::matchers::method("POST"))
-        .and(wiremock::matchers::path("/v1/chat/completions"))
+        .and(wiremock::matchers::path("/v1/responses"))
         .respond_with(move |_req: &wiremock::Request| {
             let n = server_calls.fetch_add(1, Ordering::SeqCst);
             if n == 0 {
                 wiremock::ResponseTemplate::new(200).set_body_json(serde_json::json!({
-                    "id": "chatcmpl-1",
-                    "object": "chat.completion",
-                    "choices": [{
-                        "index": 0,
-                        "message": {
-                            "role": "assistant",
-                            "content": null,
-                            "tool_calls": [{
-                                "id": "call_read_1",
-                                "type": "function",
-                                "function": {
-                                    "name": "file_read",
-                                    "arguments": "{\"path\":\"hello.txt\"}"
-                                }
-                            }]
-                        },
-                        "finish_reason": "tool_calls"
-                    }]
+                    "output": [{"type": "function_call", "call_id": "call_read_1",
+                        "name": "file_read", "arguments": "{\"path\":\"hello.txt\"}"}]
                 }))
             } else {
                 wiremock::ResponseTemplate::new(200).set_body_json(serde_json::json!({
-                    "id": "chatcmpl-2",
-                    "object": "chat.completion",
-                    "choices": [{
-                        "index": 0,
-                        "message": {
-                            "role": "assistant",
-                            "content": "hook-verified-response"
-                        },
-                        "finish_reason": "stop"
-                    }]
+                    "output_text": "hook-verified-response"
                 }))
             }
         })
@@ -3612,14 +3587,13 @@ async fn gateway_chat_dispatch_threads_configured_hooks_on_completed_tool_call()
     {
         let mut config = state.config.write();
         config.hooks.enabled = true;
-        config.providers.models.custom.insert(
+        config.providers.models.openai.insert(
             "test".into(),
-            CustomModelProviderConfig {
+            OpenAIModelProviderConfig {
                 base: ModelProviderConfig {
                     model: Some("local-hook-test".into()),
                     uri: Some(format!("{}/v1", server.uri())),
                     api_key: Some("sk-test".into()),
-                    native_tools: Some(true),
                     timeout_secs: Some(5),
                     ..Default::default()
                 },
@@ -3642,7 +3616,7 @@ async fn gateway_chat_dispatch_threads_configured_hooks_on_completed_tool_call()
             },
         );
         let mut agent = AliasedAgentConfig {
-            model_provider: "custom.test".into(),
+            model_provider: "openai.test".into(),
             risk_profile: "test".into(),
             runtime_profile: "test".into(),
             ..Default::default()

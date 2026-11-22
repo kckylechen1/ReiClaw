@@ -286,15 +286,10 @@ fn unbounded_runtime() -> RuntimeProfileConfig {
     }
 }
 
-/// Provider-specific runtime recommendations. This is deliberately separate
-/// from `local`: credential-free CLI shims can call cloud models, and local
-/// providers without native tool support must retain text-fallback prompting.
+/// Provider-specific runtime recommendations.
 #[must_use]
-pub fn recommended_runtime_profile(name: &str) -> Option<&'static str> {
-    match name {
-        "lmstudio" | "llamacpp" | "osaurus" => Some(LOCAL_SMALL_RUNTIME_PRESET_NAME),
-        _ => None,
-    }
+pub fn recommended_runtime_profile(_name: &str) -> Option<&'static str> {
+    None
 }
 
 #[cfg(test)]
@@ -496,20 +491,14 @@ mod tests {
     #[test]
     fn runtime_recommendations_distinguish_local_backends_from_cli_shims() {
         let providers = list_model_providers();
-        let recommendation = |name| {
+        assert_eq!(
             providers
                 .iter()
-                .find(|provider| provider.name == name)
-                .and_then(|provider| recommended_runtime_profile(provider.name))
-        };
-
-        assert_eq!(
-            recommendation("lmstudio"),
-            Some(LOCAL_SMALL_RUNTIME_PRESET_NAME),
+                .map(|provider| provider.name)
+                .collect::<Vec<_>>(),
+            vec!["openai"],
         );
-        assert_eq!(recommendation("ollama"), None);
-        assert_eq!(recommendation("groq"), None);
-        assert_eq!(recommendation("anthropic"), None);
+        assert_eq!(recommended_runtime_profile("openai"), None);
     }
 
     #[test]

@@ -15,7 +15,7 @@ use tokio::sync::Mutex as AsyncMutex;
 // Present ONLY in the planted memory entry: if it surfaces in a provider
 // request body, recall injected it. A memory-free run must never surface it.
 const SECRET_SENTINEL: &str = "amber-lynx-8695-uses-memory-free-canary";
-const FAKE_OPENAI_RESPONSE: &str = r#"{"id":"chatcmpl-test","object":"chat.completion","created":0,"model":"test-model","choices":[{"index":0,"message":{"role":"assistant","content":"ok"},"finish_reason":"stop"}],"usage":{"prompt_tokens":1,"completion_tokens":1,"total_tokens":2}}"#;
+const FAKE_OPENAI_RESPONSE: &str = r#"{"id":"resp_test","object":"response","created":0,"model":"test-model","output":[{"type":"message","role":"assistant","content":[{"type":"output_text","text":"ok"}]}],"usage":{"input_tokens":1,"output_tokens":1,"total_tokens":2}}"#;
 
 type CapturedBodies = Arc<AsyncMutex<Vec<String>>>;
 
@@ -27,7 +27,7 @@ async fn handle_chat(State(captured): State<CapturedBodies>, body: String) -> &'
 async fn spawn_mock_provider() -> (SocketAddr, CapturedBodies) {
     let captured: CapturedBodies = Arc::new(AsyncMutex::new(Vec::new()));
     let app = Router::new()
-        .route("/chat/completions", post(handle_chat))
+        .route("/responses", post(handle_chat))
         .with_state(captured.clone());
 
     let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
@@ -39,7 +39,7 @@ async fn spawn_mock_provider() -> (SocketAddr, CapturedBodies) {
 }
 
 async fn config_with_planted_memory(provider_uri: &str, workspace_dir: &std::path::Path) -> Config {
-    let provider_type = "custom";
+    let provider_type = "openai";
     {
         let mut mem_cfg = Config::default().memory;
         mem_cfg.hygiene_enabled = false;
@@ -61,7 +61,7 @@ async fn config_with_planted_memory(provider_uri: &str, workspace_dir: &std::pat
         let base = providers
             .models
             .ensure(provider_type, "default")
-            .expect("`custom` slot must exist on ModelProviders");
+            .expect("`openai` slot must exist on ModelProviders");
         base.api_key = Some("test-key".to_string());
         base.model = Some("test-model".to_string());
         base.uri = Some(provider_uri.to_string());
@@ -104,8 +104,8 @@ async fn run_cron_once(config: Config, overrides: AgentRunOverrides) -> Vec<Stri
         let base = config
             .providers
             .models
-            .ensure("custom", "default")
-            .expect("`custom` slot must exist");
+            .ensure("openai", "default")
+            .expect("`openai` slot must exist");
         base.uri = Some(provider_uri);
     }
 

@@ -123,9 +123,10 @@ pub(crate) fn apply_env_overrides_matching(
             }
             let tail = k.strip_prefix(PREFIX)?;
             (!tail.is_empty()
-                && tail
-                    .chars()
-                    .all(|c| c.is_ascii_lowercase() || c.is_ascii_digit() || c == '_')
+                && (model_provider_env_family(tail).is_some()
+                    || tail
+                        .chars()
+                        .all(|c| c.is_ascii_lowercase() || c.is_ascii_digit() || c == '_'))
                 && include_tail(tail))
             .then(|| (k.clone(), v, tail.to_string()))
         })
@@ -158,11 +159,7 @@ pub(crate) fn apply_env_overrides_matching(
         {
             crate::current::reject_retired_channel(kind)?;
         }
-        if tail_segments.starts_with(&["providers", "models"])
-            && let Some(family) = tail_segments.get(2)
-        {
-            crate::providers::reject_retired_model_provider(family)?;
-        }
+        let normalized_tail = check_model_provider_env(&tail, &value)?;
         let retired_hit = RETIRED_ENV_TOMBSTONE_PREFIXES
             .iter()
             .find(|(prefix, _)| {
@@ -209,7 +206,7 @@ pub(crate) fn apply_env_overrides_matching(
             ));
             continue;
         }
-        let path = resolve_path(&tail, config)
+        let path = resolve_path(&normalized_tail, config)
             .with_context(|| format!("{env_name} did not resolve to a schema path"))?;
         if NON_OVERRIDABLE_PATHS.contains(path.as_str()) {
             ::reiclaw_log::record!(
@@ -262,6 +259,53 @@ pub(crate) fn apply_env_overrides_matching(
         snapshots,
         tombstone_warnings,
     })
+}
+
+fn model_provider_env_family(tail: &str) -> Option<&str> {
+    let mut segments = tail.split(SEP);
+    match (segments.next()?, segments.next()?) {
+        ("providers", "models") => segments.next(),
+        ("model_providers" | "model_provider", family) => Some(family),
+        _ => None,
+    }
+}
+
+fn check_model_provider_env<'a>(tail: &'a str, value: &str) -> Result<std::borrow::Cow<'a, str>> {
+    use crate::providers::{
+        reject_responses_wire_api, reject_retired_model_provider, reject_retired_openai_auth,
+        require_openai_model_provider,
+    };
+    if let Some(family) = model_provider_env_family(tail) {
+        require_openai_model_provider(family)?;
+        if let ["providers", "models", "openai", _, field] =
+            tail.split(SEP).collect::<Vec<_>>().as_slice()
+        {
+            match *field {
+                "kind" if !value.trim().is_empty() => require_openai_model_provider(value.trim())?,
+                "wire_api" if !value.is_empty() => reject_responses_wire_api(value)?,
+                "requires_openai_auth" => return Err(reject_retired_openai_auth()),
+                "base_url" | "api_url" => {
+                    return Ok(format!("{}uri", &tail[..tail.len() - field.len()]).into());
+                }
+                _ => {}
+            }
+        }
+    } else if matches!(
+        tail.rsplit(SEP).next(),
+        Some(
+            "model_provider"
+                | "default_model_provider"
+                | "default_provider"
+                | "vision_model_provider"
+                | "classifier_provider"
+                | "summary_provider"
+        )
+    ) {
+        reject_retired_model_provider(value)?;
+    } else if tail.ends_with("__advisor") {
+        crate::providers::check_model_provider_prop("advisor", value)?;
+    }
+    Ok(tail.into())
 }
 
 /// Walk an env-var tail against the schema. Map-keyed positions consume one
@@ -671,6 +715,8 @@ mod tests {
             "REI_providers__models__telnyx__private_alias__api_key",
             "REI_providers__models__gemini_cli__private_alias__binary_path",
             "REI_providers__models__kilocli__private_alias__binary_path",
+            "REI_providers__models__openai-codex__private_alias__api_key",
+            "REI_model_providers__ollama__private_alias__api_key",
         ] {
             let _value = EnvVarGuard::set(name, "private-test-value");
             let mut config = Config::default();
@@ -680,43 +726,50 @@ mod tests {
             assert!(!error.contains("private_alias"));
             assert!(config.providers.models.iter_entries().next().is_none());
         }
-        let _value = EnvVarGuard::set(
-            "REI_providers__models__gemini__gemini_cli__oauth_project",
-            "retained-project",
-        );
-        let mut config = Config::default();
-        apply_env_overrides(&mut config).unwrap();
-        assert_eq!(
-            config.providers.models.gemini["gemini_cli"]
-                .oauth_project
-                .as_deref(),
-            Some("retained-project")
-        );
     }
 
     #[tokio::test]
-    async fn walker_refuses_retired_compat_family_env_override_naming_the_custom_replacement() {
+    async fn walker_accepts_responses_url_and_rejects_chat_completions_before_applying_it() {
         let _guard = super::env_test_lock().await;
-        for (name, family, base_url) in [
+        let _wire = EnvVarGuard::set(
+            "REI_providers__models__openai__proxy__wire_api",
+            "chat_completions",
+        );
+        let mut config = Config::default();
+        let error = apply_env_overrides(&mut config).unwrap_err().to_string();
+        assert!(
+            error.contains(crate::providers::RESPONSES_MIGRATION),
+            "{error}"
+        );
+        assert!(config.providers.models.is_empty());
+        drop(_wire);
+
+        let _url = EnvVarGuard::set(
+            "REI_providers__models__openai__proxy__base_url",
+            "https://router.example/v1",
+        );
+        let applied = apply_env_overrides(&mut config).unwrap();
+        assert!(applied.paths.contains("providers.models.openai.proxy.uri"));
+        let entry = config.providers.models.find("openai", "proxy").unwrap();
+        assert_eq!(entry.uri.as_deref(), Some("https://router.example/v1"));
+    }
+
+    #[tokio::test]
+    async fn walker_refuses_retired_compat_family_env_override_naming_the_responses_replacement() {
+        let _guard = super::env_test_lock().await;
+        for (name, family) in [
             (
                 "REI_providers__models__deepseek__private_alias__api_key",
                 "deepseek",
-                "https://api.deepseek.com",
             ),
             (
                 "REI_providers__models__github_models__private_alias__api_key",
                 "github_models",
-                "https://models.github.ai/inference",
             ),
-            (
-                "REI_providers__models__xai__private_alias__api_key",
-                "xai",
-                "https://api.x.ai/v1",
-            ),
+            ("REI_providers__models__xai__private_alias__api_key", "xai"),
             (
                 "REI_providers__models__moonshot__private_alias__api_key",
                 "moonshot",
-                "https://api.moonshot.ai/v1",
             ),
         ] {
             let _value = EnvVarGuard::set(name, "private-test-value");
@@ -726,8 +779,8 @@ mod tests {
                 error.contains(&format!("Model provider `{family}` is retired")),
                 "{name}: {error}"
             );
-            assert!(error.contains("providers.models.custom.<alias>"), "{error}");
-            assert!(error.contains(&format!("uri = \"{base_url}\"")), "{error}");
+            assert!(error.contains("providers.models.openai.<alias>"), "{error}");
+            assert!(error.contains("base_url"), "{error}");
             assert!(!error.contains("private-test-value"));
             assert!(!error.contains("private_alias"));
             assert!(config.providers.models.iter_entries().next().is_none());
@@ -738,7 +791,7 @@ mod tests {
     async fn walker_resolves_typed_family_alias_default() {
         let _guard = super::env_test_lock().await;
         let _v = EnvVarGuard::set(
-            "REI_providers__models__anthropic__default__api_key",
+            "REI_providers__models__openai__default__api_key",
             "sk-ant-fixture",
         );
 
@@ -748,7 +801,7 @@ mod tests {
         assert!(
             applied
                 .paths
-                .contains("providers.models.anthropic.default.api_key"),
+                .contains("providers.models.openai.default.api_key"),
             "kebab-translated path should be recorded: {:?}",
             applied.paths,
         );
@@ -757,7 +810,7 @@ mod tests {
             config
                 .providers
                 .models
-                .anthropic
+                .openai
                 .get("default")
                 .and_then(|c| c.base.api_key.as_deref()),
             Some("sk-ant-fixture"),
@@ -768,11 +821,11 @@ mod tests {
     async fn walker_accepts_alias_with_underscore() {
         let _guard = super::env_test_lock().await;
         let _v1 = EnvVarGuard::set(
-            "REI_providers__models__anthropic__prod_v2__api_key",
+            "REI_providers__models__openai__prod_v2__api_key",
             "sk-ant-fixture",
         );
         let _v2 = EnvVarGuard::set(
-            "REI_providers__models__anthropic__prod_v2__model",
+            "REI_providers__models__openai__prod_v2__model",
             "claude-sonnet-4-6",
         );
 
@@ -782,17 +835,17 @@ mod tests {
         assert!(
             applied
                 .paths
-                .contains("providers.models.anthropic.prod_v2.api_key"),
+                .contains("providers.models.openai.prod_v2.api_key"),
         );
         assert!(
             applied
                 .paths
-                .contains("providers.models.anthropic.prod_v2.model"),
+                .contains("providers.models.openai.prod_v2.model"),
         );
         let entry = config
             .providers
             .models
-            .anthropic
+            .openai
             .get("prod_v2")
             .expect("alias created");
         assert_eq!(entry.base.api_key.as_deref(), Some("sk-ant-fixture"));
@@ -1068,47 +1121,6 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn walker_tombstones_native_ollama_options_without_hiding_live_aliases() {
-        let _guard = super::env_test_lock().await;
-        let _ctx = EnvVarGuard::set("REI_providers__models__ollama__local__num_ctx", "16384");
-        let _predict =
-            EnvVarGuard::set("REI_providers__models__ollama__local__num_predict", "4096");
-        let _temperature = EnvVarGuard::set(
-            "REI_providers__models__ollama__retired_only__temperature_override",
-            "0.5",
-        );
-        let _model = EnvVarGuard::set("REI_providers__models__ollama__local__model", "qwen3");
-        // A retired leaf's spelling must not retire an alias with that name.
-        let _alias = EnvVarGuard::set("REI_providers__models__ollama__num_ctx__model", "llama3.1");
-
-        let mut config = Config::default();
-        let applied = apply_env_overrides(&mut config).unwrap();
-        assert_eq!(applied.paths.len(), 2);
-        assert_eq!(applied.tombstone_warnings.len(), 3);
-        assert!(
-            applied
-                .tombstone_warnings
-                .iter()
-                .all(|warning| warning.code == "ollama_native_options_removed")
-        );
-        assert_eq!(
-            config.providers.models.ollama["local"]
-                .base
-                .model
-                .as_deref(),
-            Some("qwen3")
-        );
-        assert_eq!(
-            config.providers.models.ollama["num_ctx"]
-                .base
-                .model
-                .as_deref(),
-            Some("llama3.1")
-        );
-        assert!(!config.providers.models.ollama.contains_key("retired_only"));
-    }
-
-    #[tokio::test]
     async fn walker_tombstones_cost_selector_under_runtime_profile() {
         let _guard = super::env_test_lock().await;
         let _retired = EnvVarGuard::set(
@@ -1152,7 +1164,7 @@ mod tests {
         // The walker's tail filter accepts `[a-z0-9_]+` so this gets past
         // the prefilter, and the failure must surface as the validator's
         // specific message — not a generic "Unknown property".
-        let _v = EnvVarGuard::set("REI_providers__models__anthropic___invalid__api_key", "x");
+        let _v = EnvVarGuard::set("REI_providers__models__openai___invalid__api_key", "x");
 
         let mut config = Config::default();
         let err = apply_env_overrides(&mut config).expect_err("must hard-error");
@@ -1188,7 +1200,7 @@ mod tests {
     async fn mask_restores_pre_override_plaintext_for_secret() {
         let _guard = super::env_test_lock().await;
         let _v = EnvVarGuard::set(
-            "REI_providers__models__anthropic__default__api_key",
+            "REI_providers__models__openai__default__api_key",
             "sk-ant-from-env",
         );
 
@@ -1198,7 +1210,7 @@ mod tests {
         config
             .providers
             .models
-            .ensure("anthropic", "default")
+            .ensure("openai", "default")
             .expect("typed slot")
             .api_key = Some("sk-ant-on-disk".to_string());
 
@@ -1206,14 +1218,14 @@ mod tests {
         assert!(
             applied
                 .paths
-                .contains("providers.models.anthropic.default.api_key"),
+                .contains("providers.models.openai.default.api_key"),
         );
         // Env value is live in memory.
         assert_eq!(
             config
                 .providers
                 .models
-                .anthropic
+                .openai
                 .get("default")
                 .and_then(|c| c.base.api_key.as_deref()),
             Some("sk-ant-from-env"),
@@ -1228,7 +1240,7 @@ mod tests {
             to_save
                 .providers
                 .models
-                .anthropic
+                .openai
                 .get("default")
                 .and_then(|c| c.base.api_key.as_deref()),
             Some("sk-ant-on-disk"),
@@ -1238,7 +1250,7 @@ mod tests {
             to_save
                 .providers
                 .models
-                .anthropic
+                .openai
                 .get("default")
                 .and_then(|c| c.base.api_key.as_deref()),
             Some("**** (encrypted)"),

@@ -31,16 +31,16 @@ class Probe:
                       "staffing_reason": "explicit_user_request"}
 
     def reply(self, request):
-        visible = {item["function"]["name"] for item in request.get("tools", [])}
+        visible = {item["name"] for item in request.get("tools", [])}
         require(set(TOOLS) == visible, "unexpected model-visible tool surface: " + json.dumps(sorted(visible)))
         if self.calls:
-            messages = [m for m in request["messages"] if m["role"] == "tool"]
+            messages = [m for m in request["input"] if m.get("type") == "function_call_output"]
             require(messages, "production Agent returned no tool result")
             latest = messages[-1]
-            require(latest["tool_call_id"] == self.calls[-1]["id"], "tool result id mismatch")
-            receipt = {"tool": self.calls[-1]["function"]["name"], "content": latest["content"][:8192]}
+            require(latest["call_id"] == self.calls[-1]["call_id"], "tool result id mismatch")
+            receipt = {"tool": self.calls[-1]["name"], "content": latest["output"][:8192]}
             self.receipts.append(receipt)
-            value = json.loads(latest["content"])
+            value = json.loads(latest["output"])
             require(value.get("request_id") == self.request_id, "request id mismatch")
             receipt["value"] = value
         else:
@@ -84,13 +84,13 @@ class Probe:
             if not self.args.expect_worker_failure:
                 require(result["body"] == "3973", "DSH result is not exact arithmetic answer")
             self.phase = 6
-            return {"role": "assistant", "content": "EXPECTED_WORKER_FAILURE" if self.args.expect_worker_failure else "3973"}
+            return {"output_text": "EXPECTED_WORKER_FAILURE" if self.args.expect_worker_failure else "3973"}
         else:
             raise RuntimeError("unexpected extra body provider request")
-        call = {"id": "probe-" + str(len(self.calls)), "type": "function",
-                "function": {"name": name, "arguments": json.dumps(arguments)}}
+        call = {"call_id": "probe-" + str(len(self.calls)), "type": "function_call",
+                "name": name, "arguments": json.dumps(arguments)}
         self.calls.append(call)
-        return {"role": "assistant", "content": None, "tool_calls": [call]}
+        return {"output": [call]}
 
     def read_args(self):
         return {"request_id": self.request_id}
@@ -159,20 +159,26 @@ def main():
             pass
 
         def do_POST(self):
+            streaming = False
             try:
-                require(self.path == "/v1/chat/completions", "unexpected scripted provider endpoint")
+                require(self.path == "/v1/responses", "unexpected scripted provider endpoint")
                 length = int(self.headers["Content-Length"])
                 require(0 < length <= 1_000_000, "provider request exceeds bound")
-                message = probe.reply(json.loads(self.rfile.read(length)))
+                request = json.loads(self.rfile.read(length))
+                streaming = request.get("stream", False)
+                response = probe.reply(request)
             except Exception as error:
                 probe.errors.append(str(error))
-                message = {"role": "assistant", "content": "MANUAL_PROBE_FAILED"}
-            payload = json.dumps({"id": "scripted-manual", "object": "chat.completion",
-                                  "model": "synthetic", "choices": [{"index": 0, "message": message,
-                                  "finish_reason": "tool_calls" if "tool_calls" in message else "stop"}],
-                                  "usage": {"prompt_tokens": 1, "completion_tokens": 1, "total_tokens": 2}}).encode()
+                response = {"output_text": "MANUAL_PROBE_FAILED"}
+            response.update(id="scripted-manual", model="synthetic",
+                            usage={"input_tokens": 1, "output_tokens": 1, "total_tokens": 2})
+            if streaming:
+                event = json.dumps({"type": "response.completed", "response": response})
+                payload = f"data: {event}\n\n".encode()
+            else:
+                payload = json.dumps(response).encode()
             self.send_response(200)
-            self.send_header("Content-Type", "application/json")
+            self.send_header("Content-Type", "text/event-stream" if streaming else "application/json")
             self.send_header("Content-Length", str(len(payload)))
             self.end_headers()
             self.wfile.write(payload)
@@ -187,12 +193,11 @@ composition = "minimal"
 [memory]
 backend = "none"
 auto_save = false
-[providers.models.custom.probe]
-uri = "http://127.0.0.1:{server.server_port}/v1/chat/completions"
+[providers.models.openai.probe]
+uri = "http://127.0.0.1:{server.server_port}/v1/responses"
 api_key = "synthetic-local-dummy"
 model = "synthetic"
-wire_api = "chat_completions"
-native_tools = true
+wire_api = "responses"
 timeout_secs = 15
 [risk_profiles.probe]
 level = "full"
@@ -204,7 +209,7 @@ max_actions_per_hour = 512
 max_tool_result_chars = 100000
 tool_call_dedup_exempt = ["tachi_start", "tachi_watch"]
 [agents.probe]
-model_provider = "custom.probe"
+model_provider = "openai.probe"
 risk_profile = "probe"
 runtime_profile = "probe"
 [tachi]

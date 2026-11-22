@@ -1148,7 +1148,7 @@ fn resolve_embedding_config_resolves_dotted_base_provider_ref() {
 }
 
 #[test]
-fn resolve_embedding_config_resolved_family_without_endpoint_is_not_silent() {
+fn resolve_embedding_config_openai_alias_with_custom_uri_resolves() {
     let cfg = MemoryConfig {
         embedding_provider: "none".into(),
         embedding_model: "hint:semantic".into(),
@@ -1157,51 +1157,15 @@ fn resolve_embedding_config_resolved_family_without_endpoint_is_not_silent() {
     };
     let routes = vec![EmbeddingRouteConfig {
         hint: "semantic".into(),
-        model_provider: "custom.myembed".into(),
+        model_provider: "openai.myembed".into(),
         model: "text-embedding-3-small".into(),
         dimensions: Some(1024),
         api_key: None,
     }];
-    // The ref RESOLVES (the `custom.myembed` profile exists) but carries no
-    // `uri`, and `custom` has no built-in embeddings endpoint — so there is
-    // no concrete form for the factory.
-    let providers = catalog_with("custom", "myembed", None, Some("sk-provider"));
-
-    let resolved =
-        resolve_embedding_config(&cfg, &routes, Some("chat-provider-key"), Some(&providers));
-
-    // It must NOT be rewritten to a bare `custom` (which would silently
-    // Noop); it is left unresolved and logged loudly. The end-to-end
-    // embedder is the keyword-only Noop, surfaced rather than hidden.
-    assert_eq!(resolved.model_provider, "custom.myembed");
-    let embedder = embeddings::create_embedding_provider(
-        &resolved.model_provider,
-        resolved.api_key.as_deref(),
-        &resolved.model,
-        resolved.dimensions,
-    );
-    assert_eq!(embedder.name(), "none");
-}
-
-#[test]
-fn resolve_embedding_config_custom_family_with_uri_resolves() {
-    let cfg = MemoryConfig {
-        embedding_provider: "none".into(),
-        embedding_model: "hint:semantic".into(),
-        embedding_dimensions: 1536,
-        ..MemoryConfig::default()
-    };
-    let routes = vec![EmbeddingRouteConfig {
-        hint: "semantic".into(),
-        model_provider: "custom.myembed".into(),
-        model: "text-embedding-3-small".into(),
-        dimensions: Some(1024),
-        api_key: None,
-    }];
-    // A `custom` profile WITH an explicit `uri` is a fully usable
-    // OpenAI-compatible endpoint.
+    // An `openai` alias WITH an explicit `uri` resolves to a custom
+    // OpenAI-compatible embeddings endpoint.
     let providers = catalog_with(
-        "custom",
+        "openai",
         "myembed",
         Some("https://embed.local/v1"),
         Some("sk-local"),
@@ -1218,55 +1182,6 @@ fn resolve_embedding_config_custom_family_with_uri_resolves() {
         resolved.dimensions,
     );
     assert_eq!(embedder.name(), "openai");
-}
-
-#[allow(clippy::await_holding_lock)]
-#[tokio::test]
-async fn resolve_embedding_config_no_endpoint_emits_loud_warning() {
-    let _writer_guard = reiclaw_log::__private_test_writer_lock();
-    let _hook_guard = reiclaw_log::__private_test_hook_lock();
-    reiclaw_log::try_install_capture_subscriber();
-    let mut rx = reiclaw_log::subscribe_or_install();
-    while rx.try_recv().is_ok() {}
-
-    let cfg = MemoryConfig {
-        embedding_provider: "none".into(),
-        embedding_model: "hint:semantic".into(),
-        embedding_dimensions: 1536,
-        ..MemoryConfig::default()
-    };
-    let routes = vec![EmbeddingRouteConfig {
-        hint: "semantic".into(),
-        model_provider: "custom.myembed".into(),
-        model: "text-embedding-3-small".into(),
-        dimensions: Some(1024),
-        api_key: None,
-    }];
-    let providers = catalog_with("custom", "myembed", None, Some("sk-provider"));
-
-    let _ = resolve_embedding_config(&cfg, &routes, Some("chat-provider-key"), Some(&providers));
-
-    // Find our diagnostic among any concurrently-broadcast events.
-    let deadline = std::time::Instant::now() + std::time::Duration::from_secs(2);
-    let mut found = None;
-    while std::time::Instant::now() < deadline {
-        match tokio::time::timeout(std::time::Duration::from_millis(50), rx.recv()).await {
-            Ok(Ok(value)) => {
-                if value["attributes"]["error_key"] == "memory.embedding_route_no_endpoint" {
-                    found = Some(value);
-                    break;
-                }
-            }
-            Ok(Err(tokio::sync::broadcast::error::RecvError::Lagged(_))) => {}
-            Ok(Err(tokio::sync::broadcast::error::RecvError::Closed)) => break,
-            Err(_elapsed) => {}
-        }
-    }
-
-    let value = found.expect("expected a loud memory.embedding_route_no_endpoint WARN event");
-    assert_eq!(value["severity_text"], "WARN");
-    assert_eq!(value["attributes"]["provider_ref"], "custom.myembed");
-    assert_eq!(value["attributes"]["provider_kind"], "custom");
 }
 
 // -- create_memory_for_agent x retrieval pipeline --------------

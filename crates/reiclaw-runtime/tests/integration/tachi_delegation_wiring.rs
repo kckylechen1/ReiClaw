@@ -1205,15 +1205,15 @@ async fn production_status_and_watch_preserve_orphaned_projection_without_termin
 #[tokio::test]
 async fn live_agent_construction_rechecks_delegation_policy_after_reload() {
     use reiclaw_config::multi_agent::MemoryBackendKind;
-    use reiclaw_config::schema::{ModelProviderConfig, OllamaModelProviderConfig};
+    use reiclaw_config::schema::{ModelProviderConfig, OpenAIModelProviderConfig};
 
     let (fake, endpoint) = serve(|_, _| panic!("revoked permission must not reach Tachi")).await;
     let temp = tempfile::TempDir::new().unwrap();
     let mut cfg = production_config(&temp, &endpoint);
     cfg.config_path = temp.path().join("config.toml");
-    cfg.providers.models.ollama.insert(
+    cfg.providers.models.openai.insert(
         "offline".into(),
-        OllamaModelProviderConfig {
+        OpenAIModelProviderConfig {
             base: ModelProviderConfig {
                 model: Some("fixture-model".into()),
                 ..Default::default()
@@ -1221,7 +1221,7 @@ async fn live_agent_construction_rechecks_delegation_policy_after_reload() {
         },
     );
     let agent_cfg = cfg.agents.get_mut("home").unwrap();
-    agent_cfg.model_provider = "ollama.offline".into();
+    agent_cfg.model_provider = "openai.offline".into();
     agent_cfg.memory.backend = MemoryBackendKind::None;
     let live = Arc::new(parking_lot::RwLock::new(cfg));
     let agent =

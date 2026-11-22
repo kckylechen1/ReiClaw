@@ -13,7 +13,7 @@ use tokio::sync::Mutex as AsyncMutex;
 // captured request body, the only path it could have taken is the engine's
 // memory-context recall + injection.
 const SECRET_SENTINEL: &str = "blue-walrus-7421-conversation-leak-canary";
-const FAKE_OPENAI_RESPONSE: &str = r#"{"id":"chatcmpl-test","object":"chat.completion","created":0,"model":"test-model","choices":[{"index":0,"message":{"role":"assistant","content":"ok"},"finish_reason":"stop"}],"usage":{"prompt_tokens":1,"completion_tokens":1,"total_tokens":2}}"#;
+const FAKE_OPENAI_RESPONSE: &str = r#"{"id":"resp_test","object":"response","created":0,"model":"test-model","output":[{"type":"message","role":"assistant","content":[{"type":"output_text","text":"ok"}]}],"usage":{"input_tokens":1,"output_tokens":1,"total_tokens":2}}"#;
 
 type CapturedBodies = Arc<AsyncMutex<Vec<String>>>;
 
@@ -25,7 +25,7 @@ async fn handle_chat(State(captured): State<CapturedBodies>, body: String) -> &'
 async fn spawn_mock_provider() -> (SocketAddr, CapturedBodies) {
     let captured: CapturedBodies = Arc::new(AsyncMutex::new(Vec::new()));
     let app = Router::new()
-        .route("/chat/completions", post(handle_chat))
+        .route("/responses", post(handle_chat))
         .with_state(captured.clone());
 
     let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
@@ -49,8 +49,8 @@ async fn scheduled_run_does_not_leak_conversation_memory_into_provider_request()
     let (addr, captured) = spawn_mock_provider().await;
     let provider_uri = format!("http://{addr}");
     // Canonical typed-family slot. The agent's `model_provider` references
-    // the alias by `<type>.<alias>` (here `custom.default`).
-    let provider_type = "custom";
+    // the alias by `<type>.<alias>` (here `openai.default`).
+    let provider_type = "openai";
 
     {
         let mut mem_cfg = Config::default().memory;
@@ -76,7 +76,7 @@ async fn scheduled_run_does_not_leak_conversation_memory_into_provider_request()
         let base = providers
             .models
             .ensure(provider_type, "default")
-            .expect("`custom` slot must exist on ModelProviders");
+            .expect("`openai` slot must exist on ModelProviders");
         base.api_key = Some("test-key".to_string());
         base.model = Some("test-model".to_string());
         base.uri = Some(provider_uri.clone());

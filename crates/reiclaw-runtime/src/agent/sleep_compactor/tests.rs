@@ -13,8 +13,7 @@ use reiclaw_api::review::{UserMessageIngress, UserMessageSource};
 use reiclaw_config::attention::AttentionConfig;
 use reiclaw_config::multi_agent::{AgentMemoryConfig, MemoryBackendKind};
 use reiclaw_config::schema::{
-    AliasedAgentConfig, ModelProviderConfig, ModelRouteConfig, OllamaModelProviderConfig,
-    OpenAIModelProviderConfig,
+    AliasedAgentConfig, ModelProviderConfig, ModelRouteConfig, OpenAIModelProviderConfig,
 };
 use reiclaw_infra::session_sqlite::SqliteSessionBackend;
 use std::collections::BTreeMap;
@@ -545,9 +544,9 @@ fn split_model_routing_uses_hint_fast_when_configured_and_falls_back_to_primary(
             },
         },
     );
-    config.providers.models.ollama.insert(
+    config.providers.models.openai.insert(
         "fastlocal".into(),
-        OllamaModelProviderConfig {
+        OpenAIModelProviderConfig {
             base: ModelProviderConfig {
                 model: Some("llama3.2".into()),
                 temperature: Some(0.1),
@@ -575,7 +574,7 @@ fn split_model_routing_uses_hint_fast_when_configured_and_falls_back_to_primary(
 
     config.model_routes.push(ModelRouteConfig {
         hint: "fast".into(),
-        model_provider: "ollama.fastlocal".into(),
+        model_provider: "openai.fastlocal".into(),
         model: "llama3.2".into(),
         api_key: None,
     });

@@ -4,33 +4,31 @@ use tempfile::TempDir;
 #[test]
 fn collapse_model_probes_groups_identical_and_breaks_divergent() {
     use ModelProbe::{Err as E, Ok as K};
-    let probes = vec![
-        ("ollama.a".to_string(), K(8)),
-        ("ollama.b".to_string(), K(8)),
-        ("ollama.c".to_string(), K(8)),
-        ("groq.x".to_string(), K(18)),
-        ("groq.y".to_string(), K(18)),
-        ("lmstudio.solo".to_string(), K(335)),
-        ("openai.a".to_string(), K(10)),
-        ("openai.b".to_string(), K(12)),
+    let uniform = collapse_model_probes(vec![
+        ("openai.a".into(), K(8)),
+        ("openai.b".into(), K(8)),
+        ("openai.c".into(), K(8)),
+    ]);
+    assert_eq!(uniform.len(), 1);
+    assert_eq!(uniform[0].message, "openai: 8 models");
+
+    let diverse = collapse_model_probes(vec![
+        ("openai.a".into(), K(18)),
+        ("openai.b".into(), K(335)),
         (
-            "custom.unlisted".to_string(),
-            E(Severity::Error, "not supported".to_string()),
+            "openai.unlisted".into(),
+            E(Severity::Error, "not supported".into()),
         ),
-    ];
-    let msgs: Vec<String> = collapse_model_probes(probes)
-        .into_iter()
-        .map(|r| r.message)
-        .collect();
+    ]);
     assert_eq!(
-        msgs,
-        vec![
-            "ollama: 8 models",          // 3 identical aliases → collapsed to type
-            "groq: 18 models",           // 2 identical → collapsed
-            "lmstudio.solo: 335 models", // single alias → kept per-alias
-            "openai.a: 10 models",       // divergent counts → broken out
-            "openai.b: 12 models",
-            "custom.unlisted: not supported", // single alias → kept
+        diverse
+            .into_iter()
+            .map(|row| row.message)
+            .collect::<Vec<_>>(),
+        [
+            "openai.a: 18 models",
+            "openai.b: 335 models",
+            "openai.unlisted: not supported"
         ]
     );
 }
@@ -50,17 +48,18 @@ fn model_in_catalog_requires_exact_id_match() {
 }
 
 #[test]
-fn provider_validation_checks_custom_url_shape() {
+fn provider_validation_rejects_retired_url_prefixes() {
     let config = Config::default();
-    assert!(provider_validation_error(&config, "openai").is_none());
-    assert!(provider_validation_error(&config, "custom:https://example.com").is_none());
-    assert!(provider_validation_error(&config, "anthropic-custom:https://example.com").is_none());
-
-    let invalid_custom = provider_validation_error(&config, "custom:").unwrap_or_default();
-    assert!(invalid_custom.contains("requires a URL"));
-
-    let invalid_unknown = provider_validation_error(&config, "totally-fake").unwrap_or_default();
-    assert!(invalid_unknown.contains("Unknown model_provider"));
+    for reference in [
+        "custom:https://example.com",
+        "anthropic-custom:https://example.com",
+    ] {
+        let error = provider_validation_error(&config, reference).unwrap();
+        assert!(
+            error.contains(reiclaw_config::providers::RESPONSES_MIGRATION),
+            "{error}"
+        );
+    }
 }
 
 #[test]
@@ -72,22 +71,21 @@ fn provider_validation_accepts_custom_with_uri_in_config() {
     let profile = config
         .providers
         .models
-        .ensure("custom", "vllm")
+        .ensure("openai", "vllm")
         .expect("known model_provider type");
     profile.uri = Some("http://10.0.0.15:8000/v1".to_string());
     profile.model = Some("Qwen3.6-27B".to_string());
 
     // Full label (type.alias) should validate successfully when uri is in config.
     assert!(
-        provider_validation_error(&config, "custom.vllm").is_none(),
-        "custom.vllm should be valid when uri is defined in config"
+        provider_validation_error(&config, "openai.vllm").is_none(),
+        "openai.vllm should be valid when uri is defined in config"
     );
 
-    // Bare "custom" without alias should still fail (no config entry to resolve).
-    let bare_error = provider_validation_error(&config, "custom").unwrap_or_default();
+    let missing = provider_validation_error(&config, "openai.missing").unwrap();
     assert!(
-        bare_error.contains("requires `uri`"),
-        "bare 'custom' without alias should require uri"
+        missing.contains("Model provider alias is not configured"),
+        "{missing}"
     );
 }
 
@@ -140,7 +138,7 @@ fn context_window_diagnostics_distinguish_unset_explicit_and_zero_profiles() {
     let profile = unset
         .providers
         .models
-        .ensure("ollama", "local")
+        .ensure("openai", "local")
         .expect("known model provider type");
     profile.model = Some("qwen3".to_string());
 
@@ -149,7 +147,7 @@ fn context_window_diagnostics_distinguish_unset_explicit_and_zero_profiles() {
     let unset_message = format!(
         "{provider_ref}: no context_window set — will use {fallback} token fallback when selected; likely far below this model's real limit; set context_window on this profile",
         fallback = UNCONFIGURED_CONTEXT_WINDOW_FALLBACK.to_string(),
-        provider_ref = "ollama.local"
+        provider_ref = "openai.local"
     );
     let unset_item = unset_items
         .iter()
@@ -161,7 +159,7 @@ fn context_window_diagnostics_distinguish_unset_explicit_and_zero_profiles() {
     explicit
         .providers
         .models
-        .ensure("ollama", "local")
+        .ensure("openai", "local")
         .expect("known model provider type")
         .context_window = Some(32_000);
     let mut explicit_items = Vec::new();
@@ -169,7 +167,7 @@ fn context_window_diagnostics_distinguish_unset_explicit_and_zero_profiles() {
     let explicit_message = format!(
         "{provider_ref}: context window: {context_window} tokens",
         context_window = "32000",
-        provider_ref = "ollama.local"
+        provider_ref = "openai.local"
     );
     let explicit_item = explicit_items
         .iter()
@@ -194,14 +192,14 @@ fn context_window_diagnostics_distinguish_unset_explicit_and_zero_profiles() {
     let mut zero = explicit;
     zero.providers
         .models
-        .ensure("ollama", "local")
+        .ensure("openai", "local")
         .expect("known model provider type")
         .context_window = Some(0);
     let mut zero_items = Vec::new();
     check_config_semantics(&zero, &mut zero_items);
     let zero_message = format!(
         "{provider_ref}: context_window is 0 (invalid; set it to the model's real context limit)",
-        provider_ref = "ollama.local"
+        provider_ref = "openai.local"
     );
     let zero_item = zero_items
         .iter()
@@ -275,12 +273,12 @@ fn configured_model_provider_api_key_uses_alias_profile() {
     config
         .providers
         .models
-        .ensure("custom", "local")
+        .ensure("openai", "local")
         .expect("known model_provider type")
         .api_key = Some("redacted-test-key".to_string());
 
     assert_eq!(
-        configured_model_provider_api_key(&config, "custom.local"),
+        configured_model_provider_api_key(&config, "openai.local"),
         Some("redacted-test-key")
     );
     assert_eq!(configured_model_provider_api_key(&config, "custom"), None);
@@ -292,12 +290,12 @@ fn doctor_model_provider_uses_alias_profile() {
     let profile = config
         .providers
         .models
-        .ensure("custom", "local")
+        .ensure("openai", "local")
         .expect("known model_provider type");
     profile.api_key = Some("redacted-test-key".to_string());
     profile.uri = Some("https://models.example.test/v1".to_string());
 
-    if let Err(error) = create_doctor_model_provider(&config, "custom.local") {
+    if let Err(error) = create_doctor_model_provider(&config, "openai.local") {
         panic!("doctor model probe should build custom providers from alias config: {error}");
     }
 }
@@ -308,7 +306,7 @@ async fn structured_run_includes_model_probe_results() {
     let profile = config
         .providers
         .models
-        .ensure("custom", "local")
+        .ensure("openai", "local")
         .expect("known model_provider type");
     profile.api_key = Some("redacted-test-key".to_string());
     profile.uri = Some("http://127.0.0.1:9/v1".to_string());
@@ -625,12 +623,12 @@ fn config_validation_warns_invalid_embedding_route_provider() {
 
 #[test]
 fn config_validation_surfaces_dangling_fallback_ref() {
-    use reiclaw_config::schema::{GroqModelProviderConfig, ModelProviderConfig};
+    use reiclaw_config::schema::{ModelProviderConfig, OpenAIModelProviderConfig};
 
     let mut config = Config::default();
-    config.providers.models.groq.insert(
+    config.providers.models.openai.insert(
         "primary".to_string(),
-        GroqModelProviderConfig {
+        OpenAIModelProviderConfig {
             base: ModelProviderConfig {
                 model: Some("primary-model".into()),
                 fallback: vec![reiclaw_config::providers::ModelProviderRef::new(
@@ -648,7 +646,7 @@ fn config_validation_surfaces_dangling_fallback_ref() {
             .contains("does not resolve to a configured providers.models entry")
             && item
                 .message
-                .contains("providers.models.groq.primary.fallback[0]")
+                .contains("providers.models.openai.primary.fallback[0]")
     });
     assert!(
         fallback_item.is_some(),
@@ -1021,61 +1019,6 @@ fn diagnose_accepts_literal_web_dist_dir() {
     );
 }
 
-fn openai_codex_slot() -> reiclaw_config::schema::OpenAIModelProviderConfig {
-    let mut slot = reiclaw_config::schema::OpenAIModelProviderConfig::default();
-    slot.base.requires_openai_auth = true;
-    slot
-}
-
-#[test]
-fn codex_wiring_warns_when_profile_has_no_slot() {
-    // Credential imported, no slot opts into it — the silent gap.
-    let config = Config::default();
-    let items = codex_auth_wiring_items(true, &config);
-    assert_eq!(items.len(), 1);
-    assert_eq!(items[0].severity, Severity::Warn);
-    assert_eq!(items[0].category, "providers.auth");
-}
-
-#[test]
-fn codex_wiring_warns_when_slot_has_no_profile() {
-    let mut config = Config::default();
-    config
-        .providers
-        .models
-        .openai
-        .insert("codex".to_string(), openai_codex_slot());
-    let items = codex_auth_wiring_items(false, &config);
-    assert_eq!(items.len(), 1);
-    assert_eq!(items[0].severity, Severity::Warn);
-    assert!(
-        items[0].message.contains("openai.codex"),
-        "slot warning should name the offending slot; got: {:?}",
-        items[0].message
-    );
-}
-
-#[test]
-fn codex_wiring_ok_when_profile_and_slot_present() {
-    let mut config = Config::default();
-    config
-        .providers
-        .models
-        .openai
-        .insert("codex".to_string(), openai_codex_slot());
-    let items = codex_auth_wiring_items(true, &config);
-    assert_eq!(items.len(), 1);
-    assert_eq!(items[0].severity, Severity::Ok);
-}
-
-#[test]
-fn codex_wiring_silent_when_codex_unused() {
-    // No credential and no requiring slot — the common case; no noise.
-    let config = Config::default();
-    let items = codex_auth_wiring_items(false, &config);
-    assert!(items.is_empty());
-}
-
 #[test]
 fn web_dist_dir_expansion_reason_detects_tilde_and_env() {
     assert_eq!(
@@ -1141,7 +1084,7 @@ async fn update_context_windows_uses_exact_alias_not_model_uri() {
         let entry1 = config
             .providers
             .models
-            .ensure("groq", "alias1")
+            .ensure("openai", "alias1")
             .expect("groq provider type exists");
         entry1.model = Some("llama-3.1-8b-instant".into());
         entry1.context_window = Some(8192);
@@ -1150,7 +1093,7 @@ async fn update_context_windows_uses_exact_alias_not_model_uri() {
         let entry2 = config
             .providers
             .models
-            .ensure("groq", "alias2")
+            .ensure("openai", "alias2")
             .expect("groq provider type exists");
         entry2.model = Some("llama-3.1-8b-instant".into());
     }
@@ -1163,9 +1106,10 @@ async fn update_context_windows_uses_exact_alias_not_model_uri() {
                 as std::pin::Pin<Box<dyn std::future::Future<Output = Option<usize>> + Send>>
         },
     );
-    let updated = update_context_windows(&mut config, Some("groq.alias2"), false, Some(mock_fetch))
-        .await
-        .expect("update_context_windows should succeed");
+    let updated =
+        update_context_windows(&mut config, Some("openai.alias2"), false, Some(mock_fetch))
+            .await
+            .expect("update_context_windows should succeed");
 
     // Should have updated exactly 1 entry (alias2)
     assert_eq!(updated, 1);
@@ -1174,7 +1118,7 @@ async fn update_context_windows_uses_exact_alias_not_model_uri() {
     let alias1_ctx = config
         .providers
         .models
-        .find("groq", "alias1")
+        .find("openai", "alias1")
         .expect("alias1 should exist")
         .context_window;
     assert_eq!(
@@ -1187,7 +1131,7 @@ async fn update_context_windows_uses_exact_alias_not_model_uri() {
     let alias2_ctx = config
         .providers
         .models
-        .find("groq", "alias2")
+        .find("openai", "alias2")
         .expect("alias2 should exist")
         .context_window;
     assert_eq!(

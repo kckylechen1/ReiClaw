@@ -191,161 +191,6 @@ pub enum MultimodalError {
     LocalReadFailed { input: String, reason: String },
 }
 
-/// Why a candidate image reference cannot be sent as an inline base64 image
-/// block.
-///
-/// Deliberately a small copy type rather than a [`MultimodalError`]: the
-/// checker below runs over the whole replayed conversation on every turn, and
-/// an owned error would allocate for every rejected reference on that path.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub(crate) enum ImageDataUriRejection {
-    /// Not a `data:` URI at all — a filesystem path, an `http(s)` URL, or prose.
-    NotADataUri,
-    /// A `data:` URI whose header does not declare `;base64`.
-    NotBase64Encoded,
-    /// Media type outside [`ALLOWED_IMAGE_MIME_TYPES`].
-    UnsupportedMediaType,
-    /// Payload is empty or is not canonical padded base64.
-    MalformedBase64,
-    /// Encoded payload exceeds the caller's per-image ceiling.
-    TooLarge,
-}
-
-impl std::fmt::Display for ImageDataUriRejection {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        let reason = match self {
-            Self::NotADataUri => "not a base64 data URI",
-            Self::NotBase64Encoded => "data URI is not base64-encoded",
-            Self::UnsupportedMediaType => "unsupported image media type",
-            Self::MalformedBase64 => "malformed base64 payload",
-            Self::TooLarge => "image payload exceeds the per-image ceiling",
-        };
-        f.write_str(reason)
-    }
-}
-
-/// Splits a `data:` image reference into its media type and base64 payload,
-/// checking the structure without decoding it.
-///
-/// Both halves of the returned pair borrow from `candidate`; a caller that
-/// needs an owned lowercase media type allocates it once when it builds its
-/// wire block. `encoded_ceiling` is measured on the **encoded** payload
-/// length, unlike `max_bytes` elsewhere in this module, which counts decoded
-/// bytes.
-///
-/// This performs no decoding, no filesystem access and no network I/O on
-/// purpose. Provider adapters call it while converting an entire replayed
-/// history on every turn, so decoding here would mean re-decoding and
-/// re-encoding every image in the conversation once per turn.
-///
-/// It splits and structurally checks. It does not claim the payload decodes to
-/// a real image — nothing short of an image decoder can claim that.
-pub(crate) fn split_base64_image_data_uri(
-    candidate: &str,
-    encoded_ceiling: usize,
-) -> Result<(&str, &str), ImageDataUriRejection> {
-    let rest = candidate
-        .strip_prefix("data:")
-        .ok_or(ImageDataUriRejection::NotADataUri)?;
-    let Some(comma) = rest.find(',') else {
-        return Err(ImageDataUriRejection::NotADataUri);
-    };
-
-    let header = &rest[..comma];
-    let payload = rest[comma + 1..].trim();
-
-    // Matched case-sensitively, exactly as `normalize_data_uri` does, but on a
-    // whole parameter rather than a substring. `contains(";base64")` also
-    // accepted `;base64foo`, which the Anthropic adapter's residual sweep
-    // declines to sweep because it requires an exact `base64` parameter — so
-    // such a header fell between the two and left raw base64 in a text position.
-    // The parameter may sit anywhere in the list, which is what the sweep allows.
-    if !header
-        .split(';')
-        .skip(1)
-        .any(|parameter| parameter == "base64")
-    {
-        return Err(ImageDataUriRejection::NotBase64Encoded);
-    }
-
-    let media_type = header.split(';').next().unwrap_or_default().trim();
-    if !ALLOWED_IMAGE_MIME_TYPES
-        .iter()
-        .any(|allowed| allowed.eq_ignore_ascii_case(media_type))
-    {
-        return Err(ImageDataUriRejection::UnsupportedMediaType);
-    }
-
-    // Checked before the character scan so an oversized payload costs one
-    // comparison rather than a full pass.
-    if payload.len() > encoded_ceiling {
-        return Err(ImageDataUriRejection::TooLarge);
-    }
-
-    if !is_canonical_base64_payload(payload) {
-        return Err(ImageDataUriRejection::MalformedBase64);
-    }
-
-    Ok((media_type, payload))
-}
-
-/// True when `payload` is canonical padded base64 in the standard alphabet:
-/// non-empty, a multiple of four characters, at most two trailing `=`, and the
-/// padding bits of the final quartet zero.
-///
-/// The final-quartet check is what stops a payload like `AB==` — correct
-/// length, legal characters — from passing here and then failing a strict
-/// decoder on the provider's side.
-fn is_canonical_base64_payload(payload: &str) -> bool {
-    if payload.is_empty() || !payload.len().is_multiple_of(4) {
-        return false;
-    }
-
-    let bytes = payload.as_bytes();
-    let pad = bytes.iter().rev().take_while(|b| **b == b'=').count();
-    if pad > 2 {
-        return false;
-    }
-
-    let body = &bytes[..bytes.len() - pad];
-    if !body.iter().all(|b| is_standard_base64_char(*b)) {
-        return false;
-    }
-
-    // `len % 4 == 0` and non-empty means `len >= 4`, so with `pad <= 2` the
-    // body always has at least the two characters indexed below.
-    match pad {
-        // `xyz=` carries 18 bits of payload in 24 bits of encoding: the last
-        // character must have its low two bits clear.
-        1 => matches!(
-            body[body.len() - 1],
-            b'A' | b'E'
-                | b'I'
-                | b'M'
-                | b'Q'
-                | b'U'
-                | b'Y'
-                | b'c'
-                | b'g'
-                | b'k'
-                | b'o'
-                | b's'
-                | b'w'
-                | b'0'
-                | b'4'
-                | b'8'
-        ),
-        // `xy==` carries 12 bits: the last character must have its low four
-        // bits clear.
-        2 => matches!(body[body.len() - 1], b'A' | b'Q' | b'g' | b'w'),
-        _ => true,
-    }
-}
-
-fn is_standard_base64_char(byte: u8) -> bool {
-    byte.is_ascii_alphanumeric() || byte == b'+' || byte == b'/'
-}
-
 fn is_loadable_image_reference(candidate: &str) -> bool {
     candidate.starts_with('/')
         || candidate.starts_with("http://")
@@ -406,17 +251,6 @@ fn collapse_wrapped_marker(raw: &str) -> String {
         out.push(ch);
     }
     out.trim().to_string()
-}
-
-/// True when `content` holds an image marker, terminated or not.
-///
-/// This is how a provider adapter tells *residue of this crate's own marker
-/// normalization* from a data URI the author wrote deliberately. An
-/// unterminated marker is copied through by [`parse_image_markers`] verbatim,
-/// prefix included, so the prefix is present in both the input and the cleaned
-/// output whenever residue is possible.
-pub(crate) fn carries_image_marker(content: &str) -> bool {
-    content.contains(IMAGE_MARKER_PREFIX)
 }
 
 pub fn parse_image_markers(content: &str) -> (String, Vec<String>) {
@@ -639,21 +473,6 @@ pub fn sanitize_audio_markers(messages: &[ChatMessage]) -> Cow<'_, [ChatMessage]
     }
 
     Cow::Owned(rebuilt)
-}
-
-pub fn extract_ollama_image_payload(image_ref: &str) -> Option<String> {
-    if image_ref.starts_with("data:") {
-        let comma_idx = image_ref.find(',')?;
-        let (_, payload) = image_ref.split_at(comma_idx + 1);
-        let payload = payload.trim();
-        if payload.is_empty() {
-            None
-        } else {
-            Some(payload.to_string())
-        }
-    } else {
-        Some(image_ref.trim().to_string()).filter(|value| !value.is_empty())
-    }
 }
 
 pub(crate) fn is_prompt_tool_result_message(message: &ChatMessage) -> bool {
@@ -1063,7 +882,7 @@ async fn prepare_messages_inner(
     // The post-normalization cap keeps the most recent successful images and
     // prevents conversations from sticking once the cumulative count crosses
     // the threshold, so no pre-normalization trim is needed here.
-    let remote_client = build_runtime_proxy_client_with_timeouts("model_provider.ollama", 30, 10);
+    let remote_client = build_runtime_proxy_client_with_timeouts("model_provider.openai", 30, 10);
 
     let mut normalized_messages = Vec::with_capacity(messages.len());
     let mut has_successful_images = false;

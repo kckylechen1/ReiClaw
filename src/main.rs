@@ -100,7 +100,6 @@ fn discard_until_newline<R: std::io::BufRead>(reader: &mut R) -> std::io::Result
     }
 }
 
-use std::path::PathBuf;
 #[cfg(feature = "agent-runtime")]
 use std::sync::Arc;
 
@@ -150,8 +149,6 @@ fn print_no_command_help(cmd: clap::Command) -> Result<()> {
 mod alias_cli;
 #[cfg(feature = "agent-runtime")]
 mod browse;
-#[cfg(feature = "agent-runtime")]
-mod cli_input;
 mod commands;
 #[cfg(feature = "agent-runtime")]
 mod gateway_helpers;
@@ -168,7 +165,7 @@ use reiclaw::config;
 #[cfg(feature = "gateway")]
 use reiclaw::gateway;
 #[cfg(feature = "agent-runtime")]
-use reiclaw::{agent, auth, channels, cron, memory, observability};
+use reiclaw::{agent, channels, cron, memory, observability};
 #[cfg(feature = "agent-runtime")]
 use reiclaw_runtime::{cost, daemon, doctor, security};
 
@@ -300,7 +297,7 @@ enum SoulCommands {
 enum Commands {
     #[command(about = "Create your first agent end-to-end")]
     Quickstart {
-        /// Provider type (anthropic / openai / ollama).
+        /// Model provider family (openai).
         #[arg(long)]
         model_provider: Option<String>,
 
@@ -308,7 +305,7 @@ enum Commands {
         #[arg(long)]
         model: Option<String>,
 
-        /// API key for the new provider entry (omit for ollama / local).
+        /// API key for the Responses endpoint.
         #[arg(long)]
         api_key: Option<String>,
 
@@ -326,7 +323,7 @@ With --message, runs one turn locally and prints the reply. Without it, opens `r
 Examples:
   rei agent -a assistant                              # chat through the gateway
   rei agent -a assistant -m \"Summarize today's logs\"  # single message
-  rei agent -a assistant -m \"Hi\" -p anthropic --model claude-sonnet-4-20250514
+  rei agent -a assistant -m \"Hi\" -p openai --model gpt-5
 
 --model-provider, --model, and --temperature apply only with --message; the interactive chat uses the agent's configured model.")]
     Agent {
@@ -339,7 +336,7 @@ Examples:
         #[arg(short, long)]
         message: Option<String>,
 
-        /// Model provider to use (anthropic, openai, ollama, openai-codex)
+        /// OpenAI Responses provider or configured alias
         #[arg(short = 'p', long = "model-provider", alias = "provider")]
         model_provider: Option<String>,
 
@@ -611,10 +608,10 @@ Examples:
         path: String,
     },
 
-    #[command(about = "Manage provider subscription authentication profiles")]
+    #[command(hide = true)]
     Auth {
-        #[command(subcommand)]
-        auth_command: AuthCommands,
+        #[arg(trailing_var_arg = true, allow_hyphen_values = true, num_args = 0..)]
+        _legacy_args: Vec<String>,
     },
 
     #[command(long_about = "\
@@ -699,8 +696,8 @@ stored. Findings do not change the exit status; only setup errors do.
 
 Examples:
   rei soul check --agent default
-  rei soul check --agent default --target anthropic.work --target openai.work:gpt-5
-  rei soul check --agent default --judge anthropic.work --format json")]
+  rei soul check --agent default --target openai.work --target openai.backup:gpt-5
+  rei soul check --agent default --judge openai.work --format json")]
     Soul {
         #[command(subcommand)]
         soul_command: SoulCommands,
@@ -850,93 +847,6 @@ enum EstopSubcommands {
         #[arg(long)]
         otp: Option<String>,
     },
-}
-
-#[derive(Subcommand, Debug)]
-enum AuthCommands {
-    /// Login with OAuth (OpenAI Codex or Gemini)
-    Login {
-        /// ModelProvider (`openai-codex` or `gemini`)
-        #[arg(long)]
-        model_provider: String,
-        /// Profile name (default: default)
-        #[arg(long, default_value = "default")]
-        profile: String,
-        /// Use OAuth device-code flow
-        #[arg(long)]
-        device_code: bool,
-        /// Import an existing auth.json file instead of starting a new login flow.
-        /// Supports `openai-codex` (`~/.codex/auth.json`).
-        #[arg(long, value_name = "PATH", conflicts_with = "device_code")]
-        import: Option<PathBuf>,
-    },
-    /// Complete OAuth by pasting redirect URL or auth code
-    PasteRedirect {
-        /// ModelProvider (`openai-codex` or `gemini`)
-        #[arg(long)]
-        model_provider: String,
-        /// Profile name (default: default)
-        #[arg(long, default_value = "default")]
-        profile: String,
-        /// Full redirect URL or raw OAuth code
-        #[arg(long)]
-        input: Option<String>,
-    },
-    /// Paste setup token / auth token (for Anthropic subscription auth)
-    PasteToken {
-        /// ModelProvider (`anthropic`)
-        #[arg(long)]
-        model_provider: String,
-        /// Profile name (default: default)
-        #[arg(long, default_value = "default")]
-        profile: String,
-        /// Token value (if omitted, read interactively)
-        #[arg(long)]
-        token: Option<String>,
-        /// Auth kind override (`authorization` or `api-key`)
-        #[arg(long)]
-        auth_kind: Option<String>,
-    },
-    /// Alias for `paste-token` (interactive by default)
-    SetupToken {
-        /// ModelProvider (`anthropic`)
-        #[arg(long)]
-        model_provider: String,
-        /// Profile name (default: default)
-        #[arg(long, default_value = "default")]
-        profile: String,
-    },
-    /// Refresh OAuth access token using refresh token
-    Refresh {
-        /// ModelProvider (`openai-codex` or `gemini`)
-        #[arg(long)]
-        model_provider: String,
-        /// Profile name or profile id
-        #[arg(long)]
-        profile: Option<String>,
-    },
-    /// Remove auth profile
-    Logout {
-        /// ModelProvider
-        #[arg(long)]
-        model_provider: String,
-        /// Profile name (default: default)
-        #[arg(long, default_value = "default")]
-        profile: String,
-    },
-    #[command(about = "Set active profile for a provider")]
-    Use {
-        /// ModelProvider
-        #[arg(long)]
-        model_provider: String,
-        /// Profile name or full profile id
-        #[arg(long)]
-        profile: String,
-    },
-    /// List auth profiles
-    List,
-    /// Show auth status with active profile and token expiry info
-    Status,
 }
 
 #[derive(Subcommand, Debug)]
@@ -1213,6 +1123,13 @@ async fn async_main(command: clap::Command) -> Result<()> {
         return handle_estop_command(&config, estop_command, level, domains, tools);
     }
 
+    if matches!(&cli.command, Commands::Auth { .. }) {
+        anyhow::bail!(
+            "Provider subscription authentication is retired. {}",
+            reiclaw_config::providers::RESPONSES_MIGRATION
+        );
+    }
+
     // All other commands need config loaded first
     let mut config = Box::pin(Config::load_or_init()).await?;
     for section in config
@@ -1407,6 +1324,9 @@ async fn async_main(command: clap::Command) -> Result<()> {
             model,
             temperature,
         } => {
+            if let Some(name) = model_provider.as_deref() {
+                reiclaw_config::providers::reject_retired_model_provider(name)?;
+            }
             // Interactive chat is a gateway client, so every device shares
             // one conversation with the agent.
             let Some(message) = message else {
@@ -1926,11 +1846,7 @@ async fn async_main(command: clap::Command) -> Result<()> {
                     println!("  {:<19} {}{}{}", p.name, p.display_name, local_tag, marker);
                 }
             }
-            println!(
-                "\n  Set [providers.models.custom.<alias>] uri = \"<URL>\" for any \
-                 OpenAI-compatible endpoint, or [providers.models.anthropic.<alias>] \
-                 uri = \"<URL>\" for an Anthropic-compatible endpoint."
-            );
+            println!("\n  {}", reiclaw_config::providers::RESPONSES_MIGRATION);
             Ok(())
         }
 
@@ -2007,8 +1923,8 @@ async fn async_main(command: clap::Command) -> Result<()> {
             memory::cli::handle_command(memory_command, &config).await
         }
 
-        Commands::Auth { auth_command } => {
-            commands::auth::handle_auth_command(auth_command, &config).await
+        Commands::Auth { .. } => {
+            unreachable!("retired provider auth is handled before config load")
         }
 
         Commands::SelfTest { quick } => {

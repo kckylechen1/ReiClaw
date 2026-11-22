@@ -10482,7 +10482,7 @@ async fn trim_record_carries_model_attribution() {
             task_owner: None,
             model_access: ResolvedModelAccess {
                 model_provider: &model_provider,
-                provider_name: "anthropic.personal",
+                provider_name: "openai.personal",
                 model: "claude-opus-4-8",
                 temperature: Some(0.0),
             },
@@ -10554,7 +10554,7 @@ async fn trim_record_carries_model_attribution() {
         "trim record must carry model attribution, got: {value}"
     );
     assert_eq!(
-        value["zeroclaw"]["model_provider"], "anthropic.personal",
+        value["zeroclaw"]["model_provider"], "openai.personal",
         "trim record must carry model_provider attribution, got: {value}"
     );
     assert_eq!(
@@ -10925,7 +10925,7 @@ fn agent_provider_composite_returns_dotted_ref_not_bare_family() {
         alias.to_string(),
         OpenAIModelProviderConfig {
             base: ModelProviderConfig {
-                requires_openai_auth: true,
+                uri: Some("https://router.example/v1".into()),
                 ..Default::default()
             },
         },
@@ -10952,7 +10952,7 @@ fn agent_provider_composite_returns_dotted_ref_not_bare_family() {
         result.as_deref(),
         Some("openai"),
         "bare family name would bypass the alias-aware factory path and drop \
-         requires_openai_auth from the config, routing to the wrong provider"
+         the Responses endpoint from the config, routing to the wrong provider"
     );
 }
 
@@ -11484,14 +11484,14 @@ async fn agent_turn_uses_the_pre_minted_turn_id_on_its_bracket() {
 /// `observability::HOOK_TEST_LOCK` serializes against
 /// `observability::mod`'s own hook tests so neither steals the other's
 /// events off the single global hook slot.
-// `config.providers.models.ollama.*` dispatches through the OpenAI-
-// compatible wire (`OllamaModelProviderConfig::create_provider` builds an
+// `config.providers.models.openai.*` dispatches through the OpenAI-
+// compatible wire (`OpenAIModelProviderConfig::create_provider` builds an
 // `OpenAiCompatibleModelProvider` labeled "Ollama"), so the scripted
 // response is OpenAI's `choices[0].message.content` shape at
-// `/v1/chat/completions`, not the native `/api/chat` shape.
+// `/v1/responses`, not the native `/api/chat` shape.
 async fn respond_with_done() -> axum::Json<serde_json::Value> {
     axum::Json(serde_json::json!({
-        "choices": [{"message": {"content": "done"}}]
+        "output_text": "done"
     }))
 }
 
@@ -11566,7 +11566,7 @@ mod process_message_pacing {
     use axum::{Json, Router, extract::State, routing::post};
     use reiclaw_config::multi_agent::{AgentMemoryConfig, MemoryBackendKind};
     use reiclaw_config::schema::{
-        AliasedAgentConfig, ModelProviderConfig, OllamaModelProviderConfig, RiskProfileConfig,
+        AliasedAgentConfig, ModelProviderConfig, OpenAIModelProviderConfig, RiskProfileConfig,
         RuntimeProfileConfig,
     };
     use serde_json::{Value, json};
@@ -11588,28 +11588,24 @@ mod process_message_pacing {
         };
         let message = if round <= script.file_read_rounds {
             json!({
-                "role": "assistant",
-                "content": null,
-                "tool_calls": [{
-                    "id": format!("pacing-read-{round}"),
-                    "type": "function",
-                    "function": {
-                        "name": "file_read",
-                        "arguments": json!({"path": "pacing-fixture.txt"}).to_string(),
-                    },
+                "output": [{
+                    "call_id": format!("pacing-read-{round}"),
+                    "type": "function_call",
+                    "name": "file_read",
+                    "arguments": json!({"path": "pacing-fixture.txt"}).to_string(),
                 }],
             })
         } else {
-            json!({"role": "assistant", "content": "pacing-finished"})
+            json!({"output_text": "pacing-finished"})
         };
-        Json(json!({"choices": [{"message": message}]}))
+        Json(message)
     }
 
     async fn start_provider(app: Router) -> (String, tokio::task::JoinHandle<()>) {
         let listener = tokio::net::TcpListener::bind("127.0.0.1:0")
             .await
             .expect("pacing provider should bind");
-        let uri = format!("http://{}", listener.local_addr().unwrap());
+        let uri = format!("http://{}/v1", listener.local_addr().unwrap());
         let server = reiclaw_log::spawn!(async move {
             axum::serve(listener, app)
                 .await
@@ -11622,9 +11618,9 @@ mod process_message_pacing {
         let (tmp, mut config) = isolated_run_test_config();
         config.memory.backend = "none".into();
         config.reliability.provider_retries = 0;
-        config.providers.models.ollama.insert(
+        config.providers.models.openai.insert(
             "pacing".into(),
-            OllamaModelProviderConfig {
+            OpenAIModelProviderConfig {
                 base: ModelProviderConfig {
                     model: Some("process-message-pacing-model".into()),
                     uri: Some(uri),
@@ -11637,7 +11633,7 @@ mod process_message_pacing {
         config.agents.insert(
             alias.into(),
             AliasedAgentConfig {
-                model_provider: "ollama.pacing".into(),
+                model_provider: "openai.pacing".into(),
                 risk_profile: "pacing".into(),
                 runtime_profile: "pacing".into(),
                 memory: AgentMemoryConfig {
@@ -11681,7 +11677,7 @@ mod process_message_pacing {
                 requests: parking_lot::Mutex::new(Vec::new()),
             });
             let app = Router::new()
-                .route("/v1/chat/completions", post(scripted_response))
+                .route("/v1/responses", post(scripted_response))
                 .with_state(script.clone());
             let (uri, server) = start_provider(app).await;
             let _server = scopeguard::guard(server, |server| server.abort());
@@ -11747,7 +11743,7 @@ mod process_message_pacing {
                 requests: parking_lot::Mutex::new(Vec::new()),
             });
             let app = Router::new()
-                .route("/v1/chat/completions", post(scripted_response))
+                .route("/v1/responses", post(scripted_response))
                 .with_state(script.clone());
             let (uri, server) = start_provider(app).await;
             let _server = scopeguard::guard(server, |server| server.abort());
@@ -11781,18 +11777,19 @@ mod process_message_pacing {
             let requests = script.requests.lock();
             assert_eq!(requests.len(), 5);
             assert!(
-                requests[..4]
-                    .iter()
-                    .all(|request| !request["messages"].to_string().contains(advisory)),
+                requests[..4].iter().all(|request| {
+                    !request["instructions"].to_string().contains(advisory)
+                        && !request["input"].to_string().contains(advisory)
+                }),
                 "the timed advisory requires four completed successful rounds"
             );
             assert!(
-                requests[4]["messages"]
+                requests[4]["input"]
                     .to_string()
                     .contains("pacing fixture output")
             );
             assert_eq!(
-                requests[4]["messages"].to_string().contains(advisory),
+                requests[4]["instructions"].to_string().contains(advisory),
                 expected_advisory,
                 "wrong timed advisory for min_elapsed={minimum_elapsed:?}"
             );
@@ -11808,7 +11805,7 @@ mod process_message_pacing {
     async fn process_message_waits_for_the_configured_step_timeout() {
         let received = Arc::new(Notify::new());
         let app = Router::new()
-            .route("/v1/chat/completions", post(hold_response))
+            .route("/v1/responses", post(hold_response))
             .with_state(received.clone());
         let (uri, server) = start_provider(app).await;
         let _server = scopeguard::guard(server, |server| server.abort());
@@ -11858,7 +11855,7 @@ mod process_message_pacing {
 async fn run_brackets_successful_turn_with_agent_start_and_agent_end() {
     use axum::{Router, routing::post};
     use reiclaw_config::schema::{
-        AliasedAgentConfig, ModelProviderConfig, OllamaModelProviderConfig, RiskProfileConfig,
+        AliasedAgentConfig, ModelProviderConfig, OpenAIModelProviderConfig, RiskProfileConfig,
     };
     use tokio::net::TcpListener;
 
@@ -11868,7 +11865,7 @@ async fn run_brackets_successful_turn_with_agent_start_and_agent_end() {
         .await
         .expect("test listener should bind");
     let addr = listener.local_addr().expect("listener should have address");
-    let app = Router::new().route("/v1/chat/completions", post(respond_with_done));
+    let app = Router::new().route("/v1/responses", post(respond_with_done));
     let server = reiclaw_log::spawn!(async move {
         axum::serve(listener, app)
             .await
@@ -11876,13 +11873,13 @@ async fn run_brackets_successful_turn_with_agent_start_and_agent_end() {
     });
 
     let (_tmp, mut config) = isolated_run_test_config();
-    config.providers.models.ollama.insert(
+    config.providers.models.openai.insert(
         "default".to_string(),
-        OllamaModelProviderConfig {
+        OpenAIModelProviderConfig {
             base: ModelProviderConfig {
                 model: Some("run-lifecycle-success-model".to_string()),
                 timeout_secs: Some(5),
-                uri: Some(format!("http://{addr}")),
+                uri: Some(format!("http://{addr}/v1")),
                 ..Default::default()
             },
         },
@@ -11890,7 +11887,7 @@ async fn run_brackets_successful_turn_with_agent_start_and_agent_end() {
     config.agents.insert(
         "run-lifecycle-success-agent".to_string(),
         AliasedAgentConfig {
-            model_provider: "ollama.default".into(),
+            model_provider: "openai.default".into(),
             risk_profile: "default".into(),
             ..Default::default()
         },
@@ -11947,7 +11944,7 @@ async fn run_brackets_successful_turn_with_agent_start_and_agent_end() {
 #[tokio::test]
 async fn run_still_closes_the_bracket_when_the_model_call_fails() {
     use reiclaw_config::schema::{
-        AliasedAgentConfig, ModelProviderConfig, OllamaModelProviderConfig, RiskProfileConfig,
+        AliasedAgentConfig, ModelProviderConfig, OpenAIModelProviderConfig, RiskProfileConfig,
     };
 
     let _hook_lock = observability::HOOK_TEST_LOCK.lock().await;
@@ -11964,9 +11961,9 @@ async fn run_still_closes_the_bracket_when_the_model_call_fails() {
     };
 
     let (_tmp, mut config) = isolated_run_test_config();
-    config.providers.models.ollama.insert(
+    config.providers.models.openai.insert(
         "default".to_string(),
-        OllamaModelProviderConfig {
+        OpenAIModelProviderConfig {
             base: ModelProviderConfig {
                 model: Some("run-lifecycle-error-model".to_string()),
                 timeout_secs: Some(5),
@@ -11978,7 +11975,7 @@ async fn run_still_closes_the_bracket_when_the_model_call_fails() {
     config.agents.insert(
         "run-lifecycle-error-agent".to_string(),
         AliasedAgentConfig {
-            model_provider: "ollama.default".into(),
+            model_provider: "openai.default".into(),
             risk_profile: "default".into(),
             ..Default::default()
         },
@@ -12045,7 +12042,7 @@ async fn run_still_closes_the_bracket_when_the_model_call_fails() {
 async fn run_rejects_model_switch_tool_call_and_keeps_original_route() {
     use axum::{Json, Router, extract::State, routing::post};
     use reiclaw_config::schema::{
-        AliasedAgentConfig, ModelProviderConfig, OllamaModelProviderConfig, RiskProfileConfig,
+        AliasedAgentConfig, ModelProviderConfig, OpenAIModelProviderConfig, RiskProfileConfig,
     };
     use tokio::net::TcpListener;
 
@@ -12060,23 +12057,11 @@ async fn run_rejects_model_switch_tool_call_and_keeps_original_route() {
         let call = calls.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
         if call == 0 {
             Json(serde_json::json!({
-                "choices": [{
-                    "message": {
-                        "content": null,
-                        "tool_calls": [{
-                            "id": "call-switch-1",
-                            "type": "function",
-                            "function": {
-                                "name": "model_switch",
-                                "arguments": "{\"action\":\"set\",\"model_provider\":\"ollama.switched\",\"model\":\"switched-model\"}"
-                            }
-                        }]
-                    }
-                }]
+                "output": [{ "type": "function_call", "call_id": "call-switch-1", "name": "model_switch", "arguments": "{\"action\":\"set\",\"model_provider\":\"openai.switched\",\"model\":\"switched-model\"}" }]
             }))
         } else {
             Json(serde_json::json!({
-                "choices": [{"message": {"content": "done"}}]
+                "output_text": "done"
             }))
         }
     }
@@ -12087,7 +12072,7 @@ async fn run_rejects_model_switch_tool_call_and_keeps_original_route() {
         .expect("test listener should bind");
     let addr = listener.local_addr().expect("listener should have address");
     let app = Router::new()
-        .route("/v1/chat/completions", post(respond_switch_then_done))
+        .route("/v1/responses", post(respond_switch_then_done))
         .with_state(calls);
     let server = reiclaw_log::spawn!(async move {
         axum::serve(listener, app)
@@ -12097,13 +12082,13 @@ async fn run_rejects_model_switch_tool_call_and_keeps_original_route() {
 
     let (_tmp, mut config) = isolated_run_test_config();
     for alias in ["default", "switched"] {
-        config.providers.models.ollama.insert(
+        config.providers.models.openai.insert(
             alias.to_string(),
-            OllamaModelProviderConfig {
+            OpenAIModelProviderConfig {
                 base: ModelProviderConfig {
                     model: Some(format!("run-lifecycle-switch-{alias}-model")),
                     timeout_secs: Some(5),
-                    uri: Some(format!("http://{addr}")),
+                    uri: Some(format!("http://{addr}/v1")),
                     ..Default::default()
                 },
             },
@@ -12112,7 +12097,7 @@ async fn run_rejects_model_switch_tool_call_and_keeps_original_route() {
     config.agents.insert(
         "run-lifecycle-switch-agent".to_string(),
         AliasedAgentConfig {
-            model_provider: "ollama.default".into(),
+            model_provider: "openai.default".into(),
             risk_profile: "default".into(),
             ..Default::default()
         },
@@ -12205,7 +12190,7 @@ async fn run_rejects_model_switch_tool_call_and_keeps_original_route() {
     assert_eq!(
         end_route,
         (
-            "ollama.default".to_string(),
+            "openai.default".to_string(),
             "run-lifecycle-switch-default-model".to_string()
         ),
         "AgentEnd must stay attributed to the original route — the model \

@@ -450,30 +450,8 @@ fn resolve_provider_ref(
         .map(str::trim)
         .filter(|value| !value.is_empty())
     {
-        Some(uri) => Some(format!("custom:{uri}")),
-        None if matches!(kind, "openai" | "openrouter") => Some(kind.to_string()),
-        None => None,
-    };
-    let Some(concrete_provider) = concrete_provider else {
-        ::reiclaw_log::record!(
-            WARN,
-            ::reiclaw_log::Event::new(module_path!(), ::reiclaw_log::Action::Note)
-                .with_outcome(::reiclaw_log::EventOutcome::Failure)
-                .with_attrs(::serde_json::json!({
-                    "error_key": "memory.embedding_route_no_endpoint",
-                    "provider_ref": reference,
-                    "provider_kind": kind,
-                })),
-            "Embedding provider reference resolved but has no usable embeddings \
-             endpoint (set its `uri`, or point the route at an openai/openrouter \
-             compatible profile); embeddings disabled (keyword-only) for this profile"
-        );
-        return ResolvedEmbeddingConfig {
-            model_provider,
-            model,
-            dimensions,
-            api_key: explicit_api_key.or(inherited_api_key),
-        };
+        Some(uri) => format!("custom:{uri}"),
+        None => kind.to_string(),
     };
 
     ResolvedEmbeddingConfig {

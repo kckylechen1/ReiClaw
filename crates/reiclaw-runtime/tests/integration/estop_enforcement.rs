@@ -471,7 +471,7 @@ async fn frozen_tools_blocks_after_hook_rewrite_before_approval_and_execution() 
 
 #[tokio::test]
 async fn remote_provider_network_kill_blocks_before_http_request() {
-    use reiclaw_providers::compatible::{AuthStyle, OpenAiCompatibleModelProvider};
+    use reiclaw_providers::openai::OpenAiResponsesModelProvider;
 
     let server = wiremock::MockServer::start().await;
     wiremock::Mock::given(wiremock::matchers::any())
@@ -480,11 +480,9 @@ async fn remote_provider_network_kill_blocks_before_http_request() {
         .mount(&server)
         .await;
 
-    let provider = OpenAiCompatibleModelProvider::builder("remote-test")
-        .display_name("remote-test")
-        .base_url(&server.uri())
+    let provider = OpenAiResponsesModelProvider::builder("remote-test")
+        .api_url(&server.uri())
         .credential(Some("sk-test"))
-        .auth_style(AuthStyle::Bearer)
         .build();
 
     let dir = tempfile::tempdir().unwrap();
@@ -621,7 +619,7 @@ async fn remote_provider_network_kill_blocks_before_http_request() {
 
 #[tokio::test]
 async fn remote_provider_midflight_kill_all_aborts_streaming_and_non_streaming() {
-    use reiclaw_providers::compatible::{AuthStyle, OpenAiCompatibleModelProvider};
+    use reiclaw_providers::openai::OpenAiResponsesModelProvider;
 
     for use_streaming in [false, true] {
         let server = wiremock::MockServer::start().await;
@@ -632,11 +630,9 @@ async fn remote_provider_midflight_kill_all_aborts_streaming_and_non_streaming()
             .mount(&server)
             .await;
 
-        let provider = OpenAiCompatibleModelProvider::builder("remote-midflight")
-            .display_name("remote-midflight")
-            .base_url(&server.uri())
+        let provider = OpenAiResponsesModelProvider::builder("remote-midflight")
+            .api_url(&server.uri())
             .credential(Some("sk-test"))
-            .auth_style(AuthStyle::Bearer)
             .build();
 
         let dir = tempfile::tempdir().unwrap();
@@ -800,7 +796,7 @@ fn advisor_registry(uri: &str, security: Arc<SecurityPolicy>) -> Vec<Box<dyn Too
         entry.api_key = Some("test-key".into());
         entry.uri = Some(endpoint.into());
         entry.model = Some(format!("{alias}-model"));
-        entry.wire_api = Some(WireApi::ChatCompletions);
+        entry.wire_api = Some(WireApi::Responses);
     }
     config
         .risk_profiles
@@ -837,11 +833,8 @@ async fn advisor_checks_its_resolved_domain_while_parent_domain_is_allowed() {
         let server = wiremock::MockServer::start().await;
         wiremock::Mock::given(wiremock::matchers::method("POST"))
             .respond_with(wiremock::ResponseTemplate::new(200).set_body_json(json!({
-                "choices": [{"message": {
-                    "role": "assistant",
-                    "content": "{\"summary\":\"advisor completed\"}"
-                }}],
-                "usage": {"prompt_tokens": 10, "completion_tokens": 5}
+                "output_text": "{\"summary\":\"advisor completed\"}",
+                "usage": {"input_tokens": 10, "output_tokens": 5}
             })))
             .mount(&server)
             .await;

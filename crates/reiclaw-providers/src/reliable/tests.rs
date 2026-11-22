@@ -591,7 +591,7 @@ fn auth_error_detects_common_patterns() {
 #[test]
 fn provider_error_diagnostic_identifies_connect_timeout_endpoint() {
     let err = anyhow::Error::msg(
-        "error sending request for url (https://api.deepseek.com/chat/completions): \
+        "error sending request for url (https://router.example/v1/responses): \
          client error (Connect): operation timed out",
     );
 
@@ -601,7 +601,7 @@ fn provider_error_diagnostic_identifies_connect_timeout_endpoint() {
     assert_eq!(diagnostic.phase, "tls_or_connect");
     assert_eq!(
         diagnostic.endpoint.as_deref(),
-        Some("https://api.deepseek.com/chat/completions")
+        Some("https://router.example/v1/responses")
     );
     assert!(diagnostic.hint.contains("VPN"));
 }
@@ -710,7 +710,7 @@ fn failure_summary_includes_provider_diagnostic_fields() {
         kind: "connect_timeout",
         phase: "tls_or_connect",
         hint: "check network, VPN, or firewall",
-        endpoint: Some("https://api.deepseek.com/chat/completions".to_string()),
+        endpoint: Some("https://router.example/v1/responses".to_string()),
     };
     let mut failures = Vec::new();
 
@@ -728,7 +728,7 @@ fn failure_summary_includes_provider_diagnostic_fields() {
     let summary = failures.join("\n");
     assert!(summary.contains("kind=connect_timeout"));
     assert!(summary.contains("phase=tls_or_connect"));
-    assert!(summary.contains("endpoint=https://api.deepseek.com/chat/completions"));
+    assert!(summary.contains("endpoint=https://router.example/v1/responses"));
     assert!(summary.contains("hint=check network, VPN, or firewall"));
 }
 
@@ -934,14 +934,14 @@ async fn model_failover_tries_fallback_model() {
     });
 
     let mut config = reiclaw_config::schema::Config::default();
-    let alias = config.providers.models.ensure("anthropic", "test").unwrap();
+    let alias = config.providers.models.ensure("openai", "test").unwrap();
     alias.model = Some("claude-opus".into());
     alias.fallback_models = vec!["claude-sonnet".into()];
     let mut entries = Vec::new();
     crate::push_pinned_entries(
         &mut entries,
         &config,
-        "anthropic",
+        "openai",
         "test",
         Box::new(Arc::clone(&mock)),
         None,
@@ -1397,7 +1397,7 @@ async fn retryable_rate_limit_cools_down_shared_provider_identity() {
             ),
             ReliableModelProviderEntry::new(
                 "downstream",
-                "anthropic.work",
+                "openai.downstream",
                 Box::new(MockModelProvider {
                     calls: Arc::clone(&downstream_calls),
                     fail_until_attempt: 0,
@@ -1756,14 +1756,14 @@ async fn chat_tries_model_failover_on_failure() {
         vec![
             ReliableModelProviderEntry::new_pinned(
                 "anthropic",
-                "anthropic.test",
+                "openai.test",
                 "test",
                 "claude-opus",
                 Box::new(Arc::clone(&mock)),
             ),
             ReliableModelProviderEntry::new_pinned(
                 "anthropic",
-                "anthropic.test",
+                "openai.test",
                 "test",
                 "claude-sonnet",
                 Box::new(Arc::clone(&mock)),
@@ -2897,7 +2897,7 @@ async fn stream_chat_with_history_skips_cooled_down_provider() {
             ),
             ReliableModelProviderEntry::new(
                 "fallback",
-                "anthropic.work",
+                "openai.fallback",
                 Box::new(StreamingHistoryMock {
                     stream_calls: Arc::clone(&fallback_calls),
                     supports: true,

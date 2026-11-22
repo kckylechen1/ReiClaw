@@ -21,7 +21,7 @@ use reiclaw::config::Config;
 #[test]
 fn security_config_secret_property_readback_masks_api_key() {
     let mut config = Config::default();
-    let path = "providers.models.anthropic.default.api_key";
+    let path = "providers.models.openai.default.api_key";
     let secret = "sk-1234567890abcdef";
 
     assert!(
@@ -31,8 +31,8 @@ fn security_config_secret_property_readback_masks_api_key() {
     config
         .providers
         .models
-        .ensure("anthropic", "default")
-        .expect("openrouter provider entry should be creatable");
+        .ensure("openai", "default")
+        .expect("openai provider entry should be creatable");
     config
         .set_prop(path, secret)
         .expect("secret config property should be settable");

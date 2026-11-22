@@ -3,13 +3,6 @@ use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 
 use super::schema::{
-    AnthropicModelProviderConfig, CustomModelProviderConfig, GeminiModelProviderConfig,
-    GroqModelProviderConfig, LlamacppModelProviderConfig, LmstudioModelProviderConfig,
-    MinimaxModelProviderConfig, ModelProviderConfig, OllamaModelProviderConfig,
-    OpenAIModelProviderConfig, OsaurusModelProviderConfig, OvhModelProviderConfig,
-    QwenModelProviderConfig,
-};
-use super::schema::{
     AssemblyAiTranscriptionProviderConfig, DeepgramTranscriptionProviderConfig,
     GoogleTranscriptionProviderConfig, GroqTranscriptionProviderConfig,
     LocalWhisperTranscriptionProviderConfig, OpenAiTranscriptionProviderConfig,
@@ -18,6 +11,7 @@ use super::schema::{
     EdgeTtsProviderConfig, ElevenLabsTtsProviderConfig, GoogleTtsProviderConfig,
     OpenAITtsProviderConfig, PiperTtsProviderConfig, TtsProviderConfig as TtsBaseConfig,
 };
+use super::schema::{ModelProviderConfig, OpenAIModelProviderConfig};
 
 #[macro_export]
 macro_rules! define_provider_ref {
@@ -134,381 +128,235 @@ define_provider_ref!(CardRef, "cards");
 
 pub const MAX_FALLBACK_DEPTH: usize = 3;
 
-/// A model-provider spelling that no longer has a schema slot or runtime.
-///
-/// URL-preset families collapse into `custom` with an explicit endpoint `uri`;
-/// `replacement_base_urls` carries that family's former default endpoint (the
-/// first entry) plus any regional alternatives. Legacy retirements that never
-/// had a preset leave it empty.
-#[derive(Debug, Clone, Copy)]
-pub struct RetiredModelProvider {
-    pub name: &'static str,
-    pub replacement_base_urls: &'static [&'static str],
-}
-
-const fn retired_legacy(name: &'static str) -> RetiredModelProvider {
-    RetiredModelProvider {
-        name,
-        replacement_base_urls: &[],
-    }
-}
-
-const fn retired_compat(
-    name: &'static str,
-    replacement_base_urls: &'static [&'static str],
-) -> RetiredModelProvider {
-    RetiredModelProvider {
-        name,
-        replacement_base_urls,
-    }
-}
-
-/// Compatibility guard only: these families no longer have a schema or runtime.
-/// Keep the old spellings here so migrations and direct config deserialization
-/// reject them instead of dropping credentials or selecting a different vendor.
-pub const RETIRED_MODEL_PROVIDERS: &[RetiredModelProvider] = &[
-    retired_legacy("bedrock"),
-    retired_legacy("aws-bedrock"),
-    retired_legacy("azure"),
-    retired_legacy("azure_openai"),
-    retired_legacy("azure-openai"),
-    retired_legacy("telnyx"),
-    retired_legacy("gemini_cli"),
-    retired_legacy("gemini-cli"),
-    retired_legacy("kilocli"),
-    retired_legacy("kilo-cli"),
-    retired_legacy("copilot"),
-    retired_legacy("github-copilot"),
-    retired_legacy("openrouter"),
-    // URL-preset families retired in favour of `custom` + explicit endpoint `uri`.
-    // Includes every alias spelling the old factory folded into the family.
-    retired_compat("vercel", &["https://ai-gateway.vercel.sh/v1"]),
-    retired_compat("vercel-ai", &["https://ai-gateway.vercel.sh/v1"]),
-    retired_compat("cloudflare", &["https://gateway.ai.cloudflare.com/v1"]),
-    retired_compat("cloudflare-ai", &["https://gateway.ai.cloudflare.com/v1"]),
-    retired_compat("synthetic", &["https://api.synthetic.new/openai/v1"]),
-    retired_compat("opencode", &["https://opencode.ai/zen/v1"]),
-    retired_compat("opencode-zen", &["https://opencode.ai/zen/v1"]),
-    retired_compat("opencode-go", &["https://opencode.ai/zen/v1"]),
-    retired_compat("doubao", &["https://ark.cn-beijing.volces.com/api/v3"]),
-    retired_compat("volcengine", &["https://ark.cn-beijing.volces.com/api/v3"]),
-    retired_compat("ark", &["https://ark.cn-beijing.volces.com/api/v3"]),
-    retired_compat("doubao-cn", &["https://ark.cn-beijing.volces.com/api/v3"]),
-    retired_compat("mistral", &["https://api.mistral.ai/v1"]),
-    retired_compat("deepseek", &["https://api.deepseek.com"]),
-    retired_compat("together", &["https://api.together.xyz"]),
-    retired_compat("together-ai", &["https://api.together.xyz"]),
-    retired_compat("fireworks", &["https://api.fireworks.ai/inference/v1"]),
-    retired_compat("fireworks-ai", &["https://api.fireworks.ai/inference/v1"]),
-    retired_compat("novita", &["https://api.novita.ai/openai"]),
-    retired_compat("perplexity", &["https://api.perplexity.ai"]),
-    retired_compat("cohere", &["https://api.cohere.com/compatibility"]),
-    retired_compat("sglang", &["http://localhost:30000/v1"]),
-    retired_compat("vllm", &["http://localhost:8000/v1"]),
-    retired_compat("astrai", &["https://as-trai.com/v1"]),
-    retired_compat("siliconflow", &["https://api.siliconflow.com/v1"]),
-    retired_compat("silicon-flow", &["https://api.siliconflow.com/v1"]),
-    retired_compat("aihubmix", &["https://aihubmix.com/v1"]),
-    retired_compat("litellm", &["http://localhost:4000/v1"]),
-    retired_compat("lite-llm", &["http://localhost:4000/v1"]),
-    retired_compat("cerebras", &["https://api.cerebras.ai/v1"]),
-    retired_compat("sambanova", &["https://api.sambanova.ai/v1"]),
-    retired_compat("hyperbolic", &["https://api.hyperbolic.xyz/v1"]),
-    retired_compat("deepinfra", &["https://api.deepinfra.com/v1/openai"]),
-    retired_compat("deep-infra", &["https://api.deepinfra.com/v1/openai"]),
-    retired_compat("huggingface", &["https://router.huggingface.co/v1"]),
-    retired_compat("hf", &["https://router.huggingface.co/v1"]),
-    retired_compat("ai21", &["https://api.ai21.com/studio/v1"]),
-    retired_compat("ai21-labs", &["https://api.ai21.com/studio/v1"]),
-    retired_compat("reka", &["https://api.reka.ai/v1"]),
-    retired_compat("baseten", &["https://inference.baseten.co/v1"]),
-    retired_compat("nscale", &["https://inference.api.nscale.com/v1"]),
-    retired_compat("anyscale", &["https://api.endpoints.anyscale.com/v1"]),
-    retired_compat("nebius", &["https://api.tokenfactory.nebius.com/v1"]),
-    retired_compat("friendli", &["https://api.friendli.ai/serverless/v1"]),
-    retired_compat("friendliai", &["https://api.friendli.ai/serverless/v1"]),
-    retired_compat("lepton", &["https://llama3-1-405b.lepton.run/api/v1"]),
-    retired_compat("lepton-ai", &["https://llama3-1-405b.lepton.run/api/v1"]),
-    retired_compat("manifest", &["https://app.manifest.build/v1"]),
-    retired_compat("morph", &["https://api.morphllm.com/v1"]),
-    retired_compat("github_models", &["https://models.github.ai/inference"]),
-    retired_compat("github-models", &["https://models.github.ai/inference"]),
-    retired_compat("upstage", &["https://api.upstage.ai/v1"]),
-    retired_compat("featherless", &["https://api.featherless.ai/v1"]),
-    retired_compat("arcee", &["https://api.arcee.ai/api/v1"]),
-    retired_compat("lambda_ai", &["https://api.lambda.ai/v1"]),
-    retired_compat("lambda-ai", &["https://api.lambda.ai/v1"]),
-    retired_compat("inception", &["https://api.inceptionlabs.ai/v1"]),
-    retired_compat(
-        "stepfun",
-        &["https://api.stepfun.ai/v1", "https://api.stepfun.com/v1"],
-    ),
-    retired_compat(
-        "step",
-        &["https://api.stepfun.ai/v1", "https://api.stepfun.com/v1"],
-    ),
-    retired_compat(
-        "stepfun-intl",
-        &["https://api.stepfun.ai/v1", "https://api.stepfun.com/v1"],
-    ),
-    retired_compat(
-        "step-intl",
-        &["https://api.stepfun.ai/v1", "https://api.stepfun.com/v1"],
-    ),
-    retired_compat("baichuan", &["https://api.baichuan-ai.com/v1"]),
-    retired_compat("yi", &["https://api.lingyiwanwu.com/v1"]),
-    retired_compat("01ai", &["https://api.lingyiwanwu.com/v1"]),
-    retired_compat("lingyiwanwu", &["https://api.lingyiwanwu.com/v1"]),
-    retired_compat("hunyuan", &["https://api.hunyuan.cloud.tencent.com/v1"]),
-    retired_compat("tencent", &["https://api.hunyuan.cloud.tencent.com/v1"]),
-    retired_compat("avian", &["https://api.avian.io/v1"]),
-    retired_compat("deepmyst", &["https://api.deepmyst.com/v1"]),
-    retired_compat("deep-myst", &["https://api.deepmyst.com/v1"]),
-    retired_compat(
-        "moonshot",
-        &[
-            "https://api.moonshot.ai/v1",
-            "https://api.moonshot.cn/v1",
-            "https://api.kimi.com/coding/v1",
-        ],
-    ),
-    retired_compat(
-        "kimi",
-        &[
-            "https://api.moonshot.ai/v1",
-            "https://api.moonshot.cn/v1",
-            "https://api.kimi.com/coding/v1",
-        ],
-    ),
-    retired_compat(
-        "kimi-cn",
-        &[
-            "https://api.moonshot.ai/v1",
-            "https://api.moonshot.cn/v1",
-            "https://api.kimi.com/coding/v1",
-        ],
-    ),
-    retired_compat(
-        "kimi-intl",
-        &[
-            "https://api.moonshot.ai/v1",
-            "https://api.moonshot.cn/v1",
-            "https://api.kimi.com/coding/v1",
-        ],
-    ),
-    retired_compat(
-        "kimi-global",
-        &[
-            "https://api.moonshot.ai/v1",
-            "https://api.moonshot.cn/v1",
-            "https://api.kimi.com/coding/v1",
-        ],
-    ),
-    retired_compat(
-        "kimi-code",
-        &[
-            "https://api.moonshot.ai/v1",
-            "https://api.moonshot.cn/v1",
-            "https://api.kimi.com/coding/v1",
-        ],
-    ),
-    retired_compat(
-        "kimi_coding",
-        &[
-            "https://api.moonshot.ai/v1",
-            "https://api.moonshot.cn/v1",
-            "https://api.kimi.com/coding/v1",
-        ],
-    ),
-    retired_compat(
-        "kimi_for_coding",
-        &[
-            "https://api.moonshot.ai/v1",
-            "https://api.moonshot.cn/v1",
-            "https://api.kimi.com/coding/v1",
-        ],
-    ),
-    retired_compat(
-        "moonshot-cn",
-        &[
-            "https://api.moonshot.ai/v1",
-            "https://api.moonshot.cn/v1",
-            "https://api.kimi.com/coding/v1",
-        ],
-    ),
-    retired_compat(
-        "moonshot-intl",
-        &[
-            "https://api.moonshot.ai/v1",
-            "https://api.moonshot.cn/v1",
-            "https://api.kimi.com/coding/v1",
-        ],
-    ),
-    retired_compat(
-        "moonshot-global",
-        &[
-            "https://api.moonshot.ai/v1",
-            "https://api.moonshot.cn/v1",
-            "https://api.kimi.com/coding/v1",
-        ],
-    ),
-    retired_compat("venice", &["https://api.venice.ai"]),
-    retired_compat("nearai", &["https://cloud-api.near.ai/v1"]),
-    retired_compat("atomic_chat", &["http://127.0.0.1:1337/v1"]),
-    retired_compat("atomic-chat", &["http://127.0.0.1:1337/v1"]),
-    retired_compat(
-        "zai",
-        &[
-            "https://api.z.ai/api/coding/paas/v4",
-            "https://open.bigmodel.cn/api/coding/paas/v4",
-        ],
-    ),
-    retired_compat(
-        "z.ai",
-        &[
-            "https://api.z.ai/api/coding/paas/v4",
-            "https://open.bigmodel.cn/api/coding/paas/v4",
-        ],
-    ),
-    retired_compat(
-        "zai-global",
-        &[
-            "https://api.z.ai/api/coding/paas/v4",
-            "https://open.bigmodel.cn/api/coding/paas/v4",
-        ],
-    ),
-    retired_compat(
-        "z.ai-global",
-        &[
-            "https://api.z.ai/api/coding/paas/v4",
-            "https://open.bigmodel.cn/api/coding/paas/v4",
-        ],
-    ),
-    retired_compat(
-        "zai-cn",
-        &[
-            "https://api.z.ai/api/coding/paas/v4",
-            "https://open.bigmodel.cn/api/coding/paas/v4",
-        ],
-    ),
-    retired_compat(
-        "z.ai-cn",
-        &[
-            "https://api.z.ai/api/coding/paas/v4",
-            "https://open.bigmodel.cn/api/coding/paas/v4",
-        ],
-    ),
-    retired_compat(
-        "glm",
-        &[
-            "https://api.z.ai/api/paas/v4",
-            "https://open.bigmodel.cn/api/paas/v4",
-        ],
-    ),
-    retired_compat(
-        "zhipu",
-        &[
-            "https://api.z.ai/api/paas/v4",
-            "https://open.bigmodel.cn/api/paas/v4",
-        ],
-    ),
-    retired_compat(
-        "glm-global",
-        &[
-            "https://api.z.ai/api/paas/v4",
-            "https://open.bigmodel.cn/api/paas/v4",
-        ],
-    ),
-    retired_compat(
-        "zhipu-global",
-        &[
-            "https://api.z.ai/api/paas/v4",
-            "https://open.bigmodel.cn/api/paas/v4",
-        ],
-    ),
-    retired_compat(
-        "glm-cn",
-        &[
-            "https://api.z.ai/api/paas/v4",
-            "https://open.bigmodel.cn/api/paas/v4",
-        ],
-    ),
-    retired_compat(
-        "zhipu-cn",
-        &[
-            "https://api.z.ai/api/paas/v4",
-            "https://open.bigmodel.cn/api/paas/v4",
-        ],
-    ),
-    retired_compat(
-        "bigmodel",
-        &[
-            "https://api.z.ai/api/paas/v4",
-            "https://open.bigmodel.cn/api/paas/v4",
-        ],
-    ),
-    retired_compat("nvidia", &["https://integrate.api.nvidia.com/v1"]),
-    retired_compat("nvidia-nim", &["https://integrate.api.nvidia.com/v1"]),
-    retired_compat("build.nvidia.com", &["https://integrate.api.nvidia.com/v1"]),
-    retired_compat("qianfan", &["https://qianfan.baidubce.com/v2"]),
-    retired_compat("baidu", &["https://qianfan.baidubce.com/v2"]),
-    retired_compat("kilo", &["https://api.kilo.ai/api/gateway"]),
-    retired_compat("xai", &["https://api.x.ai/v1"]),
-    retired_compat("grok", &["https://api.x.ai/v1"]),
+/// Old names are recognized for migration diagnostics without creating a provider.
+pub const RETIRED_MODEL_PROVIDERS: &[&str] = &[
+    "01ai",
+    "ai21",
+    "ai21-labs",
+    "aihubmix",
+    "aliyun",
+    "aliyun-bailian",
+    "anthropic",
+    "anthropic-custom",
+    "anyscale",
+    "arcee",
+    "ark",
+    "astrai",
+    "atomic-chat",
+    "atomic_chat",
+    "avian",
+    "aws-bedrock",
+    "azure",
+    "azure-openai",
+    "azure_openai",
+    "baichuan",
+    "baidu",
+    "bailian",
+    "baseten",
+    "bedrock",
+    "bigmodel",
+    "build.nvidia.com",
+    "cerebras",
+    "claude",
+    "claude-code",
+    "cloudflare",
+    "cloudflare-ai",
+    "codex",
+    "cohere",
+    "compatible",
+    "copilot",
+    "custom",
+    "dashscope",
+    "dashscope-cn",
+    "dashscope-international",
+    "dashscope-intl",
+    "dashscope-us",
+    "deep-infra",
+    "deep-myst",
+    "deepinfra",
+    "deepmyst",
+    "deepseek",
+    "doubao",
+    "doubao-cn",
+    "featherless",
+    "fireworks",
+    "fireworks-ai",
+    "friendli",
+    "friendliai",
+    "gemini",
+    "gemini-cli",
+    "gemini_cli",
+    "github-copilot",
+    "github-models",
+    "github_models",
+    "glm",
+    "glm-cn",
+    "glm-global",
+    "google",
+    "google-gemini",
+    "grok",
+    "groq",
+    "hf",
+    "huggingface",
+    "hunyuan",
+    "hyperbolic",
+    "inception",
+    "kilo",
+    "kilo-cli",
+    "kilocli",
+    "kimi",
+    "kimi-cn",
+    "kimi-code",
+    "kimi-global",
+    "kimi-intl",
+    "kimi_coding",
+    "kimi_for_coding",
+    "lambda-ai",
+    "lambda_ai",
+    "lepton",
+    "lepton-ai",
+    "lingyiwanwu",
+    "lite-llm",
+    "litellm",
+    "llama.cpp",
+    "llamacpp",
+    "lm-studio",
+    "lmstudio",
+    "manifest",
+    "minimax",
+    "minimax-cn",
+    "minimax-global",
+    "minimax-intl",
+    "minimax-io",
+    "minimax-oauth",
+    "minimax-oauth-cn",
+    "minimax-oauth-global",
+    "minimax-portal",
+    "minimax-portal-cn",
+    "minimax-portal-global",
+    "minimaxi",
+    "mistral",
+    "moonshot",
+    "moonshot-cn",
+    "moonshot-global",
+    "moonshot-intl",
+    "morph",
+    "nearai",
+    "nebius",
+    "novita",
+    "nscale",
+    "nvidia",
+    "nvidia-nim",
+    "ollama",
+    "ollama-cloud",
+    "openai-codex",
+    "openai-compatible",
+    "openai_codex",
+    "openai_compatible",
+    "opencode",
+    "opencode-go",
+    "opencode-zen",
+    "openrouter",
+    "osaurus",
+    "ovh",
+    "ovhcloud",
+    "perplexity",
+    "qianfan",
+    "qwen",
+    "qwen-cn",
+    "qwen-code",
+    "qwen-international",
+    "qwen-intl",
+    "qwen-oauth",
+    "qwen-us",
+    "qwen_oauth",
+    "reka",
+    "sambanova",
+    "sglang",
+    "silicon-flow",
+    "siliconflow",
+    "step",
+    "step-intl",
+    "stepfun",
+    "stepfun-intl",
+    "synthetic",
+    "telnyx",
+    "tencent",
+    "together",
+    "together-ai",
+    "upstage",
+    "venice",
+    "vercel",
+    "vercel-ai",
+    "vllm",
+    "volcengine",
+    "xai",
+    "yi",
+    "z.ai",
+    "z.ai-cn",
+    "z.ai-global",
+    "zai",
+    "zai-cn",
+    "zai-global",
+    "zhipu",
+    "zhipu-cn",
+    "zhipu-global",
 ];
+
+pub const RESPONSES_MIGRATION: &str = "Configure [providers.models.openai.<alias>] with wire_api = \"responses\" and set base_url to your OpenAI Responses-compatible endpoint. Set that endpoint's api_key explicitly.";
 
 /// A pre-write configuration refusal. Callers must not restore an earlier
 /// snapshot after this error: the guard has not changed the on-disk file.
 #[derive(Debug)]
-pub struct RetiredModelProviderError(&'static RetiredModelProvider);
+pub struct RetiredModelProviderError(&'static str);
 
 impl std::fmt::Display for RetiredModelProviderError {
     fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        let retired = self.0;
-        if let Some((default_url, regional)) = retired.replacement_base_urls.split_first() {
-            write!(
-                formatter,
-                "Model provider `{}` is retired. Use `providers.models.custom.<alias>` with \
-                 `uri = \"{default_url}\"`",
-                retired.name
-            )?;
-            if !regional.is_empty() {
-                let regional = regional
-                    .iter()
-                    .map(|url| format!("\"{url}\""))
-                    .collect::<Vec<_>>()
-                    .join(", ");
-                write!(formatter, " (regional alternatives: {regional})")?;
-            }
-            write!(
-                formatter,
-                " instead; keys, endpoints and options are not migrated, so set them \
-                 explicitly on the custom entry."
-            )
-        } else {
-            write!(
-                formatter,
-                "Model provider `{}` is retired. Remove its configuration and explicitly \
-                 configure a supported provider; credentials and endpoints are not migrated. \
-                 The `gemini` API provider (including Gemini CLI OAuth credentials) remains \
-                 supported.",
-                retired.name
-            )
-        }
+        write!(
+            formatter,
+            "Model provider `{}` is retired. {RESPONSES_MIGRATION}",
+            self.0
+        )
     }
 }
 
 impl std::error::Error for RetiredModelProviderError {}
 
-/// Every retired spelling, for tests and exhaustive guards.
 pub fn retired_model_provider_names() -> impl Iterator<Item = &'static str> {
-    RETIRED_MODEL_PROVIDERS.iter().map(|retired| retired.name)
+    RETIRED_MODEL_PROVIDERS.iter().copied()
 }
 
-pub fn find_retired_model_provider(name: &str) -> Option<&'static RetiredModelProvider> {
-    RETIRED_MODEL_PROVIDERS
-        .iter()
-        .find(|retired| retired.name == name)
+pub fn require_openai_model_provider(name: &str) -> anyhow::Result<()> {
+    reject_retired_model_provider(name)?;
+    anyhow::ensure!(
+        name == "openai",
+        "Unknown model provider or alias. {RESPONSES_MIGRATION}"
+    );
+    Ok(())
+}
+
+pub fn reject_responses_wire_api(wire_api: &str) -> anyhow::Result<()> {
+    anyhow::ensure!(
+        wire_api == "responses",
+        "Unsupported model provider wire_api. {RESPONSES_MIGRATION}"
+    );
+    Ok(())
+}
+
+pub fn reject_retired_openai_auth() -> anyhow::Error {
+    RetiredModelProviderError("openai-codex").into()
+}
+
+pub fn validate_responses_entry(entry: &ModelProviderConfig) -> anyhow::Result<()> {
+    if let Some(kind) = entry
+        .kind
+        .as_deref()
+        .map(str::trim)
+        .filter(|kind| !kind.is_empty())
+    {
+        require_openai_model_provider(kind)?;
+    }
+    Ok(())
 }
 
 pub fn reject_retired_model_provider(name: &str) -> anyhow::Result<()> {
@@ -516,16 +364,52 @@ pub fn reject_retired_model_provider(name: &str) -> anyhow::Result<()> {
     // either: endpoints and alias values can contain private information.
     // Whole-name match plus every separator-delimited prefix: spellings such
     // as `z.ai` contain the alias separator themselves.
-    let candidates = std::iter::once(name).chain(
+    let name = name.trim().to_ascii_lowercase();
+    let candidates = std::iter::once(name.as_str()).chain(
         name.match_indices(['.', ':'])
             .map(|(index, _)| &name[..index]),
     );
     for candidate in candidates {
-        if let Some(retired) = find_retired_model_provider(candidate) {
+        if let Some(retired) = retired_model_provider_names().find(|retired| *retired == candidate)
+        {
             return Err(RetiredModelProviderError(retired).into());
         }
     }
     Ok(())
+}
+
+pub(crate) fn check_model_provider_prop(path: &str, value: &str) -> anyhow::Result<()> {
+    if let Some(suffix) = path
+        .strip_prefix("providers.models.")
+        .or_else(|| path.strip_prefix("model_providers."))
+        .or_else(|| path.strip_prefix("model_provider."))
+    {
+        reject_retired_model_provider(suffix)?;
+        if suffix.starts_with("openai.") {
+            return match suffix.rsplit('.').next() {
+                Some("wire_api") if !value.is_empty() => reject_responses_wire_api(value),
+                Some("requires_openai_auth") => Err(reject_retired_openai_auth()),
+                Some("kind") if !value.trim().is_empty() => {
+                    require_openai_model_provider(value.trim())
+                }
+                _ => Ok(()),
+            };
+        }
+    }
+    match path.rsplit('.').next() {
+        Some(
+            "model_provider"
+            | "vision_model_provider"
+            | "classifier_provider"
+            | "summary_provider"
+            | "default_provider"
+            | "default_model_provider",
+        ) => reject_retired_model_provider(value),
+        Some("advisor") => {
+            reject_retired_model_provider(value.trim().strip_prefix("model:").unwrap_or_default())
+        }
+        _ => Ok(()),
+    }
 }
 
 /// Inspect only provider selectors and family keys, never arbitrary string
@@ -545,6 +429,7 @@ pub fn reject_retired_model_provider_config(value: &toml::Value) -> anyhow::Resu
         check_selector(value.get(key))?;
     }
     for map in [
+        value.get("model_provider"),
         value.get("model_providers"),
         value.get("providers").and_then(|v| v.get("models")),
     ] {
@@ -553,6 +438,20 @@ pub fn reject_retired_model_provider_config(value: &toml::Value) -> anyhow::Resu
                 reject_retired_model_provider(family)?;
                 if let Some(aliases) = entries.as_table() {
                     for alias in aliases.values() {
+                        if let Some(kind) = alias.get("kind").and_then(toml::Value::as_str)
+                            && !kind.trim().is_empty()
+                        {
+                            require_openai_model_provider(kind.trim())?;
+                        }
+                        if let Some(wire) = alias.get("wire_api").and_then(toml::Value::as_str) {
+                            reject_responses_wire_api(wire)?;
+                        }
+                        if alias
+                            .get("requires_openai_auth")
+                            .is_some_and(|value| value.as_bool() != Some(false))
+                        {
+                            return Err(reject_retired_openai_auth());
+                        }
                         if let Some(fallbacks) =
                             alias.get("fallback").and_then(toml::Value::as_array)
                         {
@@ -567,13 +466,57 @@ pub fn reject_retired_model_provider_config(value: &toml::Value) -> anyhow::Resu
     }
     if let Some(providers) = value.get("providers") {
         check_selector(providers.get("default_provider"))?;
+        if let Some(fields) = providers.as_table() {
+            for family in fields.keys() {
+                reject_retired_model_provider(family)?;
+            }
+        }
+    }
+    if let Some(services) = value
+        .get("proxy")
+        .and_then(|proxy| proxy.get("services"))
+        .and_then(toml::Value::as_array)
+    {
+        for family in services
+            .iter()
+            .filter_map(|service| service.as_str()?.trim().strip_prefix("model_provider."))
+        {
+            reject_retired_model_provider(family)?;
+        }
     }
     if let Some(agents) = value.get("agents").and_then(toml::Value::as_table) {
         for agent in agents.values() {
+            check_selector(agent.get("vision_model_provider"))?;
             check_selector(agent.get("provider"))?;
             check_selector(agent.get("model_provider"))?;
             check_selector(agent.get("classifier_provider"))?;
             check_selector(agent.get("summary_provider"))?;
+            if let Some(advisor) = agent.get("advisor").and_then(toml::Value::as_str) {
+                check_model_provider_prop("advisor", advisor)?;
+            }
+        }
+    }
+    if let Some(profiles) = value
+        .get("runtime_profiles")
+        .and_then(toml::Value::as_table)
+    {
+        for profile in profiles.values() {
+            check_selector(
+                profile
+                    .get("context_compression")
+                    .and_then(|value| value.get("summary_provider")),
+            )?;
+        }
+    }
+    if let Some(rates) = value
+        .get("cost")
+        .and_then(|v| v.get("rates"))
+        .and_then(|v| v.get("providers"))
+        .and_then(|v| v.get("models"))
+        .and_then(toml::Value::as_table)
+    {
+        for family in rates.keys() {
+            reject_retired_model_provider(family)?;
         }
     }
     check_selector(
@@ -583,6 +526,7 @@ pub fn reject_retired_model_provider_config(value: &toml::Value) -> anyhow::Resu
     )?;
     for routes in [
         value.get("model_routes"),
+        value.get("embedding_routes"),
         value.get("providers").and_then(|v| v.get("model_routes")),
     ] {
         if let Some(routes) = routes.and_then(toml::Value::as_array) {
@@ -600,17 +544,6 @@ macro_rules! for_each_model_provider_slot {
     ($mac:ident) => {
         $mac! {
             (openai, "openai", OpenAIModelProviderConfig),
-            (anthropic, "anthropic", AnthropicModelProviderConfig),
-            (qwen, "qwen", QwenModelProviderConfig),
-            (minimax, "minimax", MinimaxModelProviderConfig),
-            (ollama, "ollama", OllamaModelProviderConfig),
-            (gemini, "gemini", GeminiModelProviderConfig),
-            (groq, "groq", GroqModelProviderConfig),
-            (ovh, "ovh", OvhModelProviderConfig),
-            (lmstudio, "lmstudio", LmstudioModelProviderConfig),
-            (llamacpp, "llamacpp", LlamacppModelProviderConfig),
-            (osaurus, "osaurus", OsaurusModelProviderConfig),
-            (custom, "custom", CustomModelProviderConfig),
         }
     };
 }
@@ -644,7 +577,11 @@ macro_rules! emit_model_providers_struct {
                 for family in slots.unknown.keys() {
                     reject_retired_model_provider(family).map_err(serde::de::Error::custom)?;
                 }
-                Ok(Self { $( $field: slots.$field, )+ })
+                let providers = Self { $( $field: slots.$field, )+ };
+                for (_, _, entry) in providers.iter_entries() {
+                    validate_responses_entry(entry).map_err(serde::de::Error::custom)?;
+                }
+                Ok(providers)
             }
         }
     };
@@ -685,23 +622,6 @@ impl ModelProviders {
         out.into_iter()
     }
 
-    /// Resolve the family-default endpoint URI for `<family>.<alias>`. Returns
-    /// `None` when the family is single-endpoint, unknown, or the alias is
-    /// missing. Dispatch is generated by `for_each_model_provider_slot!`, so
-    /// adding a family without a `FamilyEndpoint` impl is a compile error.
-    pub fn resolved_endpoint_uri(&self, family: &str, alias: &str) -> Option<&'static str> {
-        use super::schema::FamilyEndpoint;
-        macro_rules! emit_endpoint {
-            ($(($field:ident, $type_str:literal, $cfg_ty:ty)),+ $(,)?) => {
-                match family {
-                    $( $type_str => self.$field.get(alias).and_then(|cfg| cfg.endpoint_uri()), )+
-                    _ => None,
-                }
-            };
-        }
-        for_each_model_provider_slot!(emit_endpoint)
-    }
-
     /// Look up the shared base config for a given `<provider_type>.<alias>`
     /// pair. Returns `None` when the family isn't recognized OR when
     /// the alias doesn't exist in that family's typed slot.
@@ -729,21 +649,9 @@ impl ModelProviders {
             }
             return for_each_model_provider_slot!(emit_dotted);
         }
-        let mut hit: Option<(&'static str, String, &ModelProviderConfig)> = None;
-        macro_rules! emit_bare {
-            ($(($field:ident, $type_str:literal, $cfg_ty:ty)),+ $(,)?) => {
-                $(
-                    if let Some(c) = self.$field.get(name) {
-                        if hit.is_some() {
-                            return None; // ambiguous across kinds
-                        }
-                        hit = Some(($type_str, name.to_string(), &c.base));
-                    }
-                )+
-            };
-        }
-        for_each_model_provider_slot!(emit_bare);
-        hit
+        self.openai
+            .get(name)
+            .map(|entry| ("openai", name.to_string(), &entry.base))
     }
 
     pub fn ensure(&mut self, family: &str, alias: &str) -> Option<&mut ModelProviderConfig> {
@@ -1097,48 +1005,24 @@ mod tests {
     }
 
     #[test]
-    fn retired_compat_families_name_the_custom_replacement_without_echoing_the_alias() {
+    fn retired_spellings_name_the_responses_replacement_without_echoing_the_alias() {
         let mut checked = 0;
-        for retired in RETIRED_MODEL_PROVIDERS
-            .iter()
-            .filter(|retired| !retired.replacement_base_urls.is_empty())
-        {
-            for reference in [
-                retired.name.to_string(),
-                format!("{}.private_alias", retired.name),
-            ] {
+        for retired in retired_model_provider_names() {
+            for reference in [retired.to_string(), format!("{retired}.private_alias")] {
                 let error = reject_retired_model_provider(&reference)
-                    .expect_err("retired compat family must be refused")
+                    .expect_err("retired model provider must be refused")
                     .to_string();
                 assert!(
-                    error.contains(&format!("`{}` is retired", retired.name)),
+                    error.contains(&format!("`{retired}` is retired")),
                     "{reference}: {error}"
                 );
-                assert!(error.contains("providers.models.custom.<alias>"), "{error}");
-                assert!(
-                    error.contains(&format!("uri = \"{}\"", retired.replacement_base_urls[0])),
-                    "{reference}: {error}"
-                );
+                assert!(error.contains("providers.models.openai.<alias>"), "{error}");
+                assert!(error.contains("base_url"), "{error}");
                 assert!(!error.contains("private_alias"), "{error}");
             }
             checked += 1;
         }
-        // 54 compat-preset families, xai, and every alias spelling they folded.
-        assert!(checked >= 55, "only {checked} retired compat spellings");
-    }
-
-    #[test]
-    fn multi_region_retirements_list_every_regional_endpoint() {
-        let error = reject_retired_model_provider("moonshot.home")
-            .unwrap_err()
-            .to_string();
-        for url in [
-            "https://api.moonshot.ai/v1",
-            "https://api.moonshot.cn/v1",
-            "https://api.kimi.com/coding/v1",
-        ] {
-            assert!(error.contains(url), "{error}");
-        }
+        assert!(checked >= 55, "only {checked} retired provider spellings");
     }
 
     #[test]
@@ -1163,7 +1047,7 @@ mod tests {
                 .expect_err(body)
                 .to_string();
             assert!(error.contains("is retired"), "{body}: {error}");
-            assert!(error.contains("providers.models.custom.<alias>"), "{error}");
+            assert!(error.contains("providers.models.openai.<alias>"), "{error}");
             assert!(!error.contains("private-test-key"), "{error}");
         }
     }

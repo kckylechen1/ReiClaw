@@ -663,29 +663,29 @@ bot_token = "t"
         let raw = r#"
 schema_version = 3
 
-[providers.models.ollama.ai]
+[providers.models.openai.ai]
 model = "qwen3:30b"
 
-[providers.models.custom.rag_bot]
+[providers.models.openai.rag_bot]
 uri = "http://localhost:8000/v1"
 model = "m"
 
-[providers.models.custom.broken]
+[providers.models.openai.broken]
 uri = "http://localhost:9000/v1"
 model = "m"
 temperature = "hot"
 "#;
         let load = parse_current_salvaged(raw).unwrap();
-        assert_eq!(load.dropped, vec!["providers.models.custom.broken"]);
+        assert_eq!(load.dropped, vec!["providers.models.openai.broken"]);
         assert!(
-            load.config.providers.models.find("ollama", "ai").is_some(),
-            "valid alias in another family must survive"
+            load.config.providers.models.find("openai", "ai").is_some(),
+            "another valid alias must survive"
         );
         assert!(
             load.config
                 .providers
                 .models
-                .find("custom", "rag_bot")
+                .find("openai", "rag_bot")
                 .is_some(),
             "valid sibling alias must survive"
         );
@@ -693,7 +693,7 @@ temperature = "hot"
             load.config
                 .providers
                 .models
-                .find("custom", "broken")
+                .find("openai", "broken")
                 .is_none(),
             "only the malformed alias is pruned"
         );
@@ -707,9 +707,9 @@ temperature = "hot"
         // rely on the scalar pre-passes; pin that invariant here.
         for raw in [
             "schema_version = 3\nproviders = 3\n",
-            "schema_version = 3\n[[providers.models.ollama]]\nmodel = \"x\"\n",
-            "schema_version = 3\n[providers.models.ollama]\nai = [1, 2]\n",
-            "schema_version = 3\n[providers.models]\nollama = [1]\n",
+            "schema_version = 3\n[[providers.models.openai]]\nmodel = \"x\"\n",
+            "schema_version = 3\n[providers.models.openai]\nai = [1, 2]\n",
+            "schema_version = 3\n[providers.models]\nopenai = [1]\n",
         ] {
             let _ = parse_current_salvaged(raw).unwrap();
         }
@@ -722,22 +722,22 @@ temperature = "hot"
         let raw = r#"
 schema_version = 3
 
-[providers.models]
-ollama = "oops"
+[providers.tts]
+edge = "oops"
 
-[providers.models.custom.rag_bot]
+[providers.models.openai.rag_bot]
 uri = "http://localhost:8000/v1"
 model = "m"
 "#;
         let load = parse_current_salvaged(raw).unwrap();
-        assert_eq!(load.dropped, vec!["providers.models.ollama"]);
+        assert_eq!(load.dropped, vec!["providers.tts.edge"]);
         assert!(
             load.config
                 .providers
                 .models
-                .find("custom", "rag_bot")
+                .find("openai", "rag_bot")
                 .is_some(),
-            "valid alias must survive a scalar sibling family"
+            "valid model alias must survive a malformed TTS family"
         );
     }
 
@@ -954,46 +954,49 @@ enabled = "not-a-bool"
     fn retained_provider_configuration_keeps_auth_and_shared_alias_fields() {
         let raw = r#"
 schema_version = 3
-[providers.models.anthropic.bedrock]
-api_key = "private-anthropic-key"
+[providers.models.openai.bedrock]
+api_key = "private-test-key"
 [providers.models.openai.azure]
 model = "gpt-4o"
-[providers.models.groq.telnyx]
-api_key = "private-openrouter-key"
-[providers.models.gemini.gemini_cli]
-auth_mode = "o_auth"
-oauth_project = "retained-project"
-oauth_client_id = "private-client-id"
-oauth_client_secret = "private-client-secret"
-[providers.models.llamacpp.kilocli]
+[providers.models.openai.telnyx]
+api_key = "private-router-key"
+[providers.models.openai.gemini_cli]
+base_url = "https://router.example.invalid/v1"
+[providers.models.openai.kilocli]
 model = "retained-model"
-[providers.models.lmstudio.kilo_cli]
+[providers.models.openai.kilo_cli]
 model = "anthropic/claude-sonnet-4-6"
-[providers.models.custom.compatible]
-uri = "https://api.example.invalid/v1"
+[providers.models.openai.compatible]
+api_url = "https://api.example.invalid/v1/responses"
+wire_api = "responses"
 "#;
         let config = parse_current(raw).unwrap();
         assert_eq!(config.providers.models.iter_entries().count(), 7);
         assert_eq!(
-            config.providers.models.anthropic["bedrock"]
+            config.providers.models.openai["bedrock"]
                 .base
                 .api_key
                 .as_deref(),
-            Some("private-anthropic-key")
+            Some("private-test-key")
         );
-        let gemini = &config.providers.models.gemini["gemini_cli"];
-        assert_eq!(gemini.auth_mode, Some(crate::schema::AuthMode::OAuth));
-        assert_eq!(gemini.oauth_project.as_deref(), Some("retained-project"));
+        let route = &config.providers.models.openai["compatible"].base;
         assert_eq!(
-            gemini.oauth_client_secret.as_deref(),
-            Some("private-client-secret")
+            route.uri.as_deref(),
+            Some("https://api.example.invalid/v1/responses")
         );
-        let serialized = toml::to_string(&config).unwrap();
-        let reloaded = parse_current(&serialized).unwrap();
+        assert_eq!(route.wire_api, Some(crate::schema::WireApi::Responses));
+        let reloaded = parse_current(&toml::to_string(&config).unwrap()).unwrap();
         assert_eq!(reloaded.providers.models.iter_entries().count(), 7);
         assert_eq!(
-            reloaded.providers.models.gemini["gemini_cli"].oauth_client_secret,
-            gemini.oauth_client_secret
+            reloaded.providers.models.openai["bedrock"].base.api_key,
+            config.providers.models.openai["bedrock"].base.api_key
+        );
+        assert_eq!(
+            reloaded.providers.models.openai["gemini_cli"]
+                .base
+                .uri
+                .as_deref(),
+            Some("https://router.example.invalid/v1")
         );
     }
 

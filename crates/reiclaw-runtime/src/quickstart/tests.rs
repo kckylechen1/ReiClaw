@@ -50,36 +50,11 @@ fn channel_type_options_cover_every_retained_schema_channel() {
 fn provider_runtime_defaults_follow_canonical_provider_recommendations() {
     let snapshot = snapshot_state(&Config::default());
 
-    let local = snapshot
-        .model_provider_types
-        .iter()
-        .find(|provider| provider.kind == "lmstudio")
-        .expect("LM Studio should be present in the canonical provider registry");
-    assert!(local.local);
-    assert_eq!(
-        local.default_runtime_profile.as_deref(),
-        Some("local_small")
-    );
-
-    let ollama = snapshot
-        .model_provider_types
-        .iter()
-        .find(|provider| provider.kind == "ollama")
-        .expect("Ollama should be present in the canonical provider registry");
-    assert!(ollama.local);
-    assert_eq!(
-        ollama.default_runtime_profile.as_deref(),
-        None,
-        "providers without native tools must use the canonical fallback",
-    );
-
-    let remote = snapshot
-        .model_provider_types
-        .iter()
-        .find(|provider| provider.kind == "anthropic")
-        .expect("Anthropic should be present in the canonical provider registry");
-    assert!(!remote.local);
-    assert_eq!(remote.default_runtime_profile, None);
+    assert_eq!(snapshot.model_provider_types.len(), 1);
+    let provider = &snapshot.model_provider_types[0];
+    assert_eq!(provider.kind, "openai");
+    assert!(!provider.local);
+    assert_eq!(provider.default_runtime_profile, None);
     assert_eq!(snapshot.default_runtime_profile, "unbounded");
 
     for provider in &snapshot.model_provider_types {
@@ -99,8 +74,8 @@ fn provider_runtime_defaults_follow_canonical_provider_recommendations() {
 fn fresh_submission(agent_name: &str) -> BuilderSubmission {
     BuilderSubmission {
         model_provider: SelectorChoice::Fresh(ModelProviderChoice {
-            provider_type: "anthropic".into(),
-            alias: "anthropic".into(),
+            provider_type: "openai".into(),
+            alias: "default".into(),
             model: "claude-sonnet-4-5".into(),
             fields: std::collections::HashMap::from([(
                 "api_key".to_string(),
@@ -276,9 +251,9 @@ fn apply_serializes_provider_fields_as_snake_case() {
 fn apply_provider_type_trims_and_canonicalizes_whitespace() {
     // A provider type with stray whitespace must canonicalize to the
     // registry's family key, not reach create_map_key verbatim (which would
-    // fail with "no map-keyed/list section at providers.models.llamacpp ").
+    // fail with "no map-keyed/list section at providers.models.openai ").
     let (cfg, applied, errors) = apply_fresh_provider(ModelProviderChoice {
-        provider_type: "  llamacpp  ".into(),
+        provider_type: "  openai  ".into(),
         alias: "local".into(),
         model: "qwen2.5-coder".into(),
         fields: std::collections::HashMap::new(),
@@ -286,122 +261,24 @@ fn apply_provider_type_trims_and_canonicalizes_whitespace() {
     assert!(errors.is_empty(), "apply_into errors: {errors:?}");
     assert!(applied.is_some());
     assert!(
-        cfg.providers.models.find("llamacpp", "local").is_some(),
-        "expected providers.models.llamacpp.local to exist"
+        cfg.providers.models.find("openai", "local").is_some(),
+        "expected providers.models.openai.local to exist"
     );
     let agent = cfg.agents.get("bot").expect("agent created");
-    assert_eq!(agent.model_provider.as_str(), "llamacpp.local");
+    assert_eq!(agent.model_provider.as_str(), "openai.local");
 }
 
 #[test]
 fn apply_provider_type_case_insensitive() {
     let (cfg, applied, errors) = apply_fresh_provider(ModelProviderChoice {
-        provider_type: "Anthropic".into(),
+        provider_type: "OpenAI".into(),
         alias: "main".into(),
         model: "claude-sonnet-4-5".into(),
         fields: std::collections::HashMap::new(),
     });
     assert!(errors.is_empty(), "apply_into errors: {errors:?}");
     assert!(applied.is_some());
-    assert!(cfg.providers.models.find("anthropic", "main").is_some());
-}
-
-#[test]
-fn apply_claude_alias_writes_canonical_anthropic_config() {
-    let (cfg, applied, errors) = apply_fresh_provider(ModelProviderChoice {
-        provider_type: "claude".into(),
-        alias: "max".into(),
-        model: "claude-sonnet-4-5".into(),
-        fields: std::collections::HashMap::from([
-            ("auth_mode".to_string(), "setup_token".to_string()),
-            ("api_key".to_string(), "sk-ant-oat01-test-token".to_string()),
-        ]),
-    });
-    assert!(errors.is_empty(), "apply_into errors: {errors:?}");
-    assert!(applied.is_some());
-    let entry = cfg
-        .providers
-        .models
-        .find("anthropic", "max")
-        .expect("anthropic.max entry");
-    assert_eq!(entry.model.as_deref(), Some("claude-sonnet-4-5"));
-    assert_eq!(entry.api_key.as_deref(), Some("sk-ant-oat01-test-token"));
-    assert!(
-        cfg.get_prop("providers.models.anthropic.max.auth_mode")
-            .is_err()
-    );
-    let agent = cfg.agents.get("bot").expect("agent created");
-    assert_eq!(agent.model_provider.as_str(), "anthropic.max");
-}
-
-#[test]
-fn apply_openai_codex_alias_writes_canonical_openai_auth_config() {
-    let (cfg, applied, errors) = apply_fresh_provider(ModelProviderChoice {
-        provider_type: "openai-codex".into(),
-        alias: "coding".into(),
-        model: "gpt-5.4".into(),
-        fields: std::collections::HashMap::new(),
-    });
-    assert!(errors.is_empty(), "apply_into errors: {errors:?}");
-    assert!(applied.is_some());
-    let entry = cfg
-        .providers
-        .models
-        .find("openai", "coding")
-        .expect("openai.coding entry");
-    assert_eq!(entry.model.as_deref(), Some("gpt-5.4"));
-    assert_eq!(entry.wire_api, Some(WireApi::Responses));
-    assert!(entry.requires_openai_auth);
-    let agent = cfg.agents.get("bot").expect("agent created");
-    assert_eq!(agent.model_provider.as_str(), "openai.coding");
-}
-
-#[test]
-fn apply_openai_auth_mode_codex_ignores_api_key_field() {
-    let (cfg, applied, errors) = apply_fresh_provider(ModelProviderChoice {
-        provider_type: "openai".into(),
-        alias: "coding".into(),
-        model: "gpt-5.4".into(),
-        fields: std::collections::HashMap::from([
-            ("auth_mode".to_string(), "codex".to_string()),
-            ("api_key".to_string(), "sk-should-not-persist".to_string()),
-        ]),
-    });
-    assert!(errors.is_empty(), "apply_into errors: {errors:?}");
-    assert!(applied.is_some());
-    let entry = cfg
-        .providers
-        .models
-        .find("openai", "coding")
-        .expect("openai.coding entry");
-    assert_eq!(entry.wire_api, Some(WireApi::Responses));
-    assert!(entry.requires_openai_auth);
-    assert!(
-        entry.api_key.is_none(),
-        "Codex auth must not persist an API key from the Quickstart form"
-    );
-}
-
-#[test]
-fn apply_unknown_anthropic_auth_mode_errors_clearly() {
-    let (_, applied, errors) = apply_fresh_provider(ModelProviderChoice {
-        provider_type: "anthropic".into(),
-        alias: "main".into(),
-        model: "claude-sonnet-4-5".into(),
-        fields: std::collections::HashMap::from([(
-            "auth_mode".to_string(),
-            "not_real".to_string(),
-        )]),
-    });
-    assert!(applied.is_none());
-    assert!(
-        errors
-            .iter()
-            .any(|e| e.step == QuickstartStep::ModelProvider
-                && e.field == "auth_mode"
-                && e.message.contains("unknown Anthropic auth mode")),
-        "expected a clear unknown-Anthropic-auth-mode error, got: {errors:?}"
-    );
+    assert!(cfg.providers.models.find("openai", "main").is_some());
 }
 
 #[test]
@@ -417,7 +294,7 @@ fn apply_unknown_provider_type_errors_clearly() {
         errors
             .iter()
             .any(|e| e.step == QuickstartStep::ModelProvider
-                && e.message.contains("unknown model provider type")),
+                && e.message.contains("Unknown model provider or alias")),
         "expected a clear unknown-provider error, got: {errors:?}"
     );
 }
@@ -521,7 +398,10 @@ fn validate_only_accepts_every_builtin_risk_preset() {
 
 #[test]
 fn field_shape_returns_model_provider_rows_for_canonical_types() {
-    for kind in ["anthropic", "openai", "ollama", "groq"] {
+    for kind in reiclaw_config::providers::ModelProviders::slot_names()
+        .iter()
+        .copied()
+    {
         let rows = super::field_shape(super::FieldSection::ModelProvider, kind);
         let keys: Vec<&str> = rows.iter().map(|r| r.key.as_str()).collect();
         assert!(
@@ -535,91 +415,12 @@ fn field_shape_returns_model_provider_rows_for_canonical_types() {
     }
 }
 
-/// Codex subscription auth: `field_shape(ModelProvider, "openai")` exposes
-/// one Quickstart-only auth selector instead of raw config toggles. Apply
-/// translates `auth_mode = "codex"` into the canonical persisted
-/// `wire_api = "responses"` + `requires_openai_auth = true` fields.
-#[test]
-fn field_shape_openai_includes_codex_auth_mode() {
-    let rows = super::field_shape(super::FieldSection::ModelProvider, "openai");
-    let keys: Vec<&str> = rows.iter().map(|r| r.key.as_str()).collect();
-    assert!(
-        keys.contains(&"auth_mode"),
-        "field_shape for openai must include `auth_mode` for Codex subscription; got {keys:?}",
-    );
-    assert!(
-        !keys.contains(&"requires_openai_auth") && !keys.contains(&"wire_api"),
-        "field_shape for openai should hide raw Codex config toggles; got {keys:?}",
-    );
-    let auth = rows
-        .iter()
-        .find(|row| row.key == "auth_mode")
-        .expect("auth_mode row");
-    assert!(auth.required);
-    assert_eq!(
-        auth.enum_variants.as_deref(),
-        Some(["api_key".to_string(), "codex".to_string()].as_slice())
-    );
-    assert_eq!(auth.default.as_deref(), Some("api_key"));
-    // No row may carry the `<unset>` placeholder as its default.
-    // It's a display sentinel for an unset Option; echoing it back
-    // through any surface (CLI/TUI/web) makes the daemon validate
-    // `<unset>` against the field's real type and reject it.
-    for row in &rows {
-        assert_ne!(
-            row.default.as_deref(),
-            Some(reiclaw_config::traits::UNSET_DISPLAY),
-            "`{}` must not default to the <unset> placeholder",
-            row.key
-        );
-    }
-}
-
-#[test]
-fn field_shape_openai_codex_alias_preselects_codex_auth() {
-    let rows = super::field_shape(super::FieldSection::ModelProvider, "openai-codex");
-    let auth = rows
-        .iter()
-        .find(|row| row.key == "auth_mode")
-        .expect("auth_mode row");
-    assert_eq!(auth.default.as_deref(), Some("codex"));
-}
-
-#[test]
-fn field_shape_anthropic_includes_claude_auth_mode() {
-    let rows = super::field_shape(super::FieldSection::ModelProvider, "claude");
-    let keys: Vec<&str> = rows.iter().map(|r| r.key.as_str()).collect();
-    assert!(
-        keys.contains(&"auth_mode"),
-        "field_shape for claude/anthropic must include `auth_mode`; got {keys:?}",
-    );
-    let auth = rows
-        .iter()
-        .find(|row| row.key == "auth_mode")
-        .expect("auth_mode row");
-    assert!(auth.required);
-    assert_eq!(
-        auth.enum_variants.as_deref(),
-        Some(["api_key".to_string(), "setup_token".to_string()].as_slice())
-    );
-    assert_eq!(auth.default.as_deref(), Some("api_key"));
-    let api_key = rows
-        .iter()
-        .find(|row| row.key == "api_key")
-        .expect("api_key row");
-    assert!(
-        api_key.help.contains("claude setup-token"),
-        "Anthropic API key help should mention setup-token flow; got {:?}",
-        api_key.help
-    );
-}
-
-/// `api_key` must be non-required in the Quickstart form so Codex
-/// subscription (no API key) and local providers (Ollama) can proceed
-/// without one.
 #[test]
 fn field_shape_api_key_is_not_required() {
-    for kind in ["openai", "ollama"] {
+    for kind in reiclaw_config::providers::ModelProviders::slot_names()
+        .iter()
+        .copied()
+    {
         let rows = super::field_shape(super::FieldSection::ModelProvider, kind);
         let api_key_row = rows.iter().find(|r| r.key == "api_key");
         assert!(
@@ -628,7 +429,7 @@ fn field_shape_api_key_is_not_required() {
         );
         assert!(
             !api_key_row.unwrap().required,
-            "`api_key` must be non-required for `{kind}` (Codex subscription / local providers don't need one)",
+            "`api_key` must be non-required for `{kind}` (custom endpoints may use another auth scheme)",
         );
     }
 }
@@ -956,9 +757,9 @@ async fn model_catalog_with_config_uses_native_endpoint_when_credentialed() {
         .await;
 
     let mut config = Config::default();
-    config.providers.models.custom.insert(
+    config.providers.models.openai.insert(
         "default".to_string(),
-        reiclaw_config::schema::CustomModelProviderConfig {
+        reiclaw_config::schema::OpenAIModelProviderConfig {
             base: reiclaw_config::schema::ModelProviderConfig {
                 api_key: Some("test-key".to_string()),
                 uri: Some(server.uri()),
@@ -967,7 +768,7 @@ async fn model_catalog_with_config_uses_native_endpoint_when_credentialed() {
         },
     );
 
-    let (models, _pricing, live) = model_catalog_with_config(Some(&config), "custom.default").await;
+    let (models, _pricing, live) = model_catalog_with_config(Some(&config), "openai.default").await;
 
     assert!(live, "credentialed native listing must report live=true");
     assert!(
@@ -993,9 +794,9 @@ async fn model_catalog_with_config_resolves_named_alias_endpoint() {
 
     let mut config = Config::default();
     // Non-default alias name to prove the dotted ref targets it precisely.
-    config.providers.models.custom.insert(
+    config.providers.models.openai.insert(
         "prod".to_string(),
-        reiclaw_config::schema::CustomModelProviderConfig {
+        reiclaw_config::schema::OpenAIModelProviderConfig {
             base: reiclaw_config::schema::ModelProviderConfig {
                 api_key: Some("test-key".to_string()),
                 uri: Some(server.uri()),
@@ -1004,7 +805,7 @@ async fn model_catalog_with_config_resolves_named_alias_endpoint() {
         },
     );
 
-    let (models, _pricing, live) = model_catalog_with_config(Some(&config), "custom.prod").await;
+    let (models, _pricing, live) = model_catalog_with_config(Some(&config), "openai.prod").await;
 
     assert!(live);
     assert!(

@@ -688,7 +688,7 @@ mod fallback_tests {
     use super::*;
     use crate::observability::NoopObserver;
     use reiclaw_config::schema::PacingConfig;
-    use reiclaw_providers::compatible::{AuthStyle, OpenAiCompatibleModelProvider};
+    use reiclaw_providers::openai::OpenAiResponsesModelProvider;
     use wiremock::matchers::method;
     use wiremock::{Mock, MockServer, ResponseTemplate};
 
@@ -716,10 +716,8 @@ mod fallback_tests {
                 .respond_with(ResponseTemplate::new(status).set_body_string("rejected"))
                 .mount(&server)
                 .await;
-            let provider = OpenAiCompatibleModelProvider::builder("auth-test")
-                .display_name("Auth test")
-                .base_url(&server.uri())
-                .auth_style(AuthStyle::Bearer)
+            let provider = OpenAiResponsesModelProvider::builder("auth-test")
+                .api_url(&server.uri())
                 .credential(Some("test-key"))
                 .build();
             let observer = NoopObserver;

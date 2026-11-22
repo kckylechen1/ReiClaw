@@ -166,7 +166,7 @@ async fn dropping_shell_run_kills_its_background_descendant() {
 #[tokio::test]
 async fn scheduler_cancel_and_restart_cannot_resume_the_old_agent() {
     use axum::{Json, Router, extract::State, routing::post};
-    use reiclaw_config::schema::{ModelProviderConfig, OllamaModelProviderConfig};
+    use reiclaw_config::schema::{ModelProviderConfig, OpenAIModelProviderConfig};
     use std::sync::atomic::{AtomicUsize, Ordering};
     use tokio::sync::Notify;
 
@@ -181,17 +181,16 @@ async fn scheduler_cancel_and_restart_cannot_resume_the_old_agent() {
         let message = if first {
             fixture.started.notify_one();
             fixture.release.notified().await;
-            serde_json::json!({"role": "assistant", "content": null, "tool_calls": [{
-                "id": "end-marker", "type": "function", "function": {
+            serde_json::json!({"output": [{
+                "call_id": "end-marker", "type": "function_call",
                     "name": "file_write", "arguments": serde_json::json!({
                         "path": "end-marker.txt", "content": "old agent continued"
                     }).to_string()
-                }
-            }]})
+                }] })
         } else {
-            serde_json::json!({"role": "assistant", "content": "done"})
+            serde_json::json!({"output_text": "done"})
         };
-        Json(serde_json::json!({"choices": [{"message": message}]}))
+        Json(message)
     }
 
     for cancel_old in [false, true] {
@@ -211,24 +210,23 @@ async fn scheduler_cancel_and_restart_cannot_resume_the_old_agent() {
         let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
         let addr = listener.local_addr().unwrap();
         let app = Router::new()
-            .route("/v1/chat/completions", post(chat))
+            .route("/v1/responses", post(chat))
             .with_state(fixture.clone());
         let server = AbortOnDropHandle::new(reiclaw_log::spawn!(async move {
             axum::serve(listener, app).await.unwrap();
         }));
-        config.providers.models.ollama.insert(
+        config.providers.models.openai.insert(
             "lifecycle".into(),
-            OllamaModelProviderConfig {
+            OpenAIModelProviderConfig {
                 base: ModelProviderConfig {
-                    uri: Some(format!("http://{addr}")),
+                    uri: Some(format!("http://{addr}/v1")),
                     model: Some("fixture-model".into()),
-                    native_tools: Some(true),
                     timeout_secs: Some(10),
                     ..Default::default()
                 },
             },
         );
-        config.agents.get_mut(TEST_AGENT).unwrap().model_provider = "ollama.lifecycle".into();
+        config.agents.get_mut(TEST_AGENT).unwrap().model_provider = "openai.lifecycle".into();
         let job = cron::add_agent_job(
             &config,
             TEST_AGENT,

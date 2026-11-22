@@ -166,31 +166,6 @@ fn cli_definition_has_no_flag_conflicts() {
 
 #[test]
 #[cfg(feature = "agent-runtime")]
-fn quickstart_inline_auth_uses_auth_mode_field() {
-    let fields =
-        std::collections::HashMap::from([("auth_mode".to_string(), " codex ".to_string())]);
-    assert_eq!(
-        commands::auth::quickstart_inline_auth("openai", "codex", &fields),
-        Some(commands::auth::InlineProviderAuth::Codex)
-    );
-
-    let fields =
-        std::collections::HashMap::from([("auth_mode".to_string(), "setup_token".to_string())]);
-    assert_eq!(
-        commands::auth::quickstart_inline_auth("anthropic", "max", &fields),
-        Some(commands::auth::InlineProviderAuth::AnthropicSetupToken {
-            alias: "max".to_string()
-        })
-    );
-
-    assert_eq!(
-        commands::auth::quickstart_inline_auth("openai", "api", &fields),
-        None
-    );
-}
-
-#[test]
-#[cfg(feature = "agent-runtime")]
 fn ensure_map_key_materializes_typed_provider_entries() {
     use crate::config::schema::Config;
     for (path, value) in [
@@ -375,9 +350,9 @@ fn soul_check_cli_requires_agent_and_parses_repeatable_targets() {
         "--agent",
         "ops",
         "--target",
-        "anthropic.work",
+        "openai.work",
         "--target",
-        "ollama.local:llama3:8b",
+        "openai.local:llama3:8b",
         "--judge",
         "openai.work:gpt-5",
         "--format",
@@ -394,7 +369,7 @@ fn soul_check_cli_requires_agent_and_parses_repeatable_targets() {
                     ..
                 },
         } => {
-            assert_eq!(targets, ["anthropic.work", "ollama.local:llama3:8b"]);
+            assert_eq!(targets, ["openai.work", "openai.local:llama3:8b"]);
             assert_eq!(judge.as_deref(), Some("openai.work:gpt-5"));
             assert_eq!(format, commands::soul::OutputFormat::Json);
         }
@@ -772,10 +747,10 @@ fn agent_uses_provider_temperature_when_unset() {
 #[cfg(feature = "agent-runtime")]
 fn config_set_materializes_missing_typed_provider_alias() {
     let mut config = Config::default();
-    let path = "providers.models.groq.default.model";
+    let path = "providers.models.openai.default.model";
 
     assert!(
-        config.providers.models.find("groq", "default").is_none(),
+        config.providers.models.find("openai", "default").is_none(),
         "fresh config should not already contain the requested provider alias"
     );
 
@@ -790,7 +765,7 @@ fn config_set_materializes_missing_typed_provider_alias() {
         config
             .providers
             .models
-            .find("groq", "default")
+            .find("openai", "default")
             .and_then(|provider| provider.model.as_deref()),
         Some("groq-test-model")
     );
@@ -798,7 +773,7 @@ fn config_set_materializes_missing_typed_provider_alias() {
     let known_paths: Vec<String> = config.prop_paths();
     let api_key_path = reiclaw_config::helpers::resolve_field_path(
         &known_paths,
-        "providers.models.groq.default.api-key",
+        "providers.models.openai.default.api-key",
     );
     config
         .set_prop_persistent(&api_key_path, "sk-test-placeholder")
@@ -807,7 +782,7 @@ fn config_set_materializes_missing_typed_provider_alias() {
         config
             .providers
             .models
-            .find("groq", "default")
+            .find("openai", "default")
             .and_then(|provider| provider.api_key.as_deref()),
         Some("sk-test-placeholder")
     );
@@ -1219,7 +1194,7 @@ async fn gate_security_posture_fails_closed_unless_allowed() {
 #[tokio::test]
 #[cfg(feature = "agent-runtime")]
 async fn models_set_persists_model_and_preserves_slash_bearing_ids() {
-    use crate::config::schema::{AnthropicModelProviderConfig, Config, ModelProviderConfig};
+    use crate::config::schema::{Config, ModelProviderConfig, OpenAIModelProviderConfig};
 
     let tmp = tempfile::TempDir::new().expect("temp dir");
     let config_path = tmp.path().join("config.toml");
@@ -1227,7 +1202,7 @@ async fn models_set_persists_model_and_preserves_slash_bearing_ids() {
     std::fs::write(
         &config_path,
         format!(
-            "schema_version = {}\n\n[providers.models.anthropic.default]\nmodel = \"claude-opus-4-7\"\n",
+            "schema_version = {}\n\n[providers.models.openai.default]\nmodel = \"claude-opus-4-7\"\n",
             crate::config::current::CURRENT_SCHEMA_VERSION,
         ),
     )
@@ -1239,9 +1214,9 @@ async fn models_set_persists_model_and_preserves_slash_bearing_ids() {
         schema_version: crate::config::current::CURRENT_SCHEMA_VERSION,
         ..Config::default()
     };
-    config.providers.models.anthropic.insert(
+    config.providers.models.openai.insert(
         "default".to_string(),
-        AnthropicModelProviderConfig {
+        OpenAIModelProviderConfig {
             base: ModelProviderConfig {
                 model: Some("claude-opus-4-7".to_string()),
                 ..Default::default()

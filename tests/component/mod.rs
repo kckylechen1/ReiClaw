@@ -6,7 +6,6 @@ mod dockerignore_test;
 #[cfg(feature = "agent-runtime")]
 mod estop_cli;
 mod gateway;
-mod gemini_capabilities;
 mod provider_resolution;
 mod provider_schema;
 mod retired_acp_cli;

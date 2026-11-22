@@ -15,13 +15,14 @@ purge_after_days = 30
 embedding_provider = "none"
 
 [agents.default]
-model_provider = "ollama.default"
+model_provider = "openai.default"
 risk_profile = "default"
 runtime_profile = "default"
 
-[providers.models.ollama.default]
-# Ollama runs on the host; this is an endpoint, not a credential.
-uri = "http://host.docker.internal:11434"
+[providers.models.openai.default]
+# Point this at the Responses-compatible translator running on the host.
+wire_api = "responses"
+base_url = "http://host.docker.internal:8080/v1"
 model = "llama3.2"
 temperature = 0.7
 

@@ -2,7 +2,7 @@ use super::*;
 use axum::response::IntoResponse;
 use reiclaw_api::bridge_intake::{BridgeInput, BridgeReceipt, BridgeResume, BridgeSource};
 use reiclaw_config::schema::{
-    AliasedAgentConfig, CustomModelProviderConfig, ModelProviderConfig, RiskProfileConfig,
+    AliasedAgentConfig, OpenAIModelProviderConfig, ModelProviderConfig, RiskProfileConfig,
     RuntimeProfileConfig,
 };
 use reiclaw_infra::session_backend::{
@@ -489,19 +489,19 @@ async fn mock_lazy_provider(
     axum::Json(request): axum::Json<Value>,
 ) -> impl IntoResponse {
     seen.lock().push(request.clone());
-    let message = json!({"role": "assistant", "content": "lazy response"});
+    let response = json!({"output_text": "lazy response"});
     if request["stream"] == true {
         (
             [("content-type", "text/event-stream")],
             format!(
                 "data: {}\n\ndata: [DONE]\n\n",
-                json!({"id":"local-response","choices":[{"index":0,"delta":message,"finish_reason":"stop"}]})
+                json!({"type":"response.completed","response":response})
             ),
         )
             .into_response()
     } else {
         axum::Json(
-            json!({"id":"local-response","choices":[{"index":0,"message":message,"finish_reason":"stop"}]}),
+            response,
         )
         .into_response()
     }
@@ -551,12 +551,12 @@ async fn spawn_lazy_harness(
     let seen = Arc::new(parking_lot::Mutex::new(Vec::<Value>::new()));
     let provider_listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
     let provider_uri = format!(
-        "http://{}/v1/chat/completions",
+        "http://{}/v1/responses",
         provider_listener.local_addr().unwrap()
     );
     let provider_app = axum::Router::new()
         .route(
-            "/v1/chat/completions",
+            "/v1/responses",
             axum::routing::post(mock_lazy_provider),
         )
         .with_state(Arc::clone(&seen));
@@ -571,13 +571,12 @@ async fn spawn_lazy_harness(
     ));
     {
         let mut config = state.config.write();
-        config.providers.models.custom.insert(
+        config.providers.models.openai.insert(
             "test".into(),
-            CustomModelProviderConfig {
+            OpenAIModelProviderConfig {
                 base: ModelProviderConfig {
                     model: Some("local-lazy-test".into()),
                     uri: Some(provider_uri),
-                    native_tools: Some(true),
                     timeout_secs: Some(5),
                     ..Default::default()
                 },
@@ -600,7 +599,7 @@ async fn spawn_lazy_harness(
             },
         );
         let mut agent = AliasedAgentConfig {
-            model_provider: "custom.test".into(),
+            model_provider: "openai.test".into(),
             risk_profile: "test".into(),
             runtime_profile: "test".into(),
             ..Default::default()
@@ -733,7 +732,7 @@ async fn ws_chat_lazy_history_defers_load_to_cold_attach_on_blocking_pool_and_pr
     {
         let recorded = seen.lock();
         assert_eq!(recorded.len(), 1);
-        let input = recorded[0]["messages"].to_string();
+        let input = recorded[0]["input"].to_string();
         assert!(input.contains("seeded-user-msg-0"));
         assert!(input.contains("seeded-assistant-msg-5"));
         assert!(input.contains("check-seeded"));
@@ -774,7 +773,7 @@ async fn ws_chat_lazy_history_defers_load_to_cold_attach_on_blocking_pool_and_pr
     {
         let recorded = seen.lock();
         assert_eq!(recorded.len(), 2);
-        let post_delete_input = recorded[1]["messages"].to_string();
+        let post_delete_input = recorded[1]["input"].to_string();
         assert!(post_delete_input.contains("fresh-after-delete"));
         assert!(!post_delete_input.contains("seeded-user-msg-0"));
         assert!(!post_delete_input.contains("check-seeded"));

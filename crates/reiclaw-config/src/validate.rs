@@ -104,10 +104,6 @@ pub fn validate_webhook_resolved_ip(addr: IpAddr) -> std::result::Result<(), Str
 }
 
 pub(crate) const SUPPORTED_PROXY_SERVICE_KEYS: &[&str] = &[
-    "model_provider.anthropic",
-    "model_provider.compatible",
-    "model_provider.gemini",
-    "model_provider.ollama",
     "model_provider.openai",
     "channel.dingtalk",
     "channel.qq",
@@ -427,39 +423,6 @@ fn is_valid_env_var_name(name: &str) -> bool {
     chars.all(|ch| ch.is_ascii_alphanumeric() || ch == '_')
 }
 
-fn is_local_ollama_endpoint(api_url: Option<&str>) -> bool {
-    let Some(raw) = api_url.map(str::trim).filter(|value| !value.is_empty()) else {
-        return true;
-    };
-
-    url::Url::parse(raw)
-        .ok()
-        .and_then(|url| url.host_str().map(|host| host.to_ascii_lowercase()))
-        .is_some_and(|host| matches!(host.as_str(), "localhost" | "127.0.0.1" | "::1" | "0.0.0.0"))
-}
-
-fn is_official_ollama_cloud_endpoint(api_url: Option<&str>) -> bool {
-    let Some(raw) = api_url.map(str::trim).filter(|value| !value.is_empty()) else {
-        return false;
-    };
-
-    url::Url::parse(raw)
-        .ok()
-        .and_then(|url| {
-            url.host_str().map(|host| {
-                host.eq_ignore_ascii_case("ollama.com")
-                    || host.eq_ignore_ascii_case("api.ollama.com")
-            })
-        })
-        .unwrap_or(false)
-}
-
-fn has_ollama_cloud_credential(config_api_key: Option<&str>) -> bool {
-    config_api_key
-        .map(str::trim)
-        .is_some_and(|value| !value.is_empty())
-}
-
 impl ProxyConfig {
     pub fn validate(&self) -> Result<()> {
         for (field, value) in [
@@ -473,6 +436,9 @@ impl ProxyConfig {
         }
 
         for selector in self.normalized_services() {
+            if let Some(family) = selector.strip_prefix("model_provider.") {
+                crate::providers::reject_retired_model_provider(family)?;
+            }
             if !is_supported_proxy_service_selector(&selector) {
                 anyhow::bail!(
                     "Unsupported proxy service selector '{selector}'. Use tool `proxy_config` action `list_services` for valid values"
@@ -539,24 +505,7 @@ impl Config {
         self.collect_context_compression_ignored_warnings(&mut warnings);
         self.collect_deprecated_otp_action_gating_warnings(&mut warnings);
         warnings.extend(validate_memory_semantics(&self.memory));
-        // `wire_api` is only honored by bring-your-own-endpoint families; on a
-        // branded family with a fixed wire protocol it is silently ignored.
-        // Surface that so an operator who sets it on, e.g., `mistral` learns it
-        // has no effect instead of debugging unexpected runtime behavior.
-        for (family, alias, entry) in self.providers.models.iter_entries() {
-            if entry.wire_api.is_some() && !crate::provider_aliases::family_honors_wire_api(family)
-            {
-                warnings.push(crate::validation_warnings::ValidationWarning::new(
-                    "wire_api_not_supported_for_family",
-                    format!(
-                        "wire_api is set on `{family}.{alias}` but the `{family}` family has a \
-                         fixed wire protocol and ignores it. wire_api only takes effect on the \
-                         openai, llamacpp, and custom (openai-compatible) families."
-                    ),
-                    format!("providers.models.{family}.{alias}.wire_api"),
-                ));
-            }
-        }
+
         warnings
     }
 
@@ -1676,6 +1625,9 @@ impl Config {
 
         for (type_key, alias_key, profile) in self.providers.models.iter_entries() {
             let profile_name = format!("{type_key}.{alias_key}");
+            crate::providers::validate_responses_entry(profile).map_err(|err| {
+                anyhow::Error::msg(format!("providers.models.{profile_name}: {err}"))
+            })?;
 
             let has_uri = profile
                 .uri
@@ -1770,31 +1722,6 @@ impl Config {
             );
         }
 
-        // Ollama cloud-routing safety checks
-        for (alias, cfg) in &self.providers.models.ollama {
-            let entry = &cfg.base;
-            if !entry
-                .model
-                .as_deref()
-                .is_some_and(|model| model.trim().ends_with(":cloud"))
-            {
-                continue;
-            }
-
-            if is_local_ollama_endpoint(entry.uri.as_deref()) {
-                anyhow::bail!(
-                    "providers.models.ollama.{alias}.model uses ':cloud', but uri is local or unset. Set uri to a remote Ollama endpoint (for example https://ollama.com)."
-                );
-            }
-            if is_official_ollama_cloud_endpoint(entry.uri.as_deref())
-                && !has_ollama_cloud_credential(entry.api_key.as_deref())
-            {
-                anyhow::bail!(
-                    "providers.models.ollama.{alias}.model uses ':cloud', but no API key is configured. Set api_key on [providers.models.ollama.{alias}] (or via the schema-mirror grammar: REI_providers__models__ollama__{alias}__api_key=<value>)."
-                );
-            }
-        }
-
         // MCP
         if self.mcp.enabled {
             validate_mcp_config(&self.mcp)?;
@@ -1861,7 +1788,7 @@ impl Config {
                 validation_bail!(
                     RequiredFieldEmpty,
                     format!("agents.{alias}.model_provider"),
-                    "agents.{alias}.model_provider must reference a configured model model_provider (e.g. \"anthropic.default\")",
+                    "agents.{alias}.model_provider must reference a configured model provider (for example, \"openai.default\")",
                 );
             }
             match mp.split_once('.') {
@@ -1979,6 +1906,9 @@ impl Config {
                 );
             }
             for (section_prefix, field, value) in typed_provider_refs {
+                if *section_prefix == "providers.models" {
+                    crate::providers::reject_retired_model_provider(value)?;
+                }
                 if value.is_empty() {
                     continue;
                 }

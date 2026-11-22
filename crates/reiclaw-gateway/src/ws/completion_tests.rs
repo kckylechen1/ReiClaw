@@ -6,16 +6,16 @@ async fn done_reports_vision_request_route_without_changing_next_turn() {
 
     let requests = Arc::new(parking_lot::Mutex::new(Vec::<serde_json::Value>::new()));
     let captured = Arc::clone(&requests);
-    let app = Router::new().route("/chat/completions", post(move |Json(body): Json<serde_json::Value>| {
+    let app = Router::new().route("/responses", post(move |Json(body): Json<serde_json::Value>| {
         let captured = Arc::clone(&captured);
         async move {
             captured.lock().push(body.clone());
             if body["stream"] == true {
-                let delta = serde_json::json!({"choices":[{"index":0,"delta":{"content":"vision reply"},"finish_reason":null}]});
-                let end = serde_json::json!({"choices":[{"index":0,"delta":{},"finish_reason":"stop"}]});
+                let delta = serde_json::json!({"type":"response.output_text.delta","delta":"vision reply"});
+                let end = serde_json::json!({"type":"response.completed","response":{}});
                 ([("content-type", "text/event-stream")], format!("data: {delta}\n\ndata: {end}\n\ndata: [DONE]\n\n")).into_response()
             } else {
-                Json(serde_json::json!({"choices":[{"message":{"content":"vision reply"},"finish_reason":"stop"}]})).into_response()
+                Json(serde_json::json!({"output_text":"vision reply"})).into_response()
             }
         }
     }));
@@ -28,12 +28,12 @@ async fn done_reports_vision_request_route_without_changing_next_turn() {
         data_dir: chat._tmp.path().to_path_buf(),
         ..Default::default()
     };
-    let entry = config.providers.models.ensure("custom", "vision").unwrap();
+    let entry = config.providers.models.ensure("openai", "vision").unwrap();
     entry.uri = Some(format!("http://{address}"));
     entry.model = Some("vision-model".into());
     entry.api_key = Some("completion-fixture".into());
     entry.vision = Some(true);
-    config.multimodal.vision_model_provider = Some("custom.vision".into());
+    config.multimodal.vision_model_provider = Some("openai.vision".into());
     chat.owner_config = Some(Arc::new(config));
     let mut a = chat.attach().await;
     let mut events = chat.state.event_tx.subscribe();
@@ -49,7 +49,7 @@ async fn done_reports_vision_request_route_without_changing_next_turn() {
         done["provider"], "scripted",
         "configured field stays compatible"
     );
-    assert_eq!(done["provider_ref"], "custom.vision");
+    assert_eq!(done["provider_ref"], "openai.vision");
     assert_eq!(done["model"], "vision-model");
     assert!(
         done["input_tokens"].is_null(),
@@ -64,7 +64,7 @@ async fn done_reports_vision_request_route_without_changing_next_turn() {
             .unwrap();
         if event["type"] == "agent_end" {
             assert_eq!(event["model_provider"], "scripted");
-            assert_eq!(event["provider_ref"], "custom.vision");
+            assert_eq!(event["provider_ref"], "openai.vision");
             assert_eq!(event["model"], "vision-model");
             break;
         }

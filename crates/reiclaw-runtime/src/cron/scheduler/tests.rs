@@ -683,16 +683,15 @@ async fn spawn_hanging_server() -> (
     (addr, accepts)
 }
 
-/// `test_config` with `TEST_AGENT` repointed at a `custom` provider whose
-/// `uri` targets `addr`. `custom` honours `uri` end to end (unlike
-/// `openrouter`), so a hung listener can stand in for a hung HTTP call.
+/// `test_config` with `TEST_AGENT` repointed at an `openai` Responses provider
+/// whose `uri` targets `addr` so a hung listener can stand in for a hung HTTP call.
 async fn test_config_with_hanging_provider(tmp: &TempDir, addr: std::net::SocketAddr) -> Config {
     let mut config = test_config(tmp).await;
-    config.providers.models.custom.insert(
+    config.providers.models.openai.insert(
         TEST_AGENT.to_string(),
-        reiclaw_config::schema::CustomModelProviderConfig {
+        reiclaw_config::schema::OpenAIModelProviderConfig {
             base: reiclaw_config::schema::ModelProviderConfig {
-                uri: Some(format!("http://{addr}")),
+                uri: Some(format!("http://{addr}/v1")),
                 api_key: Some("test-key".to_string()),
                 model: Some("test-model".to_string()),
                 ..Default::default()
@@ -700,7 +699,7 @@ async fn test_config_with_hanging_provider(tmp: &TempDir, addr: std::net::Socket
         },
     );
     config.agents.get_mut(TEST_AGENT).unwrap().model_provider =
-        format!("custom.{TEST_AGENT}").into();
+        format!("openai.{TEST_AGENT}").into();
     config
 }
 
@@ -839,7 +838,7 @@ async fn execute_job_with_retry_does_not_retry_agent_timeout() {
 async fn queued_and_retried_agent_jobs_keep_their_admitted_task_owner() {
     use axum::{Json, Router, extract::State, http::StatusCode, routing::post};
     use parking_lot::Mutex;
-    use reiclaw_config::schema::{ModelProviderConfig, OllamaModelProviderConfig};
+    use reiclaw_config::schema::{ModelProviderConfig, OpenAIModelProviderConfig};
     use reiclaw_infra::session_sqlite::{SqliteSessionBackend, agent_tasks::TaskOp};
     use reiclaw_memory::companion as identity;
 
@@ -854,11 +853,11 @@ async fn queued_and_retried_agent_jobs_keep_their_admitted_task_owner() {
         State(state): State<ProviderState>,
         Json(body): Json<serde_json::Value>,
     ) -> (StatusCode, Json<serde_json::Value>) {
-        let has_result = body["messages"]
+        let has_result = body["input"]
             .as_array()
             .unwrap()
             .iter()
-            .any(|message| message["role"] == "tool");
+            .any(|message| message["type"] == "function_call_output");
         let first_request = {
             let mut requests = state.requests.lock();
             requests.push(body);
@@ -889,20 +888,19 @@ async fn queued_and_retried_agent_jobs_keep_their_admitted_task_owner() {
             }
         }
         let message = if first_request || has_result {
-            serde_json::json!({"role": "assistant", "content": "done"})
+            serde_json::json!({"output_text": "done"})
         } else {
-            serde_json::json!({"role": "assistant", "content": null, "tool_calls": [{
-                "id": "task-write", "type": "function",
-                "function": {"name": "task_list", "arguments": serde_json::json!({
+            serde_json::json!({"output": [{
+                "call_id": "task-write",
+                "type": "function_call",
+                "name": "task_list",
+                "arguments": serde_json::json!({
                     "expected_revision": 1,
                     "ops": [{"op": "add", "description": "must stay with the admitted owner"}]
-                }).to_string()}
+                }).to_string()
             }]})
         };
-        (
-            StatusCode::OK,
-            Json(serde_json::json!({"choices": [{"message": message}]})),
-        )
+        (StatusCode::OK, Json(message))
     }
 
     for (retry, later_poll) in [(false, false), (true, false), (false, true)] {
@@ -935,7 +933,7 @@ async fn queued_and_retried_agent_jobs_keep_their_admitted_task_owner() {
         let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
         let addr = listener.local_addr().unwrap();
         let app = Router::new()
-            .route("/v1/chat/completions", post(chat))
+            .route("/v1/responses", post(chat))
             .with_state(ProviderState {
                 data_dir: config.data_dir.clone(),
                 store_dir: store_dir.clone(),
@@ -945,19 +943,18 @@ async fn queued_and_retried_agent_jobs_keep_their_admitted_task_owner() {
         let server = reiclaw_log::spawn!(async move {
             axum::serve(listener, app).await.unwrap();
         });
-        config.providers.models.ollama.insert(
+        config.providers.models.openai.insert(
             "tasks".into(),
-            OllamaModelProviderConfig {
+            OpenAIModelProviderConfig {
                 base: ModelProviderConfig {
-                    uri: Some(format!("http://{addr}")),
+                    uri: Some(format!("http://{addr}/v1")),
                     model: Some("task-model".into()),
-                    native_tools: Some(true),
                     timeout_secs: Some(5),
                     ..Default::default()
                 },
             },
         );
-        config.agents.get_mut(TEST_AGENT).unwrap().model_provider = "ollama.tasks".into();
+        config.agents.get_mut(TEST_AGENT).unwrap().model_provider = "openai.tasks".into();
         let mut jobs = Vec::new();
         for index in 0..if retry || later_poll { 1 } else { 2 } {
             jobs.push(
