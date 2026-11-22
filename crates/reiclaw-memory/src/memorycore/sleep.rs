@@ -12,7 +12,7 @@ use crate::sleep_records::{
     DailyDigest, EpisodeRecord, EpisodeSourceKind, PinnedDigest, validate_agent_id,
     validate_non_soul_key, validate_non_soul_namespace,
 };
-use crate::traits::{MemoryCategory, StoreOptions};
+use crate::traits::{DailyDigestCasResult, MemoryCategory, StoreOptions};
 use anyhow::{Context, bail, ensure};
 use portable_kernel::MemoryStore;
 use portable_kernel::store::scoped_read::{MetadataTextFilter, RecentMemoryQuery, TextMembership};
@@ -186,10 +186,14 @@ impl MemoryCore {
         if kind.current(store, from, slot)?.is_none()
             && let Some(existing) = kind.current(store, to, slot)?
         {
-            ensure!(
-                kind.verified_payload(existing)? == payload,
-                "destination sleep record already exists"
-            );
+            let existing_payload = kind.verified_payload(existing)?;
+            let same = if kind == SleepKind::Daily {
+                serde_json::from_value::<DailyDigest>(existing_payload)?
+                    == serde_json::from_value::<DailyDigest>(payload.clone())?
+            } else {
+                existing_payload == payload
+            };
+            ensure!(same, "destination sleep record already exists");
         }
         row.text = serde_json::to_string(&payload)?.replace('<', "\\u003c");
         Ok(())
@@ -763,6 +767,70 @@ impl MemoryCore {
             serde_json::to_value(digest)?,
         )
         .await
+    }
+
+    pub async fn publish_daily_digest_cas(
+        &self,
+        digest: &DailyDigest,
+        expected_revision: u64,
+    ) -> anyhow::Result<DailyDigestCasResult> {
+        digest.validate()?;
+        let expected_next = expected_revision
+            .checked_add(1)
+            .context("daily digest revision overflow")?;
+        ensure!(
+            digest.revision == expected_next,
+            "CAS daily digest revision ({}) must equal expected_revision + 1 ({expected_next})",
+            digest.revision
+        );
+        let digest = digest.clone();
+        let handle = self.store.clone();
+        let db_path = self.db_path.clone();
+        tokio::task::spawn_blocking(move || -> anyhow::Result<DailyDigestCasResult> {
+            let mut store = handle.lock();
+            let _guard = sleep_typed::write_guard(&db_path)?;
+            let predecessor = if let Some(record) =
+                SleepKind::Daily.current(&store, &digest.agent_id, &digest.day_key)?
+            {
+                let current: DailyDigest =
+                    serde_json::from_value(SleepKind::Daily.verified_payload(record.clone())?)?;
+                if current.revision != expected_revision {
+                    return Ok(DailyDigestCasResult::RevisionConflict {
+                        current_revision: current.revision,
+                    });
+                }
+                Some(record.id)
+            } else if let Some(legacy) = Self::legacy_sleep_slot(
+                &store,
+                SleepKind::Daily,
+                &digest.agent_id,
+                &digest.day_key,
+            )? && !legacy.archived
+                && !Self::is_soft_superseded(&legacy)
+            {
+                let current: DailyDigest =
+                    serde_json::from_str(&legacy.text).with_context(|| {
+                        format!("failed to parse legacy DailyDigest '{}'", legacy.id)
+                    })?;
+                ensure!(
+                    current.agent_id == digest.agent_id && current.day_key == digest.day_key,
+                    "legacy DailyDigest slot metadata disagrees with payload"
+                );
+                current.validate()?;
+                if current.revision != expected_revision {
+                    return Ok(DailyDigestCasResult::RevisionConflict {
+                        current_revision: current.revision,
+                    });
+                }
+                None
+            } else {
+                return Ok(DailyDigestCasResult::NotFound);
+            };
+            let payload = serde_json::to_value(&digest)?;
+            let id = SleepKind::Daily.append(&mut store, payload, predecessor.as_deref())?;
+            Ok(DailyDigestCasResult::Updated(id))
+        })
+        .await?
     }
 
     pub async fn load_daily_digests(
@@ -1442,6 +1510,8 @@ mod tests {
             created_at: "2026-11-18T04:00:00Z".to_string(),
             owner_edited: false,
             action_decisions: std::collections::BTreeMap::new(),
+            revision: 1,
+            candidate_items: vec![],
         };
         assert!(mem.publish_daily_digest(&soul_daily).await.is_err());
         assert!(
@@ -1671,6 +1741,8 @@ mod tests {
             created_at: "2026-11-17T04:01:00Z".to_string(),
             owner_edited: false,
             action_decisions: std::collections::BTreeMap::new(),
+            revision: 1,
+            candidate_items: vec![],
         };
         let d2 = DailyDigest {
             day_key: "2026-11-18".to_string(),
@@ -1686,6 +1758,8 @@ mod tests {
             created_at: "2026-11-18T04:01:00Z".to_string(),
             owner_edited: false,
             action_decisions: std::collections::BTreeMap::new(),
+            revision: 1,
+            candidate_items: vec![],
         };
         let other = DailyDigest {
             day_key: "2026-11-18".to_string(),
@@ -1701,6 +1775,8 @@ mod tests {
             created_at: "2026-11-18T04:02:00Z".to_string(),
             owner_edited: false,
             action_decisions: std::collections::BTreeMap::new(),
+            revision: 1,
+            candidate_items: vec![],
         };
 
         legacy_row(
@@ -2037,5 +2113,174 @@ mod tests {
             .unwrap(),
             0
         );
+    }
+
+    #[tokio::test]
+    async fn daily_digest_cas_checks_revision_not_found_conflict_and_legacy_row() {
+        let (_tmp, mem) = temp_memory();
+        let mut digest = DailyDigest {
+            day_key: "2026-11-18".into(),
+            agent_id: "agent_a".into(),
+            window_start: "2026-11-17T04:00:00Z".into(),
+            window_end: "2026-11-18T04:00:00Z".into(),
+            narrative: "legacy daily".into(),
+            settled_decisions: vec![],
+            why_and_tradeoffs: vec![],
+            latent_insights: vec![],
+            action_candidates: vec!["run backup".into()],
+            entities: vec![],
+            created_at: "2026-11-18T04:01:00Z".into(),
+            owner_edited: false,
+            action_decisions: std::collections::BTreeMap::new(),
+            revision: 1,
+            candidate_items: vec![],
+        };
+
+        let mut rev2 = digest.clone();
+        rev2.revision = 2;
+        assert_eq!(
+            mem.publish_daily_digest_cas(&rev2, 1).await.unwrap(),
+            DailyDigestCasResult::NotFound
+        );
+
+        legacy_row(
+            &mem,
+            "agent_a",
+            SLEEP_DAILY_DIGEST_NAMESPACE,
+            "2026-11-18",
+            None,
+            &digest,
+            &digest.created_at,
+        )
+        .await;
+
+        let mut stale = digest.clone();
+        stale.revision = 3;
+        assert_eq!(
+            mem.publish_daily_digest_cas(&stale, 2).await.unwrap(),
+            DailyDigestCasResult::RevisionConflict {
+                current_revision: 1
+            }
+        );
+
+        rev2.ensure_candidate_items();
+        rev2.owner_edited = true;
+        assert!(matches!(
+            mem.publish_daily_digest_cas(&rev2, 1).await.unwrap(),
+            DailyDigestCasResult::Updated(_)
+        ));
+        let loaded = mem.load_daily_digests("agent_a", 5).await.unwrap();
+        assert_eq!(loaded, vec![rev2.clone()]);
+
+        // Stale revision 1 now conflicts against stored revision 2.
+        assert_eq!(
+            mem.publish_daily_digest_cas(&rev2, 1).await.unwrap(),
+            DailyDigestCasResult::RevisionConflict {
+                current_revision: 2
+            }
+        );
+
+        digest = rev2;
+        digest.revision = 3;
+        digest.narrative = "rev 3 narrative".into();
+        assert!(matches!(
+            mem.publish_daily_digest_cas(&digest, 2).await.unwrap(),
+            DailyDigestCasResult::Updated(_)
+        ));
+        let reloaded = mem.load_daily_digests("agent_a", 5).await.unwrap();
+        assert_eq!(reloaded, vec![digest]);
+    }
+
+    #[tokio::test]
+    async fn daily_digest_v1_typed_record_reads_and_upgrades_to_v2_on_cas() {
+        let (tmp, mem) = temp_memory();
+        let v1_id = {
+            let mut store = mem.store.lock();
+            let writer = portable_kernel::RecordWriter::from_host_config(
+                "reiclaw-sleep",
+                crate::memorycore::KernelStoreKind::Memory.role(),
+                vec![portable_kernel::RecordKindId {
+                    name: "reiclaw.daily_digest".into(),
+                    version: 1,
+                }],
+            )
+            .unwrap();
+            let input = portable_kernel::TypedRecordInput {
+                id: uuid::Uuid::new_v4().to_string(),
+                kind: portable_kernel::RecordKindId {
+                    name: "reiclaw.daily_digest".into(),
+                    version: 1,
+                },
+                keys: serde_json::json!({
+                    "agent_id": "agent_a",
+                    "day_key": "2026-11-18",
+                    "created_at": "2026-11-18T04:01:00Z"
+                }),
+                payload: serde_json::json!({
+                    "agent_id": "agent_a",
+                    "day_key": "2026-11-18",
+                    "window_start": "2026-11-17T04:00:00Z",
+                    "window_end": "2026-11-18T04:00:00Z",
+                    "narrative": "Typed v1 daily digest",
+                    "created_at": "2026-11-18T04:01:00Z",
+                    "settled_decisions": [],
+                    "why_and_tradeoffs": [],
+                    "latent_insights": [],
+                    "action_candidates": ["check logs"],
+                    "entities": [],
+                    "owner_edited": false,
+                    "action_decisions": {}
+                }),
+                links: vec![],
+            };
+            store
+                .append_typed_record(&writer, &input, None)
+                .unwrap()
+                .record
+                .id
+        };
+        drop(mem);
+
+        // Reopening MemoryCore against an existing DB holding @1 records must succeed cleanly.
+        let mem = MemoryCore::new("memorycore", tmp.path()).unwrap();
+        let loaded = mem.load_daily_digests("agent_a", 5).await.unwrap();
+        assert_eq!(loaded.len(), 1);
+        assert_eq!(loaded[0].revision, 1);
+        assert!(loaded[0].candidate_items.is_empty());
+
+        let mut next = loaded[0].clone();
+        next.ensure_candidate_items();
+        next.revision = 2;
+        next.owner_edited = true;
+        let v2_id = match mem.publish_daily_digest_cas(&next, 1).await.unwrap() {
+            DailyDigestCasResult::Updated(id) => id,
+            other => panic!("expected Updated, got {other:?}"),
+        };
+        assert_ne!(v1_id, v2_id);
+
+        let after = mem.load_daily_digests("agent_a", 5).await.unwrap();
+        assert_eq!(after, vec![next]);
+        let store = mem.store.lock();
+        let active_v1 = store
+            .list_typed_records(&portable_kernel::TypedRecordQuery {
+                kind: Some(portable_kernel::RecordKindId {
+                    name: "reiclaw.daily_digest".into(),
+                    version: 1,
+                }),
+                ..Default::default()
+            })
+            .unwrap();
+        assert!(active_v1.is_empty(), "v1 record must be superseded");
+        let active_v2 = store
+            .list_typed_records(&portable_kernel::TypedRecordQuery {
+                kind: Some(portable_kernel::RecordKindId {
+                    name: "reiclaw.daily_digest".into(),
+                    version: 2,
+                }),
+                ..Default::default()
+            })
+            .unwrap();
+        assert_eq!(active_v2.len(), 1);
+        assert_eq!(active_v2[0].id, v2_id);
     }
 }

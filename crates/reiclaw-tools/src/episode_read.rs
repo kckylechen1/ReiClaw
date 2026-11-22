@@ -476,6 +476,8 @@ mod tests {
                 created_at: "2026-11-18T23:59:59Z".into(),
                 owner_edited: false,
                 action_decisions: BTreeMap::new(),
+                revision: 1,
+                candidate_items: vec![],
             }],
         });
 

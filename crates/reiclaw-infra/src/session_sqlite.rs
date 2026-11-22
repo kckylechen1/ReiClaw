@@ -18,8 +18,9 @@ mod delegation_origin;
 #[cfg(test)]
 mod delegation_origin_tests;
 pub use delegation::{
-    DispatchBindingRow, ProxyContinuationAdmission, ProxyContinuationReservation,
-    ProxyContinuationState,
+    CandidateDispatchClaim, CandidateDispatchClaimInput, CandidateDispatchRecord,
+    CandidateDispatchState, DispatchBindingRow, ProxyContinuationAdmission,
+    ProxyContinuationReservation, ProxyContinuationState,
 };
 pub use delegation_origin::DelegationSessionFacts;
 mod jsonl_import;
@@ -103,8 +104,7 @@ impl SqliteSessionBackend {
         std::fs::create_dir_all(&sessions_dir).context("Failed to create sessions directory")?;
         let db_path = Self::database_path(workspace_dir);
 
-        let mut conn = Connection::open(&db_path)
-            .with_context(|| format!("Failed to open session DB: {}", db_path.display()))?;
+        let mut conn = Self::open_with_retry(&db_path)?;
         conn.busy_timeout(OPEN_BUSY_TIMEOUT)
             .context("Failed to set the session DB busy timeout")?;
 
@@ -300,6 +300,33 @@ impl SqliteSessionBackend {
         Ok(Self {
             conn: Mutex::new(conn),
         })
+    }
+
+    /// Open a connection, retrying when a concurrent opener holds an
+    /// initialization lock during `sqlite3_open` (e.g. `sqlite3_auto_extension`
+    /// before `busy_timeout` can be installed on the new handle).
+    fn open_with_retry(db_path: &Path) -> Result<Connection> {
+        let deadline = std::time::Instant::now() + OPEN_BUSY_TIMEOUT;
+        let mut pause = std::time::Duration::from_millis(5);
+        loop {
+            match Connection::open(db_path) {
+                Ok(conn) => return Ok(conn),
+                Err(rusqlite::Error::SqliteFailure(error, _))
+                    if matches!(
+                        error.code,
+                        rusqlite::ErrorCode::DatabaseBusy | rusqlite::ErrorCode::DatabaseLocked
+                    ) && std::time::Instant::now() < deadline =>
+                {
+                    std::thread::sleep(pause);
+                    pause = (pause * 2).min(std::time::Duration::from_millis(100));
+                }
+                Err(error) => {
+                    return Err(error).with_context(|| {
+                        format!("Failed to open session DB: {}", db_path.display())
+                    });
+                }
+            }
+        }
     }
 
     /// Switch the database to WAL, retrying while another connection holds it.

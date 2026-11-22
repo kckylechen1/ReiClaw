@@ -81,7 +81,10 @@ fn router(state: AppState) -> Router {
             "/api/node-identities/{id}",
             delete(api_node_identity::revoke_identity),
         );
-    router.with_state(state)
+    router
+        .clone()
+        .with_state(state.clone())
+        .merge(crate::api_review::dispatch_routes(state))
 }
 
 fn operations() -> Vec<(Method, &'static str)> {
@@ -91,6 +94,10 @@ fn operations() -> Vec<(Method, &'static str)> {
         (
             Method::POST,
             "/api/review/action-candidates/missing/2026-01-01/resolve",
+        ),
+        (
+            Method::POST,
+            "/api/review/action-candidates/missing/2026-01-01/dispatch",
         ),
         (Method::GET, "/api/attention/missing"),
         (Method::GET, "/api/attention/missing/missing"),

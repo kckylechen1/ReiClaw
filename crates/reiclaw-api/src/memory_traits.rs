@@ -2,8 +2,9 @@ use async_trait::async_trait;
 use serde::{Deserialize, Serialize};
 
 pub use crate::sleep_records::{
-    ActionCandidateStatus, DailyDigest, EpisodeRecord, EpisodeSourceKind, PINNED_DIGEST_MAX_BYTES,
-    PinnedDigest, validate_agent_id, validate_non_soul_key, validate_non_soul_namespace,
+    ActionCandidateItem, ActionCandidateStatus, DailyDigest, EpisodeRecord, EpisodeSourceKind,
+    PINNED_DIGEST_MAX_BYTES, PinnedDigest, validate_agent_id, validate_candidate_id,
+    validate_non_soul_key, validate_non_soul_namespace,
 };
 
 /// Host-resolved, ephemeral read authority for one tool-loop turn.
@@ -33,6 +34,17 @@ pub struct ExportFilter {
     pub since: Option<String>,
     /// RFC 3339 upper bound (inclusive) on created_at.
     pub until: Option<String>,
+}
+
+/// Result of an optimistic compare-and-set publish on [`DailyDigest`].
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum DailyDigestCasResult {
+    /// Digest updated atomically; carries the committed typed-record ID.
+    Updated(String),
+    /// Stored active revision did not match `expected_revision`.
+    RevisionConflict { current_revision: u64 },
+    /// No existing active digest was found for `(agent_id, day_key)`.
+    NotFound,
 }
 
 /// A single memory entry
@@ -787,6 +799,21 @@ pub trait Memory: Send + Sync + crate::attribution::Attributable {
         )
     }
 
+    /// Compare-and-set publish/update of an existing agent-scoped [`DailyDigest`]
+    /// using optimistic [`DailyDigest::revision`] matching.
+    ///
+    /// Default fails closed.
+    async fn publish_daily_digest_cas(
+        &self,
+        _digest: &DailyDigest,
+        _expected_revision: u64,
+    ) -> anyhow::Result<DailyDigestCasResult> {
+        anyhow::bail!(
+            "sleep memory CAS writes unsupported by backend '{}'",
+            self.name()
+        )
+    }
+
     /// Load agent-scoped [`DailyDigest`]s, ordered newest first, bounded by `limit`.
     ///
     /// Default returns an empty list.
@@ -1236,6 +1263,8 @@ mod tests {
             created_at: "2026-11-18T04:01:00Z".into(),
             owner_edited: false,
             action_decisions: std::collections::BTreeMap::new(),
+            revision: 1,
+            candidate_items: vec![],
         };
         let err = memory.publish_daily_digest(&daily).await.unwrap_err();
         assert!(

@@ -8,7 +8,7 @@ use anyhow::{Context, Result, bail, ensure};
 use reiclaw_api::delegation_request::{
     DelegationOrigin, DelegationRequestBinding, DelegationRequestClaim,
 };
-use rusqlite::{Connection, TransactionBehavior, params};
+use rusqlite::{Connection, OptionalExtension, TransactionBehavior, params};
 
 // Existing scoped rows stay untouched. Schema discovery and migration share
 // the write lock so independently opened handles cannot race the ALTER.
@@ -105,6 +105,27 @@ pub(super) fn migrate_route_provenance(conn: &mut Connection) -> Result<()> {
         "CREATE INDEX IF NOT EXISTS idx_session_delegations_dispatch ON session_delegations(dispatch_id)",
         [],
     ).context("indexing canonical delegation dispatch lookup")?;
+    tx.execute_batch(
+        "CREATE TABLE IF NOT EXISTS daily_digest_candidate_dispatches (
+            agent_alias     TEXT NOT NULL,
+            day_key         TEXT NOT NULL,
+            candidate_id    TEXT NOT NULL,
+            source_revision INTEGER NOT NULL,
+            request_id      TEXT NOT NULL,
+            harness         TEXT NOT NULL,
+            route_digest    TEXT NOT NULL,
+            payload_digest  TEXT NOT NULL,
+            state           TEXT NOT NULL,
+            dispatch_id     TEXT,
+            created_at      TEXT NOT NULL,
+            updated_at      TEXT NOT NULL,
+            PRIMARY KEY (agent_alias, day_key, candidate_id),
+            UNIQUE (agent_alias, request_id)
+        );
+        CREATE INDEX IF NOT EXISTS idx_candidate_dispatches_agent_day
+            ON daily_digest_candidate_dispatches(agent_alias, day_key);",
+    )
+    .context("initializing daily digest candidate dispatch table")?;
     super::delegation_origin::migrate(&tx)?;
     tx.commit()
         .context("committing delegation route provenance schema")
@@ -953,6 +974,505 @@ impl SqliteSessionBackend {
         find_binding(&self.conn.lock(), agent_alias, request_id)
             .context("reading a delegation request binding")
     }
+
+    /// Atomically claim `(agent_alias, day_key, candidate_id)` before sending
+    /// any Tachi start request for a `DailyDigest` action candidate.
+    pub fn claim_candidate_dispatch(
+        &self,
+        input: &CandidateDispatchClaimInput,
+        allow_create: bool,
+    ) -> Result<CandidateDispatchClaim> {
+        validate_claim_input(input)?;
+        let rev_i64 = i64::try_from(input.source_revision)
+            .context("candidate dispatch source_revision overflow")?;
+        let mut conn = self.conn.lock();
+        let tx = conn.transaction_with_behavior(TransactionBehavior::Immediate)?;
+
+        let existing =
+            find_candidate_dispatch(&tx, &input.agent_alias, &input.day_key, &input.candidate_id)?;
+        let claim = if let Some(mut existing) = existing {
+            let mut healed = false;
+            if existing.state != CandidateDispatchState::Bound
+                && existing.dispatch_id.is_none()
+                && let Some(binding) =
+                    find_binding(&tx, &existing.agent_alias, &existing.request_id)?
+                && let Some(dispatch_id) = binding.dispatch_id
+                && binding.route_digest.as_deref() == Some(existing.route_digest.as_str())
+            {
+                let now = reiclaw_api::time::format_rfc3339(jiff::Timestamp::now());
+                let updated = tx
+                    .execute(
+                        "UPDATE daily_digest_candidate_dispatches
+                         SET state = ?5, dispatch_id = ?6, updated_at = ?7
+                         WHERE agent_alias = ?1 AND day_key = ?2 AND candidate_id = ?3
+                           AND request_id = ?4 AND dispatch_id IS NULL",
+                        params![
+                            existing.agent_alias,
+                            existing.day_key,
+                            existing.candidate_id,
+                            existing.request_id,
+                            CandidateDispatchState::Bound.as_str(),
+                            dispatch_id,
+                            now,
+                        ],
+                    )
+                    .context("self-healing candidate dispatch binding from session_delegations")?;
+                if updated == 1 {
+                    existing.state = CandidateDispatchState::Bound;
+                    existing.dispatch_id = Some(dispatch_id);
+                    existing.updated_at = now;
+                    healed = true;
+                }
+            }
+            if healed {
+                tx.commit()
+                    .context("committing healed candidate dispatch binding")?;
+                if let Some(path) = conn.path() {
+                    crate::sqlite_perms::harden_sqlite_owner_only(std::path::Path::new(path));
+                }
+            }
+            if existing.request_id != input.request_id {
+                CandidateDispatchClaim::AlreadyClaimed(existing)
+            } else if existing.source_revision == input.source_revision
+                && existing.harness == input.harness
+                && existing.route_digest == input.route_digest
+                && existing.payload_digest == input.payload_digest
+            {
+                CandidateDispatchClaim::Replay(existing)
+            } else {
+                CandidateDispatchClaim::RequestConflict(existing)
+            }
+        } else if !allow_create {
+            CandidateDispatchClaim::NotAllowedToCreate
+        } else if let Some(other) =
+            find_candidate_dispatch_by_request(&tx, &input.agent_alias, &input.request_id)?
+        {
+            CandidateDispatchClaim::RequestIdInUse(other)
+        } else if find_binding(&tx, &input.agent_alias, &input.request_id)?.is_some() {
+            CandidateDispatchClaim::RequestConflictExternal
+        } else {
+            let now = reiclaw_api::time::format_rfc3339(jiff::Timestamp::now());
+            tx.execute(
+                "INSERT INTO daily_digest_candidate_dispatches
+                    (agent_alias, day_key, candidate_id, source_revision, request_id,
+                     harness, route_digest, payload_digest, state, dispatch_id,
+                     created_at, updated_at)
+                 VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, NULL, ?10, ?11)",
+                params![
+                    input.agent_alias,
+                    input.day_key,
+                    input.candidate_id,
+                    rev_i64,
+                    input.request_id,
+                    input.harness,
+                    input.route_digest,
+                    input.payload_digest,
+                    CandidateDispatchState::Claimed.as_str(),
+                    now,
+                    now,
+                ],
+            )
+            .context("inserting candidate dispatch claim")?;
+            tx.commit().context("committing candidate dispatch claim")?;
+            if let Some(path) = conn.path() {
+                crate::sqlite_perms::harden_sqlite_owner_only(std::path::Path::new(path));
+            }
+            CandidateDispatchClaim::Created(CandidateDispatchRecord {
+                agent_alias: input.agent_alias.clone(),
+                day_key: input.day_key.clone(),
+                candidate_id: input.candidate_id.clone(),
+                source_revision: input.source_revision,
+                request_id: input.request_id.clone(),
+                harness: input.harness.clone(),
+                route_digest: input.route_digest.clone(),
+                payload_digest: input.payload_digest.clone(),
+                state: CandidateDispatchState::Claimed,
+                dispatch_id: None,
+                created_at: now.clone(),
+                updated_at: now,
+            })
+        };
+        Ok(claim)
+    }
+
+    /// Bind an admitted candidate claim to its canonical Tachi dispatch ID.
+    pub fn bind_candidate_dispatch(
+        &self,
+        agent_alias: &str,
+        day_key: &str,
+        candidate_id: &str,
+        request_id: &str,
+        dispatch_id: &str,
+    ) -> Result<CandidateDispatchRecord> {
+        ensure!(
+            !dispatch_id.trim().is_empty(),
+            "candidate dispatch_id must not be empty"
+        );
+        let now = reiclaw_api::time::format_rfc3339(jiff::Timestamp::now());
+        let mut conn = self.conn.lock();
+        let tx = conn.transaction_with_behavior(TransactionBehavior::Immediate)?;
+        let updated = tx
+            .execute(
+                "UPDATE daily_digest_candidate_dispatches
+                 SET state = ?5, dispatch_id = ?6, updated_at = ?7
+                 WHERE agent_alias = ?1 AND day_key = ?2 AND candidate_id = ?3
+                   AND request_id = ?4 AND (dispatch_id IS NULL OR dispatch_id = ?6)",
+                params![
+                    agent_alias,
+                    day_key,
+                    candidate_id,
+                    request_id,
+                    CandidateDispatchState::Bound.as_str(),
+                    dispatch_id,
+                    now,
+                ],
+            )
+            .context("binding candidate dispatch to canonical dispatch ID")?;
+        ensure!(
+            updated == 1,
+            "candidate dispatch bind rejected: missing claim, request mismatch, or conflicting dispatch_id"
+        );
+        let record = find_candidate_dispatch(&tx, agent_alias, day_key, candidate_id)?
+            .context("bound candidate dispatch missing after update")?;
+        tx.commit().context("committing candidate dispatch bind")?;
+        if let Some(path) = conn.path() {
+            crate::sqlite_perms::harden_sqlite_owner_only(std::path::Path::new(path));
+        }
+        Ok(record)
+    }
+
+    /// Mark an unresolved submission as `submission_unknown`. Never downgrades an
+    /// already `Bound` dispatch.
+    pub fn mark_candidate_dispatch_unknown(
+        &self,
+        agent_alias: &str,
+        day_key: &str,
+        candidate_id: &str,
+        request_id: &str,
+    ) -> Result<CandidateDispatchRecord> {
+        let mut conn = self.conn.lock();
+        let tx = conn.transaction_with_behavior(TransactionBehavior::Immediate)?;
+        let current = find_candidate_dispatch(&tx, agent_alias, day_key, candidate_id)?
+            .context("candidate dispatch claim not found for mark_unknown")?;
+        ensure!(
+            current.request_id == request_id,
+            "candidate dispatch request_id mismatch for mark_unknown"
+        );
+        if current.state != CandidateDispatchState::Claimed || current.dispatch_id.is_some() {
+            return Ok(current);
+        }
+        let now = reiclaw_api::time::format_rfc3339(jiff::Timestamp::now());
+        let updated = tx
+            .execute(
+                "UPDATE daily_digest_candidate_dispatches
+                 SET state = ?5, updated_at = ?6
+                 WHERE agent_alias = ?1 AND day_key = ?2 AND candidate_id = ?3
+                   AND request_id = ?4 AND state = 'claimed' AND dispatch_id IS NULL",
+                params![
+                    agent_alias,
+                    day_key,
+                    candidate_id,
+                    request_id,
+                    CandidateDispatchState::SubmissionUnknown.as_str(),
+                    now,
+                ],
+            )
+            .context("marking candidate dispatch submission_unknown")?;
+        ensure!(updated == 1, "failed to mark candidate dispatch unknown");
+        let record = find_candidate_dispatch(&tx, agent_alias, day_key, candidate_id)?
+            .context("candidate dispatch missing after mark_unknown")?;
+        tx.commit()
+            .context("committing candidate dispatch unknown transition")?;
+        if let Some(path) = conn.path() {
+            crate::sqlite_perms::harden_sqlite_owner_only(std::path::Path::new(path));
+        }
+        Ok(record)
+    }
+
+    /// Release a still-`claimed` row only when `session_delegations` holds no
+    /// durable claim for `(agent_alias, request_id)` and payload/route match.
+    pub fn release_unsent_candidate_dispatch(
+        &self,
+        agent_alias: &str,
+        day_key: &str,
+        candidate_id: &str,
+        request_id: &str,
+        payload_digest: &str,
+        route_digest: &str,
+    ) -> Result<bool> {
+        let mut conn = self.conn.lock();
+        let tx = conn.transaction_with_behavior(TransactionBehavior::Immediate)?;
+        if find_binding(&tx, agent_alias, request_id)?.is_some() {
+            return Ok(false);
+        }
+        let deleted = tx
+            .execute(
+                "DELETE FROM daily_digest_candidate_dispatches
+                 WHERE agent_alias = ?1 AND day_key = ?2 AND candidate_id = ?3
+                   AND request_id = ?4 AND payload_digest = ?5 AND route_digest = ?6
+                   AND state = 'claimed' AND dispatch_id IS NULL",
+                params![
+                    agent_alias,
+                    day_key,
+                    candidate_id,
+                    request_id,
+                    payload_digest,
+                    route_digest,
+                ],
+            )
+            .context("releasing proven unsent candidate dispatch claim")?;
+        tx.commit()
+            .context("committing candidate dispatch claim release")?;
+        if let Some(path) = conn.path() {
+            crate::sqlite_perms::harden_sqlite_owner_only(std::path::Path::new(path));
+        }
+        Ok(deleted == 1)
+    }
+
+    /// Read-only projection of all candidate dispatches for one agent.
+    pub fn list_candidate_dispatches_for_agent(
+        &self,
+        agent_alias: &str,
+    ) -> Result<Vec<CandidateDispatchRecord>> {
+        self.list_candidate_dispatches(
+            "SELECT agent_alias, day_key, candidate_id, source_revision, request_id,
+                    harness, route_digest, payload_digest, state, dispatch_id,
+                    created_at, updated_at
+             FROM daily_digest_candidate_dispatches
+             WHERE agent_alias = ?1
+             ORDER BY created_at ASC, candidate_id ASC",
+            params![agent_alias],
+        )
+    }
+
+    /// Read-only projection of all candidate dispatches for one agent's digest day.
+    pub fn list_candidate_dispatches_for_day(
+        &self,
+        agent_alias: &str,
+        day_key: &str,
+    ) -> Result<Vec<CandidateDispatchRecord>> {
+        self.list_candidate_dispatches(
+            "SELECT agent_alias, day_key, candidate_id, source_revision, request_id,
+                    harness, route_digest, payload_digest, state, dispatch_id,
+                    created_at, updated_at
+             FROM daily_digest_candidate_dispatches
+             WHERE agent_alias = ?1 AND day_key = ?2
+             ORDER BY created_at ASC, candidate_id ASC",
+            params![agent_alias, day_key],
+        )
+    }
+
+    fn list_candidate_dispatches(
+        &self,
+        sql: &str,
+        params: impl rusqlite::Params,
+    ) -> Result<Vec<CandidateDispatchRecord>> {
+        let conn = self.conn.lock();
+        let mut stmt = conn.prepare(sql)?;
+        let rows = stmt.query_map(params, read_raw_candidate_row)?;
+        let mut records = Vec::new();
+        for row in rows {
+            let mut record = convert_raw_candidate_row(row?)?;
+            if record.state != CandidateDispatchState::Bound
+                && record.dispatch_id.is_none()
+                && let Some(binding) = find_binding(&conn, &record.agent_alias, &record.request_id)?
+                && let Some(dispatch_id) = binding.dispatch_id
+                && binding.route_digest.as_deref() == Some(record.route_digest.as_str())
+            {
+                record.state = CandidateDispatchState::Bound;
+                record.dispatch_id = Some(dispatch_id);
+            }
+            records.push(record);
+        }
+        Ok(records)
+    }
+}
+
+/// Durable lifecycle state for a `DailyDigest` action-candidate dispatch claim.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum CandidateDispatchState {
+    Claimed,
+    Bound,
+    SubmissionUnknown,
+}
+
+impl CandidateDispatchState {
+    #[must_use]
+    pub const fn as_str(self) -> &'static str {
+        match self {
+            Self::Claimed => "claimed",
+            Self::Bound => "bound",
+            Self::SubmissionUnknown => "submission_unknown",
+        }
+    }
+
+    fn parse(raw: &str) -> Result<Self> {
+        match raw {
+            "claimed" => Ok(Self::Claimed),
+            "bound" => Ok(Self::Bound),
+            "submission_unknown" => Ok(Self::SubmissionUnknown),
+            other => bail!("invalid candidate dispatch state '{other}'"),
+        }
+    }
+}
+
+/// Persisted claim and Tachi dispatch binding for one `DailyDigest` candidate.
+#[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+pub struct CandidateDispatchRecord {
+    pub agent_alias: String,
+    pub day_key: String,
+    pub candidate_id: String,
+    pub source_revision: u64,
+    pub request_id: String,
+    pub harness: String,
+    pub route_digest: String,
+    pub payload_digest: String,
+    pub state: CandidateDispatchState,
+    pub dispatch_id: Option<String>,
+    pub created_at: String,
+    pub updated_at: String,
+}
+
+/// Input parameters for claiming one candidate dispatch in `sessions.db`.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct CandidateDispatchClaimInput {
+    pub agent_alias: String,
+    pub day_key: String,
+    pub candidate_id: String,
+    pub source_revision: u64,
+    pub request_id: String,
+    pub harness: String,
+    pub route_digest: String,
+    pub payload_digest: String,
+}
+
+/// Atomic admission outcome from [`SqliteSessionBackend::claim_candidate_dispatch`].
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum CandidateDispatchClaim {
+    Created(CandidateDispatchRecord),
+    Replay(CandidateDispatchRecord),
+    AlreadyClaimed(CandidateDispatchRecord),
+    RequestConflict(CandidateDispatchRecord),
+    RequestIdInUse(CandidateDispatchRecord),
+    RequestConflictExternal,
+    NotAllowedToCreate,
+}
+
+type RawCandidateRow = (
+    String,
+    String,
+    String,
+    i64,
+    String,
+    String,
+    String,
+    String,
+    String,
+    Option<String>,
+    String,
+    String,
+);
+
+fn read_raw_candidate_row(row: &rusqlite::Row<'_>) -> rusqlite::Result<RawCandidateRow> {
+    Ok((
+        row.get(0)?,
+        row.get(1)?,
+        row.get(2)?,
+        row.get(3)?,
+        row.get(4)?,
+        row.get(5)?,
+        row.get(6)?,
+        row.get(7)?,
+        row.get(8)?,
+        row.get(9)?,
+        row.get(10)?,
+        row.get(11)?,
+    ))
+}
+
+fn convert_raw_candidate_row(raw: RawCandidateRow) -> Result<CandidateDispatchRecord> {
+    let source_revision = u64::try_from(raw.3).context("negative candidate source_revision")?;
+    ensure!(
+        source_revision >= 1,
+        "candidate source_revision must be >= 1"
+    );
+    let state = CandidateDispatchState::parse(&raw.8)?;
+    Ok(CandidateDispatchRecord {
+        agent_alias: raw.0,
+        day_key: raw.1,
+        candidate_id: raw.2,
+        source_revision,
+        request_id: raw.4,
+        harness: raw.5,
+        route_digest: raw.6,
+        payload_digest: raw.7,
+        state,
+        dispatch_id: raw.9,
+        created_at: raw.10,
+        updated_at: raw.11,
+    })
+}
+
+fn validate_claim_input(input: &CandidateDispatchClaimInput) -> Result<()> {
+    for (name, value) in [
+        ("agent_alias", input.agent_alias.as_str()),
+        ("day_key", input.day_key.as_str()),
+        ("candidate_id", input.candidate_id.as_str()),
+        ("request_id", input.request_id.as_str()),
+        ("harness", input.harness.as_str()),
+        ("route_digest", input.route_digest.as_str()),
+        ("payload_digest", input.payload_digest.as_str()),
+    ] {
+        ensure!(
+            !value.trim().is_empty(),
+            "candidate {name} must not be empty"
+        );
+    }
+    ensure!(
+        input.source_revision >= 1,
+        "candidate source_revision must be >= 1"
+    );
+    Ok(())
+}
+
+fn find_candidate_dispatch(
+    conn: &Connection,
+    agent_alias: &str,
+    day_key: &str,
+    candidate_id: &str,
+) -> Result<Option<CandidateDispatchRecord>> {
+    conn.query_row(
+        "SELECT agent_alias, day_key, candidate_id, source_revision, request_id,
+                harness, route_digest, payload_digest, state, dispatch_id,
+                created_at, updated_at
+         FROM daily_digest_candidate_dispatches
+         WHERE agent_alias = ?1 AND day_key = ?2 AND candidate_id = ?3",
+        params![agent_alias, day_key, candidate_id],
+        read_raw_candidate_row,
+    )
+    .optional()?
+    .map(convert_raw_candidate_row)
+    .transpose()
+}
+
+fn find_candidate_dispatch_by_request(
+    conn: &Connection,
+    agent_alias: &str,
+    request_id: &str,
+) -> Result<Option<CandidateDispatchRecord>> {
+    conn.query_row(
+        "SELECT agent_alias, day_key, candidate_id, source_revision, request_id,
+                harness, route_digest, payload_digest, state, dispatch_id,
+                created_at, updated_at
+         FROM daily_digest_candidate_dispatches
+         WHERE agent_alias = ?1 AND request_id = ?2",
+        params![agent_alias, request_id],
+        read_raw_candidate_row,
+    )
+    .optional()?
+    .map(convert_raw_candidate_row)
+    .transpose()
 }
 
 #[cfg(test)]
@@ -2164,5 +2684,205 @@ mod tests {
             store.list_dispatch_bindings_page(0, 10).unwrap()[0].proxy_continuations,
             0
         );
+    }
+
+    fn candidate_input(candidate_id: &str, request_id: &str) -> CandidateDispatchClaimInput {
+        CandidateDispatchClaimInput {
+            agent_alias: "nova".into(),
+            day_key: "2026-11-18".into(),
+            candidate_id: candidate_id.into(),
+            source_revision: 1,
+            request_id: request_id.into(),
+            harness: "codex".into(),
+            route_digest: "route-abc".into(),
+            payload_digest: "payload-123".into(),
+        }
+    }
+
+    #[test]
+    fn candidate_dispatch_claim_enforces_uniqueness_replay_conflict_and_release_guards() {
+        let tmp = TempDir::new().unwrap();
+        let store = SqliteSessionBackend::new(tmp.path()).unwrap();
+        let input = candidate_input("cand_1", "req-1");
+
+        // allow_create=false refuses creating a missing row.
+        assert_eq!(
+            store.claim_candidate_dispatch(&input, false).unwrap(),
+            CandidateDispatchClaim::NotAllowedToCreate
+        );
+
+        let created = match store.claim_candidate_dispatch(&input, true).unwrap() {
+            CandidateDispatchClaim::Created(rec) => rec,
+            other => panic!("expected Created, got {other:?}"),
+        };
+        assert_eq!(created.state, CandidateDispatchState::Claimed);
+        assert!(created.dispatch_id.is_none());
+
+        // Different request_id on Claimed candidate fails with AlreadyClaimed.
+        let other_req = candidate_input("cand_1", "req-2");
+        assert!(matches!(
+            store.claim_candidate_dispatch(&other_req, true).unwrap(),
+            CandidateDispatchClaim::AlreadyClaimed(_)
+        ));
+
+        // Same request_id with changed harness/revision/payload/route fails with RequestConflict.
+        let mut changed = input.clone();
+        changed.harness = "claude".into();
+        assert!(matches!(
+            store.claim_candidate_dispatch(&changed, true).unwrap(),
+            CandidateDispatchClaim::RequestConflict(_)
+        ));
+        let mut changed_rev = input.clone();
+        changed_rev.source_revision = 2;
+        assert!(matches!(
+            store.claim_candidate_dispatch(&changed_rev, true).unwrap(),
+            CandidateDispatchClaim::RequestConflict(_)
+        ));
+
+        // Reusing req-1 for a second candidate on same agent is rejected.
+        let dup_req_cand = candidate_input("cand_2", "req-1");
+        assert!(matches!(
+            store.claim_candidate_dispatch(&dup_req_cand, true).unwrap(),
+            CandidateDispatchClaim::RequestIdInUse(_)
+        ));
+
+        // Request ID already claimed externally in session_delegations is rejected.
+        store
+            .claim_delegation_request("nova", "req-ext", "dig", "route-abc")
+            .unwrap();
+        let ext_input = candidate_input("cand_2", "req-ext");
+        assert_eq!(
+            store.claim_candidate_dispatch(&ext_input, true).unwrap(),
+            CandidateDispatchClaim::RequestConflictExternal
+        );
+
+        // If session_delegations holds a claim for (nova, req-1), release MUST refuse.
+        store
+            .claim_delegation_request("nova", "req-1", "dig", "route-abc")
+            .unwrap();
+        assert!(
+            !store
+                .release_unsent_candidate_dispatch(
+                    "nova",
+                    "2026-11-18",
+                    "cand_1",
+                    "req-1",
+                    "payload-123",
+                    "route-abc"
+                )
+                .unwrap()
+        );
+
+        // Releasing a clean candidate claim without session_delegations row succeeds,
+        // and SubmissionUnknown / Bound refuse release.
+        let clean = candidate_input("cand_clean", "req-clean");
+        store.claim_candidate_dispatch(&clean, true).unwrap();
+        assert!(
+            !store
+                .release_unsent_candidate_dispatch(
+                    "nova",
+                    "2026-11-18",
+                    "cand_clean",
+                    "req-clean",
+                    "wrong-payload",
+                    "route-abc"
+                )
+                .unwrap()
+        );
+        assert!(
+            store
+                .release_unsent_candidate_dispatch(
+                    "nova",
+                    "2026-11-18",
+                    "cand_clean",
+                    "req-clean",
+                    "payload-123",
+                    "route-abc"
+                )
+                .unwrap()
+        );
+
+        let unk = store
+            .mark_candidate_dispatch_unknown("nova", "2026-11-18", "cand_1", "req-1")
+            .unwrap();
+        assert_eq!(unk.state, CandidateDispatchState::SubmissionUnknown);
+        assert!(
+            !store
+                .release_unsent_candidate_dispatch(
+                    "nova",
+                    "2026-11-18",
+                    "cand_1",
+                    "req-1",
+                    "payload-123",
+                    "route-abc"
+                )
+                .unwrap()
+        );
+
+        // Even with allow_create=false (e.g. later revision edit), same-ID replay matches.
+        assert!(matches!(
+            store.claim_candidate_dispatch(&input, false).unwrap(),
+            CandidateDispatchClaim::Replay(_)
+        ));
+    }
+
+    #[test]
+    fn candidate_dispatch_self_heals_from_bound_session_delegation_and_concurrent_race() {
+        let tmp = TempDir::new().unwrap();
+        let store = Arc::new(SqliteSessionBackend::new(tmp.path()).unwrap());
+
+        // Simulate crash between binding session_delegations and binding candidate row.
+        let input = candidate_input("cand_heal", "req-heal");
+        store.claim_candidate_dispatch(&input, true).unwrap();
+        store
+            .claim_delegation_request("nova", "req-heal", "dig", "route-abc")
+            .unwrap();
+        store
+            .bind_delegation_request("nova", "req-heal", "dig", "route-abc", "disp-healed-1")
+            .unwrap();
+        store
+            .mark_candidate_dispatch_unknown("nova", "2026-11-18", "cand_heal", "req-heal")
+            .unwrap();
+
+        // Read projection surfaces Bound + dispatch_id without mutating DB.
+        let projected = store
+            .list_candidate_dispatches_for_day("nova", "2026-11-18")
+            .unwrap();
+        assert_eq!(projected.len(), 1);
+        assert_eq!(projected[0].state, CandidateDispatchState::Bound);
+        assert_eq!(projected[0].dispatch_id.as_deref(), Some("disp-healed-1"));
+
+        // Replaying claim heals the candidate row persistently and returns Replay(Bound).
+        match store.claim_candidate_dispatch(&input, false).unwrap() {
+            CandidateDispatchClaim::Replay(rec) => {
+                assert_eq!(rec.state, CandidateDispatchState::Bound);
+                assert_eq!(rec.dispatch_id.as_deref(), Some("disp-healed-1"));
+            }
+            other => panic!("expected healed Replay, got {other:?}"),
+        }
+
+        // Different request_id racing against one candidate returns Created once and AlreadyClaimed once.
+        let barrier = Arc::new(Barrier::new(2));
+        let mut handles = Vec::new();
+        for idx in 0..2 {
+            let s = store.clone();
+            let b = barrier.clone();
+            handles.push(std::thread::spawn(move || {
+                b.wait();
+                let inp = candidate_input("cand_race", &format!("req-race-{idx}"));
+                s.claim_candidate_dispatch(&inp, true).unwrap()
+            }));
+        }
+        let outcomes: Vec<_> = handles.into_iter().map(|h| h.join().unwrap()).collect();
+        let created_count = outcomes
+            .iter()
+            .filter(|c| matches!(c, CandidateDispatchClaim::Created(_)))
+            .count();
+        let already_count = outcomes
+            .iter()
+            .filter(|c| matches!(c, CandidateDispatchClaim::AlreadyClaimed(_)))
+            .count();
+        assert_eq!(created_count, 1);
+        assert_eq!(already_count, 1);
     }
 }

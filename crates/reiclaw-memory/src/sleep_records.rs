@@ -5,6 +5,7 @@
 
 #[allow(unused_imports)]
 pub use reiclaw_api::sleep_records::{
-    ActionCandidateStatus, DailyDigest, EpisodeRecord, EpisodeSourceKind, PINNED_DIGEST_MAX_BYTES,
-    PinnedDigest, validate_agent_id, validate_non_soul_key, validate_non_soul_namespace,
+    ActionCandidateItem, ActionCandidateStatus, DailyDigest, EpisodeRecord, EpisodeSourceKind,
+    PINNED_DIGEST_MAX_BYTES, PinnedDigest, validate_agent_id, validate_candidate_id,
+    validate_non_soul_key, validate_non_soul_namespace,
 };
