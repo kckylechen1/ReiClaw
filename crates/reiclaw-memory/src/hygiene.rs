@@ -199,11 +199,12 @@ fn archive_daily_memory_files(workspace_dir: &Path, archive_after_days: u32) -> 
     let archive_dir = memory_dir.join("archive");
     fs::create_dir_all(&archive_dir)?;
 
-    let cutoff = jiff::Zoned::now()
-        .date()
-        .checked_sub(jiff::SignedDuration::from_hours(
-            i64::from(archive_after_days) * 24,
-        ))?;
+    let cutoff =
+        jiff::ZonedDateTime::now()
+            .date()
+            .checked_sub(jiff::SignedDuration::from_hours(
+                i64::from(archive_after_days) * 24,
+            ))?;
     let mut moved = 0_u64;
 
     for entry in fs::read_dir(&memory_dir)? {
@@ -247,11 +248,12 @@ fn archive_session_files(workspace_dir: &Path, archive_after_days: u32) -> Resul
     let archive_dir = sessions_dir.join("archive");
     fs::create_dir_all(&archive_dir)?;
 
-    let cutoff_date = jiff::Zoned::now()
-        .date()
-        .checked_sub(jiff::SignedDuration::from_hours(
-            i64::from(archive_after_days) * 24,
-        ))?;
+    let cutoff_date =
+        jiff::ZonedDateTime::now()
+            .date()
+            .checked_sub(jiff::SignedDuration::from_hours(
+                i64::from(archive_after_days) * 24,
+            ))?;
     let cutoff_time = SystemTime::now()
         .checked_sub(StdDuration::from_secs(
             u64::from(archive_after_days) * 24 * 60 * 60,
@@ -306,11 +308,12 @@ fn purge_memory_archives(workspace_dir: &Path, purge_after_days: u32) -> Result<
         return Ok(0);
     }
 
-    let cutoff = jiff::Zoned::now()
-        .date()
-        .checked_sub(jiff::SignedDuration::from_hours(
-            i64::from(purge_after_days) * 24,
-        ))?;
+    let cutoff =
+        jiff::ZonedDateTime::now()
+            .date()
+            .checked_sub(jiff::SignedDuration::from_hours(
+                i64::from(purge_after_days) * 24,
+            ))?;
     let mut removed = 0_u64;
 
     for entry in fs::read_dir(&archive_dir)? {
@@ -348,11 +351,12 @@ fn purge_session_archives(workspace_dir: &Path, purge_after_days: u32) -> Result
         return Ok(0);
     }
 
-    let cutoff_date = jiff::Zoned::now()
-        .date()
-        .checked_sub(jiff::SignedDuration::from_hours(
-            i64::from(purge_after_days) * 24,
-        ))?;
+    let cutoff_date =
+        jiff::ZonedDateTime::now()
+            .date()
+            .checked_sub(jiff::SignedDuration::from_hours(
+                i64::from(purge_after_days) * 24,
+            ))?;
     let cutoff_time = SystemTime::now()
         .checked_sub(StdDuration::from_secs(
             u64::from(purge_after_days) * 24 * 60 * 60,
@@ -403,7 +407,7 @@ fn prune_audit_entries(workspace_dir: &Path, retention_days: u32) -> Result<()> 
 
     let conn = Connection::open(db_path)?;
     conn.execute_batch("PRAGMA journal_mode = WAL; PRAGMA synchronous = NORMAL;")?;
-    let cutoff = reiclaw_api::time::format_rfc3339_zoned(&jiff::Zoned::now().checked_sub(
+    let cutoff = reiclaw_api::time::format_rfc3339_zoned(&jiff::ZonedDateTime::now().checked_sub(
         jiff::SignedDuration::from_hours(i64::from(retention_days) * 24),
     )?);
 
@@ -534,10 +538,13 @@ mod tests {
         let workspace = tmp.path();
         fs::create_dir_all(workspace.join("memory")).unwrap();
 
-        let old = (jiff::Zoned::now().date() - jiff::SignedDuration::from_hours(10 * 24))
+        let old = (jiff::ZonedDateTime::now().date() - jiff::SignedDuration::from_hours(10 * 24))
             .strftime("%Y-%m-%d")
             .to_string();
-        let today = jiff::Zoned::now().date().strftime("%Y-%m-%d").to_string();
+        let today = jiff::ZonedDateTime::now()
+            .date()
+            .strftime("%Y-%m-%d")
+            .to_string();
 
         let old_file = workspace.join("memory").join(format!("{old}.md"));
         let today_file = workspace.join("memory").join(format!("{today}.md"));
@@ -564,7 +571,7 @@ mod tests {
         let workspace = tmp.path();
         fs::create_dir_all(workspace.join("sessions")).unwrap();
 
-        let old = (jiff::Zoned::now().date() - jiff::SignedDuration::from_hours(10 * 24))
+        let old = (jiff::ZonedDateTime::now().date() - jiff::SignedDuration::from_hours(10 * 24))
             .strftime("%Y-%m-%d")
             .to_string();
         let old_name = format!("{old}-agent.log");
@@ -676,7 +683,7 @@ mod tests {
         let workspace = tmp.path();
         fs::create_dir_all(workspace.join("memory")).unwrap();
 
-        let old_a = (jiff::Zoned::now().date() - jiff::SignedDuration::from_hours(10 * 24))
+        let old_a = (jiff::ZonedDateTime::now().date() - jiff::SignedDuration::from_hours(10 * 24))
             .strftime("%Y-%m-%d")
             .to_string();
         let file_a = workspace.join("memory").join(format!("{old_a}.md"));
@@ -685,7 +692,7 @@ mod tests {
         run_if_due(&default_cfg(), workspace).unwrap();
         assert!(!file_a.exists(), "first old file should be archived");
 
-        let old_b = (jiff::Zoned::now().date() - jiff::SignedDuration::from_hours(9 * 24))
+        let old_b = (jiff::ZonedDateTime::now().date() - jiff::SignedDuration::from_hours(9 * 24))
             .strftime("%Y-%m-%d")
             .to_string();
         let file_b = workspace.join("memory").join(format!("{old_b}.md"));
@@ -706,10 +713,10 @@ mod tests {
         let archive_dir = workspace.join("memory").join("archive");
         fs::create_dir_all(&archive_dir).unwrap();
 
-        let old = (jiff::Zoned::now().date() - jiff::SignedDuration::from_hours(40 * 24))
+        let old = (jiff::ZonedDateTime::now().date() - jiff::SignedDuration::from_hours(40 * 24))
             .strftime("%Y-%m-%d")
             .to_string();
-        let keep = (jiff::Zoned::now().date() - jiff::SignedDuration::from_hours(5 * 24))
+        let keep = (jiff::ZonedDateTime::now().date() - jiff::SignedDuration::from_hours(5 * 24))
             .strftime("%Y-%m-%d")
             .to_string();
 
@@ -762,9 +769,9 @@ mod tests {
         )
         .unwrap();
         let stale = reiclaw_api::time::format_rfc3339_zoned(
-            &(jiff::Zoned::now() - jiff::SignedDuration::from_hours(45 * 24)),
+            &(jiff::ZonedDateTime::now() - jiff::SignedDuration::from_hours(45 * 24)),
         );
-        let fresh = reiclaw_api::time::format_rfc3339_zoned(&jiff::Zoned::now());
+        let fresh = reiclaw_api::time::format_rfc3339_zoned(&jiff::ZonedDateTime::now());
         conn.execute(
             "INSERT INTO memory_audit (operation, timestamp) VALUES ('store', ?1)",
             params![stale],

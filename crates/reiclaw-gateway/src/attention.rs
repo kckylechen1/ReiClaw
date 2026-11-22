@@ -28,7 +28,7 @@ pub(crate) fn permits(
     }) {
         return Ok(true);
     }
-    let local = now.to_zoned(timezone).time();
+    let local = now.to_zoned_datetime(timezone).time();
     let quiet = if start < end {
         local >= start && local < end
     } else {

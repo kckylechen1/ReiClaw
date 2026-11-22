@@ -7,7 +7,7 @@
 use anyhow::{Context, Result, ensure};
 use jiff::fmt::temporal::DateTimePrinter;
 use jiff::tz::{Offset, TimeZone};
-use jiff::{Timestamp, Zoned};
+use jiff::{Timestamp, ZonedDateTime};
 
 /// Unix seconds rounded down, including instants before the Unix epoch.
 /// Jiff's whole-unit accessors truncate toward zero instead.
@@ -62,7 +62,7 @@ pub fn format_rfc3339_z(timestamp: Timestamp) -> String {
 }
 
 /// Format a local or fixed-offset datetime without adding a time-zone annotation.
-pub fn format_rfc3339_zoned(datetime: &Zoned) -> String {
+pub fn format_rfc3339_zoned(datetime: &ZonedDateTime) -> String {
     let timestamp = datetime.timestamp();
     stored_year_width(
         DateTimePrinter::new()
@@ -98,9 +98,9 @@ pub fn parse_rfc3339(raw: &str) -> Result<Timestamp> {
 }
 
 /// Parse an RFC 3339 instant while retaining the supplied offset's calendar date.
-pub fn parse_rfc3339_zoned(raw: &str) -> Result<Zoned> {
+pub fn parse_rfc3339_zoned(raw: &str) -> Result<ZonedDateTime> {
     let (timestamp, offset) = parse_parts(raw)?;
-    Ok(timestamp.to_zoned(TimeZone::fixed(offset)))
+    Ok(timestamp.to_zoned_datetime(TimeZone::fixed(offset)))
 }
 
 /// Read the relaxed timestamp grammar previously accepted by stored typed

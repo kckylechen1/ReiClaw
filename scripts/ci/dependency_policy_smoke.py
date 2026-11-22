@@ -19,7 +19,7 @@ import tempfile
 
 
 REVIEWED_LICENSES = (
-    ("memcore", "2.0.0", "AGPL-3.0-only"),
+    ("memcore", "2.1.0", "AGPL-3.0-only"),
     ("portable-kernel", "1.9.0", "AGPL-3.0-only"),
     ("vault-kit", "0.1.0", "AGPL-3.0-only"),
     ("borrow-or-share", "0.2.4", "MIT-0"),

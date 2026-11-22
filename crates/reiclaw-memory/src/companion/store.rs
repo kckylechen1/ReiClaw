@@ -284,7 +284,7 @@ mod tests {
     }
 
     fn probe_entry(id: &str, text: &str) -> MemoryEntry {
-        let now = reiclaw_api::time::format_rfc3339_zoned(&jiff::Zoned::now());
+        let now = reiclaw_api::time::format_rfc3339_zoned(&jiff::ZonedDateTime::now());
         MemoryEntry {
             id: id.into(),
             path: "/companion/probe".into(),

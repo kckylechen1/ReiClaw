@@ -47,6 +47,7 @@ use uuid::Uuid;
 
 mod recent;
 mod sleep;
+mod sleep_typed;
 
 const METADATA_ZC_KEY: &str = "reiclaw_key";
 pub(crate) const METADATA_ZC_CATEGORY: &str = "reiclaw_category";
@@ -147,6 +148,7 @@ impl MemoryCore {
                  a store identity, and {LEGACY_STORE_UNSUPPORTED}."
             ))
         })?;
+        let store = sleep_typed::register(store)?;
         let list_page_size = list_page_size.max(1);
         Ok(Self {
             alias: alias.to_string(),
@@ -906,17 +908,66 @@ impl MemoryCore {
         scope: PointScope,
     ) -> anyhow::Result<Vec<MemoryEntry>> {
         let store = self.store.clone();
+        let db_path = self.db_path.clone();
         let key = key.to_string();
         let agent = agent_id.map(str::to_owned);
         tokio::task::spawn_blocking(move || -> anyhow::Result<Vec<MemoryEntry>> {
             let store = store.lock();
-            let rows = Self::rows_matching_key(&store, &key, agent.as_deref())?;
-            Ok(scope.select(
-                rows.into_iter()
-                    .map(|row| Self::memcore_to_zeroclaw(row, None))
-                    .collect(),
-                agent.is_some(),
-            ))
+            let _guard = sleep_typed::read_guard(&db_path)?;
+            let mut entries: Vec<_> = Self::rows_matching_key(&store, &key, agent.as_deref())?
+                .into_iter()
+                .map(|row| Self::memcore_to_zeroclaw(row, None))
+                .collect();
+            sleep_typed::extend_key_entries(&store, &key, agent.as_deref(), &mut entries)?;
+            Ok(scope.select(entries, agent.is_some()))
+        })
+        .await?
+    }
+
+    async fn forget_by_key(
+        &self,
+        key: &str,
+        agent_id: Option<&str>,
+        scope: PointScope,
+    ) -> anyhow::Result<bool> {
+        let handle = self.store.clone();
+        let db_path = self.db_path.clone();
+        let key = key.to_string();
+        let agent = agent_id.map(str::to_owned);
+        tokio::task::spawn_blocking(move || -> anyhow::Result<bool> {
+            let mut store = handle.lock();
+            let _guard = sleep_typed::write_guard(&db_path)?;
+            let mut entries: Vec<_> = Self::rows_matching_key(&store, &key, agent.as_deref())?
+                .into_iter()
+                .map(|row| Self::memcore_to_zeroclaw(row, None))
+                .collect();
+            sleep_typed::extend_key_entries(&store, &key, agent.as_deref(), &mut entries)?;
+            let selected = scope.select(entries, agent.is_some());
+            let mut deleted = 0usize;
+            for entry in selected {
+                if let Some(kind) = sleep_typed::SleepKind::for_namespace(&entry.namespace)
+                    && entry.category == MemoryCategory::Custom(entry.namespace.clone())
+                    && let Some(entry_agent) = entry.agent_id.as_deref()
+                {
+                    let slot = if kind == sleep_typed::SleepKind::Pinned {
+                        "pinned_digest"
+                    } else {
+                        entry.key.as_str()
+                    };
+                    let mut query = kind.query(Some(entry_agent));
+                    query
+                        .key_filters
+                        .insert(kind.slot().into(), slot.to_owned());
+                    deleted += sleep_typed::purge_slots(&mut store, kind, query)?;
+                    if let Some(legacy) = Self::legacy_sleep_slot(&store, kind, entry_agent, slot)?
+                    {
+                        deleted += usize::from(store.delete(&legacy.id)?);
+                    }
+                } else {
+                    deleted += usize::from(store.delete(&entry.id)?);
+                }
+            }
+            Ok(deleted > 0)
         })
         .await?
     }
@@ -1314,32 +1365,71 @@ impl MemoryCore {
         .await?
     }
 
+    fn agent_rows(
+        store: &MemoryStore,
+        agent: &str,
+        page_size: usize,
+        max_grow: usize,
+        include_archived: bool,
+    ) -> anyhow::Result<Vec<portable_kernel::MemoryEntry>> {
+        use portable_kernel::store::scoped_read::RecentMemoryQuery;
+        let mut query = RecentMemoryQuery::new(Self::agent_path_prefix(Some(agent)), page_size);
+        query.include_archived = include_archived;
+        loop {
+            let rows = store.list_recent_matching(&query)?;
+            if rows.len() < query.limit {
+                return Ok(rows);
+            }
+            anyhow::ensure!(
+                query.limit < max_grow,
+                "tachi agent scan truncated at {max_grow} rows"
+            );
+            query.limit = query.limit.saturating_mul(2).min(max_grow);
+        }
+    }
+
     async fn list_agent_entries(&self, agent_alias: &str) -> anyhow::Result<Vec<MemoryEntry>> {
         let store = self.store.clone();
+        let db_path = self.db_path.clone();
         let page_size = self.list_page_size;
         let max_grow = self.max_list_grow;
-        let prefix = format!("/agents/{}/", Self::agent_segment(Some(agent_alias)));
         let agent_alias = agent_alias.to_string();
-        tokio::task::spawn_blocking(move || -> anyhow::Result<Vec<MemoryEntry>> {
+        tokio::task::spawn_blocking(move || {
             let store = store.lock();
-            let rows = Self::list_prefix_complete(&store, &prefix, page_size, max_grow)?;
-            Ok(rows
-                .into_iter()
-                .filter(|row| {
-                    Self::metadata_str(&row.metadata, METADATA_ZC_AGENT).as_deref()
-                        == Some(agent_alias.as_str())
-                        || Self::agent_segment(Some(&agent_alias))
-                            == row
-                                .path
-                                .trim_start_matches('/')
-                                .split('/')
-                                .nth(1)
-                                .unwrap_or("")
-                })
-                .map(|row| Self::memcore_to_zeroclaw(row, None))
-                .collect())
+            let _guard = sleep_typed::read_guard(&db_path)?;
+            let mut entries: Vec<_> =
+                Self::agent_rows(&store, &agent_alias, page_size, max_grow, false)?
+                    .into_iter()
+                    .map(|row| Self::memcore_to_zeroclaw(row, None))
+                    .collect();
+            sleep_typed::extend_visible_entries(&store, Some(&agent_alias), &mut entries, None)?;
+            Ok(entries)
         })
         .await?
+    }
+
+    fn purge_session_rows(
+        store: &mut MemoryStore,
+        rows: Vec<portable_kernel::MemoryEntry>,
+        session_id: &str,
+        agent: Option<&str>,
+    ) -> anyhow::Result<usize> {
+        let mut deleted = 0usize;
+        for row in rows {
+            if row.archived && Self::legacy_sleep_kind(&row).is_none() {
+                continue;
+            }
+            if Self::metadata_str(&row.metadata, METADATA_SESSION_ID).as_deref() == Some(session_id)
+            {
+                deleted += usize::from(store.delete(&row.id)?);
+            }
+        }
+        let mut query = sleep_typed::SleepKind::Episode.query(agent);
+        query
+            .key_filters
+            .insert("session_key".into(), session_id.to_owned());
+        deleted += sleep_typed::purge_slots(store, sleep_typed::SleepKind::Episode, query)?;
+        Ok(deleted)
     }
 }
 
@@ -1451,36 +1541,65 @@ impl Memory for MemoryCore {
         category: Option<&MemoryCategory>,
         session_id: Option<&str>,
     ) -> anyhow::Result<Vec<MemoryEntry>> {
-        let mut entries = self.list_all().await?;
-        // Ambient listing excludes the reserved Soul namespace and superseded history.
-        entries.retain(|e| e.namespace != crate::SOUL_NAMESPACE && e.superseded_by.is_none());
-        if let Some(cat) = category {
-            entries.retain(|e| &e.category == cat);
-        }
-        if let Some(sid) = session_id {
-            entries.retain(|e| e.session_id.as_deref() == Some(sid));
-        }
-        Ok(entries)
+        let handle = self.store.clone();
+        let db_path = self.db_path.clone();
+        let category = category.cloned();
+        let session_id = session_id.map(str::to_owned);
+        let page = self.list_page_size;
+        let max = self.max_list_grow;
+        tokio::task::spawn_blocking(move || {
+            let store = handle.lock();
+            let _guard = sleep_typed::read_guard(&db_path)?;
+            let mut entries: Vec<_> = Self::list_prefix_complete(&store, "/agents", page, max)?
+                .into_iter()
+                .map(|row| Self::memcore_to_zeroclaw(row, None))
+                .filter(|e| {
+                    e.namespace != crate::SOUL_NAMESPACE
+                        && e.superseded_by.is_none()
+                        && category.as_ref().is_none_or(|c| &e.category == c)
+                })
+                .collect();
+            sleep_typed::extend_visible_entries(&store, None, &mut entries, category.as_ref())?;
+            entries.retain(|e| session_id.is_none() || e.session_id == session_id);
+            Ok(entries)
+        })
+        .await?
     }
 
     async fn forget(&self, key: &str) -> anyhow::Result<bool> {
         let scope = PointScope::current();
-        let rows = self.find_rows_by_key(key, None, scope).await?;
         // The unscoped delete never reaches the reserved Soul namespace;
         // Soul rows are forgotten only through `forget_for_agent` with the
         // admitted identity.
-        let ids: Vec<String> = rows.into_iter().map(|e| e.id).collect();
-        Ok(self.delete_ids(ids).await? > 0)
+        self.forget_by_key(key, None, scope).await
     }
 
     async fn forget_for_agent(&self, key: &str, agent_id: &str) -> anyhow::Result<bool> {
         let scope = PointScope::current();
-        let rows = self.find_rows_by_key(key, Some(agent_id), scope).await?;
-        let ids: Vec<String> = rows.into_iter().map(|e| e.id).collect();
-        Ok(self.delete_ids(ids).await? > 0)
+        self.forget_by_key(key, Some(agent_id), scope).await
     }
 
     async fn purge_namespace(&self, namespace: &str) -> anyhow::Result<usize> {
+        if let Some(kind) = sleep_typed::SleepKind::for_namespace(namespace) {
+            let handle = self.store.clone();
+            let db_path = self.db_path.clone();
+            let namespace = namespace.to_owned();
+            let page = self.list_page_size;
+            let max = self.max_list_grow;
+            return tokio::task::spawn_blocking(move || {
+                let mut store = handle.lock();
+                let _guard = sleep_typed::write_guard(&db_path)?;
+                let rows = Self::list_prefix_complete(&store, "/agents", page, max)?;
+                let mut deleted = 0;
+                for row in rows {
+                    if row.metadata[METADATA_ZC_NAMESPACE] == namespace {
+                        deleted += usize::from(store.delete(&row.id)?);
+                    }
+                }
+                Ok(deleted + sleep_typed::purge_slots(&mut store, kind, kind.query(None))?)
+            })
+            .await?;
+        }
         let entries = self.list_all().await?;
         let ids: Vec<String> = entries
             .into_iter()
@@ -1491,13 +1610,32 @@ impl Memory for MemoryCore {
     }
 
     async fn purge_session(&self, session_id: &str) -> anyhow::Result<usize> {
-        let entries = self.list_all().await?;
-        let ids: Vec<String> = entries
-            .into_iter()
-            .filter(|e| e.session_id.as_deref() == Some(session_id))
-            .map(|e| e.id)
-            .collect();
-        self.delete_ids(ids).await
+        use portable_kernel::store::scoped_read::RecentMemoryQuery;
+        let handle = self.store.clone();
+        let db_path = self.db_path.clone();
+        let session = session_id.to_owned();
+        let page_size = self.list_page_size;
+        let max_grow = self.max_list_grow;
+        tokio::task::spawn_blocking(move || {
+            let mut store = handle.lock();
+            let _guard = sleep_typed::write_guard(&db_path)?;
+            let mut query = RecentMemoryQuery::new("/agents", page_size.max(1));
+            query.include_archived = true;
+            let max_grow = max_grow.max(query.limit);
+            let rows = loop {
+                let rows = store.list_recent_matching(&query)?;
+                if rows.len() < query.limit {
+                    break rows;
+                }
+                anyhow::ensure!(
+                    query.limit < max_grow,
+                    "tachi session purge scan truncated at {max_grow} rows"
+                );
+                query.limit = query.limit.saturating_mul(2).min(max_grow);
+            };
+            Self::purge_session_rows(&mut store, rows, &session, None)
+        })
+        .await?
     }
 
     async fn purge_session_for_agent(
@@ -1505,16 +1643,19 @@ impl Memory for MemoryCore {
         session_id: &str,
         agent_id: &str,
     ) -> anyhow::Result<usize> {
-        let entries = self.list_all().await?;
-        let ids: Vec<String> = entries
-            .into_iter()
-            .filter(|e| {
-                e.session_id.as_deref() == Some(session_id)
-                    && e.agent_id.as_deref() == Some(agent_id)
-            })
-            .map(|e| e.id)
-            .collect();
-        self.delete_ids(ids).await
+        let handle = self.store.clone();
+        let db_path = self.db_path.clone();
+        let session = session_id.to_owned();
+        let agent = agent_id.to_owned();
+        let page_size = self.list_page_size;
+        let max_grow = self.max_list_grow;
+        tokio::task::spawn_blocking(move || {
+            let mut store = handle.lock();
+            let _guard = sleep_typed::write_guard(&db_path)?;
+            let rows = Self::agent_rows(&store, &agent, page_size, max_grow, true)?;
+            Self::purge_session_rows(&mut store, rows, &session, Some(&agent))
+        })
+        .await?
     }
 
     async fn export_agent(&self, agent_alias: &str) -> anyhow::Result<Vec<MemoryEntry>> {
@@ -1528,9 +1669,25 @@ impl Memory for MemoryCore {
     }
 
     async fn purge_agent(&self, agent_alias: &str) -> anyhow::Result<usize> {
-        let entries = self.list_agent_entries(agent_alias).await?;
-        let ids: Vec<String> = entries.into_iter().map(|e| e.id).collect();
-        self.delete_ids(ids).await
+        let handle = self.store.clone();
+        let db_path = self.db_path.clone();
+        let agent = agent_alias.to_string();
+        let page_size = self.list_page_size;
+        let max_grow = self.max_list_grow;
+        tokio::task::spawn_blocking(move || {
+            let mut store = handle.lock();
+            let _guard = sleep_typed::write_guard(&db_path)?;
+            let rows = Self::agent_rows(&store, &agent, page_size, max_grow, true)?;
+            let mut deleted = 0;
+            for row in rows {
+                if row.archived && Self::legacy_sleep_kind(&row).is_none() {
+                    continue;
+                }
+                deleted += usize::from(store.delete(&row.id)?);
+            }
+            Ok(deleted + sleep_typed::purge(&mut store, &agent)?)
+        })
+        .await?
     }
 
     async fn rename_agent(&self, from: &str, to: &str) -> anyhow::Result<usize> {
@@ -1542,18 +1699,19 @@ impl Memory for MemoryCore {
         let max_grow = self.max_list_grow;
         let from = from.to_string();
         let to = to.to_string();
+        let db_path = self.db_path.clone();
         let from_seg = Self::agent_segment(Some(&from));
         let to_seg = Self::agent_segment(Some(&to));
         tokio::task::spawn_blocking(move || -> anyhow::Result<usize> {
             let mut store = store.lock();
-            let prefix = format!("/agents/{from_seg}/");
-            let rows = Self::list_prefix_complete(&store, &prefix, page_size, max_grow)?;
-            let mut rewritten = 0usize;
+            let _guard = sleep_typed::write_guard(&db_path)?;
+            let rows = Self::agent_rows(&store, &from, page_size, max_grow, true)?;
+            let mut rewritten = Vec::new();
             for mut row in rows {
-                let agent_meta = Self::metadata_str(&row.metadata, METADATA_ZC_AGENT);
-                if agent_meta.as_deref() != Some(from.as_str()) && !row.path.starts_with(&prefix) {
+                if row.archived && Self::legacy_sleep_kind(&row).is_none() {
                     continue;
                 }
+                Self::rename_legacy_sleep_payload(&store, &mut row, &from, &to)?;
                 let rest = row
                     .path
                     .strip_prefix(&format!("/agents/{from_seg}"))
@@ -1565,28 +1723,58 @@ impl Memory for MemoryCore {
                         serde_json::Value::String(to.clone()),
                     );
                 }
-                store
-                    .upsert(&row)
-                    .map_err(|e| anyhow::Error::msg(format!("tachi rename upsert failed: {e}")))?;
-                rewritten += 1;
+                rewritten.push(row);
             }
-            Ok(rewritten)
+            let moved = sleep_typed::copy_for_rename(&mut store, &from, &to)?;
+            store.upsert_batch(&rewritten)?;
+            sleep_typed::purge(&mut store, &from)?;
+            Ok(rewritten.len() + moved)
         })
         .await?
     }
 
     async fn count_agent(&self, agent_alias: &str) -> anyhow::Result<usize> {
-        Ok(self.list_agent_entries(agent_alias).await?.len())
+        let store = self.store.clone();
+        let agent = agent_alias.to_string();
+        let page_size = self.list_page_size;
+        let max_grow = self.max_list_grow;
+        let db_path = self.db_path.clone();
+        tokio::task::spawn_blocking(move || {
+            let store = store.lock();
+            let _guard = sleep_typed::read_guard(&db_path)?;
+            let active = sleep_typed::active_slots(&store, Some(&agent))?;
+            let rows = Self::agent_rows(&store, &agent, page_size, max_grow, true)?;
+            let owned = rows
+                .iter()
+                .filter(|row| {
+                    (!row.archived || Self::legacy_sleep_kind(row).is_some())
+                        && !Self::legacy_slot_key(row).is_some_and(|k| active.contains(&k))
+                })
+                .count();
+            Ok(owned + active.len())
+        })
+        .await?
     }
 
     async fn count(&self) -> anyhow::Result<usize> {
         let store = self.store.clone();
+        let db_path = self.db_path.clone();
         tokio::task::spawn_blocking(move || -> anyhow::Result<usize> {
             let store = store.lock();
+            let _guard = sleep_typed::read_guard(&db_path)?;
+            let active = sleep_typed::active_slots(&store, None)?;
+            let mut shadowed_live = 0usize;
+            for (agent, kind, slot) in &active {
+                if Self::legacy_sleep_slot(&store, *kind, agent, slot)?
+                    .is_some_and(|row| !row.archived)
+                {
+                    shadowed_live += 1;
+                }
+            }
             let stats = store
                 .stats(false)
                 .map_err(|e| anyhow::Error::msg(format!("{e}")))?;
-            Ok(stats.total as usize)
+            Ok(usize::try_from(stats.total)?.saturating_sub(shadowed_live) + active.len())
         })
         .await?
     }
@@ -1914,17 +2102,25 @@ impl Memory for MemoryCore {
         let store = self.store.clone();
         let page_size = self.list_page_size;
         let max_grow = self.max_list_grow;
+        let db_path = self.db_path.clone();
         tokio::task::spawn_blocking(move || -> anyhow::Result<MemoryStats> {
             let store = store.lock();
-            let stats = store
+            let _guard = sleep_typed::read_guard(&db_path)?;
+            let active = sleep_typed::active_slots(&store, None)?;
+            let mut stats = store
                 .stats(false)
                 .map_err(|e| anyhow::Error::msg(format!("{e}")))?;
-            let by_category: Vec<(String, u64)> = stats.by_category.into_iter().collect();
             let rows = Self::list_prefix_complete(&store, "/agents", page_size, max_grow)?;
             let mut pinned_rows = 0u64;
             let mut superseded_rows = 0u64;
             let mut bytes = 0u64;
             for row in &rows {
+                if Self::legacy_slot_key(row).is_some_and(|k| active.contains(&k)) {
+                    stats.total = stats.total.saturating_sub(1);
+                    let cat = stats.by_category.entry("other".into()).or_default();
+                    *cat = cat.saturating_sub(1);
+                    continue;
+                }
                 if row
                     .metadata
                     .get(METADATA_PINNED)
@@ -1939,9 +2135,19 @@ impl Memory for MemoryCore {
                 }
                 bytes += row.text.len() as u64;
             }
+            sleep_typed::visit_active(&store, None, |kind, record| {
+                stats.total += 1;
+                *stats.by_category.entry("other".into()).or_default() += 1;
+                pinned_rows += u64::from(kind == sleep_typed::SleepKind::Pinned);
+                bytes += serde_json::to_vec(&record.payload)?.len() as u64;
+                Ok(())
+            })?;
+            if stats.by_category.get("other").copied() == Some(0) {
+                stats.by_category.remove("other");
+            }
             Ok(MemoryStats {
                 total_rows: stats.total,
-                by_category,
+                by_category: stats.by_category.into_iter().collect(),
                 superseded_rows,
                 pinned_rows,
                 bytes,

@@ -22,7 +22,6 @@ async-trait = "0.1"
 base64 = "0.22"
 jiff.workspace = true
 console = "0.16"
-jiff-cron = "0.3.0"
 directories = "6.0"
 futures-util = { version = "0.3", default-features = false, features = ["sink"] }
 glob = "0.3"

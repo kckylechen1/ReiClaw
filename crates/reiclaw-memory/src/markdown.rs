@@ -5,8 +5,8 @@ use tokio::fs;
 
 fn entry_in_window(
     timestamp: &str,
-    since: Option<&jiff::Zoned>,
-    until: Option<&jiff::Zoned>,
+    since: Option<&jiff::ZonedDateTime>,
+    until: Option<&jiff::ZonedDateTime>,
 ) -> bool {
     if let Ok(ts) = reiclaw_api::time::parse_rfc3339(timestamp) {
         if let Some(s) = since
@@ -60,7 +60,7 @@ impl MarkdownMemory {
     }
 
     fn daily_path(&self) -> PathBuf {
-        let date = jiff::Zoned::now().strftime("%Y-%m-%d").to_string();
+        let date = jiff::ZonedDateTime::now().strftime("%Y-%m-%d").to_string();
         self.memory_dir().join(format!("{date}.md"))
     }
 
@@ -82,7 +82,7 @@ impl MarkdownMemory {
             let header = if path == self.core_path() {
                 "# Long-Term Memory\n\n"
             } else {
-                let date = jiff::Zoned::now().strftime("%Y-%m-%d").to_string();
+                let date = jiff::ZonedDateTime::now().strftime("%Y-%m-%d").to_string();
                 &format!("# Daily Log — {date}\n\n")
             };
             format!("{header}{content}\n")
@@ -569,14 +569,18 @@ mod tests {
             .await
             .unwrap();
 
-        let today = jiff::Zoned::now().date();
+        let today = jiff::ZonedDateTime::now().date();
         let yesterday = (today - jiff::SignedDuration::from_hours(24)).at(23, 59, 59, 0);
         let yesterday_rfc = reiclaw_api::time::format_rfc3339_zoned(
-            &yesterday.to_zoned(jiff::tz::TimeZone::system()).unwrap(),
+            &yesterday
+                .to_zoned_datetime(jiff::tz::TimeZone::system())
+                .unwrap(),
         );
         let past = (today - jiff::SignedDuration::from_hours(7 * 24)).at(0, 0, 0, 0);
         let past_rfc = reiclaw_api::time::format_rfc3339_zoned(
-            &past.to_zoned(jiff::tz::TimeZone::system()).unwrap(),
+            &past
+                .to_zoned_datetime(jiff::tz::TimeZone::system())
+                .unwrap(),
         );
 
         // until = yesterday: today's daily entry is outside the window and

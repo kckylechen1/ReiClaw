@@ -120,7 +120,7 @@ fn timezone_confirmation_fields(job: &CronJob) -> TimezoneConfirmationFields {
         Schedule::Cron { tz: Some(tz), .. } => {
             let next_run_local = jiff::tz::TimeZone::get(tz).map_or(Value::Null, |timezone| {
                 json!(reiclaw_api::time::format_rfc3339_zoned(
-                    &job.next_run.to_zoned(timezone)
+                    &job.next_run.to_zoned_datetime(timezone)
                 ))
             });
             TimezoneConfirmationFields {
@@ -133,7 +133,7 @@ fn timezone_confirmation_fields(job: &CronJob) -> TimezoneConfirmationFields {
             schedule_timezone: json!("runtime local timezone"),
             timezone_source: json!("runtime_local"),
             next_run_local: json!(reiclaw_api::time::format_rfc3339_zoned(
-                &job.next_run.to_zoned(jiff::tz::TimeZone::system())
+                &job.next_run.to_zoned_datetime(jiff::tz::TimeZone::system())
             )),
         },
         Schedule::At { .. } | Schedule::Every { .. } => TimezoneConfirmationFields {

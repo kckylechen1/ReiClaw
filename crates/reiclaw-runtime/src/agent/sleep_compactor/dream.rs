@@ -41,7 +41,7 @@ pub fn is_quiet_hours(policy: Option<&AttentionConfig>, now: jiff::Timestamp) ->
     let Ok(end) = jiff::civil::Time::strptime("%H:%M", &policy.quiet_end) else {
         return true;
     };
-    let local = now.to_zoned(timezone).time();
+    let local = now.to_zoned_datetime(timezone).time();
     if start < end {
         local >= start && local < end
     } else {
@@ -59,7 +59,7 @@ pub struct DreamWindow {
 
 /// Compute the most recently completed local `04:00` day-cut window for `now`.
 pub fn due_dream_window(now: jiff::Timestamp, timezone: jiff::tz::TimeZone) -> Result<DreamWindow> {
-    let zoned = now.to_zoned(timezone.clone());
+    let zoned = now.to_zoned_datetime(timezone.clone());
     let cut_time = jiff::civil::time(DREAM_CUT_HOUR, 0, 0, 0);
     let end_date = if zoned.time() >= cut_time {
         zoned.date()
@@ -67,8 +67,8 @@ pub fn due_dream_window(now: jiff::Timestamp, timezone: jiff::tz::TimeZone) -> R
         zoned.date().yesterday()?
     };
     let start_date = end_date.yesterday()?;
-    let window_end_zoned = timezone.to_zoned(end_date.at(DREAM_CUT_HOUR, 0, 0, 0))?;
-    let window_start_zoned = timezone.to_zoned(start_date.at(DREAM_CUT_HOUR, 0, 0, 0))?;
+    let window_end_zoned = timezone.to_zoned_datetime(end_date.at(DREAM_CUT_HOUR, 0, 0, 0))?;
+    let window_start_zoned = timezone.to_zoned_datetime(start_date.at(DREAM_CUT_HOUR, 0, 0, 0))?;
     Ok(DreamWindow {
         day_key: end_date.strftime("%Y-%m-%d").to_string(),
         window_start: reiclaw_api::time::format_rfc3339(window_start_zoned.timestamp()),

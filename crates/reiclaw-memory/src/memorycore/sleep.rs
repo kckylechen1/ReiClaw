@@ -1,6 +1,7 @@
 //! Sleep-memory primitives over `MemoryCore`'s single `MemoryStore` handle
 //! (ADR-025 Wave 1 Slice 2/3B).
 
+use super::sleep_typed::{self, SleepKind};
 use super::{
     DEFAULT_NAMESPACE, METADATA_PINNED, METADATA_SESSION_ID, METADATA_SUPERSEDED_BY,
     METADATA_ZC_AGENT, METADATA_ZC_CATEGORY, METADATA_ZC_CREATED_AT, METADATA_ZC_KEY,
@@ -8,14 +9,15 @@ use super::{
 };
 use crate::point_scope::PointScope;
 use crate::sleep_records::{
-    DailyDigest, EpisodeRecord, PinnedDigest, validate_agent_id, validate_non_soul_key,
-    validate_non_soul_namespace,
+    DailyDigest, EpisodeRecord, EpisodeSourceKind, PinnedDigest, validate_agent_id,
+    validate_non_soul_key, validate_non_soul_namespace,
 };
 use crate::traits::{MemoryCategory, StoreOptions};
 use anyhow::{Context, bail, ensure};
 use portable_kernel::MemoryStore;
 use portable_kernel::store::scoped_read::{MetadataTextFilter, RecentMemoryQuery, TextMembership};
-use serde::Serialize;
+use serde_json::Value;
+use std::collections::HashSet;
 use uuid::Uuid;
 
 const SLEEP_EPISODE_NAMESPACE: &str = "sleep_episode";
@@ -25,14 +27,7 @@ const SLEEP_PINNED_DIGEST_CATEGORY: &str = "sleep_pinned_digest";
 const SLEEP_PINNED_DIGEST_KEY: &str = "sleep:pinned_digest";
 const SLEEP_DAILY_DIGEST_NAMESPACE: &str = "sleep_daily_digest";
 const SLEEP_DAILY_DIGEST_CATEGORY: &str = "sleep_daily_digest";
-const SLEEP_RECORD_IMPORTANCE: f64 = 0.8;
 const CORE_FACT_IMPORTANCE: f64 = 0.7;
-
-fn encode_sleep_json<T: Serialize>(value: &T) -> anyhow::Result<String> {
-    let raw = serde_json::to_string(value).context("failed to serialize sleep record")?;
-    // Escape '<' so memcore's `scrub_think_tags` cannot alter serialized JSON strings.
-    Ok(raw.replace('<', "\\u003c"))
-}
 
 fn ceil_utc_millis(ts: jiff::Timestamp) -> String {
     let nanos = ts.subsec_nanosecond();
@@ -92,94 +87,112 @@ impl MemoryCore {
         }))
     }
 
-    #[allow(clippy::too_many_arguments)]
-    fn build_sleep_entry(
-        existing: Option<&portable_kernel::MemoryEntry>,
-        path: String,
-        key: &str,
-        category: &MemoryCategory,
-        namespace: &str,
-        agent_id: &str,
-        session_id: Option<&str>,
-        summary: String,
-        text: String,
-        entities: Vec<String>,
-        keywords: Vec<String>,
-        timestamp_millis: String,
-        timestamp_nanos: String,
-        pinned: bool,
-        retention_policy: Option<&str>,
-    ) -> portable_kernel::MemoryEntry {
-        let id = existing
-            .map(|e| e.id.clone())
-            .unwrap_or_else(|| Uuid::new_v4().to_string());
-        let access_count = existing.map(|e| e.access_count).unwrap_or(0);
-        let last_access = existing.and_then(|e| e.last_access.clone());
-        let recall_count = existing.map(|e| e.recall_count).unwrap_or(0);
-        let query_diversity = existing.map(|e| e.query_diversity).unwrap_or(0);
-        let tier = existing
-            .map(|e| e.tier.clone())
-            .unwrap_or_else(portable_kernel::types::default_tier);
-        let revision = existing.map(|e| e.revision).unwrap_or(1);
+    pub(super) fn legacy_sleep_kind(row: &portable_kernel::MemoryEntry) -> Option<SleepKind> {
+        let namespace = row.metadata[METADATA_ZC_NAMESPACE].as_str()?;
+        if row.metadata[METADATA_ZC_CATEGORY] != namespace {
+            return None;
+        }
+        match namespace {
+            SLEEP_EPISODE_NAMESPACE => Some(SleepKind::Episode),
+            SLEEP_PINNED_DIGEST_NAMESPACE => Some(SleepKind::Pinned),
+            SLEEP_DAILY_DIGEST_NAMESPACE => Some(SleepKind::Daily),
+            _ => None,
+        }
+    }
 
-        let options = StoreOptions::default().pinned(pinned);
-        let mut metadata = Self::build_metadata(
-            key,
-            category,
-            session_id,
-            Some(namespace),
-            Some(agent_id),
-            &options,
+    pub(super) fn legacy_slot_key(
+        row: &portable_kernel::MemoryEntry,
+    ) -> Option<(String, SleepKind, String)> {
+        let kind = Self::legacy_sleep_kind(row)?;
+        let agent = Self::metadata_str(&row.metadata, METADATA_ZC_AGENT)?;
+        let key = row.metadata[METADATA_ZC_KEY].as_str()?;
+        let slot = match kind {
+            SleepKind::Pinned => (key == SLEEP_PINNED_DIGEST_KEY).then_some("pinned_digest")?,
+            SleepKind::Episode | SleepKind::Daily => key,
+        };
+        Some((agent, kind, slot.to_owned()))
+    }
+
+    pub(super) fn legacy_sleep_slot(
+        store: &MemoryStore,
+        kind: SleepKind,
+        agent: &str,
+        slot: &str,
+    ) -> anyhow::Result<Option<portable_kernel::MemoryEntry>> {
+        let (namespace, category, key) = match kind {
+            SleepKind::Episode => (SLEEP_EPISODE_NAMESPACE, Self::episode_category(), slot),
+            SleepKind::Pinned => (
+                SLEEP_PINNED_DIGEST_NAMESPACE,
+                Self::pinned_digest_category(),
+                SLEEP_PINNED_DIGEST_KEY,
+            ),
+            SleepKind::Daily => (
+                SLEEP_DAILY_DIGEST_NAMESPACE,
+                Self::daily_digest_category(),
+                slot,
+            ),
+        };
+        let path = Self::storage_path(Some(agent), Some(namespace), &category, key);
+        let mut query = RecentMemoryQuery::new(path.clone(), 1);
+        query.include_archived = true;
+        for (field, value) in [
+            (METADATA_ZC_AGENT, agent),
+            (METADATA_ZC_KEY, key),
+            (METADATA_ZC_CATEGORY, namespace),
+            (METADATA_ZC_NAMESPACE, namespace),
+        ] {
+            query.filters.push(MetadataTextFilter {
+                field: field.into(),
+                values: vec![value.into()],
+                membership: TextMembership::AnyOf,
+                missing_value: None,
+            });
+        }
+        Ok(store
+            .list_recent_matching(&query)?
+            .into_iter()
+            .find(|r| r.path == path))
+    }
+
+    // Legacy rows carry the agent twice: in storage metadata and in the DTO.
+    pub(super) fn rename_legacy_sleep_payload(
+        store: &MemoryStore,
+        row: &mut portable_kernel::MemoryEntry,
+        from: &str,
+        to: &str,
+    ) -> anyhow::Result<()> {
+        let Some(kind) = Self::legacy_sleep_kind(row) else {
+            return Ok(());
+        };
+        let mut payload: Value = serde_json::from_str(&row.text)?;
+        ensure!(
+            payload["agent_id"] == from,
+            "legacy sleep record agent mismatch"
         );
-        let created_at_nanos = existing
-            .and_then(|e| {
-                Self::metadata_str(&e.metadata, METADATA_ZC_CREATED_AT)
-                    .filter(|s| !s.is_empty())
-                    .or_else(|| Some(Self::canonical_sort_nanos(&e.timestamp)))
-            })
-            .unwrap_or_else(|| timestamp_nanos.clone());
-        if let Some(obj) = metadata.as_object_mut() {
-            obj.insert(
-                METADATA_ZC_CREATED_AT.to_string(),
-                serde_json::Value::String(created_at_nanos),
-            );
-            obj.insert(
-                METADATA_ZC_UPDATED_AT.to_string(),
-                serde_json::Value::String(timestamp_nanos),
+        payload["agent_id"] = Value::String(to.into());
+        kind.validate_payload(&payload)?;
+        let key = row.metadata[METADATA_ZC_KEY]
+            .as_str()
+            .context("missing legacy sleep key")?;
+        let slot = if kind == SleepKind::Pinned {
+            "pinned_digest"
+        } else {
+            key
+        };
+        ensure!(
+            Self::legacy_sleep_slot(store, kind, to, slot)?.is_none(),
+            "destination legacy sleep record already exists"
+        );
+        if kind.current(store, from, slot)?.is_none()
+            && let Some(existing) = kind.current(store, to, slot)?
+        {
+            ensure!(
+                kind.verified_payload(existing)? == payload,
+                "destination sleep record already exists"
             );
         }
-
-        portable_kernel::MemoryEntry {
-            id,
-            path,
-            summary,
-            text,
-            importance: SLEEP_RECORD_IMPORTANCE,
-            timestamp: timestamp_millis.clone(),
-            valid_from: timestamp_millis,
-            valid_until: None,
-            category: Self::category_to_memcore(category),
-            topic: String::new(),
-            keywords,
-            persons: Vec::new(),
-            entities,
-            location: String::new(),
-            source: "reiclaw".into(),
-            scope: Self::scope_for_namespace(Some(namespace)),
-            archived: false,
-            access_count,
-            scored_count: 0,
-            last_use_at: None,
-            last_access,
-            revision,
-            vector: None,
-            retention_policy: retention_policy.map(str::to_string),
-            domain: None,
-            metadata,
-            recall_count,
-            query_diversity,
-            tier,
-        }
+        row.text = serde_json::to_string(&payload)?.replace('<', "\\u003c");
+        Ok(())
     }
 
     fn sleep_recent_query(
@@ -226,78 +239,103 @@ impl MemoryCore {
         query
     }
 
-    /// Persist an [`EpisodeRecord`] under this agent's dedicated non-soul
-    /// episode namespace using the shared `MemoryStore` handle.
+    /// Append a new revision, or recover the original delegated report on replay.
     pub async fn commit_episode(&self, episode: &EpisodeRecord) -> anyhow::Result<String> {
         episode.validate()?;
-        let end_ts = reiclaw_api::time::parse_rfc3339(&episode.ended_at)?;
-        let ts_millis = Self::format_utc_millis(end_ts);
-        let ts_nanos = Self::format_utc_nanos(end_ts);
-        let payload = encode_sleep_json(episode)?;
-        let category = Self::episode_category();
-        let path = Self::storage_path(
-            Some(&episode.agent_id),
-            Some(SLEEP_EPISODE_NAMESPACE),
-            &category,
-            &episode.episode_id,
-        );
-        let mut keywords = episode.entities.clone();
-        keywords.push(episode.source_kind.to_string());
-        let summary: String = episode.summary.chars().take(200).collect();
-
-        let store = self.store_handle().clone();
-        let episode_id = episode.episode_id.clone();
-        let agent_id = episode.agent_id.clone();
-        let session_key = episode.session_key.clone();
-        let entities = episode.entities.clone();
-        let immutable =
-            episode.source_kind == crate::sleep_records::EpisodeSourceKind::DelegationDigest;
-
-        tokio::task::spawn_blocking(move || -> anyhow::Result<String> {
-            let mut store = store.lock();
-            let existing =
-                Self::resolve_existing_at_path(&store, &path, &episode_id, &agent_id, immutable)?;
-            if immutable && let Some(existing) = &existing {
-                let stored: EpisodeRecord = serde_json::from_str(&existing.text)?;
+        let episode = episode.clone();
+        let handle = self.store.clone();
+        let db_path = self.db_path.clone();
+        tokio::task::spawn_blocking(move || {
+            let mut store = handle.lock();
+            let _guard = sleep_typed::write_guard(&db_path)?;
+            let current =
+                SleepKind::Episode.current(&store, &episode.agent_id, &episode.episode_id)?;
+            let predecessor = current.as_ref().map(|r| r.id.clone());
+            let existing = if let Some(record) = current {
+                let id = record.id.clone();
+                Some((
+                    id,
+                    serde_json::from_value::<EpisodeRecord>(
+                        SleepKind::Episode.verified_payload(record)?,
+                    )?,
+                ))
+            } else {
+                Self::legacy_sleep_slot(
+                    &store,
+                    SleepKind::Episode,
+                    &episode.agent_id,
+                    &episode.episode_id,
+                )?
+                .map(|row| serde_json::from_str(&row.text).map(|stored| (row.id, stored)))
+                .transpose()?
+            };
+            if let Some((id, stored)) = existing
+                && (episode.source_kind == EpisodeSourceKind::DelegationDigest
+                    || stored.source_kind == EpisodeSourceKind::DelegationDigest)
+            {
                 stored.validate()?;
                 ensure!(
-                    stored.episode_id == episode_id
-                        && stored.agent_id == agent_id
-                        && stored.session_key == session_key
-                        && stored.source_kind
-                            == crate::sleep_records::EpisodeSourceKind::DelegationDigest,
+                    episode.episode_id == stored.episode_id
+                        && episode.agent_id == stored.agent_id
+                        && episode.session_key == stored.session_key
+                        && episode.source_kind == stored.source_kind,
                     "delegation Episode identity conflicts"
                 );
-                return Ok(existing.id.clone());
+                return Ok(id);
             }
-            let entry = Self::build_sleep_entry(
-                existing.as_ref(),
-                path,
-                &episode_id,
-                &category,
-                SLEEP_EPISODE_NAMESPACE,
-                &agent_id,
-                Some(&session_key),
-                summary,
-                payload,
-                entities,
-                keywords,
-                ts_millis,
-                ts_nanos,
-                false,
-                Some("durable"),
-            );
-            let id = entry.id.clone();
-            store
-                .upsert(&entry)
-                .map_err(|e| anyhow::Error::msg(format!("tachi episode commit failed: {e}")))?;
-            Ok(id)
+            SleepKind::Episode.append(
+                &mut store,
+                serde_json::to_value(episode)?,
+                predecessor.as_deref(),
+            )
         })
         .await?
     }
 
-    /// Read non-superseded [`EpisodeRecord`]s for `agent_id` within `[since, until]`
-    /// (inclusive on `ended_at`), optionally filtered to `session_id`, newest first.
+    // A typed successor can move out of the requested session or window.
+    // Check the logical slot without those filters before admitting legacy data.
+    fn legacy_sleep_rows<T>(
+        store: &MemoryStore,
+        kind: SleepKind,
+        agent: &str,
+        mut query: RecentMemoryQuery,
+        limit: usize,
+        max_grow: usize,
+        decode: impl Fn(&str, &str) -> anyhow::Result<Option<T>>,
+    ) -> anyhow::Result<Vec<T>> {
+        let mut seen = HashSet::new();
+        let mut selected = Vec::new();
+        let mut cutoff = None;
+        query.limit = limit.max(16).min(max_grow);
+        loop {
+            let rows = store.list_recent_matching(&query)?;
+            let full = rows.len() == query.limit;
+            for row in rows {
+                if cutoff.as_ref().is_some_and(|ts| &row.timestamp < ts) {
+                    return Ok(selected);
+                }
+                let Some(key) = row.metadata[METADATA_ZC_KEY].as_str() else {
+                    continue;
+                };
+                if seen.contains(key) || kind.current(store, agent, key)?.is_some() {
+                    continue;
+                }
+                if let Some(value) = decode(key, &row.text)? {
+                    seen.insert(key.to_string());
+                    selected.push(value);
+                    if selected.len() == limit {
+                        cutoff = Some(row.timestamp);
+                    }
+                }
+            }
+            if !full || query.limit >= max_grow {
+                return Ok(selected);
+            }
+            query.limit = query.limit.saturating_mul(2).min(max_grow);
+        }
+    }
+
+    /// Read active episodes in an inclusive instant window, newest first.
     pub async fn read_episodes_in_window(
         &self,
         agent_id: &str,
@@ -308,89 +346,77 @@ impl MemoryCore {
     ) -> anyhow::Result<Vec<EpisodeRecord>> {
         validate_agent_id(agent_id)?;
         validate_optional_session_id(session_id)?;
-
-        let since_ts = since
+        let since = since
             .map(reiclaw_api::time::parse_rfc3339)
             .transpose()
             .context("invalid since timestamp for read_episodes_in_window")?;
-        let until_ts = until
+        let until = until
             .map(reiclaw_api::time::parse_rfc3339)
             .transpose()
             .context("invalid until timestamp for read_episodes_in_window")?;
-
-        if limit == 0 {
+        if limit == 0 || matches!((since,until),(Some(s),Some(u)) if s > u) {
             return Ok(Vec::new());
         }
-        if let (Some(s), Some(u)) = (since_ts, until_ts)
-            && s > u
-        {
-            return Ok(Vec::new());
-        }
-
-        let category = Self::episode_category();
-        let prefix = Self::sleep_subtree_prefix(agent_id, SLEEP_EPISODE_NAMESPACE, &category);
-        let store = self.store_handle().clone();
-        let max_grow = self.max_list_grow.max(1);
-        let agent_owned = agent_id.to_string();
-        let session_owned = session_id.map(str::to_owned);
-
-        tokio::task::spawn_blocking(move || -> anyhow::Result<Vec<EpisodeRecord>> {
-            let store = store.lock();
-            let mut fetch_limit = limit.max(16).min(max_grow);
-            loop {
-                let mut query = Self::sleep_recent_query(
-                    prefix.clone(),
-                    &agent_owned,
-                    SLEEP_EPISODE_NAMESPACE,
-                    SLEEP_EPISODE_CATEGORY,
-                    session_owned.as_deref(),
-                    fetch_limit,
-                );
-                query.since = since_ts.map(Self::format_utc_millis);
-                query.until = until_ts.map(ceil_utc_millis);
-
-                let rows = store.list_recent_matching(&query).map_err(|e| {
-                    anyhow::Error::msg(format!("tachi read_episodes_in_window failed: {e}"))
-                })?;
-                let raw_len = rows.len();
-
-                let mut episodes = Vec::with_capacity(limit.min(raw_len));
-                for row in rows {
-                    if Self::is_soft_superseded(&row) {
-                        continue;
-                    }
-                    let episode: EpisodeRecord = serde_json::from_str(&row.text)
-                        .with_context(|| format!("failed to parse EpisodeRecord '{}'", row.id))?;
-                    if episode.agent_id != agent_owned {
-                        continue;
-                    }
-                    if let Some(sid) = session_owned.as_deref()
-                        && episode.session_key != sid
-                    {
-                        continue;
-                    }
-                    let ended_ts = reiclaw_api::time::parse_rfc3339(&episode.ended_at)?;
-                    if let Some(s) = since_ts
-                        && ended_ts < s
-                    {
-                        continue;
-                    }
-                    if let Some(u) = until_ts
-                        && ended_ts > u
-                    {
-                        continue;
-                    }
-                    episodes.push(episode);
-                    if episodes.len() >= limit {
-                        break;
-                    }
-                }
-
-                if episodes.len() >= limit || raw_len < fetch_limit || fetch_limit >= max_grow {
-                    return Ok(episodes);
-                }
-                fetch_limit = fetch_limit.saturating_mul(2).min(max_grow);
+        let agent = agent_id.to_owned();
+        let session = session_id.map(str::to_owned);
+        let handle = self.store.clone();
+        let max_grow = self.max_list_grow;
+        let db_path = self.db_path.clone();
+        tokio::task::spawn_blocking(move || {
+            let store = handle.lock();
+            let _guard = sleep_typed::read_guard(&db_path)?;
+            let kind = SleepKind::Episode;
+            let mut query = kind.query(Some(&agent));
+            if let Some(sid) = &session {
+                query.key_filters.insert("session_key".into(), sid.clone());
             }
+            query.since = since.map(|t| t.to_string());
+            query.until = until.map(|t| t.to_string());
+            let mut episodes = Vec::new();
+            for record in sleep_typed::ordered(&store, kind, query, limit, false)? {
+                let ep: EpisodeRecord = serde_json::from_value(kind.verified_payload(record)?)?;
+                episodes.push((reiclaw_api::time::parse_rfc3339(&ep.ended_at)?, ep));
+            }
+            let prefix = Self::sleep_subtree_prefix(
+                &agent,
+                SLEEP_EPISODE_NAMESPACE,
+                &Self::episode_category(),
+            );
+            let mut legacy = Self::sleep_recent_query(
+                prefix,
+                &agent,
+                SLEEP_EPISODE_NAMESPACE,
+                SLEEP_EPISODE_CATEGORY,
+                session.as_deref(),
+                limit,
+            );
+            legacy.since = since.map(Self::format_utc_millis);
+            legacy.until = until.map(ceil_utc_millis);
+            episodes.extend(Self::legacy_sleep_rows(
+                &store,
+                kind,
+                &agent,
+                legacy,
+                limit,
+                max_grow,
+                |key, text| {
+                    let ep: EpisodeRecord = serde_json::from_str(text)?;
+                    if ep.agent_id != agent
+                        || ep.episode_id != key
+                        || session.as_ref().is_some_and(|sid| sid != &ep.session_key)
+                    {
+                        return Ok(None);
+                    }
+                    ep.validate()?;
+                    let time = reiclaw_api::time::parse_rfc3339(&ep.ended_at)?;
+                    Ok(
+                        (since.is_none_or(|s| time >= s) && until.is_none_or(|u| time <= u))
+                            .then_some((time, ep)),
+                    )
+                },
+            )?);
+            episodes.sort_by_key(|(time, _)| std::cmp::Reverse(*time));
+            Ok(episodes.into_iter().take(limit).map(|(_, ep)| ep).collect())
         })
         .await?
     }
@@ -645,58 +671,35 @@ impl MemoryCore {
         .await?
     }
 
-    /// Publish or replace the agent-scoped [`PinnedDigest`] (enforcing `<= 8_000` UTF-8 bytes).
-    pub async fn publish_pinned_digest(&self, digest: &PinnedDigest) -> anyhow::Result<String> {
-        digest.validate()?;
-        let updated_ts = reiclaw_api::time::parse_rfc3339(&digest.updated_at)?;
-        let ts_millis = Self::format_utc_millis(updated_ts);
-        let ts_nanos = Self::format_utc_nanos(updated_ts);
-        let payload = encode_sleep_json(digest)?;
-        let category = Self::pinned_digest_category();
-        let path = Self::storage_path(
-            Some(&digest.agent_id),
-            Some(SLEEP_PINNED_DIGEST_NAMESPACE),
-            &category,
-            SLEEP_PINNED_DIGEST_KEY,
-        );
-        let summary: String = digest.rendered_index.chars().take(200).collect();
-
-        let store = self.store_handle().clone();
-        let agent_id = digest.agent_id.clone();
-
-        tokio::task::spawn_blocking(move || -> anyhow::Result<String> {
-            let mut store = store.lock();
-            let existing = Self::resolve_existing_at_path(
-                &store,
-                &path,
-                SLEEP_PINNED_DIGEST_KEY,
-                &agent_id,
-                false,
-            )?;
-            let entry = Self::build_sleep_entry(
-                existing.as_ref(),
-                path,
-                SLEEP_PINNED_DIGEST_KEY,
-                &category,
-                SLEEP_PINNED_DIGEST_NAMESPACE,
-                &agent_id,
-                None,
-                summary,
-                payload,
-                Vec::new(),
-                vec!["pinned_digest".into()],
-                ts_millis,
-                ts_nanos,
-                true,
-                Some("pinned"),
-            );
-            let id = entry.id.clone();
-            store.upsert(&entry).map_err(|e| {
-                anyhow::Error::msg(format!("tachi publish_pinned_digest failed: {e}"))
-            })?;
-            Ok(id)
+    async fn publish_sleep_digest(
+        &self,
+        kind: SleepKind,
+        agent: &str,
+        slot: &str,
+        payload: Value,
+    ) -> anyhow::Result<String> {
+        let handle = self.store.clone();
+        let db_path = self.db_path.clone();
+        let agent = agent.to_owned();
+        let slot = slot.to_owned();
+        tokio::task::spawn_blocking(move || {
+            let mut store = handle.lock();
+            let _guard = sleep_typed::write_guard(&db_path)?;
+            let current = kind.current(&store, &agent, &slot)?;
+            kind.append(&mut store, payload, current.as_ref().map(|r| r.id.as_str()))
         })
         .await?
+    }
+
+    pub async fn publish_pinned_digest(&self, digest: &PinnedDigest) -> anyhow::Result<String> {
+        digest.validate()?;
+        self.publish_sleep_digest(
+            SleepKind::Pinned,
+            &digest.agent_id,
+            "pinned_digest",
+            serde_json::to_value(digest)?,
+        )
+        .await
     }
 
     /// Load the active [`PinnedDigest`] for `agent_id`, if present.
@@ -707,8 +710,17 @@ impl MemoryCore {
         let store = self.store_handle().clone();
         let agent_owned = agent_id.to_string();
 
+        let db_path = self.db_path.clone();
         tokio::task::spawn_blocking(move || -> anyhow::Result<Option<PinnedDigest>> {
             let store = store.lock();
+            let _guard = sleep_typed::read_guard(&db_path)?;
+            if let Some(record) =
+                SleepKind::Pinned.current(&store, &agent_owned, "pinned_digest")?
+            {
+                return Ok(Some(serde_json::from_value(
+                    SleepKind::Pinned.verified_payload(record)?,
+                )?));
+            }
             let query = Self::sleep_recent_query(
                 prefix,
                 &agent_owned,
@@ -742,60 +754,17 @@ impl MemoryCore {
         .await?
     }
 
-    /// Publish or update an agent-scoped [`DailyDigest`].
     pub async fn publish_daily_digest(&self, digest: &DailyDigest) -> anyhow::Result<String> {
         digest.validate()?;
-        let created_ts = reiclaw_api::time::parse_rfc3339(&digest.created_at)?;
-        let ts_millis = Self::format_utc_millis(created_ts);
-        let ts_nanos = Self::format_utc_nanos(created_ts);
-        let payload = encode_sleep_json(digest)?;
-        let category = Self::daily_digest_category();
-        let path = Self::storage_path(
-            Some(&digest.agent_id),
-            Some(SLEEP_DAILY_DIGEST_NAMESPACE),
-            &category,
+        self.publish_sleep_digest(
+            SleepKind::Daily,
+            &digest.agent_id,
             &digest.day_key,
-        );
-        let summary: String = digest.narrative.chars().take(200).collect();
-        let mut keywords = digest.entities.clone();
-        keywords.push(digest.day_key.clone());
-
-        let store = self.store_handle().clone();
-        let agent_id = digest.agent_id.clone();
-        let day_key = digest.day_key.clone();
-        let entities = digest.entities.clone();
-
-        tokio::task::spawn_blocking(move || -> anyhow::Result<String> {
-            let mut store = store.lock();
-            let existing =
-                Self::resolve_existing_at_path(&store, &path, &day_key, &agent_id, false)?;
-            let entry = Self::build_sleep_entry(
-                existing.as_ref(),
-                path,
-                &day_key,
-                &category,
-                SLEEP_DAILY_DIGEST_NAMESPACE,
-                &agent_id,
-                None,
-                summary,
-                payload,
-                entities,
-                keywords,
-                ts_millis,
-                ts_nanos,
-                false,
-                Some("durable"),
-            );
-            let id = entry.id.clone();
-            store.upsert(&entry).map_err(|e| {
-                anyhow::Error::msg(format!("tachi publish_daily_digest failed: {e}"))
-            })?;
-            Ok(id)
-        })
-        .await?
+            serde_json::to_value(digest)?,
+        )
+        .await
     }
 
-    /// Load agent-scoped [`DailyDigest`]s, ordered newest first, bounded by `limit`.
     pub async fn load_daily_digests(
         &self,
         agent_id: &str,
@@ -805,56 +774,67 @@ impl MemoryCore {
         if limit == 0 {
             return Ok(Vec::new());
         }
-
-        let category = Self::daily_digest_category();
-        let prefix = Self::sleep_subtree_prefix(agent_id, SLEEP_DAILY_DIGEST_NAMESPACE, &category);
-        let store = self.store_handle().clone();
-        let max_grow = self.max_list_grow.max(1);
-        let agent_owned = agent_id.to_string();
-
-        tokio::task::spawn_blocking(move || -> anyhow::Result<Vec<DailyDigest>> {
-            let store = store.lock();
-            let mut fetch_limit = limit.max(16).min(max_grow);
-            loop {
-                let query = Self::sleep_recent_query(
-                    prefix.clone(),
-                    &agent_owned,
-                    SLEEP_DAILY_DIGEST_NAMESPACE,
-                    SLEEP_DAILY_DIGEST_CATEGORY,
-                    None,
-                    fetch_limit,
-                );
-                let rows = store.list_recent_matching(&query).map_err(|e| {
-                    anyhow::Error::msg(format!("tachi load_daily_digests failed: {e}"))
-                })?;
-                let raw_len = rows.len();
-
-                let mut digests = Vec::with_capacity(limit.min(raw_len));
-                for row in rows {
-                    if Self::is_soft_superseded(&row) {
-                        continue;
-                    }
-                    let digest: DailyDigest = serde_json::from_str(&row.text)
-                        .with_context(|| format!("failed to parse DailyDigest '{}'", row.id))?;
-                    if digest.agent_id != agent_owned {
-                        continue;
-                    }
-                    digests.push(digest);
-                }
-
-                if digests.len() >= limit || raw_len < fetch_limit || fetch_limit >= max_grow {
-                    digests.sort_by(|a, b| {
-                        let b_ts = reiclaw_api::time::parse_rfc3339(&b.created_at).ok();
-                        let a_ts = reiclaw_api::time::parse_rfc3339(&a.created_at).ok();
-                        b_ts.cmp(&a_ts)
-                            .then_with(|| b.window_end.cmp(&a.window_end))
-                            .then_with(|| b.day_key.cmp(&a.day_key))
-                    });
-                    digests.truncate(limit);
-                    return Ok(digests);
-                }
-                fetch_limit = fetch_limit.saturating_mul(2).min(max_grow);
+        let agent = agent_id.to_owned();
+        let handle = self.store.clone();
+        let max_grow = self.max_list_grow;
+        let db_path = self.db_path.clone();
+        tokio::task::spawn_blocking(move || {
+            let store = handle.lock();
+            let _guard = sleep_typed::read_guard(&db_path)?;
+            let kind = SleepKind::Daily;
+            let mut digests = Vec::new();
+            for record in sleep_typed::ordered(&store, kind, kind.query(Some(&agent)), limit, true)?
+            {
+                let digest: DailyDigest = serde_json::from_value(kind.verified_payload(record)?)?;
+                digests.push((
+                    reiclaw_api::time::parse_rfc3339(&digest.created_at)?,
+                    reiclaw_api::time::parse_rfc3339(&digest.window_end)?,
+                    digest,
+                ));
             }
+            let prefix = Self::sleep_subtree_prefix(
+                &agent,
+                SLEEP_DAILY_DIGEST_NAMESPACE,
+                &Self::daily_digest_category(),
+            );
+            let legacy = Self::sleep_recent_query(
+                prefix,
+                &agent,
+                SLEEP_DAILY_DIGEST_NAMESPACE,
+                SLEEP_DAILY_DIGEST_CATEGORY,
+                None,
+                limit,
+            );
+            digests.extend(Self::legacy_sleep_rows(
+                &store,
+                kind,
+                &agent,
+                legacy,
+                limit,
+                max_grow,
+                |key, text| {
+                    let digest: DailyDigest = serde_json::from_str(text)?;
+                    if digest.agent_id != agent || digest.day_key != key {
+                        return Ok(None);
+                    }
+                    digest.validate()?;
+                    Ok(Some((
+                        reiclaw_api::time::parse_rfc3339(&digest.created_at)?,
+                        reiclaw_api::time::parse_rfc3339(&digest.window_end)?,
+                        digest,
+                    )))
+                },
+            )?);
+            digests.sort_by(|a, b| {
+                b.0.cmp(&a.0)
+                    .then_with(|| b.1.cmp(&a.1))
+                    .then_with(|| b.2.day_key.cmp(&a.2.day_key))
+            });
+            Ok(digests
+                .into_iter()
+                .take(limit)
+                .map(|(_, _, digest)| digest)
+                .collect())
         })
         .await?
     }
@@ -897,6 +877,38 @@ mod tests {
         }
     }
 
+    async fn legacy_row(
+        mem: &MemoryCore,
+        agent: &str,
+        namespace: &str,
+        key: &str,
+        session: Option<&str>,
+        payload: &impl serde::Serialize,
+        time: &str,
+    ) -> String {
+        let category = MemoryCategory::Custom(namespace.into());
+        mem.store_with_options_and_agent(
+            key,
+            &serde_json::to_string(payload).unwrap(),
+            category.clone(),
+            session,
+            StoreOptions {
+                namespace: Some(namespace.into()),
+                ..Default::default()
+            },
+            Some(agent),
+        )
+        .await
+        .unwrap();
+        let path = MemoryCore::storage_path(Some(agent), Some(namespace), &category, key);
+        let mut store = mem.store.lock();
+        let mut row = store.list_by_path(&path, 1, false).unwrap().pop().unwrap();
+        row.timestamp =
+            MemoryCore::format_utc_millis(reiclaw_api::time::parse_rfc3339(time).unwrap());
+        store.upsert(&row).unwrap();
+        row.id
+    }
+
     #[tokio::test]
     async fn delegation_episode_retry_preserves_existing_and_archived_identity() {
         let (_tmp, mem) = temp_memory();
@@ -909,7 +921,16 @@ mod tests {
             "Original report",
         );
         episode.source_kind = EpisodeSourceKind::DelegationDigest;
-        let id = mem.commit_episode(&episode).await.unwrap();
+        let id = legacy_row(
+            &mem,
+            &episode.agent_id,
+            SLEEP_EPISODE_NAMESPACE,
+            &episode.episode_id,
+            Some(&episode.session_key),
+            &episode,
+            &episode.ended_at,
+        )
+        .await;
         episode.summary = "Replacement must not overwrite".into();
         assert_eq!(mem.commit_episode(&episode).await.unwrap(), id);
         {
@@ -975,9 +996,11 @@ mod tests {
 
         let id1 = mem.commit_episode(&ep1).await.unwrap();
         let id1_recommit = mem.commit_episode(&ep1).await.unwrap();
+        assert_ne!(id1, id1_recommit);
+        let previous = mem.store.lock().get_typed_record(&id1).unwrap().unwrap();
         assert_eq!(
-            id1, id1_recommit,
-            "re-committing same episode_id updates in place"
+            previous.superseded_by.as_deref(),
+            Some(id1_recommit.as_str())
         );
         mem.commit_episode(&ep2).await.unwrap();
         mem.commit_episode(&ep3).await.unwrap();
@@ -1005,10 +1028,10 @@ mod tests {
         let s1_ids: Vec<&str> = s1.iter().map(|e| e.episode_id.as_str()).collect();
         assert_eq!(s1_ids, vec!["ep-3", "ep-1"]);
 
-        // Soft-superseded episodes are excluded by read_episodes_in_window.
-        mem.supersede(std::slice::from_ref(&id1), "replacement-id")
-            .await
-            .unwrap();
+        // The replacement moved sessions; the superseded revision is invisible.
+        let mut replacement = ep1.clone();
+        replacement.session_key = "session_3".into();
+        mem.commit_episode(&replacement).await.unwrap();
         let s1_after = mem
             .read_episodes_in_window("zeroclaw_agent", None, None, Some("session_1"), 10)
             .await
@@ -1022,6 +1045,302 @@ mod tests {
             .await
             .unwrap();
         assert!(soul_rows.is_empty());
+    }
+
+    #[tokio::test]
+    async fn migrated_episodes_shadow_legacy_outside_the_new_window_and_session() {
+        let (_tmp, mem) = temp_memory();
+        let mut ep = sample_episode(
+            "same",
+            "agent",
+            "old",
+            "2026-11-18T00:00:00Z",
+            "2026-11-18T01:00:00.000000001Z",
+            "legacy",
+        );
+        legacy_row(
+            &mem,
+            &ep.agent_id,
+            SLEEP_EPISODE_NAMESPACE,
+            &ep.episode_id,
+            Some("old"),
+            &ep,
+            &ep.ended_at,
+        )
+        .await;
+        assert_eq!(
+            mem.read_episodes_in_window("agent", None, None, Some("old"), 1)
+                .await
+                .unwrap(),
+            [ep.clone()]
+        );
+        ep.ended_at = "2026-11-18T01:00:00.000000002Z".into();
+        ep.session_key = "new".into();
+        mem.commit_episode(&ep).await.unwrap();
+        assert!(
+            mem.read_episodes_in_window("agent", None, None, Some("old"), 1)
+                .await
+                .unwrap()
+                .is_empty()
+        );
+        assert!(
+            mem.read_episodes_in_window(
+                "agent",
+                None,
+                Some("2026-11-18T01:00:00.000000001Z"),
+                None,
+                1
+            )
+            .await
+            .unwrap()
+            .is_empty()
+        );
+        assert_eq!(
+            mem.read_episodes_in_window(
+                "agent",
+                Some(&ep.ended_at),
+                Some(&ep.ended_at),
+                Some("new"),
+                usize::MAX
+            )
+            .await
+            .unwrap(),
+            [ep]
+        );
+    }
+
+    #[tokio::test]
+    async fn typed_delegation_replay_preserves_content_and_rejects_identity_changes() {
+        let (_tmp, mem) = temp_memory();
+        let mut ep = sample_episode(
+            "delegated",
+            "agent",
+            "sess",
+            "2026-11-18T00:00:00Z",
+            "2026-11-18T01:00:00Z",
+            "first report",
+        );
+        ep.source_kind = EpisodeSourceKind::DelegationDigest;
+        let id = mem.commit_episode(&ep).await.unwrap();
+        ep.summary = "replay".into();
+        assert_eq!(mem.commit_episode(&ep).await.unwrap(), id);
+        ep.session_key = "other".into();
+        assert!(mem.commit_episode(&ep).await.is_err());
+        ep.session_key = "sess".into();
+        ep.source_kind = EpisodeSourceKind::Dialogue;
+        assert!(mem.commit_episode(&ep).await.is_err());
+        let record = mem.store.lock().get_typed_record(&id).unwrap().unwrap();
+        assert_eq!(record.payload["summary"], "first report");
+        assert!(record.superseded_by.is_none());
+    }
+
+    #[tokio::test]
+    async fn typed_pinned_lineage_counts_rename_and_scoped_erasure() {
+        let (tmp, mem) = temp_memory();
+        let mut pin = PinnedDigest {
+            agent_id: "from".into(),
+            rendered_index: "v1".into(),
+            updated_at: "2026-11-18T01:00:00Z".into(),
+            source_day_key: None,
+        };
+        let mut foreign = pin.clone();
+        foreign.agent_id = "foreign".into();
+        let other_id = mem.publish_pinned_digest(&foreign).await.unwrap();
+        let first = mem.publish_pinned_digest(&pin).await.unwrap();
+        pin.rendered_index = "v2".into();
+        let second = mem.publish_pinned_digest(&pin).await.unwrap();
+        {
+            let store = mem.store.lock();
+            let v1 = store.get_typed_record(&first).unwrap().unwrap();
+            let v2 = store.get_typed_record(&second).unwrap().unwrap();
+            assert_eq!(v1.superseded_by.as_deref(), Some(second.as_str()));
+            assert_eq!((v1.revision, v2.revision), (1, 2));
+            assert_eq!(store.stats(false).unwrap().total, 0);
+        }
+        assert_eq!(
+            mem.load_pinned_digest("from").await.unwrap(),
+            Some(pin.clone())
+        );
+        assert_eq!(mem.count().await.unwrap(), 2);
+        let stats = mem.stats().await.unwrap();
+        assert_eq!((stats.total_rows, stats.pinned_rows), (2, 2));
+        assert_eq!(stats.by_category, vec![("other".into(), 2)]);
+        assert_eq!(mem.count_agent("from").await.unwrap(), 1);
+        assert!(mem.rename_agent("from", "foreign").await.is_err());
+        assert_eq!(mem.rename_agent("from", "to").await.unwrap(), 1);
+        assert_eq!(mem.count_agent("from").await.unwrap(), 0);
+        pin.agent_id = "to".into();
+        assert_eq!(
+            mem.load_pinned_digest("to").await.unwrap(),
+            Some(pin.clone())
+        );
+        mem.publish_pinned_digest(&pin).await.unwrap();
+        assert_eq!(mem.purge_agent("to").await.unwrap(), 2);
+        assert_eq!(mem.count().await.unwrap(), 1);
+        let store = mem.store.lock();
+        assert!(store.get_typed_record(&first).unwrap().is_none());
+        assert!(store.get_typed_record(&second).unwrap().is_none());
+        assert!(store.get_typed_record(&other_id).unwrap().is_some());
+        let conn = rusqlite::Connection::open_with_flags(
+            tmp.path().join("memory/memorycore.db"),
+            rusqlite::OpenFlags::SQLITE_OPEN_READ_ONLY,
+        )
+        .unwrap();
+        assert_eq!(
+            conn.query_row("SELECT COUNT(*) FROM typed_record_supersessions", [], |r| r
+                .get::<_, i64>(0))
+                .unwrap(),
+            0
+        );
+    }
+
+    #[tokio::test]
+    async fn typed_window_and_rename_cover_a_time_bucket_larger_than_one_kernel_page() {
+        let (_tmp, mem) = temp_memory();
+        let mut ep = sample_episode(
+            "0",
+            "old",
+            "session",
+            "2026-11-18T00:00:00Z",
+            "2026-11-18T01:00:00Z",
+            "tied",
+        );
+        {
+            let mut store = mem.store.lock();
+            for i in 0..1001 {
+                ep.episode_id = format!("ep-{i}");
+                SleepKind::Episode
+                    .append(&mut store, serde_json::to_value(&ep).unwrap(), None)
+                    .unwrap();
+            }
+        }
+        let rows = mem
+            .read_episodes_in_window(
+                "old",
+                Some(&ep.ended_at),
+                Some(&ep.ended_at),
+                Some("session"),
+                1001,
+            )
+            .await
+            .unwrap();
+        assert_eq!(
+            rows.iter()
+                .map(|r| &r.episode_id)
+                .collect::<HashSet<_>>()
+                .len(),
+            1001
+        );
+        assert_eq!(mem.rename_agent("old", "new").await.unwrap(), 1001);
+        assert_eq!(mem.count_agent("old").await.unwrap(), 0);
+        assert_eq!(mem.count_agent("new").await.unwrap(), 1001);
+        let rows = mem
+            .read_episodes_in_window("new", None, None, None, 1)
+            .await
+            .unwrap();
+        assert_eq!(rows[0].agent_id, "new");
+    }
+
+    #[tokio::test]
+    async fn separately_opened_handles_extend_one_pinned_lineage() {
+        let (tmp, first) = temp_memory();
+        let second = MemoryCore::new("other", tmp.path()).unwrap();
+        let pin = PinnedDigest {
+            agent_id: "agent".into(),
+            rendered_index: "first".into(),
+            updated_at: "2026-11-18T01:00:00Z".into(),
+            source_day_key: None,
+        };
+        let other = PinnedDigest {
+            rendered_index: "other".into(),
+            ..pin.clone()
+        };
+        let (a, b) = tokio::join!(
+            first.publish_pinned_digest(&pin),
+            second.publish_pinned_digest(&other)
+        );
+        assert_ne!(a.unwrap(), b.unwrap());
+        let current = SleepKind::Pinned
+            .current(&first.store.lock(), "agent", "pinned_digest")
+            .unwrap()
+            .unwrap();
+        assert_eq!(current.revision, 2);
+    }
+
+    #[tokio::test]
+    async fn namespace_purge_erases_only_that_kind_across_agents() {
+        let (_tmp, mem) = temp_memory();
+        let pin = PinnedDigest {
+            agent_id: "first".into(),
+            rendered_index: "v1".into(),
+            updated_at: "2026-11-18T01:00:00Z".into(),
+            source_day_key: None,
+        };
+        mem.publish_pinned_digest(&pin).await.unwrap();
+        mem.publish_pinned_digest(&pin).await.unwrap();
+        let other = PinnedDigest {
+            agent_id: "second".into(),
+            ..pin
+        };
+        mem.publish_pinned_digest(&other).await.unwrap();
+        let ep = sample_episode(
+            "ep",
+            "first",
+            "session",
+            "2026-11-18T00:00:00Z",
+            "2026-11-18T01:00:00Z",
+            "untouched",
+        );
+        mem.commit_episode(&ep).await.unwrap();
+        assert_eq!(
+            mem.purge_namespace(SLEEP_PINNED_DIGEST_NAMESPACE)
+                .await
+                .unwrap(),
+            3
+        );
+        assert!(mem.load_pinned_digest("first").await.unwrap().is_none());
+        assert!(mem.load_pinned_digest("second").await.unwrap().is_none());
+        assert_eq!(
+            mem.read_episodes_in_window("first", None, None, None, 1)
+                .await
+                .unwrap(),
+            [ep]
+        );
+    }
+
+    #[tokio::test]
+    async fn scoped_count_includes_visible_typed_slots_and_excludes_foreign_agents() {
+        use crate::agent_scoped::AgentScopedMemory;
+        let (_tmp, mem) = temp_memory();
+        let ep = sample_episode(
+            "ep",
+            "alpha",
+            "old",
+            "2026-11-18T00:00:00Z",
+            "2026-11-18T01:00:00Z",
+            "visible",
+        );
+        legacy_row(
+            &mem,
+            "alpha",
+            SLEEP_EPISODE_NAMESPACE,
+            "ep",
+            Some("old"),
+            &ep,
+            &ep.ended_at,
+        )
+        .await;
+        for agent in ["alpha", "beta", "rogue"] {
+            let current = EpisodeRecord {
+                agent_id: agent.into(),
+                session_key: "new".into(),
+                ..ep.clone()
+            };
+            mem.commit_episode(&current).await.unwrap();
+        }
+        let scoped = AgentScopedMemory::new(std::sync::Arc::new(mem), "alpha", ["beta".into()]);
+        assert_eq!(scoped.count().await.unwrap(), 2);
+        assert!(scoped.list(None, Some("old")).await.unwrap().is_empty());
     }
 
     #[tokio::test]
@@ -1384,6 +1703,50 @@ mod tests {
             action_decisions: std::collections::BTreeMap::new(),
         };
 
+        legacy_row(
+            &mem,
+            &d1.agent_id,
+            SLEEP_DAILY_DIGEST_NAMESPACE,
+            &d1.day_key,
+            None,
+            &d1,
+            &d1.created_at,
+        )
+        .await;
+        assert_eq!(
+            mem.load_daily_digests("agent_a", 1).await.unwrap(),
+            std::slice::from_ref(&d1)
+        );
+        let pin = PinnedDigest {
+            agent_id: "agent_a".into(),
+            rendered_index: "legacy".into(),
+            updated_at: d1.created_at.clone(),
+            source_day_key: None,
+        };
+        legacy_row(
+            &mem,
+            &pin.agent_id,
+            SLEEP_PINNED_DIGEST_NAMESPACE,
+            SLEEP_PINNED_DIGEST_KEY,
+            None,
+            &pin,
+            &pin.updated_at,
+        )
+        .await;
+        assert_eq!(
+            mem.load_pinned_digest("agent_a").await.unwrap(),
+            Some(pin.clone())
+        );
+        let newer = PinnedDigest {
+            rendered_index: "typed".into(),
+            ..pin.clone()
+        };
+        mem.publish_pinned_digest(&newer).await.unwrap();
+        assert_eq!(
+            mem.load_pinned_digest("agent_a").await.unwrap(),
+            Some(newer.clone())
+        );
+
         // Publish out of chronological order to verify newest-first ordering.
         mem.publish_daily_digest(&d2).await.unwrap();
         mem.publish_daily_digest(&d1).await.unwrap();
@@ -1397,5 +1760,282 @@ mod tests {
 
         let other_loaded = mem.load_daily_digests("agent_b", 10).await.unwrap();
         assert_eq!(other_loaded, vec![other]);
+        assert_eq!(mem.rename_agent("agent_a", "renamed").await.unwrap(), 5);
+        let renamed = mem.load_daily_digests("renamed", 10).await.unwrap();
+        assert_eq!(renamed.len(), 2);
+        assert!(renamed.iter().all(|d| d.agent_id == "renamed"));
+        assert_eq!(
+            mem.load_pinned_digest("renamed").await.unwrap(),
+            Some(PinnedDigest {
+                agent_id: "renamed".into(),
+                ..newer
+            })
+        );
+    }
+
+    #[tokio::test]
+    async fn purge_session_and_agent_session_erase_typed_episodes_and_lineage() {
+        let (tmp, mem) = temp_memory();
+        let pin = PinnedDigest {
+            agent_id: "agent_a".into(),
+            rendered_index: "keep pin".into(),
+            updated_at: "2026-11-18T01:00:00Z".into(),
+            source_day_key: None,
+        };
+        mem.publish_pinned_digest(&pin).await.unwrap();
+
+        let mut ep_a_s1 = sample_episode(
+            "ep-a-s1",
+            "agent_a",
+            "s1",
+            "2026-11-18T00:00:00Z",
+            "2026-11-18T01:00:00Z",
+            "a s1 v1",
+        );
+        let a_v1 = mem.commit_episode(&ep_a_s1).await.unwrap();
+        ep_a_s1.summary = "a s1 v2".into();
+        let a_v2 = mem.commit_episode(&ep_a_s1).await.unwrap();
+
+        let ep_a_s2 = sample_episode(
+            "ep-a-s2",
+            "agent_a",
+            "s2",
+            "2026-11-18T00:00:00Z",
+            "2026-11-18T01:30:00Z",
+            "a s2 keep",
+        );
+        mem.commit_episode(&ep_a_s2).await.unwrap();
+
+        let mut ep_b_s1 = sample_episode(
+            "ep-b-s1",
+            "agent_b",
+            "s1",
+            "2026-11-18T00:00:00Z",
+            "2026-11-18T02:00:00Z",
+            "b s1 v1",
+        );
+        let b_v1 = mem.commit_episode(&ep_b_s1).await.unwrap();
+        ep_b_s1.summary = "b s1 v2".into();
+        let b_v2 = mem.commit_episode(&ep_b_s1).await.unwrap();
+
+        assert_eq!(
+            mem.purge_session_for_agent("s1", "agent_a").await.unwrap(),
+            2
+        );
+        assert!(
+            mem.read_episodes_in_window("agent_a", None, None, Some("s1"), 10)
+                .await
+                .unwrap()
+                .is_empty()
+        );
+        {
+            let store = mem.store.lock();
+            assert!(store.get_typed_record(&a_v1).unwrap().is_none());
+            assert!(store.get_typed_record(&a_v2).unwrap().is_none());
+            assert!(store.get_typed_record(&b_v2).unwrap().is_some());
+        }
+        assert_eq!(
+            mem.read_episodes_in_window("agent_a", None, None, Some("s2"), 10)
+                .await
+                .unwrap(),
+            vec![ep_a_s2.clone()]
+        );
+        assert_eq!(
+            mem.load_pinned_digest("agent_a").await.unwrap(),
+            Some(pin.clone())
+        );
+        assert_eq!(
+            mem.read_episodes_in_window("agent_b", None, None, Some("s1"), 10)
+                .await
+                .unwrap(),
+            vec![ep_b_s1]
+        );
+
+        assert_eq!(mem.purge_session("s1").await.unwrap(), 2);
+        assert!(
+            mem.read_episodes_in_window("agent_b", None, None, Some("s1"), 10)
+                .await
+                .unwrap()
+                .is_empty()
+        );
+        {
+            let store = mem.store.lock();
+            assert!(store.get_typed_record(&b_v1).unwrap().is_none());
+            assert!(store.get_typed_record(&b_v2).unwrap().is_none());
+        }
+        assert_eq!(
+            mem.read_episodes_in_window("agent_a", None, None, Some("s2"), 10)
+                .await
+                .unwrap(),
+            vec![ep_a_s2]
+        );
+        assert_eq!(mem.load_pinned_digest("agent_a").await.unwrap(), Some(pin));
+        let conn = rusqlite::Connection::open_with_flags(
+            tmp.path().join("memory/memorycore.db"),
+            rusqlite::OpenFlags::SQLITE_OPEN_READ_ONLY,
+        )
+        .unwrap();
+        assert_eq!(
+            conn.query_row("SELECT COUNT(*) FROM typed_record_supersessions", [], |r| {
+                r.get::<_, i64>(0)
+            })
+            .unwrap(),
+            0
+        );
+    }
+
+    #[tokio::test]
+    async fn shadowed_legacy_sleep_rows_are_not_double_counted_and_export_includes_typed() {
+        let (_tmp, mem) = temp_memory();
+        let mut pin = PinnedDigest {
+            agent_id: "agent".into(),
+            rendered_index: "legacy pin".into(),
+            updated_at: "2026-11-18T01:00:00Z".into(),
+            source_day_key: None,
+        };
+        let mut ep = sample_episode(
+            "ep-1",
+            "agent",
+            "s1",
+            "2026-11-18T00:00:00Z",
+            "2026-11-18T01:00:00Z",
+            "legacy ep",
+        );
+
+        legacy_row(
+            &mem,
+            "agent",
+            SLEEP_PINNED_DIGEST_NAMESPACE,
+            SLEEP_PINNED_DIGEST_KEY,
+            None,
+            &pin,
+            &pin.updated_at,
+        )
+        .await;
+        legacy_row(
+            &mem,
+            "agent",
+            SLEEP_EPISODE_NAMESPACE,
+            &ep.episode_id,
+            Some(&ep.session_key),
+            &ep,
+            &ep.ended_at,
+        )
+        .await;
+        assert_eq!(mem.count().await.unwrap(), 2);
+        assert_eq!(mem.count_agent("agent").await.unwrap(), 2);
+
+        pin.rendered_index = "typed pin".into();
+        ep.summary = "typed ep".into();
+        mem.publish_pinned_digest(&pin).await.unwrap();
+        mem.commit_episode(&ep).await.unwrap();
+
+        assert_eq!(mem.count().await.unwrap(), 2);
+        assert_eq!(mem.count_agent("agent").await.unwrap(), 2);
+        let stats = mem.stats().await.unwrap();
+        assert_eq!((stats.total_rows, stats.pinned_rows), (2, 1));
+        assert_eq!(stats.by_category, vec![("other".into(), 2)]);
+
+        let exported = mem.export_agent("agent").await.unwrap();
+        assert_eq!(exported.len(), 2);
+        let contents: Vec<&str> = exported.iter().map(|e| e.content.as_str()).collect();
+        assert!(contents.iter().any(|c| c.contains("typed pin")));
+        assert!(contents.iter().any(|c| c.contains("typed ep")));
+        assert!(!contents.iter().any(|c| c.contains("legacy pin")));
+        assert!(!contents.iter().any(|c| c.contains("legacy ep")));
+    }
+
+    #[tokio::test]
+    async fn get_and_forget_for_agent_resolve_and_erase_typed_sleep_records_without_resurrecting_legacy()
+     {
+        let (tmp, mem) = temp_memory();
+        let mut ep = sample_episode(
+            "ep-lookup",
+            "agent",
+            "s1",
+            "2026-11-18T00:00:00Z",
+            "2026-11-18T01:00:00Z",
+            "legacy ep",
+        );
+        legacy_row(
+            &mem,
+            "agent",
+            SLEEP_EPISODE_NAMESPACE,
+            &ep.episode_id,
+            Some(&ep.session_key),
+            &ep,
+            &ep.ended_at,
+        )
+        .await;
+
+        ep.summary = "v1 ep".into();
+        let v1_id = mem.commit_episode(&ep).await.unwrap();
+        ep.summary = "v2 ep".into();
+        let v2_id = mem.commit_episode(&ep).await.unwrap();
+
+        let pin = PinnedDigest {
+            agent_id: "agent".into(),
+            rendered_index: "typed lookup pin".into(),
+            updated_at: "2026-11-18T02:00:00Z".into(),
+            source_day_key: None,
+        };
+        mem.publish_pinned_digest(&pin).await.unwrap();
+
+        let fetched = mem
+            .get_for_agent("ep-lookup", "agent")
+            .await
+            .unwrap()
+            .unwrap();
+        assert_eq!(fetched.id, v2_id);
+        assert_eq!(fetched.key, "ep-lookup");
+        assert_eq!(fetched.namespace, SLEEP_EPISODE_NAMESPACE);
+        assert_eq!(
+            fetched.category,
+            MemoryCategory::Custom(SLEEP_EPISODE_NAMESPACE.into())
+        );
+        assert_eq!(fetched.session_id.as_deref(), Some("s1"));
+        assert_eq!(fetched.agent_id.as_deref(), Some("agent"));
+        assert!(fetched.superseded_by.is_none());
+        let decoded: EpisodeRecord = serde_json::from_str(&fetched.content).unwrap();
+        assert_eq!(decoded, ep);
+
+        let fetched_pin = mem
+            .get_for_agent(SLEEP_PINNED_DIGEST_KEY, "agent")
+            .await
+            .unwrap()
+            .unwrap();
+        let decoded_pin: PinnedDigest = serde_json::from_str(&fetched_pin.content).unwrap();
+        assert_eq!(decoded_pin, pin);
+
+        assert!(mem.forget_for_agent("ep-lookup", "agent").await.unwrap());
+        assert!(
+            mem.get_for_agent("ep-lookup", "agent")
+                .await
+                .unwrap()
+                .is_none()
+        );
+        assert!(
+            mem.read_episodes_in_window("agent", None, None, None, 10)
+                .await
+                .unwrap()
+                .is_empty()
+        );
+        {
+            let store = mem.store.lock();
+            assert!(store.get_typed_record(&v1_id).unwrap().is_none());
+            assert!(store.get_typed_record(&v2_id).unwrap().is_none());
+        }
+        let conn = rusqlite::Connection::open_with_flags(
+            tmp.path().join("memory/memorycore.db"),
+            rusqlite::OpenFlags::SQLITE_OPEN_READ_ONLY,
+        )
+        .unwrap();
+        assert_eq!(
+            conn.query_row("SELECT COUNT(*) FROM typed_record_supersessions", [], |r| {
+                r.get::<_, i64>(0)
+            })
+            .unwrap(),
+            0
+        );
     }
 }

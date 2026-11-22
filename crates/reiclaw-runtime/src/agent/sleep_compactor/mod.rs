@@ -789,7 +789,7 @@ pub async fn consolidate_turn_via_sleep(
     match memory.commit_episode(&episode).await {
         Ok(_) => {}
         Err(err) if is_unsupported_sleep_error(&err) => {
-            let date = jiff::Zoned::now().strftime("%Y-%m-%d").to_string();
+            let date = jiff::ZonedDateTime::now().strftime("%Y-%m-%d").to_string();
             let key = format!("daily_{date}_{}", uuid::Uuid::new_v4());
             memory
                 .store(&key, &summary, MemoryCategory::Daily, None)

@@ -225,7 +225,7 @@ async fn steering_at_tool_boundary_keeps_enrichment_and_cancellation_precedence(
         let cancel = tokio_util::sync::CancellationToken::new();
         let fixed = reiclaw_api::time::parse_rfc3339("2026-01-01T12:00:00+00:00")
             .unwrap()
-            .to_zoned(jiff::tz::TimeZone::system());
+            .to_zoned_datetime(jiff::tz::TimeZone::system());
         let mut agent = Agent::builder()
             .model_provider(Box::new(TranscriptCaptureModelProvider {
                 seen_messages: seen.clone(),
@@ -825,7 +825,7 @@ async fn dated_turns_share_provider_payload_and_history_across_entry_points() {
         for timestamp in ["2026-01-01T12:00:00+00:00", "2026-01-02T12:00:00+00:00"] {
             let fixed = reiclaw_api::time::parse_rfc3339(timestamp)
                 .unwrap()
-                .to_zoned(jiff::tz::TimeZone::system());
+                .to_zoned_datetime(jiff::tz::TimeZone::system());
             expected_dates.push(fixed.strftime("%Y-%m-%d %H:%M:%S %:z").to_string());
             let mut agent = Agent::builder()
                 .model_provider(Box::new(TranscriptCaptureModelProvider {
@@ -1186,10 +1186,10 @@ struct CapturingObserver {
     events: parking_lot::Mutex<Vec<ObserverEvent>>,
 }
 
-fn fixed_response_cache_turn_datetime() -> jiff::Zoned {
+fn fixed_response_cache_turn_datetime() -> jiff::ZonedDateTime {
     jiff::civil::date(2026, 6, 25)
         .at(12, 0, 0, 0)
-        .to_zoned(jiff::tz::TimeZone::system())
+        .to_zoned_datetime(jiff::tz::TimeZone::system())
         .expect("fixed local test timestamp")
 }
 
@@ -4759,7 +4759,7 @@ async fn response_cache_does_not_cross_serve_memory_conditioned_answers() {
     // which is what makes the two pre-injection cache keys collide.
     let fixed = reiclaw_api::time::parse_rfc3339("2026-01-01T00:00:00+00:00")
         .unwrap()
-        .to_zoned(jiff::tz::TimeZone::system());
+        .to_zoned_datetime(jiff::tz::TimeZone::system());
     let observer: Arc<dyn Observer> = Arc::from(crate::observability::NoopObserver {});
 
     let last_user = |seen: &Arc<Mutex<Vec<Vec<ChatMessage>>>>| -> String {
