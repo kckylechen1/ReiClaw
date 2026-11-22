@@ -103,7 +103,8 @@ impl ResponseCache {
                     drop(hot);
                     // Still bump SQLite hit count for accurate stats
                     let conn = self.conn.lock();
-                    let now_str = reiclaw_api::time::format_rfc3339_zoned(&jiff::Zoned::now());
+                    let now_str =
+                        reiclaw_api::time::format_rfc3339_zoned(&jiff::ZonedDateTime::now());
                     conn.execute(
                         "UPDATE response_cache
                          SET accessed_at = ?1, hit_count = hit_count + 1
@@ -118,7 +119,7 @@ impl ResponseCache {
         // Tier 2: SQLite (warm)
         let result: Option<(String, u32)> = {
             let conn = self.conn.lock();
-            let now = jiff::Zoned::now();
+            let now = jiff::ZonedDateTime::now();
             let cutoff = reiclaw_api::time::format_rfc3339_zoned(
                 &now.checked_sub(jiff::SignedDuration::from_mins(self.ttl_minutes))?,
             );
@@ -160,7 +161,7 @@ impl ResponseCache {
         // Write to SQLite (warm)
         let conn = self.conn.lock();
 
-        let now = reiclaw_api::time::format_rfc3339_zoned(&jiff::Zoned::now());
+        let now = reiclaw_api::time::format_rfc3339_zoned(&jiff::ZonedDateTime::now());
 
         conn.execute(
             "INSERT OR REPLACE INTO response_cache
@@ -171,7 +172,8 @@ impl ResponseCache {
 
         // Evict expired entries
         let cutoff = reiclaw_api::time::format_rfc3339_zoned(
-            &jiff::Zoned::now().checked_sub(jiff::SignedDuration::from_mins(self.ttl_minutes))?,
+            &jiff::ZonedDateTime::now()
+                .checked_sub(jiff::SignedDuration::from_mins(self.ttl_minutes))?,
         );
         conn.execute(
             "DELETE FROM response_cache WHERE created_at <= ?1",

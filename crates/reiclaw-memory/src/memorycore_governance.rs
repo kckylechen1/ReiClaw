@@ -314,7 +314,7 @@ mod tests {
         keywords: &[&str],
         tier: &str,
     ) {
-        let now = reiclaw_api::time::format_rfc3339_zoned(&jiff::Zoned::now());
+        let now = reiclaw_api::time::format_rfc3339_zoned(&jiff::ZonedDateTime::now());
         let entry = MemoryEntry {
             id: id.into(),
             path: path.into(),
@@ -538,7 +538,7 @@ mod tests {
         let mem = MemoryCore::new("memorycore", tmp.path()).unwrap();
         {
             let mut store = mem.store_handle().lock();
-            let now = reiclaw_api::time::format_rfc3339_zoned(&jiff::Zoned::now());
+            let now = reiclaw_api::time::format_rfc3339_zoned(&jiff::ZonedDateTime::now());
             let promotable = MemoryEntry {
                 id: "promo".into(),
                 path: "/agents/default/ns/core/promo".into(),

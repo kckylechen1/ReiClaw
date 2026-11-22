@@ -3,6 +3,7 @@ use anyhow::{Context, Result, bail};
 use jiff::{SignedDuration, Timestamp};
 use reiclaw_config::schema::Config;
 
+mod expr;
 mod schedule;
 mod store;
 mod types;

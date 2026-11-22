@@ -118,7 +118,7 @@ async fn completion_route_classification_cache_and_next_turn() {
     ));
     let fixed = reiclaw_api::time::parse_rfc3339("2026-01-01T12:00:00Z")
         .unwrap()
-        .to_zoned(jiff::tz::TimeZone::system());
+        .to_zoned_datetime(jiff::tz::TimeZone::system());
     agent.turn_datetime = Some(Arc::new(move || fixed.clone()));
 
     for _ in 0..2 {

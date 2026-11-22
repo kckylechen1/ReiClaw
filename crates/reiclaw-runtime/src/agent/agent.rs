@@ -149,7 +149,7 @@ pub struct Agent {
     user_model_section: String,
     device_bound: bool,
     #[cfg(test)]
-    turn_datetime: Option<Arc<dyn Fn() -> jiff::Zoned + Send + Sync>>,
+    turn_datetime: Option<Arc<dyn Fn() -> jiff::ZonedDateTime + Send + Sync>>,
 }
 
 /// What the Agent remembers between turns to keep the Soul projection fresh.
@@ -287,7 +287,7 @@ pub struct AgentBuilder {
     provider_switch_config: Option<ProviderSwitchConfig>,
     turn_context: Option<TurnContextState>,
     #[cfg(test)]
-    turn_datetime: Option<Arc<dyn Fn() -> jiff::Zoned + Send + Sync>>,
+    turn_datetime: Option<Arc<dyn Fn() -> jiff::ZonedDateTime + Send + Sync>>,
 }
 
 impl Default for AgentBuilder {
@@ -568,7 +568,7 @@ impl AgentBuilder {
     #[cfg(all(test, feature = "heavy-tests"))]
     fn turn_datetime<F>(mut self, provider: F) -> Self
     where
-        F: Fn() -> jiff::Zoned + Send + Sync + 'static,
+        F: Fn() -> jiff::ZonedDateTime + Send + Sync + 'static,
     {
         self.turn_datetime = Some(Arc::new(provider));
         self
@@ -817,13 +817,13 @@ impl Agent {
         crate::agent::loop_::ToolLoopCostTrackingContext::usage_only()
     }
 
-    fn current_turn_datetime(&self) -> jiff::Zoned {
+    fn current_turn_datetime(&self) -> jiff::ZonedDateTime {
         #[cfg(test)]
         if let Some(provider) = &self.turn_datetime {
             return provider();
         }
 
-        jiff::Zoned::now()
+        jiff::ZonedDateTime::now()
     }
 
     pub fn set_channel_name(&mut self, name: String) {

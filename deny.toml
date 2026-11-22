@@ -42,7 +42,7 @@ unused-allowed-license = "allow"
 # borrow-or-share is the reviewed MIT No Attribution dependency reached through
 # memcore -> jsonschema -> referencing -> fluent-uri (tracking #432/#647).
 exceptions = [
-    { name = "memcore", version = "=2.0.0", allow = ["AGPL-3.0-only"] },
+    { name = "memcore", version = "=2.1.0", allow = ["AGPL-3.0-only"] },
     { name = "portable-kernel", version = "=1.9.0", allow = ["AGPL-3.0-only"] },
     { name = "vault-kit", version = "=0.1.0", allow = ["AGPL-3.0-only"] },
     { name = "borrow-or-share", version = "=0.2.4", allow = ["MIT-0"] },

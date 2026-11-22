@@ -167,7 +167,7 @@ impl<M: Memory> AuditedMemory<M> {
         session_id: Option<&str>,
         metadata: Option<&str>,
     ) {
-        let now = reiclaw_api::time::format_rfc3339_zoned(&jiff::Zoned::now());
+        let now = reiclaw_api::time::format_rfc3339_zoned(&jiff::ZonedDateTime::now());
         let op_str = op.to_string();
         let started = std::time::Instant::now();
         let recorded = {
@@ -211,9 +211,10 @@ impl<M: Memory> AuditedMemory<M> {
     /// Prune audit entries older than the given number of days.
     pub fn prune_older_than(&self, retention_days: u32) -> anyhow::Result<u64> {
         let conn = self.audit_conn.lock();
-        let cutoff = reiclaw_api::time::format_rfc3339_zoned(&jiff::Zoned::now().checked_sub(
-            jiff::SignedDuration::from_hours(i64::from(retention_days) * 24),
-        )?);
+        let cutoff =
+            reiclaw_api::time::format_rfc3339_zoned(&jiff::ZonedDateTime::now().checked_sub(
+                jiff::SignedDuration::from_hours(i64::from(retention_days) * 24),
+            )?);
         let affected = conn.execute(
             "DELETE FROM memory_audit WHERE timestamp < ?1",
             params![cutoff],
@@ -776,7 +777,7 @@ mod tests {
         {
             let conn = Connection::open(tmp.path().join("memory").join("audit.db")).unwrap();
             let old = reiclaw_api::time::format_rfc3339_zoned(
-                &(jiff::Zoned::now() - jiff::SignedDuration::from_hours((40) * 24)),
+                &(jiff::ZonedDateTime::now() - jiff::SignedDuration::from_hours((40) * 24)),
             );
             conn.execute(
                 "INSERT INTO memory_audit (operation, timestamp) VALUES ('store', ?1)",

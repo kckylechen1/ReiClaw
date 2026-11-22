@@ -467,7 +467,7 @@ mod tests {
         namespace: &str,
         key: &str,
     ) {
-        let now = reiclaw_api::time::format_rfc3339_zoned(&jiff::Zoned::now());
+        let now = reiclaw_api::time::format_rfc3339_zoned(&jiff::ZonedDateTime::now());
         let entry = MemoryEntry {
             id: id.into(),
             path: path.into(),

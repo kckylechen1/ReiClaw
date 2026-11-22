@@ -1,12 +1,11 @@
+use super::expr::CronExpr;
 use crate::cron::Schedule;
 use anyhow::{Context, Result};
 use jiff::{
     SignedDuration, Timestamp,
     tz::{AmbiguousOffset, TimeZone},
 };
-use jiff_cron::{Schedule as CronExprSchedule, TimeUnitSpec};
 use reiclaw_api::time::{format_rfc3339, format_rfc3339_zoned};
-use std::str::FromStr;
 
 pub fn next_run_for_schedule(schedule: &Schedule, from: Timestamp) -> Result<Timestamp> {
     match schedule {
@@ -34,20 +33,8 @@ pub fn next_run_for_schedule(schedule: &Schedule, from: Timestamp) -> Result<Tim
 
 fn next_cron_run(expr: &str, tz_name: Option<&str>, from: Timestamp) -> Result<Timestamp> {
     let normalized = normalize_expression(expr)?;
-    let cron = CronExprSchedule::from_str(&normalized)
-        .with_context(|| format!("Invalid cron expression: {expr}"))?;
-    // Keep weekday authority in the parsed schedule, but evaluate the other
-    // fields separately so an excluded weekday can be skipped as one day.
-    // jiff-cron's own weekday loop otherwise visits each second for schedules
-    // such as `* * * * * MON` while searching across excluded days.
-    let calendar_expression = normalized
-        .split_whitespace()
-        .enumerate()
-        .map(|(index, field)| if index == 5 { "*" } else { field })
-        .collect::<Vec<_>>()
-        .join(" ");
-    let calendar = CronExprSchedule::from_str(&calendar_expression)
-        .with_context(|| format!("Invalid cron expression: {expr}"))?;
+    let cron =
+        CronExpr::parse(&normalized).with_context(|| format!("Invalid cron expression: {expr}"))?;
     let timezone = match tz_name {
         Some(name) => {
             TimeZone::get(name).with_context(|| format!("Invalid IANA timezone: {name}"))?
@@ -55,42 +42,21 @@ fn next_cron_run(expr: &str, tz_name: Option<&str>, from: Timestamp) -> Result<T
         None => TimeZone::try_system().context("Failed to determine local timezone for cron")?,
     };
 
-    // Enumerate civil fields in UTC, then resolve them in the real timezone.
+    // Enumerate civil wall fields and resolve them in the real timezone.
     // This preserves the retained scheduler's wall-clock policy: nonexistent
     // local times are skipped; a repeated local time uses its earlier instant.
-    // It also keeps zoned arithmetic from shifting a 02:30 job into a DST gap.
-    // Clearing fractions avoids jiff-cron 0.3's rounded-candidate fast path,
-    // which checks date/time fields but does not check the weekday.
     let mut cursor = from
-        .to_zoned(timezone.clone())
+        .to_zoned_datetime(timezone.clone())
         .datetime()
         .with()
         .subsec_nanosecond(0)
-        .build()?
-        .to_zoned(TimeZone::UTC)?;
-    loop {
-        let previous = cursor.timestamp();
-        let Some(wall) = calendar.after(cursor).next() else {
-            break;
-        };
-        if wall.timestamp() <= previous {
+        .build()?;
+    while let Some(wall) = cron.next_after(cursor) {
+        if wall <= cursor {
             anyhow::bail!("Cron expression did not advance: {expr}");
         }
-        if !cron
-            .days_of_week()
-            .includes(wall.weekday().to_sunday_one_offset() as u32)
-        {
-            cursor = wall
-                .with()
-                .hour(23)
-                .minute(59)
-                .second(59)
-                .subsec_nanosecond(0)
-                .build()?;
-            continue;
-        }
-        cursor = wall.clone();
-        let candidate = timezone.to_ambiguous_timestamp(wall.datetime());
+        cursor = wall;
+        let candidate = timezone.to_ambiguous_timestamp(wall);
         if matches!(candidate.offset(), AmbiguousOffset::Gap { .. }) {
             continue;
         }
@@ -127,9 +93,9 @@ pub fn validate_schedule(schedule: &Schedule, now: Timestamp) -> Result<()> {
                     "Invalid schedule: 'at' must be in the future \
                      (now_utc={}, now_local={}, at_utc={}, at_local={}, delta_seconds={})",
                     format_rfc3339(now),
-                    format_rfc3339_zoned(&now.to_zoned(local.clone())),
+                    format_rfc3339_zoned(&now.to_zoned_datetime(local.clone())),
                     format_rfc3339(*at),
-                    format_rfc3339_zoned(&at.to_zoned(local)),
+                    format_rfc3339_zoned(&at.to_zoned_datetime(local)),
                     at.duration_since(now).as_secs()
                 );
             }
@@ -317,7 +283,7 @@ mod tests {
     fn utc(year: i16, month: i8, day: i8, hour: i8, minute: i8, second: i8) -> Timestamp {
         date(year, month, day)
             .at(hour, minute, second, 0)
-            .to_zoned(TimeZone::UTC)
+            .to_zoned_datetime(TimeZone::UTC)
             .unwrap()
             .timestamp()
     }
@@ -452,7 +418,10 @@ mod tests {
         let next = next_run_for_schedule(&schedule, sunday).unwrap();
         // Should be Monday 2026-02-16 at 09:00 UTC (weekday = Mon)
         assert_eq!(next, utc(2026, 2, 16, 9, 0, 0));
-        assert_eq!(next.to_zoned(TimeZone::UTC).weekday(), Weekday::Monday);
+        assert_eq!(
+            next.to_zoned_datetime(TimeZone::UTC).weekday(),
+            Weekday::Monday
+        );
     }
 
     #[test]
@@ -466,7 +435,10 @@ mod tests {
         let next = next_run_for_schedule(&schedule, friday_evening).unwrap();
         // Should be Monday 2026-02-23 at 09:00 UTC
         assert_eq!(next, utc(2026, 2, 23, 9, 0, 0));
-        assert_eq!(next.to_zoned(TimeZone::UTC).weekday(), Weekday::Monday);
+        assert_eq!(
+            next.to_zoned_datetime(TimeZone::UTC).weekday(),
+            Weekday::Monday
+        );
     }
 
     #[test]
@@ -478,7 +450,10 @@ mod tests {
             tz: Some("UTC".into()),
         };
         let next = next_run_for_schedule(&schedule, monday).unwrap();
-        assert_eq!(next.to_zoned(TimeZone::UTC).weekday(), Weekday::Sunday);
+        assert_eq!(
+            next.to_zoned_datetime(TimeZone::UTC).weekday(),
+            Weekday::Sunday
+        );
     }
 
     #[test]
@@ -490,7 +465,10 @@ mod tests {
             tz: Some("UTC".into()),
         };
         let next = next_run_for_schedule(&schedule, monday).unwrap();
-        assert_eq!(next.to_zoned(TimeZone::UTC).weekday(), Weekday::Sunday);
+        assert_eq!(
+            next.to_zoned_datetime(TimeZone::UTC).weekday(),
+            Weekday::Sunday
+        );
     }
 
     #[test]
@@ -509,14 +487,17 @@ mod tests {
         let saturday = next_run_for_schedule(&schedule, monday).unwrap();
         assert_eq!(saturday, utc(2026, 2, 21, 10, 0, 0));
         assert_eq!(
-            saturday.to_zoned(TimeZone::UTC).weekday(),
+            saturday.to_zoned_datetime(TimeZone::UTC).weekday(),
             Weekday::Saturday
         );
 
         // The following run is the very next day, Sunday 2026-02-22.
         let sunday = next_run_for_schedule(&schedule, saturday).unwrap();
         assert_eq!(sunday, utc(2026, 2, 22, 10, 0, 0));
-        assert_eq!(sunday.to_zoned(TimeZone::UTC).weekday(), Weekday::Sunday);
+        assert_eq!(
+            sunday.to_zoned_datetime(TimeZone::UTC).weekday(),
+            Weekday::Sunday
+        );
     }
 
     #[test]
@@ -529,7 +510,10 @@ mod tests {
 
         let next = next_run_for_schedule(&schedule, monday).unwrap();
         assert_eq!(next, utc(2026, 2, 17, 10, 0, 0));
-        assert_eq!(next.to_zoned(TimeZone::UTC).weekday(), Weekday::Tuesday);
+        assert_eq!(
+            next.to_zoned_datetime(TimeZone::UTC).weekday(),
+            Weekday::Tuesday
+        );
     }
 
     #[test]
@@ -547,7 +531,10 @@ mod tests {
         let next_utc = next_run_for_schedule(&schedule_utc, from).unwrap();
         assert!(next_local > from);
         assert!(next_utc > from);
-        let local_offset = from.to_zoned(TimeZone::system()).offset().seconds();
+        let local_offset = from
+            .to_zoned_datetime(TimeZone::system())
+            .offset()
+            .seconds();
         if local_offset == 0 {
             assert_eq!(next_local, next_utc);
         } else {

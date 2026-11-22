@@ -358,7 +358,7 @@ impl Tool for EpisodeCommitTool {
         let stored_id = match self.memory.commit_episode(&episode).await {
             Ok(id) => id,
             Err(err) if self.tolerate_unsupported_sleep && is_unsupported_sleep_error(&err) => {
-                let date = jiff::Zoned::now().strftime("%Y-%m-%d").to_string();
+                let date = jiff::ZonedDateTime::now().strftime("%Y-%m-%d").to_string();
                 let fallback_key = format!("daily_{date}_{}", uuid::Uuid::new_v4());
                 self.memory
                     .store(&fallback_key, &episode.summary, MemoryCategory::Daily, None)
