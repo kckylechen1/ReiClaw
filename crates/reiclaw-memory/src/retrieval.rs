@@ -24,8 +24,8 @@
 //! documented limitation of the opt-in cache.
 
 use super::traits::{
-    DailyDigest, EpisodeRecord, ExportFilter, Memory, MemoryCategory, MemoryEntry, MemoryStats,
-    PinnedDigest, ProceduralMessage, RecallEntryPredicate, StoreOptions,
+    DailyDigest, DailyDigestCasResult, EpisodeRecord, ExportFilter, Memory, MemoryCategory,
+    MemoryEntry, MemoryStats, PinnedDigest, ProceduralMessage, RecallEntryPredicate, StoreOptions,
 };
 use parking_lot::Mutex;
 use std::collections::HashMap;
@@ -708,6 +708,19 @@ crate::forwarding::forward_memory! {
 
     async fn publish_daily_digest(&self, digest: &DailyDigest) -> anyhow::Result<String> {
         let result = self.memory.publish_daily_digest(digest).await;
+        self.invalidate_cache();
+        result
+    }
+
+    async fn publish_daily_digest_cas(
+        &self,
+        digest: &DailyDigest,
+        expected_revision: u64,
+    ) -> anyhow::Result<DailyDigestCasResult> {
+        let result = self
+            .memory
+            .publish_daily_digest_cas(digest, expected_revision)
+            .await;
         self.invalidate_cache();
         result
     }
@@ -1811,6 +1824,8 @@ mod tests {
             created_at: "2026-11-18T04:01:00Z".into(),
             owner_edited: false,
             action_decisions: BTreeMap::new(),
+            revision: 1,
+            candidate_items: vec![],
         };
 
         pipeline.store_in_cache(cache_key.clone(), vec![]);

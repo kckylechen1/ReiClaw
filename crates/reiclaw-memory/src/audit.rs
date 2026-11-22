@@ -1,8 +1,8 @@
 //! Audit trail for memory operations.
 
 use super::traits::{
-    DailyDigest, EpisodeRecord, ExportFilter, Memory, MemoryCategory, MemoryEntry, MemoryStats,
-    PinnedDigest, ProceduralMessage, RecallEntryPredicate, StoreOptions,
+    DailyDigest, DailyDigestCasResult, EpisodeRecord, ExportFilter, Memory, MemoryCategory,
+    MemoryEntry, MemoryStats, PinnedDigest, ProceduralMessage, RecallEntryPredicate, StoreOptions,
 };
 use parking_lot::Mutex;
 use rusqlite::{Connection, params};
@@ -704,6 +704,26 @@ crate::forwarding::forward_memory! {
             )),
         );
         self.inner.publish_daily_digest(digest).await
+    }
+
+    async fn publish_daily_digest_cas(
+        &self,
+        digest: &DailyDigest,
+        expected_revision: u64,
+    ) -> anyhow::Result<DailyDigestCasResult> {
+        self.log_audit(
+            AuditOp::Store,
+            Some(&digest.day_key),
+            Some("sleep_daily_digest"),
+            None,
+            Some(&format!(
+                "agent_id={}; op=publish_daily_digest_cas; expected_revision={expected_revision}",
+                digest.agent_id
+            )),
+        );
+        self.inner
+            .publish_daily_digest_cas(digest, expected_revision)
+            .await
     }
 
 }

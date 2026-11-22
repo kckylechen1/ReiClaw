@@ -30,8 +30,9 @@
 
 use super::embeddings::EmbeddingProvider;
 use super::traits::{
-    DailyDigest, EpisodeRecord, ExportFilter, Memory, MemoryCategory, MemoryEntry, MemoryStats,
-    PinnedDigest, RecallEntryPredicate, StoreOptions, is_recent_recall_query,
+    DailyDigest, DailyDigestCasResult, EpisodeRecord, ExportFilter, Memory, MemoryCategory,
+    MemoryEntry, MemoryStats, PinnedDigest, RecallEntryPredicate, StoreOptions,
+    is_recent_recall_query,
 };
 use crate::kernel_store::{KernelStoreKind, LEGACY_STORE_UNSUPPORTED};
 use crate::point_scope::PointScope;
@@ -2192,6 +2193,14 @@ impl Memory for MemoryCore {
 
     async fn publish_daily_digest(&self, digest: &DailyDigest) -> anyhow::Result<String> {
         MemoryCore::publish_daily_digest(self, digest).await
+    }
+
+    async fn publish_daily_digest_cas(
+        &self,
+        digest: &DailyDigest,
+        expected_revision: u64,
+    ) -> anyhow::Result<DailyDigestCasResult> {
+        MemoryCore::publish_daily_digest_cas(self, digest, expected_revision).await
     }
 
     async fn load_daily_digests(

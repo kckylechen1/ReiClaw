@@ -1621,6 +1621,7 @@ pub async fn run_gateway(
 
     let inner = inner
         .merge(api_delegation::routes(state.clone()))
+        .merge(api_review::dispatch_routes(state.clone()))
         .merge(api_attachments::routes(
             state.clone(),
             gateway_request_timeout_secs(&config.gateway),

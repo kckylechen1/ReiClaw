@@ -28,8 +28,8 @@ use crate::policy::PolicyEnforcer;
 use crate::redact::{self, RedactCategory};
 use crate::threat::{self, Scope};
 use crate::traits::{
-    DailyDigest, EpisodeRecord, ExportFilter, Memory, MemoryCategory, MemoryEntry, MemoryStats,
-    PinnedDigest, ProceduralMessage, RecallEntryPredicate, StoreOptions,
+    DailyDigest, DailyDigestCasResult, EpisodeRecord, ExportFilter, Memory, MemoryCategory,
+    MemoryEntry, MemoryStats, PinnedDigest, ProceduralMessage, RecallEntryPredicate, StoreOptions,
 };
 use reiclaw_config::schema::MemoryPolicyConfig;
 use std::sync::Arc;
@@ -693,6 +693,23 @@ crate::forwarding::forward_memory! {
         let mut sanitized = digest.clone();
         sanitized.narrative = narrative;
         self.inner.publish_daily_digest(&sanitized).await
+    }
+
+    async fn publish_daily_digest_cas(
+        &self,
+        digest: &DailyDigest,
+        expected_revision: u64,
+    ) -> anyhow::Result<DailyDigestCasResult> {
+        let narrative = self.process_content(
+            &digest.day_key,
+            &digest.narrative,
+            Some("sleep_daily_digest"),
+        )?;
+        let mut sanitized = digest.clone();
+        sanitized.narrative = narrative;
+        self.inner
+            .publish_daily_digest_cas(&sanitized, expected_revision)
+            .await
     }
 
 }

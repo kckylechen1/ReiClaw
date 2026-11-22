@@ -281,7 +281,8 @@ struct WatchArgs {
     max_wait_secs: u64,
 }
 
-fn valid_request_id(value: &str) -> bool {
+#[must_use]
+pub fn valid_request_id(value: &str) -> bool {
     !value.is_empty()
         && value.len() <= 128
         && value

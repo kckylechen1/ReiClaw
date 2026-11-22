@@ -7,9 +7,9 @@ use anyhow::{Context, Result};
 use async_trait::async_trait;
 use reiclaw_api::attribution::ToolKind;
 use reiclaw_api::memory_traits::{
-    ActionCandidateStatus, DailyDigest, EpisodeRecord, EpisodeSourceKind, Memory, MemoryCategory,
-    PINNED_DIGEST_MAX_BYTES, PinnedDigest, validate_agent_id, validate_non_soul_key,
-    validate_non_soul_namespace,
+    ActionCandidateItem, ActionCandidateStatus, DailyDigest, EpisodeRecord, EpisodeSourceKind,
+    Memory, MemoryCategory, PINNED_DIGEST_MAX_BYTES, PinnedDigest, validate_agent_id,
+    validate_non_soul_key, validate_non_soul_namespace,
 };
 use reiclaw_api::tool::{Tool, ToolResult};
 use reiclaw_config::schema::MemoryConfig;
@@ -651,18 +651,62 @@ pub(super) async fn publish_dream_digests(
         }
     }
 
+    let revision = existing
+        .as_ref()
+        .map_or(1, |prev| prev.revision.saturating_add(1));
+    let prev_items: Vec<ActionCandidateItem> = existing
+        .as_ref()
+        .map(DailyDigest::normalized_candidates)
+        .unwrap_or_default();
+    let mut used_ids = std::collections::HashSet::with_capacity(action_candidates.len());
+    let mut candidate_items = Vec::with_capacity(action_candidates.len());
     let mut action_decisions = BTreeMap::new();
-    if let Some(prev) = existing.as_ref() {
-        for (k, v) in &prev.action_decisions {
-            if action_candidates.iter().any(|c| c == k) {
-                action_decisions.insert(k.clone(), *v);
+    for (idx, cand) in action_candidates.iter().enumerate() {
+        let prev_matches: Vec<&ActionCandidateItem> = prev_items
+            .iter()
+            .filter(|p| p.text == *cand && !used_ids.contains(&p.id))
+            .collect();
+        let matched = (prev_matches.len() == 1).then(|| prev_matches[0].clone());
+        let id = if let Some(ref prev_item) = matched {
+            prev_item.id.clone()
+        } else {
+            let mut salt = 0usize;
+            loop {
+                let candidate_id = DailyDigest::deterministic_legacy_candidate_id(
+                    agent_id,
+                    day_key,
+                    idx.saturating_add(salt.saturating_mul(1024)),
+                    cand,
+                );
+                if !used_ids.contains(&candidate_id)
+                    && !prev_items.iter().any(|p| p.id == candidate_id)
+                {
+                    break candidate_id;
+                }
+                salt = salt.saturating_add(1);
             }
-        }
+        };
+        used_ids.insert(id.clone());
+        let status = match (&existing, &matched) {
+            (Some(prev), Some(prev_item)) => prev.candidate_status(prev_item),
+            _ => ActionCandidateStatus::Pending,
+        };
+        action_decisions.insert(id.clone(), status);
+        candidate_items.push(ActionCandidateItem {
+            id,
+            text: cand.clone(),
+        });
     }
-    for cand in &action_candidates {
-        action_decisions
-            .entry(cand.clone())
-            .or_insert(ActionCandidateStatus::Pending);
+    for item in &candidate_items {
+        let text_count = candidate_items
+            .iter()
+            .filter(|other| other.text == item.text)
+            .count();
+        if text_count == 1
+            && let Some(status) = action_decisions.get(&item.id).copied()
+        {
+            action_decisions.insert(item.text.clone(), status);
+        }
     }
 
     let digest = DailyDigest {
@@ -679,6 +723,8 @@ pub(super) async fn publish_dream_digests(
         created_at: now_rfc.clone(),
         owner_edited: false,
         action_decisions,
+        revision,
+        candidate_items,
     };
     digest.validate()?;
     let daily_id = memory.publish_daily_digest(&digest).await?;

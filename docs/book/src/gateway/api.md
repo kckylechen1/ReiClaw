@@ -968,12 +968,13 @@ than a successful partial inbox.
 
 The response is `{ "items": [...], "total": N, "next_offset": N | null }`.
 Items carry a stable namespaced `id`, `kind` (`soul_proposal`,
-`user_model_candidate`, or `reflection_receipt`), `created_at_unix`, and the
-original `item`. Candidates appear oldest first, then receipts newest first.
+`user_model_candidate`, `reflection_receipt`, `sleep_action_candidate`, or
+`daily_digest`), `created_at_unix`, and the original `item`. Candidates appear
+oldest first, then receipts newest first.
 Use `limit=1..200` (default 100) and `offset` for bounded pages; these are live
 views, so concurrent review can change page positions. An optional `agent`
-filters Soul and reflection history. The owner's shared User Model candidates
-remain visible for every agent filter.
+filters Soul, reflection, and daily-digest history. The owner's shared User Model
+candidates remain visible for every agent filter.
 
 Each candidate has `review_url` pointing to its existing operator endpoint:
 
@@ -988,6 +989,43 @@ Each candidate has `review_url` pointing to its existing operator endpoint:
   follow-up documented below.
 - Reflection receipts have no review action: they report what ran and how many
   proposals/candidates were created. They grant no approval authority.
+- Daily digests and sleep action candidates (`memorycore.db` + `sessions.db` projection):
+  - `DailyDigest` records carry an optimistic monotonic `revision` (`>= 1`) and
+    stable `candidate_items: [{"id": "cand_<16-hex>", "text": "..."}]`. Legacy
+    string-array digests without stored `candidate_items` derive deterministic
+    `cand_<16-hex>` identifiers transparently and upgrade from `reiclaw.daily_digest@1`
+    to `reiclaw.daily_digest@2` on the next versioned write without registry conflicts.
+  - `GET /api/review/inbox` enriches `daily_digest` items with normalized
+    `candidate_items` and a rebuildable `action_dispatches` map projected from
+    `sessions.db` (`daily_digest_candidate_dispatches`). Each pending
+    `sleep_action_candidate` carries `candidate_id`, `source_revision`,
+    `dispatch` (if claimed), `review_url`, and `dispatch_url`.
+  - `PUT /api/review/daily-digest/{agent}/{day_key}` accepts `narrative`, optional
+    string lists, optional `expected_revision`, and optional
+    `candidate_edits: [{"candidate_id", "text"}]`. Candidate text edits keep
+    `candidate_id`, preserve existing decisions, and bump `revision` via CAS;
+    stale revisions return HTTP 409 with `code: "revision_conflict"` and
+    `current_revision`.
+  - `POST /api/review/action-candidates/{agent}/{day_key}/resolve` stays
+    status-only (`approved` or `dismissed`) and never starts Tachi runs. Callers
+    pass `candidate_id` (or unambiguous `candidate` text) and optional
+    `expected_revision`; duplicate text without `candidate_id` returns HTTP 409
+    with `code: "ambiguous_candidate"`.
+  - `POST /api/review/action-candidates/{agent}/{day_key}/dispatch` requires
+    operator bearer authentication and explicitly promotes a pending or approved
+    candidate through `TachiDelegation` (`StaffingReason::ExplicitUserRequest`).
+    Request body: `{"candidate_id", "expected_revision", "request_id", "harness", "task?", "issue_ref?", "pr_ref?", "flow_id?", "context_brief?"}` (`context_brief <= 4,096` bytes).
+    Pre-flight checks live agent/Tachi/estop policy, outbound admission scanning,
+    and Soul/User Model marker isolation before acquiring an atomic claim in
+    `sessions.db` (`PRIMARY KEY (agent_alias, day_key, candidate_id)`,
+    `UNIQUE (agent_alias, request_id)`). Unchanged retries return the existing
+    claim (`replayed: true`); a different `request_id` for an already claimed,
+    bound, or `submission_unknown` candidate returns HTTP 409 with
+    `code: "candidate_already_dispatched"`; dismissed candidates return HTTP 409
+    `candidate_dismissed`. Only provably unsent failures (such as `unavailable`
+    without a `session_delegations` claim) release the candidate claim;
+    cross-store crash states where `session_delegations` already bound a
+    `dispatch_id` self-heal on inbox read or replay.
 
 `note_owner_correction` puts a correction from the current owner message into
 this same User Model queue. It uses the existing `user_model.db` owner and the

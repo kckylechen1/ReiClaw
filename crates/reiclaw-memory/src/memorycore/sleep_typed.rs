@@ -24,14 +24,42 @@ const PAGE: usize = 1000;
 
 impl SleepKind {
     fn id(self) -> RecordKindId {
-        let name = match self {
-            Episode => "reiclaw.sleep_episode",
-            Pinned => "reiclaw.pinned_digest",
-            Daily => "reiclaw.daily_digest",
-        };
-        RecordKindId {
-            name: name.into(),
-            version: 1,
+        match self {
+            Episode => RecordKindId {
+                name: "reiclaw.sleep_episode".into(),
+                version: 1,
+            },
+            Pinned => RecordKindId {
+                name: "reiclaw.pinned_digest".into(),
+                version: 1,
+            },
+            Daily => RecordKindId {
+                name: "reiclaw.daily_digest".into(),
+                version: 2,
+            },
+        }
+    }
+
+    fn read_ids(self) -> Vec<RecordKindId> {
+        match self {
+            Episode | Pinned => vec![self.id()],
+            Daily => vec![
+                RecordKindId {
+                    name: "reiclaw.daily_digest".into(),
+                    version: 2,
+                },
+                RecordKindId {
+                    name: "reiclaw.daily_digest".into(),
+                    version: 1,
+                },
+            ],
+        }
+    }
+
+    fn matches_kind(self, kind: &RecordKindId) -> bool {
+        match self {
+            Episode | Pinned => *kind == self.id(),
+            Daily => kind.name == "reiclaw.daily_digest" && matches!(kind.version, 1 | 2),
         }
     }
 
@@ -63,31 +91,7 @@ impl SleepKind {
         }
     }
 
-    fn definition(self) -> RecordKind {
-        let string = json!({"type":"string"});
-        let strings = json!({"type":"array","items":string});
-        let mut keys = json!({"agent_id":string, self.time():string, self.slot():string});
-        match self {
-            Episode => keys["session_key"] = string.clone(),
-            Pinned => keys["slot"] = json!({"const":"pinned_digest"}),
-            Daily => {}
-        }
-        let payload = match self {
-            Episode => json!({
-                "agent_id":string, "episode_id":string, "session_key":string, "started_at":string,
-                "ended_at":string, "summary":string, "up_to_message_id":{"type":["integer","null"]},
-                "why_and_tradeoffs":strings, "settled_decisions":strings, "rejected_options":strings,
-                "entities":strings, "source_kind":{"enum":["dialogue","delegation_digest","idle_flush","startup_recovery"]}
-            }),
-            Pinned => json!({"agent_id":string, "rendered_index":string, "updated_at":string,
-                "source_day_key":{"type":["string","null"]}}),
-            Daily => json!({"agent_id":string, "day_key":string, "window_start":string,
-                "window_end":string, "narrative":string, "created_at":string,
-                "settled_decisions":strings, "why_and_tradeoffs":strings, "latent_insights":strings,
-                "action_candidates":strings, "entities":strings, "owner_edited":{"type":"boolean"},
-                "action_decisions":{"type":"object","additionalProperties":{"enum":["pending","approved","dismissed"]}}
-            }),
-        };
+    fn definitions(self) -> Vec<RecordKind> {
         fn schema(properties: Value) -> Value {
             let mut required: Vec<_> = properties
                 .as_object()
@@ -99,10 +103,68 @@ impl SleepKind {
             json!({"$schema":"https://json-schema.org/draft/2020-12/schema", "type":"object",
                 "additionalProperties":false, "properties":properties, "required":required})
         }
-        RecordKind {
-            id: self.id(),
-            key_schema: schema(keys),
-            payload_schema: schema(payload),
+        let string = json!({"type":"string"});
+        let strings = json!({"type":"array","items":string});
+        let mut keys = json!({"agent_id":string, self.time():string, self.slot():string});
+        match self {
+            Episode => keys["session_key"] = string.clone(),
+            Pinned => keys["slot"] = json!({"const":"pinned_digest"}),
+            Daily => {}
+        }
+        let key_schema = schema(keys);
+        match self {
+            Episode => vec![RecordKind {
+                id: self.id(),
+                key_schema,
+                payload_schema: schema(json!({
+                    "agent_id":string, "episode_id":string, "session_key":string, "started_at":string,
+                    "ended_at":string, "summary":string, "up_to_message_id":{"type":["integer","null"]},
+                    "why_and_tradeoffs":strings, "settled_decisions":strings, "rejected_options":strings,
+                    "entities":strings, "source_kind":{"enum":["dialogue","delegation_digest","idle_flush","startup_recovery"]}
+                })),
+            }],
+            Pinned => vec![RecordKind {
+                id: self.id(),
+                key_schema,
+                payload_schema: schema(
+                    json!({"agent_id":string, "rendered_index":string, "updated_at":string,
+                    "source_day_key":{"type":["string","null"]}}),
+                ),
+            }],
+            Daily => {
+                let v1 = json!({"agent_id":string, "day_key":string, "window_start":string,
+                    "window_end":string, "narrative":string, "created_at":string,
+                    "settled_decisions":strings, "why_and_tradeoffs":strings, "latent_insights":strings,
+                    "action_candidates":strings, "entities":strings, "owner_edited":{"type":"boolean"},
+                    "action_decisions":{"type":"object","additionalProperties":{"enum":["pending","approved","dismissed"]}}
+                });
+                let mut v2 = v1.clone();
+                if let Some(obj) = v2.as_object_mut() {
+                    obj.insert("revision".into(), json!({"type":"integer","minimum":1}));
+                    obj.insert(
+                        "candidate_items".into(),
+                        json!({"type":"array","items": schema(json!({"id":string,"text":string}))}),
+                    );
+                }
+                vec![
+                    RecordKind {
+                        id: RecordKindId {
+                            name: "reiclaw.daily_digest".into(),
+                            version: 1,
+                        },
+                        key_schema: key_schema.clone(),
+                        payload_schema: schema(v1),
+                    },
+                    RecordKind {
+                        id: RecordKindId {
+                            name: "reiclaw.daily_digest".into(),
+                            version: 2,
+                        },
+                        key_schema,
+                        payload_schema: schema(v2),
+                    },
+                ]
+            }
         }
     }
 
@@ -114,20 +176,34 @@ impl SleepKind {
         }
     }
 
+    pub(super) fn queries(self, agent: Option<&str>) -> Vec<TypedRecordQuery> {
+        let key_filters = agent.map(agent_filter).unwrap_or_default();
+        self.read_ids()
+            .into_iter()
+            .map(|kind_id| TypedRecordQuery {
+                kind: Some(kind_id),
+                key_filters: key_filters.clone(),
+                ..Default::default()
+            })
+            .collect()
+    }
+
     pub(super) fn current(
         self,
         store: &MemoryStore,
         agent: &str,
         slot: &str,
     ) -> Result<Option<TypedRecord>> {
-        let mut query = self.query(Some(agent));
-        query.key_filters.insert(self.slot().into(), slot.into());
-        query.limit = 2;
-        let mut rows = store.list_typed_records(&query)?;
-        ensure!(
-            rows.len() <= 1,
-            "multiple active revisions for a sleep record"
-        );
+        let mut rows = Vec::new();
+        for mut query in self.queries(Some(agent)) {
+            query.key_filters.insert(self.slot().into(), slot.into());
+            query.limit = 2;
+            rows.extend(store.list_typed_records(&query)?);
+            ensure!(
+                rows.len() <= 1,
+                "multiple active revisions for a sleep record"
+            );
+        }
         Ok(rows.pop())
     }
 
@@ -157,7 +233,7 @@ impl SleepKind {
     pub(super) fn verified_payload(self, record: TypedRecord) -> Result<Value> {
         self.validate_payload(&record.payload)?;
         ensure!(
-            record.kind == self.id() && record.keys == self.keys(&record.payload)?,
+            self.matches_kind(&record.kind) && record.keys == self.keys(&record.payload)?,
             "sleep record keys disagree with its payload"
         );
         Ok(record.payload)
@@ -184,15 +260,17 @@ impl SleepKind {
 }
 
 fn writer() -> Result<RecordWriter> {
+    let kind_ids: Vec<RecordKindId> = KINDS.into_iter().flat_map(SleepKind::read_ids).collect();
     Ok(RecordWriter::from_host_config(
         "reiclaw-sleep",
         KernelStoreKind::Memory.role(),
-        KINDS.map(SleepKind::id).into(),
+        kind_ids,
     )?)
 }
 
 pub(super) fn register(store: MemoryStore) -> Result<MemoryStore> {
-    let registry = RecordRegistry::new(KINDS.map(SleepKind::definition).into())?;
+    let definitions: Vec<RecordKind> = KINDS.into_iter().flat_map(SleepKind::definitions).collect();
+    let registry = RecordRegistry::new(definitions)?;
     let mut store = store.with_kernel_policy(KernelPolicy {
         record_registry: Some(Arc::new(registry)),
         ..Default::default()
@@ -273,7 +351,9 @@ pub(super) fn visit_active(
     mut visit: impl FnMut(SleepKind, TypedRecord) -> Result<()>,
 ) -> Result<()> {
     for kind in KINDS {
-        visit_by_append_time(store, kind.query(agent), |row| visit(kind, row))?;
+        for query in kind.queries(agent) {
+            visit_by_append_time(store, query, |row| visit(kind, row))?;
+        }
     }
     Ok(())
 }
@@ -367,10 +447,12 @@ pub(super) fn extend_visible_entries(
         if category.is_some_and(|c| c != &cat) {
             continue;
         }
-        visit_by_append_time(store, kind.query(agent), |row| {
-            typed.push(to_memory_entry(kind, row)?);
-            Ok(())
-        })?;
+        for query in kind.queries(agent) {
+            visit_by_append_time(store, query, |row| {
+                typed.push(to_memory_entry(kind, row)?);
+                Ok(())
+            })?;
+        }
     }
     merge_entries(entries, typed);
     Ok(())
@@ -392,12 +474,13 @@ pub(super) fn extend_key_entries(
             Pinned => continue,
             Episode | Daily => key,
         };
-        let mut query = kind.query(agent);
-        query.key_filters.insert(kind.slot().into(), slot.into());
-        visit_by_append_time(store, query, |row| {
-            typed.push(to_memory_entry(kind, row)?);
-            Ok(())
-        })?;
+        for mut query in kind.queries(agent) {
+            query.key_filters.insert(kind.slot().into(), slot.into());
+            visit_by_append_time(store, query, |row| {
+                typed.push(to_memory_entry(kind, row)?);
+                Ok(())
+            })?;
+        }
     }
     merge_entries(entries, typed);
     Ok(())
@@ -406,26 +489,29 @@ pub(super) fn extend_key_entries(
 pub(super) fn purge_slots(
     store: &mut MemoryStore,
     kind: SleepKind,
-    mut query: TypedRecordQuery,
+    query: TypedRecordQuery,
 ) -> Result<usize> {
     let mut slots = Vec::new();
-    query.kind = Some(kind.id());
-    visit_by_append_time(store, query, |row| {
-        let mut filters = agent_filter(
-            row.keys["agent_id"]
-                .as_str()
-                .context("missing sleep agent")?,
-        );
-        filters.insert(
-            kind.slot().into(),
-            row.keys[kind.slot()]
-                .as_str()
-                .context("missing sleep slot")?
-                .into(),
-        );
-        slots.push(filters);
-        Ok(())
-    })?;
+    for kind_id in kind.read_ids() {
+        let mut q = query.clone();
+        q.kind = Some(kind_id);
+        visit_by_append_time(store, q, |row| {
+            let mut filters = agent_filter(
+                row.keys["agent_id"]
+                    .as_str()
+                    .context("missing sleep agent")?,
+            );
+            filters.insert(
+                kind.slot().into(),
+                row.keys[kind.slot()]
+                    .as_str()
+                    .context("missing sleep slot")?
+                    .into(),
+            );
+            slots.push(filters);
+            Ok(())
+        })?;
+    }
     let mut deleted = 0;
     let writer = writer()?;
     for slot in slots {
@@ -438,27 +524,37 @@ pub(super) fn copy_for_rename(store: &mut MemoryStore, from: &str, to: &str) -> 
     let mut pending = Vec::new();
     let mut moved = 0;
     for kind in KINDS {
-        visit_by_append_time(store, kind.query(Some(from)), |record| {
-            let mut payload = kind.verified_payload(record)?;
-            payload["agent_id"] = json!(to);
-            kind.validate_payload(&payload)?;
-            let keys = kind.keys(&payload)?;
-            let slot = keys[kind.slot()].as_str().context("missing sleep slot")?;
-            if let Some(existing) = kind.current(store, to, slot)? {
-                ensure!(
-                    kind.verified_payload(existing)? == payload,
-                    "destination sleep record already exists"
-                );
-            } else {
-                ensure!(
-                    MemoryCore::legacy_sleep_slot(store, kind, to, slot)?.is_none(),
-                    "destination legacy sleep record already exists"
-                );
-                pending.push((kind, payload));
-            }
-            moved += 1;
-            Ok(())
-        })?;
+        for query in kind.queries(Some(from)) {
+            visit_by_append_time(store, query, |record| {
+                let mut payload = kind.verified_payload(record)?;
+                payload["agent_id"] = json!(to);
+                if kind == Daily {
+                    let digest: DailyDigest = serde_json::from_value(payload)?;
+                    payload = serde_json::to_value(digest)?;
+                }
+                kind.validate_payload(&payload)?;
+                let keys = kind.keys(&payload)?;
+                let slot = keys[kind.slot()].as_str().context("missing sleep slot")?;
+                if let Some(existing) = kind.current(store, to, slot)? {
+                    let existing_payload = kind.verified_payload(existing)?;
+                    let same = if kind == Daily {
+                        serde_json::from_value::<DailyDigest>(existing_payload)?
+                            == serde_json::from_value::<DailyDigest>(payload.clone())?
+                    } else {
+                        existing_payload == payload
+                    };
+                    ensure!(same, "destination sleep record already exists");
+                } else {
+                    ensure!(
+                        MemoryCore::legacy_sleep_slot(store, kind, to, slot)?.is_none(),
+                        "destination legacy sleep record already exists"
+                    );
+                    pending.push((kind, payload));
+                }
+                moved += 1;
+                Ok(())
+            })?;
+        }
     }
     for (kind, payload) in pending {
         kind.append(store, payload, None)?;
@@ -471,55 +567,63 @@ pub(super) fn copy_for_rename(store: &mut MemoryStore, from: &str, to: &str) -> 
 pub(super) fn ordered(
     store: &MemoryStore,
     kind: SleepKind,
-    mut query: TypedRecordQuery,
+    query: TypedRecordQuery,
     limit: usize,
     include_ties: bool,
 ) -> Result<Vec<TypedRecord>> {
     let mut result = Vec::new();
     let time = kind.time();
-    query.time_key = Some(time.into());
-    while result.len() < limit {
-        let remaining = limit - result.len();
-        query.limit = remaining
-            .saturating_add(usize::from(include_ties))
-            .min(PAGE);
-        let mut page = store.list_typed_records(&query)?;
-        if page.len() < query.limit || (!include_ties && page.len() == remaining) {
-            result.extend(page);
-            break;
+    for kind_id in kind.read_ids() {
+        let mut q = query.clone();
+        q.kind = Some(kind_id.clone());
+        q.time_key = Some(time.into());
+        let mut version_rows = Vec::new();
+        while version_rows.len() < limit {
+            let remaining = limit - version_rows.len();
+            q.limit = remaining
+                .saturating_add(usize::from(include_ties))
+                .min(PAGE);
+            let mut page = store.list_typed_records(&q)?;
+            if page.len() < q.limit || (!include_ties && page.len() == remaining) {
+                version_rows.extend(page);
+                break;
+            }
+            let boundary = page
+                .last()
+                .and_then(|r| r.keys[time].as_str())
+                .context("missing sleep time key")?
+                .to_owned();
+            page.retain(|r| r.keys[time] != boundary);
+            version_rows.extend(page);
+            if version_rows.len() >= limit {
+                break;
+            }
+            // Use the kernel append clock to walk even a large domain-time tie.
+            let mut bucket = TypedRecordQuery {
+                kind: Some(kind_id.clone()),
+                ..Default::default()
+            };
+            bucket.key_filters = q.key_filters.clone();
+            bucket.key_filters.insert(time.into(), boundary.clone());
+            visit_by_append_time(store, bucket, |r| {
+                version_rows.push(r);
+                Ok(())
+            })?;
+            let instant: jiff::Timestamp = boundary.parse()?;
+            let Ok(before) = instant.checked_sub(jiff::SignedDuration::from_nanos(1)) else {
+                break;
+            };
+            if q.since
+                .as_deref()
+                .map(str::parse::<jiff::Timestamp>)
+                .transpose()?
+                .is_some_and(|s| before < s)
+            {
+                break;
+            }
+            q.until = Some(before.to_string());
         }
-        let boundary = page
-            .last()
-            .and_then(|r| r.keys[time].as_str())
-            .context("missing sleep time key")?
-            .to_owned();
-        page.retain(|r| r.keys[time] != boundary);
-        result.extend(page);
-        if result.len() >= limit {
-            break;
-        }
-        // Use the kernel append clock to walk even a large domain-time tie.
-        let mut bucket = kind.query(None);
-        bucket.key_filters = query.key_filters.clone();
-        bucket.key_filters.insert(time.into(), boundary.clone());
-        visit_by_append_time(store, bucket, |r| {
-            result.push(r);
-            Ok(())
-        })?;
-        let instant: jiff::Timestamp = boundary.parse()?;
-        let Ok(before) = instant.checked_sub(jiff::SignedDuration::from_nanos(1)) else {
-            break;
-        };
-        if query
-            .since
-            .as_deref()
-            .map(str::parse::<jiff::Timestamp>)
-            .transpose()?
-            .is_some_and(|s| before < s)
-        {
-            break;
-        }
-        query.until = Some(before.to_string());
+        result.extend(version_rows);
     }
     Ok(result)
 }
@@ -539,7 +643,7 @@ mod tests {
             &KernelStoreKind::Memory.context(DbOpenContext::create_fresh()),
         )
         .unwrap();
-        let mut kind = Pinned.definition();
+        let mut kind = Pinned.definitions().into_iter().next().unwrap();
         kind.key_schema["properties"]["slot"]["const"] = json!("different");
         let mut store = store.with_kernel_policy(KernelPolicy {
             record_registry: Some(Arc::new(RecordRegistry::new(vec![kind]).unwrap())),

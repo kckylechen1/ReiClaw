@@ -1,6 +1,6 @@
 use super::traits::{
-    DailyDigest, EpisodeRecord, ExportFilter, Memory, MemoryCategory, MemoryEntry, PinnedDigest,
-    ProceduralMessage, RecallEntryPredicate, StoreOptions,
+    DailyDigest, DailyDigestCasResult, EpisodeRecord, ExportFilter, Memory, MemoryCategory,
+    MemoryEntry, PinnedDigest, ProceduralMessage, RecallEntryPredicate, StoreOptions,
 };
 use anyhow::Result;
 use std::collections::HashSet;
@@ -710,6 +710,17 @@ crate::forwarding::forward_memory! {
     async fn publish_daily_digest(&self, digest: &DailyDigest) -> Result<String> {
         self.ensure_bound_agent("publish_daily_digest", &digest.agent_id)?;
         self.inner.publish_daily_digest(digest).await
+    }
+
+    async fn publish_daily_digest_cas(
+        &self,
+        digest: &DailyDigest,
+        expected_revision: u64,
+    ) -> Result<DailyDigestCasResult> {
+        self.ensure_bound_agent("publish_daily_digest_cas", &digest.agent_id)?;
+        self.inner
+            .publish_daily_digest_cas(digest, expected_revision)
+            .await
     }
 
     async fn load_daily_digests(&self, agent_id: &str, limit: usize) -> Result<Vec<DailyDigest>> {
@@ -1493,6 +1504,8 @@ mod tests {
             created_at: "2026-11-18T04:01:00Z".into(),
             owner_edited: false,
             action_decisions: BTreeMap::new(),
+            revision: 1,
+            candidate_items: vec![],
         };
         inner.publish_daily_digest(&beta_daily).await.unwrap();
 
@@ -1702,6 +1715,8 @@ mod tests {
             created_at: "2026-11-18T04:01:00Z".into(),
             owner_edited: true,
             action_decisions: decisions,
+            revision: 1,
+            candidate_items: vec![],
         };
         let daily_id = memory.publish_daily_digest(&daily).await.unwrap();
         assert!(!daily_id.is_empty());
