@@ -102,7 +102,7 @@ Line shape mirrors `zeroclaw_log::event::LogEvent`. Top-level keys:
 | `zeroclaw.*` | flat string map | Alias-bound attribution (see below). |
 | `message` | string \| omitted | Human-readable line body. |
 | `attributes` | object \| omitted | Free-form per-action payload. |
-| `schema_version` | u8 | Currently `2`. v1 rows migrate in-place on startup. |
+| `schema_version` | u8 | Currently `2`. The v1 startup migrator is retired; legacy v1 rows are skipped by `/api/logs`. |
 
 ### `zeroclaw.*` attribution
 
@@ -254,15 +254,10 @@ Span fields are visible inline.
 
 ## Schema migration
 
-On startup, if `log_persistence` is enabled and the file exists, the
-writer streams any schema-1 rows through an in-place migration to
-schema-2 before the first append. Pure streaming, bounded by a
-single line's allocation regardless of file size. The migrated file is
-atomically renamed into place. Files already at v2 are left untouched.
-
-If migration fails, the daemon logs a `warn` and continues writing v2
-appends; the old v1 rows remain readable by tools that still
-understand v1 but won't pass the v2 reader's deserializer.
+The automatic startup `version: 1` → `version: 2` in-place log migration has been
+retired (S7 closeout). Files and rows are written at schema `2`; any remaining
+historical v1 rows are left untouched on disk and skipped by the v2 reader's
+deserializer.
 
 ## What is `internal`?
 
@@ -286,8 +281,6 @@ volume governor for genuine errors.
 - `crates/zeroclaw-log/src/reader.rs`: `/api/logs` reader.
 - `crates/zeroclaw-log/src/config.rs`: `StoragePolicy`, `ToolIoPolicy`,
   `ResolvedPolicy`.
-- `crates/zeroclaw-log/src/migrate.rs`: schema-1 → schema-2 streaming
-  migration.
 - `crates/zeroclaw-log/src/observer_bridge.rs`: typed `Observer`
   projection for runtime event consumers.
 - `crates/zeroclaw-gateway/src/api_logs.rs`: the HTTP adapter.

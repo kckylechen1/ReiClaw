@@ -25,7 +25,7 @@
 //! pending writes.
 
 use std::fs::{self, File, OpenOptions};
-use std::io::{BufRead, BufReader, BufWriter, Write};
+use std::io::{BufRead, BufReader, BufWriter, Read, Seek, SeekFrom, Write};
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::mpsc::{Receiver, SyncSender, TrySendError, sync_channel};
@@ -36,7 +36,6 @@ use std::time::{Duration, Instant, SystemTime};
 use crate::broadcast::current_broadcast_hook;
 use crate::config::{LlmRequestPayloadPolicy, LogConfig, ResolvedPolicy, StoragePolicy};
 use crate::event::LogEvent;
-use crate::migrate;
 use anyhow::{Context, Result};
 use serde_json::Value;
 
@@ -87,7 +86,7 @@ enum WriterJob {
     /// completed a `sync_all`. Acks via a rendezvous channel.
     Flush(SyncSender<Result<()>>),
     /// Drain all earlier jobs, sync the active file, and exit. Re-init uses
-    /// the acknowledgement to establish a quiescent migration boundary.
+    /// the acknowledgement to establish a quiescent reload handoff boundary.
     Shutdown(SyncSender<()>),
     #[cfg(test)]
     Pause {
@@ -130,32 +129,16 @@ fn current_state() -> Option<Arc<WriterState>> {
 }
 
 pub fn init_from_config(config: &LogConfig, workspace_dir: &Path) {
-    init_from_config_with_migration(
-        config,
-        workspace_dir,
-        migrate::migrate_legacy_jsonl_in_place,
-    );
+    init_from_config_with_reload_hooks(config, workspace_dir, || {}, SHUTDOWN_WARN_AFTER);
 }
 
-fn init_from_config_with_migration<F>(config: &LogConfig, workspace_dir: &Path, migrate_file: F)
-where
-    F: FnOnce(&Path) -> Result<()>,
-{
-    init_from_config_with_migration_and_shutdown_warning(
-        config,
-        workspace_dir,
-        migrate_file,
-        SHUTDOWN_WARN_AFTER,
-    );
-}
-
-fn init_from_config_with_migration_and_shutdown_warning<F>(
+fn init_from_config_with_reload_hooks<F>(
     config: &LogConfig,
     workspace_dir: &Path,
-    migrate_file: F,
+    on_quiescent: F,
     shutdown_warn_after: Duration,
 ) where
-    F: FnOnce(&Path) -> Result<()>,
+    F: FnOnce(),
 {
     let _reinit_guard = REINIT_LOCK.lock();
     let policy = ResolvedPolicy::from_config(config, workspace_dir);
@@ -166,18 +149,8 @@ fn init_from_config_with_migration_and_shutdown_warning<F>(
     *handoff_buffer().lock() = Some(Vec::new());
 
     shutdown_current_writer(shutdown_warn_after);
+    on_quiescent();
 
-    if policy.storage.is_enabled()
-        && policy.path.exists()
-        && let Err(err) = migrate_file(&policy.path)
-    {
-        tracing::warn!(
-            target: "reiclaw_log",
-            error = ?err,
-            path = %policy.path.display(),
-            "log: legacy JSONL migration failed; daemon continuing with mixed-shape file"
-        );
-    }
     let (tx, rx) = sync_channel::<WriterJob>(QUEUE_CAPACITY);
     let worker_dead: WorkerDead = Arc::new(AtomicBool::new(false));
 
@@ -376,8 +349,14 @@ fn write_one(state: &Arc<WorkerState>, value: &Value) -> Result<()> {
         maybe_rotate_for_date(state)?;
     }
     let mut file = open_active_file(state)?;
+    let prepend_newline = needs_leading_newline(&mut file)?;
     {
         let mut writer = BufWriter::new(&mut file);
+        if prepend_newline {
+            writer
+                .write_all(b"\n")
+                .context("writing separating newline")?;
+        }
         write_jsonl_line(&mut writer, value)?;
         writer.flush()?;
     }
@@ -409,7 +388,7 @@ fn open_active_file(state: &Arc<WorkerState>) -> Result<File> {
             .with_context(|| format!("creating log directory {}", parent.display()))?;
     }
     let mut options = OpenOptions::new();
-    options.create(true).append(true);
+    options.create(true).read(true).append(true);
     #[cfg(unix)]
     {
         use std::os::unix::fs::OpenOptionsExt;
@@ -485,9 +464,8 @@ pub fn tool_io_policy() -> Option<ResolvedPolicy> {
 /// by construction.
 ///
 /// This is the function the `record!` macro expands into. Direct callers
-/// (the schema migration tool, tests) can invoke it too, but production
-/// code should go through the macro so the `tracing::event!` carries the
-/// correct `file:line` source info.
+/// (tests) can invoke it too, but production code should go through the
+/// macro so the `tracing::event!` carries the correct `file:line` source info.
 pub fn record_event(event: LogEvent) {
     // `serde(skip)` on `ephemeral_attributes` keeps this value — the one
     // that reaches disk — free of broadcast-only secrets.
@@ -519,8 +497,7 @@ pub fn record_event(event: LogEvent) {
 
     // Serialize persistence handoff with re-init. Once reload begins, events
     // are buffered until the old worker has drained and the replacement is
-    // installed, so migration cannot replace a file that is still receiving
-    // accepted writes.
+    // installed, so a reload cannot drop or overtake accepted writes.
     let mut handoff = handoff_buffer().lock();
     if let Some(buffer) = handoff.as_mut() {
         if buffer.len() < QUEUE_CAPACITY {
@@ -628,6 +605,23 @@ fn deep_merge(target: &mut Value, incoming: &Value) {
 /// line-buffered reader directly, so it stays inline rather than going
 /// through this helper (re-serializing would risk non-byte-identical output
 /// for non-canonical input, e.g. reordered keys or whitespace).
+/// Inspect the last byte of an already-opened append handle so upgrading from
+/// a pre-v2 log file that ended without `\n` never glues the first v2 event
+/// onto the old line (which `/api/logs` would skip as malformed JSON).
+fn needs_leading_newline(file: &mut File) -> Result<bool> {
+    if file.metadata().context("reading log file metadata")?.len() == 0 {
+        return Ok(false);
+    }
+    file.seek(SeekFrom::End(-1))
+        .context("seeking to last byte of log file")?;
+    let mut last = [0_u8; 1];
+    file.read_exact(&mut last)
+        .context("reading last byte of log file")?;
+    file.seek(SeekFrom::End(0))
+        .context("restoring log file cursor to end")?;
+    Ok(last[0] != b'\n')
+}
+
 fn write_jsonl_line<W: Write + ?Sized>(writer: &mut W, value: &Value) -> Result<()> {
     serde_json::to_writer(&mut *writer, value).context("serializing log line")?;
     writer.write_all(b"\n").context("writing newline")?;
@@ -1406,12 +1400,7 @@ mod tests {
         let dir = tmp.path().to_path_buf();
         let (done_tx, done_rx) = std::sync::mpsc::channel();
         let reinit = thread::spawn(move || {
-            init_from_config_with_migration_and_shutdown_warning(
-                &cfg,
-                &dir,
-                |_| Ok(()),
-                Duration::from_millis(20),
-            );
+            init_from_config_with_reload_hooks(&cfg, &dir, || {}, Duration::from_millis(20));
             done_tx.send(()).unwrap();
         });
 
@@ -1464,21 +1453,13 @@ mod tests {
     }
 
     #[test]
-    fn reinit_preserves_event_accepted_while_migrating() {
+    fn reinit_preserves_event_accepted_during_handoff() {
         let _guard = WRITER_TEST_LOCK.lock();
         let tmp = tempfile::tempdir().unwrap();
         install_writer(tmp.path(), 100);
         emit("before-reload");
 
         let path = runtime_trace_path().unwrap();
-        let mut file = OpenOptions::new().append(true).open(&path).unwrap();
-        writeln!(
-            file,
-            r#"{{"id":"legacy-id","timestamp":"2026-05-15T19:00:00Z","event_type":"legacy-test","message":"legacy-row"}}"#
-        )
-        .unwrap();
-        file.sync_all().unwrap();
-
         let cfg = LogConfig {
             log_persistence: "rolling".into(),
             log_persistence_max_entries: 100,
@@ -1489,18 +1470,22 @@ mod tests {
         let producer = thread::spawn(move || {
             start_rx.recv().unwrap();
             let mut event = LogEvent::new(Severity::Info, "test", EventCategory::Agent);
-            event.message = Some("accepted-during-migration".to_string());
+            event.message = Some("accepted-during-handoff".to_string());
             record_event(event);
             accepted_tx.send(()).unwrap();
         });
 
-        init_from_config_with_migration(&cfg, tmp.path(), |migration_path| {
-            start_tx.send(()).unwrap();
-            accepted_rx
-                .recv_timeout(Duration::from_secs(1))
-                .expect("concurrent event should be accepted into the handoff buffer");
-            migrate::migrate_legacy_jsonl_in_place(migration_path)
-        });
+        init_from_config_with_reload_hooks(
+            &cfg,
+            tmp.path(),
+            || {
+                start_tx.send(()).unwrap();
+                accepted_rx
+                    .recv_timeout(Duration::from_secs(1))
+                    .expect("concurrent event should be accepted into the handoff buffer");
+            },
+            SHUTDOWN_WARN_AFTER,
+        );
         producer.join().unwrap();
         flush_for_test().unwrap();
 
@@ -1511,53 +1496,9 @@ mod tests {
             .collect();
         assert!(
             events.iter().any(|event| {
-                event.get("message").and_then(Value::as_str) == Some("accepted-during-migration")
+                event.get("message").and_then(Value::as_str) == Some("accepted-during-handoff")
             }),
-            "an event accepted during migration must be replayed to the replacement writer"
-        );
-        assert!(
-            events.iter().any(|event| {
-                event.get("id").and_then(Value::as_str) == Some("legacy-id")
-                    && event.get("schema_version").and_then(Value::as_u64) == Some(2)
-            }),
-            "the legacy row should still be migrated during the quiescent handoff"
-        );
-    }
-
-    #[test]
-    fn migration_makes_unterminated_tail_safe_for_first_writer_append() {
-        let _guard = WRITER_TEST_LOCK.lock();
-        let tmp = tempfile::tempdir().unwrap();
-        let cfg = LogConfig {
-            log_persistence: "full".into(),
-            ..LogConfig::default()
-        };
-        let path = ResolvedPolicy::from_config(&cfg, tmp.path()).path;
-        fs::create_dir_all(path.parent().unwrap()).unwrap();
-        fs::write(
-            &path,
-            r#"{"id":"legacy-id","timestamp":"2026-05-15T19:00:00Z","event_type":"legacy-test","message":"legacy-row"}"#,
-        )
-        .unwrap();
-
-        init_from_config(&cfg, tmp.path());
-        let mut event = LogEvent::new(Severity::Info, "test", EventCategory::Agent);
-        event.message = Some("first-event-after-migration".to_string());
-        record_event(event);
-        flush_for_test().unwrap();
-
-        let lines: Vec<Value> = fs::read_to_string(&path)
-            .unwrap()
-            .lines()
-            .map(|line| serde_json::from_str(line).unwrap())
-            .collect();
-        assert!(lines.iter().any(|line| {
-            line["id"] == "legacy-id" && line["schema_version"] == LogEvent::SCHEMA_VERSION
-        }));
-        assert!(
-            lines
-                .iter()
-                .any(|line| line["message"] == "first-event-after-migration")
+            "an event accepted during reload handoff must be replayed to the replacement writer"
         );
     }
 
@@ -1975,5 +1916,36 @@ mod tests {
         );
         // Real archives are still pruned to the cap.
         assert_eq!(archives.len(), 1, "real archives are still capped");
+    }
+
+    #[test]
+    fn first_append_to_unterminated_legacy_file_starts_on_new_line() {
+        let _guard = WRITER_TEST_LOCK.lock();
+        let tmp = tempfile::tempdir().unwrap();
+        let log_dir = tmp.path().join("state");
+        fs::create_dir_all(&log_dir).unwrap();
+        let log_path = log_dir.join("runtime-trace.jsonl");
+        let legacy_v1 =
+            r#"{"ts":"2026-01-01T00:00:00Z","level":"INFO","target":"legacy","msg":"v1"}"#;
+        fs::write(&log_path, legacy_v1).unwrap();
+
+        let cfg = LogConfig {
+            log_persistence: "full".into(),
+            ..LogConfig::default()
+        };
+        init_from_config(&cfg, tmp.path());
+        assert_eq!(runtime_trace_path().as_deref(), Some(log_path.as_path()));
+
+        emit("after-upgrade");
+
+        let raw = fs::read_to_string(&log_path).unwrap();
+        let lines: Vec<&str> = raw.lines().collect();
+        assert_eq!(lines.len(), 2, "raw log: {raw:?}");
+        assert_eq!(lines[0], legacy_v1);
+
+        let page =
+            crate::reader::load_page(&log_path, &crate::reader::LogFilter::default(), 10).unwrap();
+        assert_eq!(page.events.len(), 1);
+        assert_eq!(page.events[0].message.as_deref(), Some("after-upgrade"));
     }
 }

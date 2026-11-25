@@ -543,7 +543,7 @@ pub const RETIRED_CONFIG_VALUES: &[(&str, &[&str], &str)] = &[
 fn retired_field_reason(code: &str) -> &'static str {
     match code {
         "session_backend_selector_removed" => {
-            "SQLite is the only session backend; legacy JSONL startup import remains available"
+            "SQLite is the only session backend; automatic legacy JSONL startup import is retired"
         }
         "skill_authoring_and_registry_removed" => {
             "automatic skill authoring and registry sync were retired; use reviewed local \

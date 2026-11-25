@@ -23,7 +23,6 @@ pub use delegation::{
     ProxyContinuationReservation, ProxyContinuationState,
 };
 pub use delegation_origin::DelegationSessionFacts;
-mod jsonl_import;
 pub mod reminder_occurrences;
 #[cfg(test)]
 mod review_source_tests;
@@ -178,7 +177,6 @@ impl SqliteSessionBackend {
 
         bridge_intake::initialize(&tx)?;
         checkpoints::initialize(&tx)?;
-        jsonl_import::initialize(&tx)?;
 
         // Historical messages have no attributable ingress source. Leave
         // them NULL rather than guessing from the session's latest sender.
@@ -1903,37 +1901,6 @@ mod tests {
 
         assert!(backend.delete_session("ghost").unwrap());
         assert!(!backend.session_exists("ghost"));
-    }
-
-    #[test]
-    fn migrate_from_jsonl_imports_and_renames() {
-        let tmp = TempDir::new().unwrap();
-        let sessions_dir = tmp.path().join("sessions");
-        std::fs::create_dir_all(&sessions_dir).unwrap();
-
-        // The retained importer keeps its historical line-level tolerance;
-        // the original bytes, including malformed lines, stay in the archive.
-        let jsonl_path = sessions_dir.join("test_user.jsonl");
-        let original = "{\"role\":\"user\",\"content\":\"hello\"}\n\ninvalid legacy line\n{\"role\":\"assistant\",\"content\":\"hi\"}\n";
-        std::fs::write(&jsonl_path, original).unwrap();
-
-        let backend = SqliteSessionBackend::new(tmp.path()).unwrap();
-        let migrated = backend.migrate_from_jsonl(tmp.path()).unwrap();
-        assert_eq!(migrated, 1);
-
-        // JSONL should be renamed
-        assert!(!jsonl_path.exists());
-        assert!(sessions_dir.join("test_user.jsonl.migrated").exists());
-        assert_eq!(
-            std::fs::read_to_string(sessions_dir.join("test_user.jsonl.migrated")).unwrap(),
-            original
-        );
-
-        // Messages should be in SQLite
-        let msgs = backend.load("test_user");
-        assert_eq!(msgs.len(), 2);
-        assert_eq!(msgs[0].content, "hello");
-        assert_eq!(msgs[1].content, "hi");
     }
 
     #[test]
