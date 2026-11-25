@@ -12365,14 +12365,16 @@ async fn scheduled_and_delegated_tools_obey_host_memory_policy() {
     for origin in [TurnOrigin::Cron, TurnOrigin::Daemon, TurnOrigin::SubTurn] {
         for parallel_tools in [false, true] {
             let model_provider = ScriptedModelProvider::from_text_responses(vec![
-                r#"<tool_call>{"name":"memory_recall","arguments":{"query":"*","limit":20}}</tool_call>
-<tool_call>{"name":"memory_export","arguments":{"session_id":"A","origin":"interactive"}}</tool_call>"#,
+                concat!(
+                    r#"<tool_call>{"name":"memory_recall","arguments":{"query":"*","limit":20}}</tool_call>"#,
+                    "\n",
+                    r#"<tool_call>{"name":"memory_recall","arguments":{"query":"PRIVATE_CHAT_CANARY","limit":10}}</tool_call>"#,
+                ),
                 "done",
             ]);
-            let tools_registry: Vec<Box<dyn Tool>> = vec![
-                Box::new(crate::tools::MemoryRecallTool::new(Arc::clone(&mem))),
-                Box::new(crate::tools::MemoryExportTool::new(Arc::clone(&mem))),
-            ];
+            let tools_registry: Vec<Box<dyn Tool>> = vec![Box::new(
+                crate::tools::MemoryRecallTool::new(Arc::clone(&mem)),
+            )];
             let mut history = vec![ChatMessage::user("recall fixture")];
             let turn_id = uuid::Uuid::new_v4().to_string();
             let multimodal = reiclaw_config::schema::MultimodalConfig::default();
@@ -12447,7 +12449,6 @@ async fn scheduled_and_delegated_tools_obey_host_memory_policy() {
                 .collect::<Vec<_>>()
                 .join("\n");
             assert!(results.contains("memory_recall"), "{results}");
-            assert!(results.contains("memory_export"), "{results}");
             assert!(
                 !results.contains("PRIVATE_CHAT_CANARY"),
                 "{origin:?}: {results}"
