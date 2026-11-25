@@ -424,14 +424,9 @@ async fn execute_one_tool_keeps_data_path_raw_and_scrubs_only_observer() {
                 self.results.lock().unwrap().push(result.clone());
             }
         }
-        fn record_metric(&self, _metric: &crate::observability::traits::ObserverMetric) {}
         fn name(&self) -> &str {
             "capturing-results"
         }
-        fn as_any(&self) -> &dyn std::any::Any {
-            self
-        }
-        fn flush(&self) {}
     }
 
     let observer = CapturingResults {
@@ -8566,14 +8561,8 @@ impl crate::observability::Observer for RecallCountingObserver {
         }
     }
 
-    fn record_metric(&self, _metric: &reiclaw_api::observability_traits::ObserverMetric) {}
-
     fn name(&self) -> &str {
         "recall-counting-observer"
-    }
-
-    fn as_any(&self) -> &dyn std::any::Any {
-        self
     }
 }
 
@@ -11150,14 +11139,9 @@ impl Observer for CapturingObserver {
     fn record_event(&self, event: &ObserverEvent) {
         self.events.lock().push(event.clone());
     }
-    fn record_metric(&self, _metric: &reiclaw_api::observability_traits::ObserverMetric) {}
     fn name(&self) -> &str {
         "capturing"
     }
-    fn as_any(&self) -> &dyn std::any::Any {
-        self
-    }
-    fn flush(&self) {}
 }
 
 fn assert_all_events_share_turn_id(

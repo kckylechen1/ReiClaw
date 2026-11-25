@@ -1072,12 +1072,8 @@ impl Observer for EventCapture {
     fn record_event(&self, event: &ObserverEvent) {
         self.events.lock().push(event.clone());
     }
-    fn record_metric(&self, _metric: &reiclaw_api::observability_traits::ObserverMetric) {}
     fn name(&self) -> &str {
         "event-capture"
-    }
-    fn as_any(&self) -> &dyn std::any::Any {
-        self
     }
 }
 

@@ -1,5 +1,4 @@
-use super::traits::{Observer, ObserverEvent, ObserverMetric};
-use std::any::Any;
+use super::traits::{Observer, ObserverEvent};
 
 /// Human-readable progress observer for interactive CLI sessions.
 /// This observer prints compact `>` / `<` progress lines without exposing
@@ -61,15 +60,8 @@ impl Observer for VerboseObserver {
         }
     }
 
-    #[inline(always)]
-    fn record_metric(&self, _metric: &ObserverMetric) {}
-
     fn name(&self) -> &str {
         "verbose"
-    }
-
-    fn as_any(&self) -> &dyn Any {
-        self
     }
 }
 
@@ -104,7 +96,6 @@ mod tests {
             error_message: None,
             input_tokens: Some(50),
             output_tokens: Some(25),
-            messages: None,
             channel: None,
             agent_alias: None,
             turn_id: None,

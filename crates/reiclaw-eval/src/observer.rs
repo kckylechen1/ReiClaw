@@ -1,6 +1,6 @@
 //! An [`Observer`] that records tool-call outcomes and token usage from a run.
 
-use reiclaw_api::observability_traits::{Observer, ObserverEvent, ObserverMetric};
+use reiclaw_api::observability_traits::{Observer, ObserverEvent};
 use std::sync::Mutex;
 
 /// Captures `(tool_name, success)` for each dispatched tool call and accumulates
@@ -66,14 +66,8 @@ impl Observer for RecordingObserver {
         }
     }
 
-    fn record_metric(&self, _metric: &ObserverMetric) {}
-
     fn name(&self) -> &str {
         "eval-recording"
-    }
-
-    fn as_any(&self) -> &dyn std::any::Any {
-        self
     }
 }
 
@@ -108,7 +102,6 @@ mod tests {
             error_message: None,
             input_tokens: Some(input),
             output_tokens: Some(output),
-            messages: None,
             channel: None,
             agent_alias: None,
             turn_id: None,

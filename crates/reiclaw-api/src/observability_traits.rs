@@ -1,43 +1,5 @@
 use std::time::Duration;
 
-/// A single conversation message captured for OTel GenAI semconv export.
-/// Structurally mirrors [`crate::model_provider::ChatMessage`] but is defined
-/// independently to keep the observability API decoupled from the model-provider
-/// API and to signal that `content` has been credential-scrubbed at capture time.
-#[derive(Debug, Clone)]
-pub struct MessageSnapshot {
-    pub role: String,
-    pub content: String,
-}
-
-/// A tool call the model emitted, captured for `gen_ai.output.messages`.
-/// `arguments_json` is the raw JSON arguments string, credential-scrubbed.
-#[derive(Debug, Clone)]
-pub struct ToolCallSnapshot {
-    pub id: String,
-    pub name: String,
-    pub arguments_json: String,
-}
-
-/// Full prompt/completion content for one `llm.call`, captured and
-/// credential-scrubbed at the agent-loop boundary so the OTel exporter can emit
-/// `gen_ai.input.messages` / `gen_ai.output.messages` / `gen_ai.system_instructions`.
-///
-/// The in-tree OTel exporter was removed, so the runtime no longer captures
-/// this snapshot and always leaves the field `None`; the type stays for API
-/// compatibility.
-#[derive(Debug, Clone)]
-pub struct LlmMessageSnapshot {
-    /// Non-system input messages, in send order.
-    pub input: Vec<MessageSnapshot>,
-    /// Assistant text output, if any. Empty text is captured as `None`.
-    pub output_text: Option<String>,
-    /// Tool calls the assistant emitted this turn.
-    pub output_tool_calls: Vec<ToolCallSnapshot>,
-    /// System prompt, carried separately from `input`.
-    pub system_instructions: Option<String>,
-}
-
 /// Token usage breakdown for a single agent turn.
 #[derive(Debug, Clone, serde::Serialize)]
 pub struct TurnTokenUsage {
@@ -94,9 +56,6 @@ pub enum ObserverEvent {
         error_message: Option<String>,
         input_tokens: Option<u64>,
         output_tokens: Option<u64>,
-        /// Prompt/completion snapshot for the retired OTel exporter. Always
-        /// `None` in-tree; kept for API compatibility. See [`LlmMessageSnapshot`].
-        messages: Option<LlmMessageSnapshot>,
         channel: Option<String>,
         agent_alias: Option<String>,
         /// The delegating agent's alias when this record was produced by a
@@ -214,44 +173,8 @@ pub enum ObserverEvent {
         agent_alias: Option<String>,
         turn_id: Option<String>,
     },
-    /// A memory audit/operator action was recorded on the audit trail.
-    ///
-    /// Carries only bounded labels. The action is an audit verb such as
-    /// `"store"`, `"recall"`, or `"purge"`; raw memory keys and content
-    /// are intentionally excluded from this event.
-    MemoryAudit {
-        /// Bounded audit action name, safe to use as a metric label.
-        action: String,
-        /// Bounded backend identifier (e.g. `"sqlite"`, `"qdrant"`).
-        backend: String,
-        duration: Duration,
-        success: bool,
-    },
-    /// A RAG retrieval pass has completed.
-    ///
-    /// Emitted after vector + keyword retrieval against the hardware
-    /// datasheet index. Reports cardinalities only; carries an optional
-    /// scrubbed-and-truncated query summary on the same terms as
-    /// [`Self::MemoryRecall`]. Has no `success` field because the underlying
-    /// `rag.retrieve` call is synchronous and infallible.
-    RagRetrieve {
-        query_summary: Option<String>,
-        duration: Duration,
-        num_chunks: usize,
-        num_boards: usize,
-        channel: Option<String>,
-        agent_alias: Option<String>,
-        turn_id: Option<String>,
-    },
     /// The agent produced a final answer for the current user message.
     TurnComplete,
-    /// A message was sent or received through a channel.
-    ChannelMessage {
-        /// Channel name (e.g., `"telegram"`, `"webhook"`).
-        channel: String,
-        /// `"inbound"` or `"outbound"`.
-        direction: String,
-    },
     /// Periodic heartbeat tick from the runtime keep-alive loop.
     HeartbeatTick,
     /// Response cache hit — an LLM call was avoided.
@@ -287,28 +210,12 @@ pub enum ObserverEvent {
     },
 }
 
-/// Numeric metrics emitted by the agent runtime.
-///
-/// Observers can aggregate these into dashboards, alerts, or structured logs.
-/// Each variant carries a single scalar value with implicit units.
-#[derive(Debug, Clone)]
-pub enum ObserverMetric {
-    /// Time elapsed for a single LLM or tool request.
-    RequestLatency(Duration),
-    /// Number of tokens consumed by an LLM call.
-    TokensUsed(u64),
-    /// Current number of active concurrent sessions.
-    ActiveSessions(u64),
-    /// Current depth of the inbound message queue.
-    QueueDepth(u64),
-}
-
 /// Core observability trait for recording agent runtime telemetry.
 ///
 /// Implement this trait to integrate with any monitoring backend (structured
 /// logging or event broadcasts). The agent runtime holds one or
 /// more `Observer` instances and calls [`record_event`](Observer::record_event)
-/// and [`record_metric`](Observer::record_metric) at key lifecycle points.
+/// at key lifecycle points.
 ///
 /// Implementations must be `Send + Sync + 'static` because the observer is
 /// shared across async tasks via `Arc`.
@@ -316,60 +223,27 @@ pub trait Observer: Send + Sync + 'static {
     /// Record a discrete lifecycle event.
     ///
     /// Called synchronously on the hot path; implementations should avoid
-    /// blocking I/O. Buffer events internally and flush asynchronously
-    /// when possible.
+    /// blocking I/O.
     fn record_event(&self, event: &ObserverEvent);
-
-    /// Record a numeric metric sample.
-    ///
-    /// Called synchronously; same non-blocking guidance as
-    /// [`record_event`](Observer::record_event).
-    fn record_metric(&self, metric: &ObserverMetric);
-
-    /// Flush any buffered telemetry data to the backend.
-    ///
-    /// The runtime calls this during graceful shutdown. The default
-    /// implementation is a no-op, which is appropriate for backends
-    /// that write synchronously.
-    fn flush(&self) {}
 
     /// Return the human-readable name of this observer backend.
     ///
     /// Used in logs and diagnostics (e.g., `"log"`, `"verbose"`, `"noop"`).
     fn name(&self) -> &str;
-
-    /// Downcast to `Any` for backend-specific operations.
-    ///
-    /// Enables callers to access concrete observer types when needed
-    fn as_any(&self) -> &dyn std::any::Any;
 }
 
 /// Blanket implementation: `Arc<T>` delegates all `Observer` methods to `T`.
 ///
 /// Lets a singleton observer be handed out as `Arc<MyObserver>` and still be
 /// used wherever `Box<dyn Observer>` is expected (e.g.
-/// `Box::new(MyObserver::shared())`). `as_any` deliberately delegates to the
-/// inner `T` so backend-specific diagnostics recover the concrete type
-/// rather than the `Arc` wrapper.
+/// `Box::new(MyObserver::shared())`).
 impl<T: Observer + ?Sized> Observer for std::sync::Arc<T> {
     fn record_event(&self, event: &ObserverEvent) {
         self.as_ref().record_event(event);
     }
 
-    fn record_metric(&self, metric: &ObserverMetric) {
-        self.as_ref().record_metric(metric);
-    }
-
-    fn flush(&self) {
-        self.as_ref().flush();
-    }
-
     fn name(&self) -> &str {
         self.as_ref().name()
-    }
-
-    fn as_any(&self) -> &dyn std::any::Any {
-        self.as_ref().as_any()
     }
 }
 
@@ -382,7 +256,6 @@ mod tests {
     #[derive(Default)]
     struct DummyObserver {
         events: Mutex<u64>,
-        metrics: Mutex<u64>,
     }
 
     impl Observer for DummyObserver {
@@ -391,22 +264,13 @@ mod tests {
             *guard += 1;
         }
 
-        fn record_metric(&self, _metric: &ObserverMetric) {
-            let mut guard = self.metrics.lock();
-            *guard += 1;
-        }
-
         fn name(&self) -> &str {
             "dummy-observer"
-        }
-
-        fn as_any(&self) -> &dyn std::any::Any {
-            self
         }
     }
 
     #[test]
-    fn observer_records_events_and_metrics() {
+    fn observer_records_events_and_reports_name() {
         let observer = DummyObserver::default();
 
         observer.record_event(&ObserverEvent::HeartbeatTick);
@@ -414,19 +278,9 @@ mod tests {
             component: "test".into(),
             message: "boom".into(),
         });
-        observer.record_metric(&ObserverMetric::TokensUsed(42));
 
         assert_eq!(*observer.events.lock(), 2);
-        assert_eq!(*observer.metrics.lock(), 1);
-    }
-
-    #[test]
-    fn observer_default_flush_and_as_any_work() {
-        let observer = DummyObserver::default();
-
-        observer.flush();
         assert_eq!(observer.name(), "dummy-observer");
-        assert!(observer.as_any().downcast_ref::<DummyObserver>().is_some());
     }
 
     #[test]
@@ -467,7 +321,7 @@ mod tests {
     }
 
     #[test]
-    fn observer_event_and_metric_are_cloneable() {
+    fn observer_event_is_cloneable() {
         let event = ObserverEvent::ToolCall {
             tool: "shell".into(),
             tool_call_id: Some("call_abc123".into()),
@@ -480,13 +334,10 @@ mod tests {
             parent_agent_alias: None,
             turn_id: None,
         };
-        let metric = ObserverMetric::RequestLatency(Duration::from_millis(8));
 
         let cloned_event = event.clone();
-        let cloned_metric = metric.clone();
 
         assert!(matches!(cloned_event, ObserverEvent::ToolCall { .. }));
-        assert!(matches!(cloned_metric, ObserverMetric::RequestLatency(_)));
     }
 
     #[test]
@@ -510,21 +361,6 @@ mod tests {
             agent_alias: Some("default".into()),
             turn_id: Some("turn-1".into()),
         };
-        let rag = ObserverEvent::RagRetrieve {
-            query_summary: None,
-            duration: Duration::from_millis(120),
-            num_chunks: 5,
-            num_boards: 2,
-            channel: Some("cli".into()),
-            agent_alias: Some("default".into()),
-            turn_id: Some("turn-1".into()),
-        };
-        let audit = ObserverEvent::MemoryAudit {
-            action: "store".into(),
-            backend: "sqlite".into(),
-            duration: Duration::from_millis(2),
-            success: true,
-        };
 
         match recall.clone() {
             ObserverEvent::MemoryRecall { turn_id, .. } => {
@@ -533,7 +369,5 @@ mod tests {
             other => panic!("clone changed variant: {other:?}"),
         }
         assert!(matches!(store.clone(), ObserverEvent::MemoryStore { .. }));
-        assert!(matches!(rag.clone(), ObserverEvent::RagRetrieve { .. }));
-        assert!(matches!(audit.clone(), ObserverEvent::MemoryAudit { .. }));
     }
 }

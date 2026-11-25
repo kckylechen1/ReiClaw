@@ -144,9 +144,6 @@ pub(crate) async fn interpret_chat_response(
         agent_alias: ctx.agent_alias.map(|s| s.to_string()),
         parent_agent_alias: ctx.parent_agent_alias.map(|s| s.to_string()),
         turn_id: Some(ctx.turn_id.to_string()),
-        // Prompt/completion snapshots fed only the retired OTel exporter;
-        // the api field stays for semver and is never populated.
-        messages: None,
     });
 
     let call_cost_usd = resp

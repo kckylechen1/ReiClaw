@@ -35,8 +35,6 @@ pub(crate) fn record_llm_failure(
         agent_alias: ctx.agent_alias.map(|s| s.to_string()),
         parent_agent_alias: ctx.parent_agent_alias.map(|s| s.to_string()),
         turn_id: Some(ctx.turn_id.to_string()),
-        // Error path: no prompt/completion content captured.
-        messages: None,
     });
     ::reiclaw_log::record!(
         WARN,
