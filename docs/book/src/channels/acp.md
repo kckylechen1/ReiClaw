@@ -332,7 +332,7 @@ ACP sessions do not interact with the agent's persistent memory system. This is 
 
 **What ACP sessions exclude:**
 
-- Memory tools (`memory_recall`, `memory_store`, `memory_forget`, `memory_export`, `memory_purge`) are not available
+- Memory tools (`memory_recall`, `memory_store`, `memory_forget`, `episode_read`) are not available
 - Automatic memory recall (the context preamble built from long-term memory at each turn) is disabled
 - Automatic conversation auto-save to the agent's memory store is disabled
 

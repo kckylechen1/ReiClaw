@@ -14,9 +14,7 @@ use crate::file_write::FileWriteTool;
 use crate::glob_search::GlobSearchTool;
 use crate::http_request::HttpRequestTool;
 use crate::mcp_tool::McpToolWrapper;
-use crate::memory_export::MemoryExportTool;
 use crate::memory_forget::MemoryForgetTool;
-use crate::memory_purge::MemoryPurgeTool;
 use crate::memory_recall::MemoryRecallTool;
 use crate::memory_store::MemoryStoreTool;
 use crate::propose_soul_change::ProposeSoulChangeTool;
@@ -36,14 +34,12 @@ tool_attribution!(FileWriteTool, ToolKind::Plugin);
 tool_attribution!(GlobSearchTool, ToolKind::Search);
 tool_attribution!(HttpRequestTool, ToolKind::HttpRequest);
 tool_attribution!(McpToolWrapper, ToolKind::Plugin);
-tool_attribution!(MemoryExportTool, ToolKind::Memory);
 tool_attribution!(MemoryForgetTool, ToolKind::Memory);
 tool_attribution!(ProposeSoulChangeTool, ToolKind::Memory);
 tool_attribution!(
     crate::note_owner_correction::NoteOwnerCorrectionTool,
     ToolKind::Memory
 );
-tool_attribution!(MemoryPurgeTool, ToolKind::Memory);
 tool_attribution!(MemoryRecallTool, ToolKind::Memory);
 tool_attribution!(MemoryStoreTool, ToolKind::Memory);
 tool_attribution!(ScreenshotTool, ToolKind::Plugin);

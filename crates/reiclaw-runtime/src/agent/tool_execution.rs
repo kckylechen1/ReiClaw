@@ -51,6 +51,9 @@ fn resolve_tool<'a>(
     if let Some(tool) = find_tool(dispatch.tools_registry, name) {
         return Some(ResolvedTool::Static(tool));
     }
+    if crate::tools::is_retired_operator_tool_name(name) {
+        return None;
+    }
     let activated = dispatch.activated_tools?;
     let activated = match activated.lock() {
         Ok(guard) => guard,
@@ -114,6 +117,8 @@ pub(crate) fn undispatchable_tool_outcome(
             return None;
         }
         true
+    } else if crate::tools::is_retired_operator_tool_name(call_name) {
+        false
     } else {
         let recoverable = dispatch.activated_tools.is_some_and(|activated| {
             let guard = activated
@@ -347,6 +352,9 @@ async fn execute_one_tool_with_provenance(
     }
 
     let resolved = resolve_tool(dispatch, call_name, tool_call_id).or_else(|| {
+        if crate::tools::is_retired_operator_tool_name(call_name) {
+            return None;
+        }
         // Only actual dispatch may hydrate an authorized exact deferred name.
         // Admission's shared canonical resolver stays read-only, and hooks and
         // approval have already completed before this execution boundary.
@@ -1304,5 +1312,118 @@ mod tests {
             should_execute_tools_in_parallel(&batch, None),
             "no approval manager + non-tool_search batch must run in parallel"
         );
+    }
+
+    #[tokio::test]
+    async fn retired_bare_memory_tools_do_not_suffix_resolve_to_activated_mcp_tools() {
+        use super::{dispatch_tool_name, undispatchable_tool_outcome};
+
+        let activated = Arc::new(Mutex::new(ActivatedToolSet::new()));
+        let purge_invocations = Arc::new(AtomicUsize::new(0));
+        let export_invocations = Arc::new(AtomicUsize::new(0));
+        {
+            let mut guard = activated.lock().unwrap();
+            guard.activate(
+                "archive__memory_purge".into(),
+                Arc::new(CountingTool::new(
+                    "archive__memory_purge",
+                    Arc::clone(&purge_invocations),
+                )),
+            );
+            guard.activate(
+                "archive__memory_export".into(),
+                Arc::new(CountingTool::new(
+                    "archive__memory_export",
+                    Arc::clone(&export_invocations),
+                )),
+            );
+        }
+
+        let meta = crate::agent::turn::TurnMeta {
+            parent_agent_alias: None,
+            agent_alias: None,
+            turn_id: "test-turn-id",
+            channel_name: "test",
+        };
+        let dispatch = ToolDispatchContext {
+            tools_registry: &[],
+            activated_tools: Some(&activated),
+            excluded_tools: &[],
+        };
+
+        for bare in ["memory_purge", "memory_export", " MEMORY_PURGE "] {
+            assert!(
+                dispatch_tool_name(bare, dispatch).is_none(),
+                "retired bare tool name {bare:?} must not resolve to an MCP suffix"
+            );
+            let preflight = undispatchable_tool_outcome(
+                bare,
+                &serde_json::json!({}),
+                Some("call-preflight"),
+                dispatch,
+                true,
+                &meta,
+                &NoopObserver,
+            )
+            .expect("retired bare tool name must fail eagerly even if tool_search is in batch");
+            assert!(!preflight.success);
+            assert_eq!(preflight.output, format!("Unknown tool: {bare}"));
+
+            let exec = execute_one_tool(
+                bare,
+                serde_json::json!({}),
+                Some("call-exec"),
+                dispatch,
+                &meta,
+                &NoopObserver,
+                None,
+                None,
+                None,
+            )
+            .await
+            .expect("retired bare tool name must return Unknown tool outcome");
+            assert!(!exec.success);
+            assert_eq!(exec.output, format!("Unknown tool: {bare}"));
+        }
+
+        assert_eq!(purge_invocations.load(Ordering::SeqCst), 0);
+        assert_eq!(export_invocations.load(Ordering::SeqCst), 0);
+
+        for qualified in ["archive__memory_purge", "archive__memory_export"] {
+            assert_eq!(
+                dispatch_tool_name(qualified, dispatch).as_deref(),
+                Some(qualified)
+            );
+            assert!(
+                undispatchable_tool_outcome(
+                    qualified,
+                    &serde_json::json!({}),
+                    Some("call-ok-preflight"),
+                    dispatch,
+                    true,
+                    &meta,
+                    &NoopObserver,
+                )
+                .is_none()
+            );
+            let exec = execute_one_tool(
+                qualified,
+                serde_json::json!({}),
+                Some("call-ok"),
+                dispatch,
+                &meta,
+                &NoopObserver,
+                None,
+                None,
+                None,
+            )
+            .await
+            .expect("qualified MCP tool must execute normally");
+            assert!(exec.success);
+            assert!(exec.output.contains("executed via poisoned lock recovery"));
+        }
+
+        assert_eq!(purge_invocations.load(Ordering::SeqCst), 1);
+        assert_eq!(export_invocations.load(Ordering::SeqCst), 1);
     }
 }
