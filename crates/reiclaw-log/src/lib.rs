@@ -12,7 +12,6 @@ pub mod broadcast;
 pub mod config;
 pub mod event;
 pub mod layer;
-pub mod migrate;
 pub mod reader;
 mod spawn_task;
 mod subscriber;
@@ -67,7 +66,6 @@ pub mod field {
     pub use ::tracing::field::{Empty, FieldSet};
 }
 
-pub use migrate::migrate_legacy_jsonl_in_place;
 pub use reader::{LogFilter, LogPage, current_log_path, find_event_by_id, load_page};
 pub use spawn_task::TASK_EVENT_NAME;
 pub use subscriber::{install_global_subscriber, try_install_capture_subscriber};

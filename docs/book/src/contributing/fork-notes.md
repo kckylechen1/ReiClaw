@@ -410,38 +410,26 @@ only activates exact MCP names already admitted by its own policy. See
 and validation limits. Reverting this leaf restores search-first loading; no
 persistent data migration is required.
 
-## Retained JSONL session import integrity (#772)
+## Retired legacy JSONL session import (#772)
 
-`SqliteSessionBackend` owns legacy `sessions/*.jsonl` imports and the
-`session_jsonl_imports` receipt table in the existing `sessions.db`. Each receipt
-stores only the original filename, SHA-256 and valid-message count; message
-bodies remain in session history and the existing `*.jsonl.migrated` archive.
-Receipts survive session deletion and retention cleanup so a leftover source
-cannot restore history the owner already deleted. Their lifetime follows the
-legacy import compatibility window, not the live session TTL.
+The legacy `sessions/*.jsonl` startup compatibility window is now closed (S7
+closeout), and `SqliteSessionBackend` no longer reads or imports
+`sessions/*.jsonl` files at startup.
 
-Each file imports under one SQLite `IMMEDIATE` transaction, including message,
-metadata, FTS-trigger and receipt writes. All original bytes, including malformed
-and invalid UTF-8 lines, are preserved with the existing private, synced,
-no-overwrite archive helper before commit. The connection uses `synchronous=FULL`
-for import and restores its previous policy afterward. Source cleanup follows
-the durable commit; a cleanup failure or concurrent opener can retry against the
-receipt without inserting messages again. SQL, receipt, archive and finalization
-errors are reported. Files with no valid messages remain untouched.
-
-A same-named source with changed bytes, a conflicting archive, or existing
-SQLite history without a receipt requires explicit reconciliation; the importer
-does not guess whether old receipt-less code already copied those messages.
-It does not retrospectively deduplicate previous imports. Source symlinks are
-refused and observed source changes block cleanup. Legacy writers must already
-be stopped; snapshot checks do not serialize arbitrary external filesystem
-writers. The selectable JSONL runtime backend remains retired.
-
-These failure and retry guarantees do not close the separate real-data
-preservation window or authorize deleting legacy import/ACP/log compatibility.
-Reverting this fix cannot undo completed imports; preserve the database,
-receipts and archives, and do not restart an older importer against leftover
-JSONL sources without reviewing their import state.
+- `SqliteSessionBackend` initialization does not drop pre-existing
+  `session_jsonl_imports` receipt tables in `sessions.db` or delete legacy files
+  itself.
+- **Restore / downgrade & hygiene boundary:** Restoring pre-SQLite
+  `sessions/*.jsonl` backups or downgrading to legacy `.jsonl` session files will
+  no longer hydrate those files automatically into `sessions.db`; the selectable
+  JSONL runtime backend remains retired (`channels.session_backend = "jsonl"`
+  fails closed). Separately from the retired startup importer, workspace memory
+  hygiene (`memory.hygiene_enabled`, enabled by default) still archives
+  `sessions/*.jsonl` and `sessions/*.jsonl.migrated` files inside an active
+  agent workspace after `memory.archive_after_days` (default 7 days) and purges
+  archived copies after `memory.purge_after_days` (default 30 days). Copy
+  databases and `*.jsonl.migrated` backups outside the workspace (or disable/adjust
+  hygiene retention) before relying on them for manual recovery.
 
 ## Default Tachi memory and retired SQLite / Lucid backends (#382 / #647)
 

@@ -20,7 +20,7 @@ impl std::fmt::Display for RetiredSessionBackendError {
              Review the existing session history and explicitly remove this setting \
              and its REI_channels__session_backend override. Only the former sqlite \
              default may be ignored; JSONL, unknown and malformed selections are \
-             refused. Legacy JSONL startup import remains available, but this \
+             refused. Automatic legacy JSONL startup import is retired; this \
              refusal does not migrate or delete session files.",
         )
     }
@@ -106,6 +106,16 @@ mod tests {
         assert_eq!(warnings.len(), 1);
         assert_eq!(warnings[0].path, PATH);
         assert_eq!(warnings[0].code, "session_backend_selector_removed");
+        assert!(
+            warnings[0].message.contains("startup import is retired"),
+            "warning must state startup import is retired: {}",
+            warnings[0].message
+        );
+        assert!(
+            !warnings[0].message.contains("remains available"),
+            "warning must not claim startup import remains available: {}",
+            warnings[0].message
+        );
         let generated = crate::generate::generate(&Default::default()).unwrap();
         assert!(!generated.contains("session_backend"));
     }
@@ -130,7 +140,16 @@ mod tests {
             for result in [parse_current(&raw), parse_current_resilient(&raw)] {
                 let error = result.unwrap_err();
                 assert!(error.is::<RetiredSessionBackendError>(), "{error:#}");
-                assert!(!format!("{error:#}").contains("private-unknown-backend"));
+                let rendered = format!("{error:#}");
+                assert!(!rendered.contains("private-unknown-backend"));
+                assert!(
+                    rendered.contains("startup import is retired"),
+                    "error must state startup import is retired: {rendered}"
+                );
+                assert!(
+                    !rendered.contains("remains available"),
+                    "error must not claim startup import remains available: {rendered}"
+                );
             }
         }
     }

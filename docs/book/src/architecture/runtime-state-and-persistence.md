@@ -49,7 +49,7 @@ new runtime state should be described in terms of `<install>/data/`,
 | Agent filesystem identity | Per-agent workspace files | `<install>/agents/<alias>/workspace/` | effective `SecurityPolicy` and agent prompt construction | Created lazily when the agent starts; workspace access is evaluated from config | This is the filesystem sandbox, not the config source of truth for providers/channels/tools. |
 | Shared skill bundles | Configured skill bundle entries and resolved bundle dirs | `<install>/shared/skills/<bundle>/` by default | skill loading / prompt enrichment | Reload and new agent starts observe config and filesystem changes | Bundle aliases and directory resolution come from config; the files are the bundle content. |
 | Conversation memory | `reiclaw-memory` backend selected per agent | Shared MemoryCore store under `data/memory/memorycore.db`, or per-agent Markdown files | `Arc<dyn Memory>` wrapped in agent-scoping adapters | Backend choice is locked once an agent has written data; same-backend cross-agent recall is opt-in (SQLite/Lucid/Postgres/Qdrant retired) | Memory rows are agent-scoped. Do not replace memory ownership with copied prompt/session caches. |
-| Chat and channel sessions | SQLite `SessionBackend` | `data/sessions/sessions.db`; retained startup import reads legacy `data/sessions/*.jsonl` | `zeroclaw-infra` session backend shared by channels and gateway | SQLite uses WAL; `SessionActorQueue` serializes active turns per session | Chat/Code sessions use this unified backend. ACP protocol sessions use a separate store. |
+| Chat and channel sessions | SQLite `SessionBackend` | `data/sessions/sessions.db` (legacy `data/sessions/*.jsonl` startup import retired) | `zeroclaw-infra` session backend shared by channels and gateway | SQLite uses WAL; `SessionActorQueue` serializes active turns per session | Chat/Code sessions use this unified backend. ACP protocol sessions use a separate store. |
 | ACP sessions | ACP protocol session store | `data/sessions/acp-sessions.db` | `AcpSessionStore` opened by `zeroclaw acp` and gateway agent-state handlers | WAL-backed SQLite store, separate from chat sessions | ACP `session/load` and `session/resume` operate on this protocol store, not the chat session backend. |
 | Cron jobs | Declarative config membership plus cron SQLite store | `data/cron/jobs.db` | `zeroclaw-runtime::cron` scheduler/store | Read paths do not create `jobs.db`; scheduler owns due/lock state | Declarative jobs are reconciled from config, while run metadata and locks live in the cron DB. |
 | SOP runs | Removed with the run side | `data/sop/runs.db` only as a leftover from an older install | none | The legacy `SopEngine`/`SopRunStore` pair was demolished; leftover stores are left in place and reported by a boot-time warning | Run truth lives Tachi-side as ProcedureRuns through the procedure_v1 seam. |
@@ -71,17 +71,18 @@ unknown values and non-string values reject configuration admission before
 another store can be selected. Review the existing history before making
 that operator edit.
 
-The retained importer still reads legacy `data/sessions/*.jsonl` and preserves
-successfully imported files as byte-identical `*.jsonl.migrated` archives before
-committing and removing the scanned sources. Keep those archives: the
-compatibility window has not closed. Malformed or invalid UTF-8 lines remain
-skipped and preserved in the archive; hard read, SQL, receipt and archive errors
-fail the affected file. A reported imported-file count is not evidence that
-every source record was valid. Durable import receipts prevent replaying
-committed files after failed cleanup. See
-[JSONL import integrity](../contributing/fork-notes.md#retained-jsonl-session-import-integrity-772)
-for retry, ownership and reconciliation boundaries. This backend retirement
-does not establish full migration or retire the importer.
+The automatic startup importer for legacy `data/sessions/*.jsonl` files is now
+retired (S7 closeout). `SqliteSessionBackend` initialization leaves pre-existing
+`session_jsonl_imports` receipt tables and files untouched, and no longer
+auto-imports restored `.jsonl` files at startup. Note that workspace memory
+hygiene (`memory.hygiene_enabled`, enabled by default) runs separately from the
+startup importer: under an active agent workspace, it archives `sessions/*.jsonl`
+and `sessions/*.jsonl.migrated` files into `sessions/archive/` after
+`memory.archive_after_days` (default 7 days) and deletes archived copies after
+`memory.purge_after_days` (default 30 days), so copy any backup files out of
+the workspace or disable/adjust hygiene retention before relying on them. See
+[Retired JSONL session import](../contributing/fork-notes.md#retired-legacy-jsonl-session-import-772)
+for the historical import window and restore/downgrade boundaries.
 
 ## Reload and restart
 
