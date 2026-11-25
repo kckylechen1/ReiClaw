@@ -45,9 +45,7 @@ pub use reiclaw_tools::mcp_deferred::{
 pub use reiclaw_tools::mcp_prompts_tool::McpPromptsTool;
 pub use reiclaw_tools::mcp_resources_tool::McpResourcesTool;
 pub use reiclaw_tools::mcp_tool::McpToolWrapper;
-pub use reiclaw_tools::memory_export::MemoryExportTool;
 pub use reiclaw_tools::memory_forget::MemoryForgetTool;
-pub use reiclaw_tools::memory_purge::MemoryPurgeTool;
 pub use reiclaw_tools::memory_recall::MemoryRecallTool;
 pub use reiclaw_tools::memory_store::MemoryStoreTool;
 pub use reiclaw_tools::propose_soul_change::ProposeSoulChangeTool;
@@ -426,8 +424,9 @@ fn reasoning_spawn_tool_for_registry(
 /// Tool names retired from the ordinary model-visible registry. No assembly
 /// path may register them. Entries with retained operator consumers keep
 /// their implementations; tools without
-/// a retained consumer are deleted. The registry totality test asserts this set.
-#[cfg(test)]
+/// a retained consumer are deleted. The registry totality test asserts this set,
+/// and runtime tool dispatch refuses bare calls matching these names so deferred
+/// MCP suffix resolution cannot hijack them.
 pub(crate) const RETIRED_OPERATOR_TOOL_NAMES: &[&str] = &[
     "model_routing_config",
     "model_switch",
@@ -467,7 +466,21 @@ pub(crate) const RETIRED_OPERATOR_TOOL_NAMES: &[&str] = &[
     "browser",
     "browser_open",
     "text_browser",
+    // Model-facing memory export/purge tools retired (S9c-2); underlying
+    // Memory::purge_session and owner agent-deletion cascade stay intact.
+    "memory_export",
+    "memory_purge",
 ];
+
+/// Returns true when `name` matches a retired bare built-in tool name
+/// (case-insensitive after trimming). Qualified MCP names (`server__tool`)
+/// never match this set.
+pub(crate) fn is_retired_operator_tool_name(name: &str) -> bool {
+    let trimmed = name.trim();
+    RETIRED_OPERATOR_TOOL_NAMES
+        .iter()
+        .any(|retired| retired.eq_ignore_ascii_case(trimmed))
+}
 
 /// Bundled return values from tool registry construction.
 /// Named struct to avoid an ever-growing positional tuple that's painful
@@ -644,8 +657,6 @@ pub fn all_tools_with_runtime(
         Arc::new(MemoryRecallTool::new(memory.clone())),
         Arc::new(EpisodeReadTool::new(memory.clone(), agent_alias)),
         Arc::new(MemoryForgetTool::new(memory.clone(), security.clone())),
-        Arc::new(MemoryExportTool::new(memory.clone())),
-        Arc::new(MemoryPurgeTool::new(memory.clone(), security.clone())),
         Arc::new(ScheduleTool::new(
             security.clone(),
             root_config.clone(),

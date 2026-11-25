@@ -24,9 +24,7 @@ pub mod mcp_resources_tool;
 pub mod mcp_task;
 pub mod mcp_tool;
 pub mod mcp_transport;
-pub mod memory_export;
 pub mod memory_forget;
-pub mod memory_purge;
 pub mod memory_recall;
 pub mod memory_store;
 pub mod note_owner_correction;
@@ -47,8 +45,6 @@ pub const MEMORY_TOOL_NAMES: &[&str] = &[
     "memory_store",
     "memory_recall",
     "memory_forget",
-    "memory_export",
-    "memory_purge",
     "episode_read",
 ];
 
@@ -72,11 +68,6 @@ mod memory_tool_names_guard {
             )),
             Box::new(memory_recall::MemoryRecallTool::new(memory.clone())),
             Box::new(memory_forget::MemoryForgetTool::new(
-                memory.clone(),
-                security.clone(),
-            )),
-            Box::new(memory_export::MemoryExportTool::new(memory.clone())),
-            Box::new(memory_purge::MemoryPurgeTool::new(
                 memory.clone(),
                 security.clone(),
             )),

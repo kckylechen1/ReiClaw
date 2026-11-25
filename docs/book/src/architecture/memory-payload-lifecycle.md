@@ -64,18 +64,17 @@ control.
 ## Prompt context and recall
 
 At turn start, the common tool loop can recall relevant memories and inject a
-bounded `[Memory context]` block. Automatic injection, `memory_recall`, and
-model-facing `memory_export` share the same host-origin and canonical-session
-admissibility checks. Backend rows are checked before deduplication, reranking,
-or output; a backend's session filter alone is not sufficient evidence of scope.
-The renderer additionally filters generated autosave noise, stale tool-result
-blocks, relevance, and size.
+bounded `[Memory context]` block. Automatic injection and `memory_recall` share
+the same host-origin and canonical-session admissibility checks. Backend rows are
+checked before deduplication, reranking, or output; a backend's session filter
+alone is not sufficient evidence of scope. The renderer additionally filters
+generated autosave noise, stale tool-result blocks, relevance, and size.
 
 | Host-stamped turn origin | Ambient memory reads |
 | --- | --- |
 | Interactive, Channel, AgentDirect | Conversation rows require a matching canonical memory session; without one, only unscoped non-Conversation rows qualify. |
 | Cron, Daemon | Conversation rows are excluded even when the job reuses a chat session; other rows still require their admitted session or global scope. |
-| SubTurn | Automatic injection and both model-facing read tools are disabled, including unscoped durable facts. The child receives its bounded task context. |
+| SubTurn | Automatic injection and model-facing read tools (`memory_recall`) are disabled, including unscoped durable facts. The child receives its bounded task context. |
 | Tool called outside a stamped turn | Conservative non-Conversation fallback; canonical-session, Soul, and backend-attribution checks still apply. |
 
 Each nested tool loop replaces the parent's ephemeral read policy. Model tool
@@ -94,30 +93,30 @@ current turn a new memory. Review prompt-assembly changes by asking:
 
 ## Companion privacy boundaries
 
-Automatic injection and the `memory_recall` / `memory_export` tools derive their
-allowed memory sessions from the
-executing turn's canonical memory input, not its transport/history key. WebSocket
-history and memory IDs differ; channel turns may have multiple sender/group
-scopes. Model arguments cannot select another conversation. Results outside
-those scopes are excluded, and unattributed Conversation rows are not returned.
-Without a session, only unscoped non-Conversation entries remain eligible.
-Recall filters a bounded over-fetch window, not an exhaustive scan: higher-ranked
-ineligible rows can still crowd eligible rows outside that window. Durable
-memory key identity remains `(agent, key)`; this boundary does not create a
-per-session key namespace or prevent same-key replacement by another session.
-Conversation writes through `memory_store` use the first canonical memory scope
-admitted by the turn; without one, the write is refused. Channel groups put
-that group's conversation at index zero, with the sanitized sender as a secondary
-read scope. This prevents a new group Conversation write from entering a shared
-sender scope. Ordered recall deduplication gives group-local entries precedence;
-legacy sender-scoped reads remain available. Markdown cannot preserve
-conversation scope, so that tool refuses Conversation writes to it, and ordinary
-recall omits its unattributed daily-file rows (which mix daily notes and conversation
-autosaves). Its Core file remains globally recallable; existing files are not rewritten.
-Reserved Soul entries (namespace `soul` or key prefix `soul::`) remain excluded
-even if a backend returns them. A model-selected export session/category can
-only narrow the host scope. Operator archive exports through owner APIs retain
-their existing contract; the model tool is not an authority to export all data.
+Automatic injection and the `memory_recall` tool derive their allowed memory
+sessions from the executing turn's canonical memory input, not its
+transport/history key. WebSocket history and memory IDs differ; channel turns
+may have multiple sender/group scopes. Model arguments cannot select another
+conversation. Results outside those scopes are excluded, and unattributed
+Conversation rows are not returned. Without a session, only unscoped
+non-Conversation entries remain eligible. Recall filters a bounded over-fetch
+window, not an exhaustive scan: higher-ranked ineligible rows can still crowd
+eligible rows outside that window. Durable memory key identity remains
+`(agent, key)`; this boundary does not create a per-session key namespace or
+prevent same-key replacement by another session. Conversation writes through
+`memory_store` use the first canonical memory scope admitted by the turn; without
+one, the write is refused. Channel groups put that group's conversation at
+index zero, with the sanitized sender as a secondary read scope. This prevents a
+new group Conversation write from entering a shared sender scope. Ordered recall
+deduplication gives group-local entries precedence; legacy sender-scoped reads
+remain available. Markdown cannot preserve conversation scope, so that tool
+refuses Conversation writes to it, and ordinary recall omits its unattributed
+daily-file rows (which mix daily notes and conversation autosaves). Its Core
+file remains globally recallable; existing files are not rewritten. Reserved Soul
+entries (namespace `soul` or key prefix `soul::`) remain excluded even if a
+backend returns them. Model-facing `memory_export` and `memory_purge` tools are
+retired; operator archive exports and agent-deletion cascades through owner APIs
+retain their existing contract.
 Standalone hosts that need Conversation reads must explicitly scope a
 `MemoryReadPolicy::SessionScoped` policy and the canonical memory sessions.
 
