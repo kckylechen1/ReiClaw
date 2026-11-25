@@ -11,13 +11,11 @@ pub use traits::{Observer, ObserverEvent};
 #[allow(unused_imports)]
 pub use verbose::VerboseObserver;
 
-use std::any::Any;
 use std::sync::{Arc, OnceLock};
 use std::time::Instant;
 
 use parking_lot::RwLock;
 use reiclaw_config::schema::{ObservabilityBackend, ObservabilityConfig};
-use traits::ObserverMetric;
 
 /// Drop-safe lifecycle bracket for one logical agent turn.
 ///
@@ -193,53 +191,8 @@ fn current_broadcast_hook() -> Option<Arc<dyn Observer>> {
     broadcast_hook_slot().read().current()
 }
 
-/// Guard that flushes its observer on drop — the telemetry analogue of
-/// [`AgentTurnGuard`]. Held for the lifetime of a short-lived agent
-/// invocation (today: the CLI one-shot, `zeroclaw agent -m ...`), whose
-/// process exits before a buffering backend's background export fires.
-/// Without this flush any buffered telemetry is lost when the runtime is
-/// torn down.
-///
-/// Long-lived callers (daemon heartbeat/cron, channel `process_message`,
-/// subagent spawns) pass `interactive = false` and skip this guard: they
-/// rely on the periodic export firing on its own cadence, and a flush
-/// per turn would add a synchronous export to every invocation.
-///
-/// Backend-agnostic: calls `Observer::flush()`, which is a no-op for
-/// synchronous backends (`Log`/`Verbose`/`Noop`).
-#[must_use = "hold the guard for the lifetime of the agent invocation; dropping it flushes"]
-pub struct FlushGuard {
-    observer: Arc<dyn Observer>,
-    done: bool,
-}
-
-impl FlushGuard {
-    /// Construct a guard that will flush `observer` when dropped.
-    pub fn new(observer: Arc<dyn Observer>) -> Self {
-        Self {
-            observer,
-            done: false,
-        }
-    }
-
-    /// Flush immediately and mark the guard spent so a later `Drop` is a no-op.
-    pub fn fire(&mut self) {
-        if self.done {
-            return;
-        }
-        self.done = true;
-        self.observer.flush();
-    }
-}
-
-impl Drop for FlushGuard {
-    fn drop(&mut self) {
-        self.fire();
-    }
-}
-
 /// Wrapper that forwards every event to a primary observer plus the
-/// process-wide broadcast hook (when set). Metrics flow only to the primary.
+/// process-wide broadcast hook (when set).
 struct TeeObserver {
     primary: Box<dyn Observer>,
 }
@@ -252,24 +205,10 @@ impl Observer for TeeObserver {
         }
     }
 
-    fn record_metric(&self, metric: &ObserverMetric) {
-        self.primary.record_metric(metric);
-    }
-
-    fn flush(&self) {
-        self.primary.flush();
-    }
-
     fn name(&self) -> &str {
         // Delegate so callers (and tests) see the underlying backend name,
         // not the internal wrapper.
         self.primary.name()
-    }
-
-    fn as_any(&self) -> &dyn Any {
-        // Expose the primary so backend-specific diagnostics can downcast
-        // through the broadcast wrapper.
-        self.primary.as_any()
     }
 }
 
@@ -340,14 +279,10 @@ mod tests {
 
     use std::sync::atomic::{AtomicUsize, Ordering};
 
-    /// Test observer that counts events, metrics, and flushes, used to
-    /// verify the broadcast hook fan-out, that downcasts pass through
-    /// `TeeObserver`, and that `FlushGuard` drives `Observer::flush`.
+    /// Test observer that counts events, used to verify broadcast hook fan-out.
     #[derive(Default)]
     struct CountingObserver {
         events: AtomicUsize,
-        metrics: AtomicUsize,
-        flushes: AtomicUsize,
     }
 
     impl Observer for CountingObserver {
@@ -355,20 +290,8 @@ mod tests {
             self.events.fetch_add(1, Ordering::SeqCst);
         }
 
-        fn record_metric(&self, _metric: &ObserverMetric) {
-            self.metrics.fetch_add(1, Ordering::SeqCst);
-        }
-
-        fn flush(&self) {
-            self.flushes.fetch_add(1, Ordering::SeqCst);
-        }
-
         fn name(&self) -> &str {
             "counting"
-        }
-
-        fn as_any(&self) -> &dyn Any {
-            self
         }
     }
 
@@ -398,29 +321,6 @@ mod tests {
     }
 
     #[test]
-    fn broadcast_hook_does_not_receive_metrics() {
-        let _guard = HOOK_TEST_LOCK.blocking_lock();
-        clear_broadcast_hook();
-
-        let hook = Arc::new(CountingObserver::default());
-        set_broadcast_hook(hook.clone());
-
-        let cfg = ObservabilityConfig {
-            backend: ObservabilityBackend::None,
-            ..ObservabilityConfig::default()
-        };
-        let observer = create_observer(&cfg);
-
-        observer.record_metric(&ObserverMetric::TokensUsed(10));
-        observer.record_metric(&ObserverMetric::TokensUsed(20));
-
-        assert_eq!(hook.events.load(Ordering::SeqCst), 0);
-        assert_eq!(hook.metrics.load(Ordering::SeqCst), 0);
-
-        clear_broadcast_hook();
-    }
-
-    #[test]
     fn broadcast_hook_unset_means_only_primary_runs() {
         let _guard = HOOK_TEST_LOCK.blocking_lock();
         clear_broadcast_hook();
@@ -433,7 +333,6 @@ mod tests {
 
         // No hook installed; recording must not panic and must be a no-op.
         observer.record_event(&ObserverEvent::HeartbeatTick);
-        observer.record_metric(&ObserverMetric::TokensUsed(1));
     }
 
     #[test]
@@ -515,45 +414,6 @@ mod tests {
         assert_eq!(new_hook.events.load(Ordering::SeqCst), 1);
 
         clear_broadcast_hook();
-    }
-
-    #[test]
-    fn factory_observer_downcasts_through_tee() {
-        let _guard = HOOK_TEST_LOCK.blocking_lock();
-        clear_broadcast_hook();
-
-        let cfg = ObservabilityConfig {
-            backend: ObservabilityBackend::Log,
-            ..ObservabilityConfig::default()
-        };
-        let observer = create_observer(&cfg);
-
-        // `as_any` must surface the primary observer so existing downcasts
-        // keep working through the tee.
-        assert!(observer.as_any().downcast_ref::<LogObserver>().is_some());
-    }
-
-    #[test]
-    fn flush_guard_flushes_on_drop() {
-        let observer = Arc::new(CountingObserver::default());
-        let guard = FlushGuard::new(observer.clone());
-        assert_eq!(observer.flushes.load(Ordering::SeqCst), 0);
-        drop(guard);
-        assert_eq!(observer.flushes.load(Ordering::SeqCst), 1);
-    }
-
-    #[test]
-    fn flush_guard_fire_is_idempotent() {
-        let observer = Arc::new(CountingObserver::default());
-        let mut guard = FlushGuard::new(observer.clone());
-        guard.fire();
-        assert_eq!(observer.flushes.load(Ordering::SeqCst), 1);
-        // Second explicit fire is a no-op.
-        guard.fire();
-        assert_eq!(observer.flushes.load(Ordering::SeqCst), 1);
-        // Dropping after fire must not flush again.
-        drop(guard);
-        assert_eq!(observer.flushes.load(Ordering::SeqCst), 1);
     }
 
     #[test]

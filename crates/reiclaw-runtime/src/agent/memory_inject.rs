@@ -705,14 +705,8 @@ mod tests {
             }
         }
 
-        fn record_metric(&self, _metric: &reiclaw_api::observability_traits::ObserverMetric) {}
-
         fn name(&self) -> &str {
             "recording"
-        }
-
-        fn as_any(&self) -> &dyn std::any::Any {
-            self
         }
     }
 

@@ -1579,14 +1579,8 @@ impl reiclaw_runtime::observability::Observer for CapturingObserver {
         self.events.lock().push(event.clone());
     }
 
-    fn record_metric(&self, _metric: &reiclaw_runtime::observability::traits::ObserverMetric) {}
-
     fn name(&self) -> &str {
         "capturing"
-    }
-
-    fn as_any(&self) -> &dyn std::any::Any {
-        self
     }
 }
 

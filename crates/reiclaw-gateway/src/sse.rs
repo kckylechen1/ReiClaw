@@ -343,16 +343,8 @@ impl reiclaw_runtime::observability::Observer for BroadcastObserver {
         let _ = self.tx.send(json);
     }
 
-    fn record_metric(&self, _metric: &reiclaw_runtime::observability::traits::ObserverMetric) {
-        // Metrics are not broadcast over SSE; the primary observer records them.
-    }
-
     fn name(&self) -> &str {
         "broadcast"
-    }
-
-    fn as_any(&self) -> &dyn std::any::Any {
-        self
     }
 }
 

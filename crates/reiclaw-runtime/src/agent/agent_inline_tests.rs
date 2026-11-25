@@ -2,7 +2,6 @@ use super::*;
 use crate::agent::dispatcher::{NativeToolDispatcher, ToolDispatcher, XmlToolDispatcher};
 use async_trait::async_trait;
 use parking_lot::Mutex;
-use reiclaw_api::observability_traits::ObserverMetric;
 use reiclaw_config::schema::Config;
 use std::collections::HashMap;
 use std::sync::atomic::{AtomicUsize, Ordering};
@@ -1197,14 +1196,9 @@ impl Observer for CapturingObserver {
     fn record_event(&self, event: &ObserverEvent) {
         self.events.lock().push(event.clone());
     }
-    fn record_metric(&self, _metric: &ObserverMetric) {}
     fn name(&self) -> &str {
         "capturing"
     }
-    fn as_any(&self) -> &dyn std::any::Any {
-        self
-    }
-    fn flush(&self) {}
 }
 
 struct MultimodalCaptureProvider {
@@ -5933,8 +5927,7 @@ fn observer_event_turn_id(event: &ObserverEvent) -> Option<&str> {
         | ObserverEvent::ToolCall { turn_id, .. }
         | ObserverEvent::ToolCallStart { turn_id, .. }
         | ObserverEvent::MemoryRecall { turn_id, .. }
-        | ObserverEvent::MemoryStore { turn_id, .. }
-        | ObserverEvent::RagRetrieve { turn_id, .. } => turn_id.as_deref(),
+        | ObserverEvent::MemoryStore { turn_id, .. } => turn_id.as_deref(),
         _ => None,
     }
 }
@@ -5995,12 +5988,6 @@ fn assert_all_events_share_turn_id(
                 turn_id,
                 ..
             } => ("MemoryStore", channel, agent_alias, turn_id),
-            ObserverEvent::RagRetrieve {
-                channel,
-                agent_alias,
-                turn_id,
-                ..
-            } => ("RagRetrieve", channel, agent_alias, turn_id),
             _ => continue,
         };
         assert!(
@@ -6035,8 +6022,7 @@ fn assert_all_events_share_turn_id(
                 | ObserverEvent::ToolCallStart { agent_alias, .. }
                 | ObserverEvent::ToolCall { agent_alias, .. }
                 | ObserverEvent::MemoryRecall { agent_alias, .. }
-                | ObserverEvent::MemoryStore { agent_alias, .. }
-                | ObserverEvent::RagRetrieve { agent_alias, .. } => agent_alias,
+                | ObserverEvent::MemoryStore { agent_alias, .. } => agent_alias,
                 _ => continue,
             };
             assert_eq!(
@@ -6057,8 +6043,7 @@ fn assert_all_events_share_turn_id(
                 | ObserverEvent::ToolCall { channel: ch, .. }
                 | ObserverEvent::AgentEnd { channel: ch, .. }
                 | ObserverEvent::MemoryRecall { channel: ch, .. }
-                | ObserverEvent::MemoryStore { channel: ch, .. }
-                | ObserverEvent::RagRetrieve { channel: ch, .. } => ch,
+                | ObserverEvent::MemoryStore { channel: ch, .. } => ch,
                 _ => continue,
             };
             assert_eq!(ch.as_deref(), Some(channel), "channel should be consistent");
