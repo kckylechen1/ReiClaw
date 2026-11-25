@@ -93,12 +93,8 @@ impl Observer for RecordingObserver {
         };
         self.0.lock().unwrap().push(text);
     }
-    fn record_metric(&self, _: &reiclaw_api::observability_traits::ObserverMetric) {}
     fn name(&self) -> &str {
         "preflight-observer"
-    }
-    fn as_any(&self) -> &dyn std::any::Any {
-        self
     }
 }
 

@@ -180,14 +180,12 @@ impl<M: Memory> AuditedMemory<M> {
             .is_ok()
         };
         let elapsed_ms = u64::try_from(started.elapsed().as_millis()).unwrap_or(u64::MAX);
-        // Mirror the audit row onto the log stream as a `memory_audit`
-        // event. The observer bridge projects this action onto
-        // `ObserverEvent::MemoryAudit` for metrics backends; bounded
-        // attributes only (no keys, no content). Outcome/duration describe
-        // the audit-row insert itself (the trail's own health): the wrapped
-        // memory operation has not run yet at this point, and a failing
-        // audit.db must surface as success=false instead of being silently
-        // swallowed.
+        // Mirror the audit row onto the structured log stream as a
+        // `memory_audit` event with bounded attributes only (no keys, no
+        // content). Outcome/duration describe the audit-row insert itself (the
+        // trail's own health): the wrapped memory operation has not run yet at
+        // this point, and a failing audit.db must surface as success=false
+        // instead of being silently swallowed.
         let outcome = if recorded {
             ::reiclaw_log::EventOutcome::Success
         } else {

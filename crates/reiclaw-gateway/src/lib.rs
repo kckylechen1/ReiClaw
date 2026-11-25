@@ -2393,25 +2393,14 @@ async fn handle_webhook(
     // dispatch below enters `process_message`, whose runtime turn guard is the
     // sole owner of lifecycle and LLM events. Emitting another bracket here
     // gives one webhook prompt two unrelated turn IDs.
-    let started_at = Instant::now();
-
     match run_gateway_chat_with_tools(&state, message, session_id.as_deref(), agent_override).await
     {
         Ok(GatewayChatOutcome { response, .. }) => {
-            let duration = started_at.elapsed();
-            state.observer.record_metric(
-                &reiclaw_runtime::observability::traits::ObserverMetric::RequestLatency(duration),
-            );
-
             let body = serde_json::json!({"response": response, "model": model_label});
             (StatusCode::OK, Json(body))
         }
         Err(e) => {
-            let duration = started_at.elapsed();
             let sanitized = reiclaw_providers::sanitize_api_error(&e.to_string());
-            state.observer.record_metric(
-                &reiclaw_runtime::observability::traits::ObserverMetric::RequestLatency(duration),
-            );
             state
                 .observer
                 .record_event(&reiclaw_runtime::observability::ObserverEvent::Error {
